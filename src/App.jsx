@@ -1420,7 +1420,7 @@ Extract ALL fields exactly as they appear. Return ONLY clean JSON, no text befor
                       {item.status==="analyzing" && "🤖 AI analizuje…"}
                       {item.status==="saved"     && `Zapisano · ${item.result?.driverName||""} · ${item.result?.country||""}`}
                       {item.status==="duplicate" && `Duplikat — pominięto · ${item.result?.driverName||""} (${item.result?.country||""} ${item.result?.dateFrom||""})`}
-                      {item.status==="error"     && "Błąd odczytu — pomiń lub wgraj ręcznie"}
+                      {item.status==="error"     && `❌ ${item.error || "Błąd odczytu"}`}
                     </div>
                   </div>
                 </div>
