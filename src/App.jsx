@@ -7,6 +7,10 @@ import { initializeApp } from "firebase/app";
 import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
 
+// ─── STORAGE HELPERS (per-user, per-key documents) ───────────────────────────
+// Każdy klucz to osobny dokument: fleet/{uid}/{key}
+// Omija limit 1MB na dokument i izoluje dane per użytkownik
+
 const firebaseConfig = {
   apiKey:            "AIzaSyBJ_1_i_OS3DQ7g0hjJyF6ZTgU9_7LkHcQ",
   authDomain:        "vbs-stats.firebaseapp.com",
@@ -22,15 +26,19 @@ const db   = getFirestore(app);
 const auth = getAuth(app);
 
 // ─── STORAGE (Firebase Firestore) ────────────────────────────────────────────
-// Wszystkie dane trzymamy w jednym dokumencie "fleet/data" dla prostoty
-const DOC_REF = () => doc(db, "fleet", "data");
+// Kazdy klucz to osobny dokument: fleet/{uid}/data/{key}
+// Omija limit 1MB i izoluje dane per uzytkownik
+
+function getUid() {
+  return auth.currentUser?.uid || "anonymous";
+}
 
 async function dbGet(key) {
   try {
-    const snap = await getDoc(DOC_REF());
+    const ref = doc(db, "fleet", getUid(), "data", key);
+    const snap = await getDoc(ref);
     if (!snap.exists()) return null;
-    const val = snap.data()[key];
-    return val !== undefined ? val : null;
+    return snap.data().value ?? null;
   } catch (e) {
     console.error("dbGet error", e);
     return null;
@@ -39,7 +47,8 @@ async function dbGet(key) {
 
 async function dbSet(key, value) {
   try {
-    await setDoc(DOC_REF(), { [key]: value }, { merge: true });
+    const ref = doc(db, "fleet", getUid(), "data", key);
+    await setDoc(ref, { value });
   } catch (e) {
     console.error("dbSet error", e);
   }
