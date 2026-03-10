@@ -1288,18 +1288,27 @@ Extract ALL fields exactly as they appear. Return ONLY clean JSON, no text befor
     const base64 = fileData.split(",")[1];
     const isPdf  = fileType === "application/pdf";
 
-    const content = isPdf
+    const msgContent = isPdf
       ? [{ type:"document", source:{ type:"base64", media_type:"application/pdf", data:base64 } }, { type:"text", text:AI_PROMPT }]
       : [{ type:"image",    source:{ type:"base64", media_type:fileType, data:base64 } },            { type:"text", text:AI_PROMPT }];
 
     const res  = await fetch("https://api.anthropic.com/v1/messages", {
       method:"POST",
       headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:2000, system:AI_SYSTEM, messages:[{ role:"user", content }] }),
+      body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:2000, system:AI_SYSTEM, messages:[{ role:"user", content:msgContent }] }),
     });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`API error ${res.status}: ${errText.slice(0,200)}`);
+    }
     const resp = await res.json();
+    if (resp.error) throw new Error(resp.error.message || "API error");
     const txt  = resp.content?.map(c=>c.text||"").join("").trim().replace(/```json|```/g,"").trim();
-    return JSON.parse(txt);
+    if (!txt) throw new Error("Pusta odpowiedź AI");
+    let parsed;
+    try { parsed = JSON.parse(txt); }
+    catch(e) { throw new Error("Błąd parsowania JSON: " + txt.slice(0,100)); }
+    return parsed;
   };
 
   const readFile = (file) => new Promise((res) => {
@@ -1811,10 +1820,14 @@ Format daty: YYYY-MM-DD`;
           messages: [{ role: "user", content: contentParts }],
         }),
       });
+      if (!res.ok) { const e = await res.text(); throw new Error(`API ${res.status}: ${e.slice(0,200)}`); }
       const data = await res.json();
+      if (data.error) throw new Error(data.error.message || "API error");
       const text = data.content?.map(c => c.text||"").join("").trim();
+      if (!text) throw new Error("Pusta odpowiedź AI");
       const clean = text.replace(/```json|```/g,"").trim();
-      const parsed = JSON.parse(clean);
+      let parsed;
+      try { parsed = JSON.parse(clean); } catch(e) { throw new Error("JSON parse error: " + clean.slice(0,100)); }
 
       const extracted = {
         vehicleId:    vehicles[0]?.id || "",
