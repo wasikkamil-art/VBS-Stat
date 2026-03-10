@@ -5,6 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 // 👇 WKLEJ TUTAJ SWÓJ firebaseConfig z Firebase Console
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey:            "AIzaSyBJ_1_i_OS3DQ7g0hjJyF6ZTgU9_7LkHcQ",
@@ -17,7 +18,8 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-const db  = getFirestore(app);
+const db   = getFirestore(app);
+const auth = getAuth(app);
 
 // ─── STORAGE (Firebase Firestore) ────────────────────────────────────────────
 // Wszystkie dane trzymamy w jednym dokumencie "fleet/data" dla prostoty
@@ -167,7 +169,78 @@ const DOC_TYPES = [
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════════════════════
-export default function App() {
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LOGIN SCREEN
+// ═══════════════════════════════════════════════════════════════════════════════
+function LoginScreen() {
+  const [email, setEmail]       = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError]       = useState(null);
+  const [loading, setLoading]   = useState(false);
+
+  async function handleLogin(e) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+    } catch (err) {
+      setError("Nieprawidłowy email lub hasło");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div style={{ minHeight:"100vh", background:"#f8f9fb", display:"flex", alignItems:"center", justifyContent:"center" }}>
+      <div style={{ background:"#fff", borderRadius:16, padding:40, width:360, boxShadow:"0 4px 24px rgba(0,0,0,0.08)" }}>
+        <div style={{ textAlign:"center", marginBottom:32 }}>
+          <div style={{ fontSize:40 }}>🚛</div>
+          <h1 style={{ fontFamily:"DM Sans,sans-serif", fontWeight:700, fontSize:24, margin:"8px 0 4px" }}>FleetOS</h1>
+          <p style={{ color:"#6b7280", fontSize:14 }}>Zarządzanie flotą</p>
+        </div>
+        <form onSubmit={handleLogin}>
+          <div style={{ marginBottom:16 }}>
+            <label style={{ display:"block", fontSize:13, fontWeight:600, color:"#374151", marginBottom:6 }}>Email</label>
+            <input
+              type="email" value={email} onChange={e => setEmail(e.target.value)} required
+              style={{ width:"100%", padding:"10px 14px", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, outline:"none", boxSizing:"border-box" }}
+              placeholder="twoj@email.com"
+            />
+          </div>
+          <div style={{ marginBottom:24 }}>
+            <label style={{ display:"block", fontSize:13, fontWeight:600, color:"#374151", marginBottom:6 }}>Hasło</label>
+            <input
+              type="password" value={password} onChange={e => setPassword(e.target.value)} required
+              style={{ width:"100%", padding:"10px 14px", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, outline:"none", boxSizing:"border-box" }}
+              placeholder="••••••••"
+            />
+          </div>
+          {error && <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:8, padding:"10px 14px", color:"#dc2626", fontSize:13, marginBottom:16 }}>{error}</div>}
+          <button type="submit" disabled={loading}
+            style={{ width:"100%", padding:"12px", background:"#f59e0b", border:"none", borderRadius:8, fontWeight:700, fontSize:15, color:"#fff", cursor:"pointer" }}>
+            {loading ? "Logowanie..." : "Zaloguj się"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ROOT — auth wrapper
+// ═══════════════════════════════════════════════════════════════════════════════
+export default function Root() {
+  const [user, setUser]         = useState(undefined); // undefined = loading
+  useEffect(() => onAuthStateChanged(auth, u => setUser(u)), []);
+  if (user === undefined) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f8f9fb",fontSize:32}}>🚛</div>;
+  if (!user) return <LoginScreen />;
+  return <App user={user} />;
+}
+
+
+function App({ user }) {
   const [tab, setTab]               = useState("dashboard");
   const [vehicles, setVehicles]     = useState([]);
   const [costs, setCosts]           = useState([]);
@@ -395,6 +468,14 @@ export default function App() {
               style={{ background: "#f3f4f6", color: "#374151" }}>
               + Dodaj pojazd
             </button>
+            <div style={{ borderTop:"1px solid #f3f4f6", paddingTop:8, marginTop:4 }}>
+              <div className="text-xs text-gray-400 px-1 mb-1 truncate">{user?.email}</div>
+              <button onClick={() => signOut(auth)}
+                className="w-full py-2 rounded-lg text-sm font-medium transition-all hover:bg-red-50"
+                style={{ color: "#ef4444", background: "transparent" }}>
+                🚪 Wyloguj
+              </button>
+            </div>
           </div>
         </aside>
 
