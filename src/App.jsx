@@ -1292,7 +1292,7 @@ Extract ALL fields exactly as they appear. Return ONLY clean JSON, no text befor
       ? [{ type:"document", source:{ type:"base64", media_type:"application/pdf", data:base64 } }, { type:"text", text:AI_PROMPT }]
       : [{ type:"image",    source:{ type:"base64", media_type:fileType, data:base64 } },            { type:"text", text:AI_PROMPT }];
 
-    const res  = await fetch("https://api.anthropic.com/v1/messages", {
+    const res  = await fetch("/api/claude", {
       method:"POST",
       headers:{ "Content-Type":"application/json" },
       body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:2000, system:AI_SYSTEM, messages:[{ role:"user", content:msgContent }] }),
@@ -1810,7 +1810,7 @@ Format daty: YYYY-MM-DD`;
             { type: "text", text: userPrompt }
           ];
 
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/claude", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
