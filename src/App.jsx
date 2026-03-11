@@ -392,7 +392,7 @@ function App({ user }) {
 
   // ─── RENDER ──────────────────────────────────────────────────────────────────
   return (
-    <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", color: "#111827" }}>
+    <div style={{ fontFamily: "'Inter', sans-serif", background: "#f8f9fb", minHeight: "100vh", color: "#111827" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 
       {/* TOAST */}
@@ -524,7 +524,7 @@ function App({ user }) {
 
               <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-5">
                 <div className="lg:col-span-3 bg-white rounded-2xl p-5 border border-gray-100">
-                  <div className="text-sm font-semibold text-gray-700 mb-4">Koszty miesięczne</div>
+                  <div className="text-sm font-medium text-gray-500 mb-4">Koszty miesięczne</div>
                   <ResponsiveContainer width="100%" height={170}>
                     <BarChart data={stats.monthly} barSize={20}>
                       <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#9ca3af", fontFamily: "DM Sans" }} axisLine={false} tickLine={false} />
@@ -538,7 +538,7 @@ function App({ user }) {
                 </div>
 
                 <div className="lg:col-span-2 bg-white rounded-2xl p-5 border border-gray-100">
-                  <div className="text-sm font-semibold text-gray-700 mb-4">Struktura kosztów</div>
+                  <div className="text-sm font-medium text-gray-500 mb-4">Struktura kosztów</div>
                   {stats.byCategory.length > 0 ? (
                     <div className="flex gap-4 items-center">
                       <ResponsiveContainer width={100} height={100}>
@@ -555,7 +555,7 @@ function App({ user }) {
                               <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: c.color }} />
                               <span className="text-xs text-gray-500 truncate">{c.icon} {c.label}</span>
                             </div>
-                            <span className="text-xs font-semibold text-gray-800 whitespace-nowrap">{fmtPLN(c.total)}</span>
+                            <span className="text-xs font-medium text-gray-700 whitespace-nowrap">{fmtPLN(c.total)}</span>
                           </div>
                         ))}
                       </div>
@@ -566,7 +566,7 @@ function App({ user }) {
 
               <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
                 <div className="px-5 py-3.5 border-b border-gray-50">
-                  <span className="text-sm font-semibold text-gray-700">Koszty per pojazd</span>
+                  <span className="text-sm font-medium text-gray-500">Koszty per pojazd</span>
                 </div>
                 <div className="divide-y divide-gray-50">
                   {stats.byVehicle.sort((a, b) => b.total - a.total).map((v) => {
@@ -579,7 +579,7 @@ function App({ user }) {
                             <span className="text-xs text-gray-400 ml-2">{v.brand} · {v.activeDriver}</span>
                           </div>
                           <div className="text-right">
-                            <div className="text-sm font-semibold text-gray-900">{fmtEUR(v.total / stats.rate)}</div>
+                            <div className="text-sm font-medium text-gray-700">{fmtEUR(v.total / stats.rate)}</div>
                             <div className="text-xs text-gray-400">{fmtPLN(v.total)}</div>
                           </div>
                         </div>
@@ -623,7 +623,7 @@ function App({ user }) {
                 style={{ background: "#f9fafb", border: "1px solid #e5e7eb" }}>
                 <span className="text-sm text-gray-500">Suma ({filteredCosts.length} wpisów)</span>
                 <div>
-                  <span className="font-bold text-gray-900">{fmtEUR(filteredTotal / stats.rate)}</span>
+                  <span className="font-medium text-gray-700">{fmtEUR(filteredTotal / stats.rate)}</span>
                   <span className="text-xs text-gray-400 ml-2">{fmtPLN(filteredTotal)}</span>
                 </div>
               </div>
@@ -655,7 +655,7 @@ function App({ user }) {
                       </div>
                       <span className="col-span-3 text-gray-400 text-xs truncate">{c.note || "—"}{c.liters ? ` · ${c.liters} L` : ""}</span>
                       <div className="col-span-2 text-right">
-                        <div className="font-semibold text-gray-900 text-sm">{fmtEUR(amtPLN / stats.rate)}</div>
+                        <div className="font-medium text-gray-700 text-sm">{fmtEUR(amtPLN / stats.rate)}</div>
                         {amtEUR != null && <div className="text-xs text-gray-400">{fmtPLN(amtPLN)}</div>}
                       </div>
                       <div className="col-span-1 flex justify-end">
@@ -735,12 +735,12 @@ function App({ user }) {
                       <div className="grid grid-cols-3 divide-x divide-gray-50 border-b border-gray-50">
                         <div className="px-4 py-3">
                           <div className="text-xs text-gray-400 mb-0.5">Łączne koszty</div>
-                          <div className="font-bold text-gray-900 text-sm">{fmtEUR(total / stats.rate)}</div>
+                          <div className="font-medium text-gray-700 text-sm">{fmtEUR(total / stats.rate)}</div>
                           <div className="text-xs text-gray-400">{fmtPLN(total)}</div>
                         </div>
                         <div className="px-4 py-3">
                           <div className="text-xs text-gray-400 mb-0.5">Wpisów</div>
-                          <div className="font-bold text-gray-900 text-sm">{vc.length}</div>
+                          <div className="font-medium text-gray-700 text-sm">{vc.length}</div>
                         </div>
                         <div className="px-4 py-3">
                           <div className="text-xs text-gray-400 mb-0.5">Rodzaj</div>
@@ -995,7 +995,7 @@ function ImiCard({ record: r, vehicles, onPreview, onDelete }) {
         <span className="text-2xl">🌍</span>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-bold text-gray-900">{r.driverName || "—"}</span>
+            <span className="text-sm font-medium text-gray-700">{r.driverName || "—"}</span>
             {r.country && (
               <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
                 style={{ background:"#eff6ff", color:"#1a3c8f" }}>🏳️ {r.country}</span>
@@ -1379,7 +1379,7 @@ Extract ALL fields exactly as they appear. Return ONLY clean JSON, no text befor
     <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center p-0 sm:p-4"
       style={{ background:"rgba(0,0,0,0.4)", backdropFilter:"blur(4px)" }}>
       <div className="w-full sm:max-w-lg bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col"
-        style={{ fontFamily:"'DM Sans',sans-serif", maxHeight:"90vh" }}>
+        style={{ fontFamily:"'Inter',sans-serif", maxHeight:"90vh" }}>
 
         {/* HEADER */}
         <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100">
@@ -1695,7 +1695,7 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
         <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center p-0 sm:p-4"
           style={{ background:"rgba(0,0,0,0.35)", backdropFilter:"blur(4px)" }}>
           <div className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-screen overflow-y-auto"
-            style={{ fontFamily:"'DM Sans',sans-serif" }}>
+            style={{ fontFamily:"'Inter',sans-serif" }}>
             <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100 sticky top-0 bg-white">
               <h3 className="text-base font-bold text-gray-900">🔔 Przypomnienia</h3>
               <button onClick={() => setShowReminders(false)} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs">✕</button>
@@ -1878,7 +1878,7 @@ Format daty: YYYY-MM-DD`;
     <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center p-0 sm:p-4"
       style={{ background:"rgba(0,0,0,0.45)", backdropFilter:"blur(5px)" }}>
       <div className="w-full sm:max-w-2xl bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col"
-        style={{ fontFamily:"'DM Sans',sans-serif", maxHeight:"92vh" }}>
+        style={{ fontFamily:"'Inter',sans-serif", maxHeight:"92vh" }}>
 
         {/* HEADER */}
         <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100">
@@ -2050,7 +2050,7 @@ function AddDocModal({ vehicles, doc, onSave, onClose }) {
     <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center p-0 sm:p-4"
       style={{ background:"rgba(0,0,0,0.35)", backdropFilter:"blur(4px)" }}>
       <div className="w-full sm:max-w-lg bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-y-auto"
-        style={{ fontFamily:"'DM Sans',sans-serif", maxHeight:"95vh" }}>
+        style={{ fontFamily:"'Inter',sans-serif", maxHeight:"95vh" }}>
         <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100 sticky top-0 bg-white z-10">
           <h3 className="text-base font-bold text-gray-900">{doc ? "Edytuj dokument" : "Nowy dokument"}</h3>
           <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs">✕</button>
@@ -2241,7 +2241,7 @@ function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, 
     <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center p-0 sm:p-4"
       style={{ background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)" }}>
       <div className="w-full sm:max-w-lg bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-y-auto"
-        style={{ fontFamily: "'DM Sans', sans-serif", maxHeight: "95vh" }}>
+        style={{ fontFamily: "'Inter', sans-serif", maxHeight: "95vh" }}>
 
         <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100 sticky top-0 bg-white z-10">
           <h3 className="text-base font-bold text-gray-900">Nowy koszt</h3>
@@ -2519,7 +2519,7 @@ function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
                   </div>
                   <div className="col-span-2 text-right text-sm font-medium text-gray-700">{f > 0 ? fmt(f) : <span className="text-gray-300">—</span>}</div>
                   <div className="col-span-2 text-right text-sm font-medium text-gray-700">{k > 0 ? fmt(k) : <span className="text-gray-300">—</span>}</div>
-                  <div className="col-span-2 text-right text-sm font-bold" style={{ color: zyskColor(z) }}>{hasData ? fmtS(z) : <span className="text-gray-300">—</span>}</div>
+                  <div className="col-span-2 text-right text-sm font-medium" style={{ color: zyskColor(z) }}>{hasData ? fmtS(z) : <span className="text-gray-300">—</span>}</div>
                   <div className="col-span-2 text-right">
                     {f > 0 ? (
                       <span className="px-2 py-0.5 rounded-full text-xs font-bold"
@@ -2539,7 +2539,7 @@ function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
 
           {/* Month grid for current year */}
           <div className="mt-6">
-            <div className="text-sm font-semibold text-gray-700 mb-3">Zysk miesięczny per pojazd — {selYear}</div>
+            <div className="text-sm font-medium text-gray-500 mb-3">Zysk miesięczny per pojazd — {selYear}</div>
             <div className="bg-white rounded-2xl border border-gray-100 overflow-x-auto">
               <table className="w-full text-xs" style={{ minWidth: 700 }}>
                 <thead>
@@ -2652,7 +2652,7 @@ function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
 
                 {/* Monthly bar chart */}
                 <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
-                  <div className="text-sm font-semibold text-gray-700 mb-4">Przychód vs Koszty — miesięcznie</div>
+                  <div className="text-sm font-medium text-gray-500 mb-4">Przychód vs Koszty — miesięcznie</div>
                   <div className="flex items-end gap-1.5" style={{ height: 140 }}>
                     {yearData.map((d, i) => (
                       <div key={i} className="flex-1 flex flex-col items-center gap-0.5 group cursor-pointer" onClick={() => openAdd(selVehicle, selYear, i)}>
@@ -2685,7 +2685,7 @@ function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
                 {/* Cost breakdown */}
                 {costBreakdown.length > 0 && (
                   <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
-                    <div className="text-sm font-semibold text-gray-700 mb-3">Struktura kosztów {selYear}</div>
+                    <div className="text-sm font-medium text-gray-500 mb-3">Struktura kosztów {selYear}</div>
                     <div className="space-y-2">
                       {costBreakdown.map(c => (
                         <div key={c.id} className="flex items-center gap-3">
@@ -2756,7 +2756,7 @@ function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
         <div className="space-y-4">
           {/* YoY comparison */}
           <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
-            <div className="text-sm font-semibold text-gray-700 mb-4">Frachty floty — rok do roku</div>
+            <div className="text-sm font-medium text-gray-500 mb-4">Frachty floty — rok do roku</div>
             <div className="overflow-x-auto">
               <table className="w-full text-xs" style={{ minWidth: 600 }}>
                 <thead>
@@ -2798,7 +2798,7 @@ function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
 
           {/* Per-vehicle YoY */}
           <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
-            <div className="text-sm font-semibold text-gray-700 mb-4">Zysk roczny per pojazd</div>
+            <div className="text-sm font-medium text-gray-500 mb-4">Zysk roczny per pojazd</div>
             <div className="space-y-3">
               {vehicles.map(v => {
                 const zyski = years.map(y => ({ y, z: totalZysk(v.id,y), f: totalFrachty(v.id,y) }));
@@ -3436,7 +3436,7 @@ function DriverCopyRow({ vehicle: v, active }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: "rgba(0,0,0,0.4)", backdropFilter: "blur(4px)" }}>
           <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl overflow-hidden"
-            style={{ fontFamily: "'DM Sans', sans-serif" }}>
+            style={{ fontFamily: "'Inter', sans-serif" }}>
             <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-gray-100">
               <span className="text-sm font-bold text-gray-900">Oferta — zaznacz i skopiuj</span>
               <button onClick={() => setShowText(false)}
@@ -3602,7 +3602,7 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
               }
             }}
             className="flex-1 px-3 py-2 rounded-lg text-xs outline-none"
-            style={{ background: "#f9fafb", border: "1.5px solid #e5e7eb", fontFamily: "'DM Sans', sans-serif", color: "#111827" }}
+            style={{ background: "#f9fafb", border: "1.5px solid #e5e7eb", fontFamily: "'Inter', sans-serif", color: "#111827" }}
           />
           <button
             onClick={() => {
@@ -3870,7 +3870,7 @@ function AddVehicleModal({ onSave, onClose }) {
     <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center p-0 sm:p-4"
       style={{ background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)" }}>
       <div className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl"
-        style={{ fontFamily: "'DM Sans', sans-serif" }}>
+        style={{ fontFamily: "'Inter', sans-serif" }}>
         <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100">
           <h3 className="text-base font-bold text-gray-900">Nowy pojazd</h3>
           <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs">✕</button>
@@ -3926,7 +3926,7 @@ function AddVehicleModal({ onSave, onClose }) {
                 onChange={(e) => setNewEqInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") addCustomEq(); }}
                 className="flex-1 px-3 py-2 rounded-lg text-xs outline-none"
-                style={{ background: "#f9fafb", border: "1.5px solid #e5e7eb", fontFamily: "'DM Sans', sans-serif", color: "#111827" }} />
+                style={{ background: "#f9fafb", border: "1.5px solid #e5e7eb", fontFamily: "'Inter', sans-serif", color: "#111827" }} />
               <button onClick={addCustomEq} className="px-3 py-2 rounded-lg text-xs font-semibold text-white" style={{ background: "#111827" }}>+ Dodaj</button>
             </div>
           </div>
@@ -3993,7 +3993,7 @@ function FSel({ value, onChange, options }) {
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)}
       className="px-3 py-2 rounded-lg text-sm outline-none appearance-none cursor-pointer"
-      style={{ background: "#fff", border: "1px solid #e5e7eb", color: "#374151", minWidth: "140px", fontFamily: "'DM Sans', sans-serif" }}>
+      style={{ background: "#fff", border: "1px solid #e5e7eb", color: "#374151", minWidth: "140px", fontFamily: "'Inter', sans-serif" }}>
       {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>
   );
@@ -4013,7 +4013,7 @@ function MInput({ type = "text", placeholder, value, onChange, highlight }) {
       style={{
         background: "#f9fafb",
         border: `1.5px solid ${highlight ? "#111827" : "#e5e7eb"}`,
-        fontFamily: "'DM Sans', sans-serif",
+        fontFamily: "'Inter', sans-serif",
         color: "#111827",
       }} />
   );
@@ -4022,7 +4022,7 @@ function MSelect({ value, onChange, children }) {
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)}
       className="w-full px-3.5 py-2.5 rounded-lg text-sm outline-none appearance-none"
-      style={{ background: "#f9fafb", border: "1.5px solid #e5e7eb", fontFamily: "'DM Sans', sans-serif", color: "#111827" }}>
+      style={{ background: "#f9fafb", border: "1.5px solid #e5e7eb", fontFamily: "'Inter', sans-serif", color: "#111827" }}>
       {children}
     </select>
   );
