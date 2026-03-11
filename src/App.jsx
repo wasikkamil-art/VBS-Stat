@@ -2511,7 +2511,7 @@ function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
               return (
                 <div key={v.id} className="grid grid-cols-12 px-5 py-3.5 border-b border-gray-50 items-center hover:bg-gray-50 transition-colors">
                   <div className="col-span-3">
-                    <div className="font-semibold text-sm text-gray-900" style={{ fontFamily:"'DM Mono',monospace" }}>{v.plate}</div>
+                    <div className="font-medium text-sm text-gray-600">{v.plate}</div>
                     <div className="text-xs text-gray-400">{v.brand}</div>
                   </div>
                   <div className="col-span-2 text-right text-sm font-medium text-gray-700">{f > 0 ? fmt(f) : <span className="text-gray-300">—</span>}</div>
