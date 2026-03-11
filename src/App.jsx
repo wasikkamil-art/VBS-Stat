@@ -918,7 +918,6 @@ function ImiTab({ imiRecords, vehicles, onAdd, onDelete }) {
   }).sort((a,b) => (b.createdAt||"").localeCompare(a.createdAt||""));
 
   const countries = [...new Set(imiRecords.map(r => r.country).filter(Boolean))];
-  const drivers   = [...new Set(imiRecords.map(r => r.driverName).filter(Boolean))].sort();
 
   return (
     <div>
@@ -943,11 +942,9 @@ function ImiTab({ imiRecords, vehicles, onAdd, onDelete }) {
             <option value="all">Wszystkie kraje</option>
             {countries.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
-          <select value={filterDriver} onChange={e => setFilterDriver(e.target.value)}
-            className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 outline-none bg-white text-gray-700">
-            <option value="">Wszyscy kierowcy</option>
-            {drivers.map(d => <option key={d} value={d}>{d}</option>)}
-          </select>
+          <input value={filterDriver} onChange={e => setFilterDriver(e.target.value)}
+            placeholder="Szukaj kierowcy..."
+            className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 outline-none bg-white text-gray-700 min-w-[160px]" />
         </div>
       )}
 
