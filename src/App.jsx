@@ -1193,7 +1193,7 @@ function ImiPreviewModal({ record: r, vehicles, onClose }) {
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{overflowY:"auto"}}
       style={{ background:"rgba(0,0,0,0.6)", backdropFilter:"blur(6px)" }}>
       <div className="w-full max-w-3xl bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden" style={{ maxHeight:"92vh" }}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
@@ -1474,7 +1474,7 @@ function FilePreviewModal({ file, onClose }) {
   if (!file) return null;
   const isPdf = file.fileType === "application/pdf";
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{overflowY:"auto"}}
       style={{ background:"rgba(0,0,0,0.7)", backdropFilter:"blur(6px)" }}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-screen flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
@@ -2877,7 +2877,7 @@ function RentFormModal({ vehicles, record, initVehicle, initYear, initMonth, onS
   const zyskColor = (z) => z > 0 ? "#16a34a" : z < 0 ? "#dc2626" : "#9ca3af";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background:"rgba(0,0,0,0.5)", backdropFilter:"blur(4px)" }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{overflowY:"auto"}} style={{ background:"rgba(0,0,0,0.5)", backdropFilter:"blur(4px)" }}>
       <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden" style={{ maxHeight:"90vh" }}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <div className="font-bold text-gray-900">
@@ -3430,7 +3430,7 @@ function DriverCopyRow({ vehicle: v, active }) {
 
       {/* FALLBACK MODAL — gdy clipboard zablokowany */}
       {showText && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{overflowY:"auto"}}
           style={{ background: "rgba(0,0,0,0.4)", backdropFilter: "blur(4px)" }}>
           <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl overflow-hidden"
             style={{ fontFamily: "'DM Sans', sans-serif" }}>
