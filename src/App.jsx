@@ -575,7 +575,7 @@ function App({ user }) {
                       <div key={v.id} className="px-5 py-4">
                         <div className="flex justify-between items-start mb-1.5">
                           <div>
-                            <span className="font-semibold text-sm text-gray-900" style={{ fontFamily: "'DM Mono', monospace" }}>{v.plate}</span>
+                            <span className="font-medium text-sm text-gray-600">{v.plate}</span>
                             <span className="text-xs text-gray-400 ml-2">{v.brand} · {v.activeDriver}</span>
                           </div>
                           <div className="text-right">
@@ -704,7 +704,7 @@ function App({ user }) {
                           </div>
                           <div>
                             <div className="flex items-center gap-1.5">
-                              <span className="font-bold text-gray-900 text-sm" style={{ fontFamily: "'DM Mono', monospace" }}>{v.plate}</span>
+                              <span className="font-medium text-gray-600 text-sm">{v.plate}</span>
                               {v.plate2 && (
                                 <>
                                   <span className="text-gray-300 text-xs">+</span>
@@ -2511,7 +2511,7 @@ function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
               return (
                 <div key={v.id} className="grid grid-cols-12 px-5 py-3.5 border-b border-gray-50 items-center hover:bg-gray-50 transition-colors">
                   <div className="col-span-3">
-                    <div className="font-semibold text-sm text-gray-900" style={{ fontFamily:"'DM Mono',monospace" }}>{v.plate}</div>
+                    <div className="font-medium text-sm text-gray-600">{v.plate}</div>
                     <div className="text-xs text-gray-400">{v.brand}</div>
                   </div>
                   <div className="col-span-2 text-right text-sm font-medium text-gray-700">{f > 0 ? fmt(f) : <span className="text-gray-300">—</span>}</div>
