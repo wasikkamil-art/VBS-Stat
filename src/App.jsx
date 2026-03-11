@@ -575,7 +575,7 @@ function App({ user }) {
                       <div key={v.id} className="px-5 py-4">
                         <div className="flex justify-between items-start mb-1.5">
                           <div>
-                            <span className="font-semibold text-sm text-gray-900" style={{ fontFamily: "'DM Mono', monospace" }}>{v.plate}</span>
+                            <span className="font-medium text-sm text-gray-600">{v.plate}</span>
                             <span className="text-xs text-gray-400 ml-2">{v.brand} · {v.activeDriver}</span>
                           </div>
                           <div className="text-right">
@@ -704,11 +704,11 @@ function App({ user }) {
                           </div>
                           <div>
                             <div className="flex items-center gap-1.5">
-                              <span className="font-bold text-gray-900 text-sm" style={{ fontFamily: "'DM Mono', monospace" }}>{v.plate}</span>
+                              <span className="font-medium text-gray-600 text-sm">{v.plate}</span>
                               {v.plate2 && (
                                 <>
                                   <span className="text-gray-300 text-xs">+</span>
-                                  <span className="font-bold text-sm" style={{ fontFamily: "'DM Mono', monospace", color: "#6366f1" }}>{v.plate2}</span>
+                                  <span className="font-medium text-sm" style={{ color: "#6366f1" }}>{v.plate2}</span>
                                   <span className="text-xs px-1.5 py-0.5 rounded-md font-medium" style={{ background: "#eef2ff", color: "#6366f1" }}>przyczepa</span>
                                 </>
                               )}
@@ -913,11 +913,12 @@ function ImiTab({ imiRecords, vehicles, onAdd, onDelete }) {
 
   const filtered = imiRecords.filter(r => {
     if (filterCountry !== "all" && r.country !== filterCountry) return false;
-    if (filterDriver && !(r.driverName||"").toLowerCase().includes(filterDriver.toLowerCase())) return false;
+    if (filterDriver && (r.driverName||"") !== filterDriver) return false;
     return true;
   }).sort((a,b) => (b.createdAt||"").localeCompare(a.createdAt||""));
 
   const countries = [...new Set(imiRecords.map(r => r.country).filter(Boolean))];
+  const drivers   = [...new Set(imiRecords.map(r => r.driverName).filter(Boolean))].sort();
 
   return (
     <div>
@@ -942,9 +943,11 @@ function ImiTab({ imiRecords, vehicles, onAdd, onDelete }) {
             <option value="all">Wszystkie kraje</option>
             {countries.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
-          <input value={filterDriver} onChange={e => setFilterDriver(e.target.value)}
-            placeholder="Szukaj kierowcy..."
-            className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 outline-none bg-white text-gray-700 min-w-[160px]" />
+          <select value={filterDriver} onChange={e => setFilterDriver(e.target.value)}
+            className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 outline-none bg-white text-gray-700">
+            <option value="">Wszyscy kierowcy</option>
+            {drivers.map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
         </div>
       )}
 
@@ -2511,7 +2514,7 @@ function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
               return (
                 <div key={v.id} className="grid grid-cols-12 px-5 py-3.5 border-b border-gray-50 items-center hover:bg-gray-50 transition-colors">
                   <div className="col-span-3">
-                    <div className="font-semibold text-sm text-gray-900" style={{ fontFamily:"'DM Mono',monospace" }}>{v.plate}</div>
+                    <div className="font-medium text-sm text-gray-600">{v.plate}</div>
                     <div className="text-xs text-gray-400">{v.brand}</div>
                   </div>
                   <div className="col-span-2 text-right text-sm font-medium text-gray-700">{f > 0 ? fmt(f) : <span className="text-gray-300">—</span>}</div>
@@ -2549,7 +2552,7 @@ function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
                 <tbody>
                   {vehicles.map(v => (
                     <tr key={v.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="px-4 py-2 font-semibold text-gray-800" style={{ fontFamily:"'DM Mono',monospace", fontSize:11 }}>{v.plate}</td>
+                      <td className="px-4 py-2 font-medium text-gray-600" style={{ fontSize:11 }}>{v.plate}</td>
                       {MONTHS_PL.map((_,mi) => {
                         const r = getRecord(v.id, selYear, mi);
                         if (!r) return (
@@ -2802,7 +2805,7 @@ function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
                 const maxF = Math.max(...zyski.map(x=>x.f), 1);
                 return (
                   <div key={v.id} className="flex items-center gap-3">
-                    <span className="text-xs font-semibold text-gray-700 w-24 flex-shrink-0" style={{ fontFamily:"'DM Mono',monospace", fontSize:11 }}>{v.plate}</span>
+                    <span className="text-xs font-medium text-gray-500 w-24 flex-shrink-0" style={{ fontSize:11 }}>{v.plate}</span>
                     <div className="flex-1 flex gap-1 items-end" style={{ height:28 }}>
                       {zyski.map(({y,z,f}) => (
                         <div key={y} className="flex-1 flex flex-col justify-end" style={{ height:28 }} title={`${y}: frachty ${fmt(f)}, zysk ${fmtS(z)}`}>
