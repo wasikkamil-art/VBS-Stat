@@ -26,19 +26,16 @@ const db   = getFirestore(app);
 const auth = getAuth(app);
 
 // ─── STORAGE (Firebase Firestore) ────────────────────────────────────────────
-// Kazdy klucz to osobny dokument: fleet/{uid}/data/{key}
-// Omija limit 1MB i izoluje dane per uzytkownik
+// Dane w jednym dokumencie fleet/data (merge strategy)
 
-function getUid() {
-  return auth.currentUser?.uid || "anonymous";
-}
+const DATA_REF = () => doc(db, "fleet", "data");
 
 async function dbGet(key) {
   try {
-    const ref = doc(db, "fleet", getUid(), "data", key);
-    const snap = await getDoc(ref);
+    const snap = await getDoc(DATA_REF());
     if (!snap.exists()) return null;
-    return snap.data().value ?? null;
+    const val = snap.data()[key];
+    return val !== undefined ? val : null;
   } catch (e) {
     console.error("dbGet error", e);
     return null;
@@ -47,8 +44,7 @@ async function dbGet(key) {
 
 async function dbSet(key, value) {
   try {
-    const ref = doc(db, "fleet", getUid(), "data", key);
-    await setDoc(ref, { value });
+    await setDoc(DATA_REF(), { [key]: value }, { merge: true });
   } catch (e) {
     console.error("dbSet error", e);
   }
@@ -1357,9 +1353,7 @@ Extract ALL fields exactly as they appear. Return ONLY clean JSON, no text befor
             id: item.id,
             vehicleId: vehicles[0]?.id || "",
             createdAt: new Date().toISOString(),
-            fileData: item.fileData,
             fileName: item.fileName,
-            fileType: item.fileType,
           };
           onSave(record);
           setQueue(q => q.map(x => x.id===item.id ? {...x, status:"saved", result:parsed} : x));
