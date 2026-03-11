@@ -919,6 +919,7 @@ function ImiTab({ imiRecords, vehicles, onAdd, onDelete }) {
 
   const countries = [...new Set(imiRecords.map(r => r.country).filter(Boolean))];
   const drivers   = [...new Set(imiRecords.map(r => r.driverName).filter(Boolean))].sort();
+  const drivers   = [...new Set(imiRecords.map(r => r.driverName).filter(Boolean))].sort();
 
   return (
     <div>
