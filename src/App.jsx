@@ -909,12 +909,10 @@ function ImiTab({ imiRecords, vehicles, onAdd, onDelete }) {
   const [showUpload, setShowUpload] = useState(false);
   const [preview, setPreview]       = useState(null); // record to show full card
   const [filterCountry, setFilterCountry] = useState("all");
-  const [filterVehicle, setFilterVehicle] = useState("all");
   const [filterDriver, setFilterDriver]   = useState("");
 
   const filtered = imiRecords.filter(r => {
     if (filterCountry !== "all" && r.country !== filterCountry) return false;
-    if (filterVehicle !== "all" && r.vehicleId !== filterVehicle) return false;
     if (filterDriver && !(r.driverName||"").toLowerCase().includes(filterDriver.toLowerCase())) return false;
     return true;
   }).sort((a,b) => (b.createdAt||"").localeCompare(a.createdAt||""));
@@ -943,11 +941,6 @@ function ImiTab({ imiRecords, vehicles, onAdd, onDelete }) {
             className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 outline-none bg-white text-gray-700">
             <option value="all">Wszystkie kraje</option>
             {countries.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-          <select value={filterVehicle} onChange={e => setFilterVehicle(e.target.value)}
-            className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 outline-none bg-white text-gray-700">
-            <option value="all">Wszystkie pojazdy</option>
-            {vehicles.map(v => <option key={v.id} value={v.id}>{v.plate}{v.plate2?` / ${v.plate2}`:""}</option>)}
           </select>
           <input value={filterDriver} onChange={e => setFilterDriver(e.target.value)}
             placeholder="Szukaj kierowcy..."
