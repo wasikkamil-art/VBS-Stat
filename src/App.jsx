@@ -575,7 +575,7 @@ function App({ user }) {
                       <div key={v.id} className="px-5 py-4">
                         <div className="flex justify-between items-start mb-1.5">
                           <div>
-                            <span className="font-normal text-sm text-gray-500 tracking-wide">{v.plate}</span>
+                            <span className="font-semibold text-sm text-gray-900" style={{ fontFamily: "'DM Mono', monospace" }}>{v.plate}</span>
                             <span className="text-xs text-gray-400 ml-2">{v.brand} · {v.activeDriver}</span>
                           </div>
                           <div className="text-right">
@@ -704,19 +704,16 @@ function App({ user }) {
                           </div>
                           <div>
                             <div className="flex items-center gap-1.5">
-                              <span className="font-normal text-gray-500 text-sm tracking-wide">{v.plate}</span>
+                              <span className="font-bold text-gray-900 text-sm" style={{ fontFamily: "'DM Mono', monospace" }}>{v.plate}</span>
                               {v.plate2 && (
                                 <>
                                   <span className="text-gray-300 text-xs">+</span>
-                                  <span className="font-medium text-sm" style={{ color: "#6366f1" }}>{v.plate2}</span>
+                                  <span className="font-bold text-sm" style={{ fontFamily: "'DM Mono', monospace", color: "#6366f1" }}>{v.plate2}</span>
                                   <span className="text-xs px-1.5 py-0.5 rounded-md font-medium" style={{ background: "#eef2ff", color: "#6366f1" }}>przyczepa</span>
                                 </>
                               )}
                             </div>
                             <div className="text-xs text-gray-400">{v.brand} · {v.year} · {v.type}</div>
-                            {active && active.name && (
-                              <div className="text-xs font-medium text-gray-600 mt-0.5">👤 {active.name}</div>
-                            )}
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -734,7 +731,26 @@ function App({ user }) {
                         </div>
                       </div>
 
-
+                      {/* ── STATS ROW ── */}
+                      <div className="grid grid-cols-3 divide-x divide-gray-50 border-b border-gray-50">
+                        <div className="px-4 py-3">
+                          <div className="text-xs text-gray-400 mb-0.5">Łączne koszty</div>
+                          <div className="font-bold text-gray-900 text-sm">{fmtEUR(total / stats.rate)}</div>
+                          <div className="text-xs text-gray-400">{fmtPLN(total)}</div>
+                        </div>
+                        <div className="px-4 py-3">
+                          <div className="text-xs text-gray-400 mb-0.5">Wpisów</div>
+                          <div className="font-bold text-gray-900 text-sm">{vc.length}</div>
+                        </div>
+                        <div className="px-4 py-3">
+                          <div className="text-xs text-gray-400 mb-0.5">Rodzaj</div>
+                          <div className="text-xs font-medium text-gray-700 leading-tight">
+                            {v.type}{v.plate2 ? " + Przyczepa" : ""}
+                            {(v.equipment||[]).includes("winda") ? " + winda" : ""}
+                            {(v.equipment||[]).includes("paleciak") ? " + paleciak" : ""}
+                          </div>
+                        </div>
+                      </div>
 
                       {/* ── TECH SPECS ── */}
                       <div className="px-5 py-3 border-b border-gray-50">
@@ -897,12 +913,11 @@ function ImiTab({ imiRecords, vehicles, onAdd, onDelete }) {
 
   const filtered = imiRecords.filter(r => {
     if (filterCountry !== "all" && r.country !== filterCountry) return false;
-    if (filterDriver && (r.driverName||"") !== filterDriver) return false;
+    if (filterDriver && !(r.driverName||"").toLowerCase().includes(filterDriver.toLowerCase())) return false;
     return true;
   }).sort((a,b) => (b.createdAt||"").localeCompare(a.createdAt||""));
 
   const countries = [...new Set(imiRecords.map(r => r.country).filter(Boolean))];
-  const drivers   = [...new Set(imiRecords.map(r => r.driverName).filter(Boolean))].sort();
 
   return (
     <div>
@@ -927,11 +942,9 @@ function ImiTab({ imiRecords, vehicles, onAdd, onDelete }) {
             <option value="all">Wszystkie kraje</option>
             {countries.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
-          <select value={filterDriver} onChange={e => setFilterDriver(e.target.value)}
-            className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 outline-none bg-white text-gray-700">
-            <option value="">Wszyscy kierowcy</option>
-            {drivers.map(d => <option key={d} value={d}>{d}</option>)}
-          </select>
+          <input value={filterDriver} onChange={e => setFilterDriver(e.target.value)}
+            placeholder="Szukaj kierowcy..."
+            className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 outline-none bg-white text-gray-700 min-w-[160px]" />
         </div>
       )}
 
@@ -1366,7 +1379,7 @@ Extract ALL fields exactly as they appear. Return ONLY clean JSON, no text befor
         style={{ fontFamily:"'DM Sans',sans-serif", maxHeight:"90vh" }}>
 
         {/* HEADER */}
-        <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100 flex-shrink-0">
+        <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100">
           <div>
             <h3 className="text-base font-bold text-gray-900">🌍 Import IMI/SIPSI</h3>
             <p className="text-xs text-gray-400 mt-0.5">Wiele plików naraz · AI odczytuje i zapisuje automatycznie</p>
@@ -1865,7 +1878,7 @@ Format daty: YYYY-MM-DD`;
         style={{ fontFamily:"'DM Sans',sans-serif", maxHeight:"92vh" }}>
 
         {/* HEADER */}
-        <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100 flex-shrink-0">
+        <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100">
           <div>
             <h3 className="text-base font-bold text-gray-900">🤖 Wgraj dokumenty z AI</h3>
             <p className="text-xs text-gray-400 mt-0.5">AI automatycznie odczyta dane — Ty potwierdzasz przed zapisem</p>
@@ -2232,7 +2245,7 @@ function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, 
           <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 transition-all text-xs">✕</button>
         </div>
 
-        <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
+        <div className="px-6 py-5 space-y-4">
 
           {/* POJAZD */}
           <MF label="Pojazd">
@@ -2498,7 +2511,7 @@ function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
               return (
                 <div key={v.id} className="grid grid-cols-12 px-5 py-3.5 border-b border-gray-50 items-center hover:bg-gray-50 transition-colors">
                   <div className="col-span-3">
-                    <div className="font-normal text-sm text-gray-500 tracking-wide">{v.plate}</div>
+                    <div className="font-semibold text-sm text-gray-900" style={{ fontFamily:"'DM Mono',monospace" }}>{v.plate}</div>
                     <div className="text-xs text-gray-400">{v.brand}</div>
                   </div>
                   <div className="col-span-2 text-right text-sm font-medium text-gray-700">{f > 0 ? fmt(f) : <span className="text-gray-300">—</span>}</div>
@@ -2536,7 +2549,7 @@ function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
                 <tbody>
                   {vehicles.map(v => (
                     <tr key={v.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="px-4 py-2 font-normal text-gray-500 tracking-wide" style={{ fontSize:11 }}>{v.plate}</td>
+                      <td className="px-4 py-2 font-semibold text-gray-800" style={{ fontFamily:"'DM Mono',monospace", fontSize:11 }}>{v.plate}</td>
                       {MONTHS_PL.map((_,mi) => {
                         const r = getRecord(v.id, selYear, mi);
                         if (!r) return (
@@ -2587,7 +2600,7 @@ function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
           <div className="flex gap-2 mb-5 flex-wrap">
             {vehicles.map(v => (
               <button key={v.id} onClick={() => setSelVehicle(v.id)}
-                className="px-4 py-2 rounded-xl text-sm font-normal tracking-wide transition-all border"
+                className="px-4 py-2 rounded-xl text-sm font-semibold transition-all border"
                 style={{ background: selVehicle===v.id ? "#111827" : "#fff",
                          color: selVehicle===v.id ? "#fff" : "#374151",
                          borderColor: selVehicle===v.id ? "#111827" : "#e5e7eb" }}>
@@ -2789,7 +2802,7 @@ function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
                 const maxF = Math.max(...zyski.map(x=>x.f), 1);
                 return (
                   <div key={v.id} className="flex items-center gap-3">
-                    <span className="text-xs font-normal text-gray-400 tracking-wide w-24 flex-shrink-0" style={{ fontSize:11 }}>{v.plate}</span>
+                    <span className="text-xs font-semibold text-gray-700 w-24 flex-shrink-0" style={{ fontFamily:"'DM Mono',monospace", fontSize:11 }}>{v.plate}</span>
                     <div className="flex-1 flex gap-1 items-end" style={{ height:28 }}>
                       {zyski.map(({y,z,f}) => (
                         <div key={y} className="flex-1 flex flex-col justify-end" style={{ height:28 }} title={`${y}: frachty ${fmt(f)}, zysk ${fmtS(z)}`}>
@@ -3059,7 +3072,7 @@ function ServisTab({ vehicles, onUpdateVehicle }) {
                 <div className="flex items-center gap-3">
                   <span className="text-xl">{v.plate2 ? "🚌" : "🚛"}</span>
                   <div>
-                    <span className="font-normal text-sm text-gray-500 tracking-wide">
+                    <span className="font-bold text-sm text-gray-900" style={{ fontFamily:"'DM Mono',monospace" }}>
                       {v.plate}{v.plate2 ? ` / ${v.plate2}` : ""}
                     </span>
                     <div className="text-xs text-gray-400">{v.brand} · {v.year}</div>
@@ -3853,13 +3866,13 @@ function AddVehicleModal({ onSave, onClose }) {
   return (
     <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center p-0 sm:p-4"
       style={{ background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)" }}>
-      <div className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col"
-        style={{ fontFamily: "'DM Sans', sans-serif", maxHeight: "90vh" }}>
-        <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100 flex-shrink-0">
+      <div className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl"
+        style={{ fontFamily: "'DM Sans', sans-serif" }}>
+        <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100">
           <h3 className="text-base font-bold text-gray-900">Nowy pojazd</h3>
           <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs">✕</button>
         </div>
-        <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
+        <div className="px-6 py-5 space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <MF label="Rejestracja (główna)"><MInput placeholder="WGM 0000X" value={form.plate} onChange={(v) => set("plate", v.toUpperCase())} /></MF>
             <MF label="Rejestracja przyczepy"><MInput placeholder="np. TK 760AP" value={form.plate2} onChange={(v) => set("plate2", v.toUpperCase())} /></MF>
@@ -3947,7 +3960,7 @@ function AddVehicleModal({ onSave, onClose }) {
             </div>
           </div>
         </div>
-        <div className="px-6 pb-6 pt-3 border-t border-gray-100 flex-shrink-0">
+        <div className="px-6 pb-6">
           <button onClick={handleSave} disabled={!form.plate}
             className="w-full py-3 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-95 disabled:opacity-30"
             style={{ background: "#111827" }}>
