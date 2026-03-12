@@ -581,7 +581,7 @@ function App({ user }) {
                       <div key={v.id} className="px-5 py-4">
                         <div className="flex justify-between items-start mb-1.5">
                           <div>
-                            <span className="font-semibold text-sm text-gray-900" style={{ fontFamily: "'DM Mono', monospace" }}>{v.plate}</span>
+                            <span className="font-normal text-gray-500 tracking-wide text-sm">{v.plate}</span>
                             <span className="text-xs text-gray-400 ml-2">{v.brand} · {v.activeDriver}</span>
                           </div>
                           <div className="text-right">
@@ -710,11 +710,11 @@ function App({ user }) {
                           </div>
                           <div>
                             <div className="flex items-center gap-1.5">
-                              <span className="font-bold text-gray-900 text-sm" style={{ fontFamily: "'DM Mono', monospace" }}>{v.plate}</span>
+                              <span className="font-normal text-gray-500 tracking-wide text-sm">{v.plate}</span>
                               {v.plate2 && (
                                 <>
                                   <span className="text-gray-300 text-xs">+</span>
-                                  <span className="font-bold text-sm" style={{ fontFamily: "'DM Mono', monospace", color: "#6366f1" }}>{v.plate2}</span>
+                                  <span className="font-normal tracking-wide text-sm" style={{ color: "#6366f1" }}>{v.plate2}</span>
                                   <span className="text-xs px-1.5 py-0.5 rounded-md font-medium" style={{ background: "#eef2ff", color: "#6366f1" }}>przyczepa</span>
                                 </>
                               )}
@@ -966,7 +966,7 @@ function ImiTab({ imiRecords, vehicles, onAdd, onDelete }) {
             <option value="all">Wszystkie kraje</option>
             {countries.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
-          <input value={filterDriver} onChange={e => setFilterDriver(e.target.value)}
+          <select value={filterDriver} onChange={e => setFilterDriver(e.target.value)} className="text-sm px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-700"><option value="">Wszyscy kierowcy</option>{[...new Set(imiRecords.map(r => r.driverName).filter(Boolean))].sort().map(d => <option key={d} value={d}>{d}</option>)}</select>
             placeholder="Szukaj kierowcy..."
             className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 outline-none bg-white text-gray-700 min-w-[160px]" />
         </div>
