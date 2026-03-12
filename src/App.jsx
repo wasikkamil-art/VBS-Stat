@@ -710,11 +710,11 @@ function App({ user }) {
                           </div>
                           <div>
                             <div className="flex items-center gap-1.5">
-                              <span className="font-bold text-gray-900 text-sm" style={{ fontFamily: "'DM Mono', monospace" }}>{v.plate}</span>
+                              <span className="font-normal text-gray-500 tracking-wide text-sm">{v.plate}</span>
                               {v.plate2 && (
                                 <>
                                   <span className="text-gray-300 text-xs">+</span>
-                                  <span className="font-bold text-sm" style={{ fontFamily: "'DM Mono', monospace", color: "#6366f1" }}>{v.plate2}</span>
+                                  <span className="font-normal tracking-wide text-sm" style={{ color: "#6366f1" }}>{v.plate2}</span>
                                   <span className="text-xs px-1.5 py-0.5 rounded-md font-medium" style={{ background: "#eef2ff", color: "#6366f1" }}>przyczepa</span>
                                 </>
                               )}
@@ -966,9 +966,7 @@ function ImiTab({ imiRecords, vehicles, onAdd, onDelete }) {
             <option value="all">Wszystkie kraje</option>
             {countries.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
-          <input value={filterDriver} onChange={e => setFilterDriver(e.target.value)}
-            placeholder="Szukaj kierowcy..."
-            className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 outline-none bg-white text-gray-700 min-w-[160px]" />
+          <select value={filterDriver} onChange={e => setFilterDriver(e.target.value)} style={{background:"#f9fafb",border:"1.5px solid #e5e7eb",fontFamily:"'DM Sans', sans-serif",color:"#111827"}} className="text-sm px-3 py-1.5 rounded-lg"><option value="">Wszyscy kierowcy</option>{[...new Set(imiRecords.map(r => r.driverName).filter(Boolean))].sort().map(d => <option key={d} value={d}>{d}</option>)}</select>
         </div>
       )}
 
