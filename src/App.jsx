@@ -2587,7 +2587,7 @@ function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
           <div className="flex gap-2 mb-5 flex-wrap">
             {vehicles.map(v => (
               <button key={v.id} onClick={() => setSelVehicle(v.id)}
-                className="px-4 py-2 rounded-xl text-sm font-semibold transition-all border"
+                className="px-4 py-2 rounded-xl text-sm font-normal tracking-wide transition-all border"
                 style={{ background: selVehicle===v.id ? "#111827" : "#fff",
                          color: selVehicle===v.id ? "#fff" : "#374151",
                          borderColor: selVehicle===v.id ? "#111827" : "#e5e7eb" }}>
