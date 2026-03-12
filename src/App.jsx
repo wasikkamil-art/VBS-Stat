@@ -575,7 +575,7 @@ function App({ user }) {
                       <div key={v.id} className="px-5 py-4">
                         <div className="flex justify-between items-start mb-1.5">
                           <div>
-                            <span className="font-medium text-sm text-gray-600">{v.plate}</span>
+                            <span className="font-normal text-sm text-gray-500 tracking-wide">{v.plate}</span>
                             <span className="text-xs text-gray-400 ml-2">{v.brand} · {v.activeDriver}</span>
                           </div>
                           <div className="text-right">
@@ -704,7 +704,7 @@ function App({ user }) {
                           </div>
                           <div>
                             <div className="flex items-center gap-1.5">
-                              <span className="font-medium text-gray-600 text-sm">{v.plate}</span>
+                              <span className="font-normal text-gray-500 text-sm tracking-wide">{v.plate}</span>
                               {v.plate2 && (
                                 <>
                                   <span className="text-gray-300 text-xs">+</span>
@@ -2498,7 +2498,7 @@ function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
               return (
                 <div key={v.id} className="grid grid-cols-12 px-5 py-3.5 border-b border-gray-50 items-center hover:bg-gray-50 transition-colors">
                   <div className="col-span-3">
-                    <div className="font-medium text-sm text-gray-600">{v.plate}</div>
+                    <div className="font-normal text-sm text-gray-500 tracking-wide">{v.plate}</div>
                     <div className="text-xs text-gray-400">{v.brand}</div>
                   </div>
                   <div className="col-span-2 text-right text-sm font-medium text-gray-700">{f > 0 ? fmt(f) : <span className="text-gray-300">—</span>}</div>
@@ -2536,7 +2536,7 @@ function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
                 <tbody>
                   {vehicles.map(v => (
                     <tr key={v.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="px-4 py-2 font-medium text-gray-600" style={{ fontSize:11 }}>{v.plate}</td>
+                      <td className="px-4 py-2 font-normal text-gray-500 tracking-wide" style={{ fontSize:11 }}>{v.plate}</td>
                       {MONTHS_PL.map((_,mi) => {
                         const r = getRecord(v.id, selYear, mi);
                         if (!r) return (
@@ -2789,7 +2789,7 @@ function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
                 const maxF = Math.max(...zyski.map(x=>x.f), 1);
                 return (
                   <div key={v.id} className="flex items-center gap-3">
-                    <span className="text-xs font-medium text-gray-500 w-24 flex-shrink-0" style={{ fontSize:11 }}>{v.plate}</span>
+                    <span className="text-xs font-normal text-gray-400 tracking-wide w-24 flex-shrink-0" style={{ fontSize:11 }}>{v.plate}</span>
                     <div className="flex-1 flex gap-1 items-end" style={{ height:28 }}>
                       {zyski.map(({y,z,f}) => (
                         <div key={y} className="flex-1 flex flex-col justify-end" style={{ height:28 }} title={`${y}: frachty ${fmt(f)}, zysk ${fmtS(z)}`}>
