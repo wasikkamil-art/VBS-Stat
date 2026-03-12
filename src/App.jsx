@@ -50,7 +50,7 @@ async function dbSet(key, value) {
   }
 }
 
-const SK = { vehicles: "fleetv2_vehicles", costs: "fleetv2_costs", categories: "fleetv2_categories", docs: "fleetv2_docs", imi: "fleetv2_imi", rent: "fleetv2_rent" };
+const SK = { vehicles: "fleetv2_vehicles", costs: "fleetv2_costs", categories: "fleetv2_categories", docs: "fleetv2_docs", imi: "fleetv2_imi", rent: "fleetv2_rent", frachty: "fleetv2_frachty" };
 
 // ─── SEED DATA ─────────────────────────────────────────────────────────────────
 const SEED_VEHICLES = [
@@ -253,6 +253,8 @@ function App({ user }) {
   const [docs, setDocs]             = useState([]);
   const [imiRecords, setImiRecords] = useState([]);
   const [rentRecords, setRentRecords] = useState([]);
+  const [frachtyList, setFrachtyList] = useState([]);
+  const [frachtyList, setFrachtyList] = useState([]);
   const [loaded, setLoaded]         = useState(false);
   const [toast, setToast]           = useState(null);
   const [eurRate, setEurRate]       = useState(null);
@@ -275,12 +277,14 @@ function App({ user }) {
       const d  = await dbGet(SK.docs);
       const im = await dbGet(SK.imi);
       const rn = await dbGet(SK.rent);
+      const fr = await dbGet(SK.frachty);
       setVehicles(v  || SEED_VEHICLES);
       setCosts(c     || SEED_COSTS);
       setCategories(ca || SEED_CATEGORIES);
       setDocs(d || []);
       setImiRecords(im || []);
       setRentRecords(rn || []);
+      setFrachtyList(fr || []);
       setLoaded(true);
     })();
   }, []);
@@ -292,6 +296,8 @@ function App({ user }) {
   useEffect(() => { if (loaded) dbSet(SK.docs, docs); },            [docs, loaded]);
   useEffect(() => { if (loaded) dbSet(SK.imi, imiRecords); },       [imiRecords, loaded]);
   useEffect(() => { if (loaded) dbSet(SK.rent, rentRecords); },     [rentRecords, loaded]);
+  useEffect(() => { if (loaded) dbSet(SK.frachty, frachtyList); },  [frachtyList, loaded]);
+  useEffect(() => { if (loaded) dbSet(SK.frachty, frachtyList); },  [frachtyList, loaded]);
 
   // ── EUR RATE (NBP API) ──
   useEffect(() => {
@@ -430,6 +436,7 @@ function App({ user }) {
           <nav className="space-y-0.5 flex-1">
             {[
               { id: "dashboard", icon: "◈",  label: "Przegląd" },
+              { id: "frachty",   icon: "🚚",  label: "Frachty" },
               { id: "costs",     icon: "≡",   label: "Koszty" },
               { id: "vehicles",  icon: "⊡",   label: "Pojazdy" },
               { id: "serwis",    icon: "🔧",  label: "Serwis" },
@@ -864,6 +871,24 @@ function App({ user }) {
             <ServisTab vehicles={vehicles} onUpdateVehicle={updateVehicle} />
           )}
 
+          {tab === "frachty" && (
+            <FrachtyTab
+              frachtyList={frachtyList}
+              vehicles={vehicles}
+              onAdd={(r) => setFrachtyList(p => [{ ...r, id: uid() }, ...p])}
+              onDelete={(id) => setFrachtyList(p => p.filter(r => r.id !== id))}
+              onUpdate={(id, data) => setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r))}
+            />
+          )}
+          {tab === "frachty" && (
+            <FrachtyTab
+              frachtyList={frachtyList}
+              vehicles={vehicles}
+              onAdd={(r) => setFrachtyList(p => [{ ...r, id: uid() }, ...p])}
+              onDelete={(id) => setFrachtyList(p => p.filter(r => r.id !== id))}
+              onUpdate={(id, data) => setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r))}
+            />
+          )}
           {tab === "imi" && (
             <ImiTab
               imiRecords={imiRecords}
@@ -878,7 +903,7 @@ function App({ user }) {
 
       {/* MOBILE BOTTOM NAV */}
       <div className="fixed bottom-0 left-0 right-0 md:hidden bg-white border-t border-gray-100 flex px-3 py-2 gap-1">
-        {[["dashboard","◈","Przegląd"],["costs","≡","Koszty"],["vehicles","⊡","Pojazdy"],["serwis","🔧","Serwis"],["rent","📊","Rentow."],["docs","🛡️","Dok."],["imi","🌍","IMI"]].map(([id,icon,label]) => (
+        {[["dashboard","◈","Przegląd"],["frachty","🚚","Frachty"],["costs","≡","Koszty"],["vehicles","⊡","Pojazdy"],["serwis","🔧","Serwis"],["rent","📊","Rentow."],["docs","🛡️","Dok."],["imi","🌍","IMI"]].map(([id,icon,label]) => (
           <button key={id} onClick={() => setTab(id)} className="flex-1 flex flex-col items-center gap-0.5 py-1.5 rounded-lg transition-all"
             style={{ color: tab === id ? "#111827" : "#9ca3af", background: tab === id ? "#f3f4f6" : "transparent" }}>
             <span className="text-base">{icon}</span>
