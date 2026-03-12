@@ -1,0 +1,154 @@
+Script started on Thu Mar 12 11:39:02 2026
+Command: import { initializeApp } from "/Users/kamilwasik/Desktop/VBS-Stat/node_modules/firebase/app/dist/index.mjs";
+import { getFirestore, doc, getDoc, setDoc } from "/Users/kamilwasik/Desktop/VBS-Stat/node_modules/firebase/firestore/dist/index.mjs";
+
+const app = initializeApp({apiKey:"AIzaSyBJ_1_i_OS3DQ7g0hjJyF6ZTgU9_7LkHcQ",authDomain:"vbs-stats.firebaseapp.com",projectId:"vbs-stats"});
+const db = getFirestore(app);
+
+const records = [
+  {id:"r25_v3_0",vehicleId:"v3",year:2025,month:0,frachty:87.37,costs:{}},
+  {id:"r25_v3_1",vehicleId:"v3",year:2025,month:1,frachty:4593.63,costs:{}},
+  {id:"r25_v3_2",vehicleId:"v3",year:2025,month:2,frachty:-3.37,costs:{}},
+  {id:"r25_v3_3",vehicleId:"v3",year:2025,month:3,frachty:3226.13,costs:{}},
+  {id:"r25_v3_4",vehicleId:"v3",year:2025,month:4,frachty:4362.88,costs:{}},
+  {id:"r25_v3_5",vehicleId:"v3",year:2025,month:5,frachty:3215.05,costs:{}},
+  {id:"r25_v3_6",vehicleId:"v3",year:2025,month:6,frachty:-1908.82,costs:{}},
+  {id:"r25_v3_7",vehicleId:"v3",year:2025,month:7,frachty:1744.32,costs:{}},
+  {id:"r25_v3_8",vehicleId:"v3",year:2025,month:8,frachty:2406.64,costs:{}},
+  {id:"r25_v3_9",vehicleId:"v3",year:2025,month:9,frachty:2387.62,costs:{}},
+  {id:"r25_v3_10",vehicleId:"v3",year:2025,month:10,frachty:2829.37,costs:{}},
+  {id:"r25_v3_11",vehicleId:"v3",year:2025,month:11,frachty:673.96,costs:{}},
+  {id:"r25_v4_0",vehicleId:"v4",year:2025,month:0,frachty:2337.8,costs:{}},
+  {id:"r25_v4_1",vehicleId:"v4",year:2025,month:1,frachty:-370.97,costs:{}},
+  {id:"r25_v4_2",vehicleId:"v4",year:2025,month:2,frachty:-443.16,costs:{}},
+  {id:"r25_v4_3",vehicleId:"v4",year:2025,month:3,frachty:3346.16,costs:{}},
+  {id:"r25_v4_4",vehicleId:"v4",year:2025,month:4,frachty:-1227.22,costs:{}},
+  {id:"r25_v4_5",vehicleId:"v4",year:2025,month:5,frachty:-1227.22,costs:{}},
+  {id:"r25_v4_6",vehicleId:"v4",year:2025,month:6,frachty:-1222.86,costs:{}},
+  {id:"r25_v4_7",vehicleId:"v4",year:2025,month:7,frachty:-1222.86,costs:{}},
+  {id:"r25_v4_8",vehicleId:"v4",year:2025,month:8,frachty:-1222.86,costs:{}},
+  {id:"r25_v4_9",vehicleId:"v4",year:2025,month:9,frachty:-1223.26,costs:{}},
+  {id:"r25_v4_10",vehicleId:"v4",year:2025,month:10,frachty:-1222.86,costs:{}},
+  {id:"r25_v4_11",vehicleId:"v4",year:2025,month:11,frachty:-1222.86,costs:{}},
+  {id:"r25_v2_0",vehicleId:"v2",year:2025,month:0,frachty:4040.39,costs:{}},
+  {id:"r25_v2_1",vehicleId:"v2",year:2025,month:1,frachty:721.1,costs:{}},
+  {id:"r25_v2_2",vehicleId:"v2",year:2025,month:2,frachty:833.08,costs:{}},
+  {id:"r25_v2_3",vehicleId:"v2",year:2025,month:3,frachty:-2208.8,costs:{}},
+  {id:"r25_v2_4",vehicleId:"v2",year:2025,month:4,frachty:-653.53,costs:{}},
+  {id:"r25_v2_5",vehicleId:"v2",year:2025,month:5,frachty:4443.86,costs:{}},
+  {id:"r25_v2_6",vehicleId:"v2",year:2025,month:6,frachty:379.62,costs:{}},
+  {id:"r25_v2_7",vehicleId:"v2",year:2025,month:7,frachty:2495.0,costs:{}},
+  {id:"r25_v2_8",vehicleId:"v2",year:2025,month:8,frachty:837.32,costs:{}},
+  {id:"r25_v2_9",vehicleId:"v2",year:2025,month:9,frachty:2307.94,costs:{}},
+  {id:"r25_v2_10",vehicleId:"v2",year:2025,month:10,frachty:2042.43,costs:{}},
+  {id:"r25_v2_11",vehicleId:"v2",year:2025,month:11,frachty:-759.32,costs:{}},
+  {id:"r25_e_0",vehicleId:"el6e81en",year:2025,month:0,frachty:2314.04,costs:{}},
+  {id:"r25_e_1",vehicleId:"el6e81en",year:2025,month:1,frachty:453.53,costs:{}},
+  {id:"r25_e_2",vehicleId:"el6e81en",year:2025,month:2,frachty:1360.03,costs:{}},
+  {id:"r25_e_3",vehicleId:"el6e81en",year:2025,month:3,frachty:5031.74,costs:{}},
+  {id:"r25_e_4",vehicleId:"el6e81en",year:2025,month:4,frachty:2698.3,costs:{}},
+  {id:"r25_e_5",vehicleId:"el6e81en",year:2025,month:5,frachty:4768.36,costs:{}},
+  {id:"r25_e_6",vehicleId:"el6e81en",year:2025,month:6,frachty:3220.07,costs:{}},
+  {id:"r25_e_7",vehicleId:"el6e81en",year:2025,month:7,frachty:728.9,costs:{}},
+  {id:"r25_e_8",vehicleId:"el6e81en",year:2025,month:8,frachty:2710.16,costs:{}},
+  {id:"r25_e_9",vehicleId:"el6e81en",year:2025,month:9,frachty:5019.95,costs:{}},
+  {id:"r25_e_10",vehicleId:"el6e81en",year:2025,month:10,frachty:-1438.21,costs:{}},
+  {id:"r25_e_11",vehicleId:"el6e81en",year:2025,month:11,frachty:1754.19,costs:{}},
+  {id:"r25_v1_3",vehicleId:"v1",year:2025,month:3,frachty:965.42,costs:{}},
+  {id:"r25_v1_4",vehicleId:"v1",year:2025,month:4,frachty:1461.75,costs:{}},
+  {id:"r25_v1_5",vehicleId:"v1",year:2025,month:5,frachty:3765.77,costs:{}},
+  {id:"r25_v1_6",vehicleId:"v1",year:2025,month:6,frachty:2784.88,costs:{}},
+  {id:"r25_v1_7",vehicleId:"v1",year:2025,month:7,frachty:176.1,costs:{}},
+  {id:"r25_v1_8",vehicleId:"v1",year:2025,month:8,frachty:3184.37,costs:{}},
+  {id:"r25_v1_9",vehicleId:"v1",year:2025,month:9,frachty:-216.17,costs:{}},
+  {id:"r25_v1_10",vehicleId:"v1",year:2025,month:10,frachty:-15.17,costs:{}},
+  {id:"r25_v1_11",vehicleId:"v1",year:2025,month:11,frachty:1837.27,costs:{}},
+];
+
+const ref = doc(db,"fleet","data");
+const snap = await getDoc(ref);
+const existing = snap.exists()?(snap.data().fleetv2_rent||[]):[];
+const existingIds = new Set(existing.map(r=>r.id));
+const toAdd = records.filter(r=>!existingIds.has(r.id));
+await setDoc(ref,{fleetv2_rent:[...existing,...toAdd]},{merge:true});
+console.log("OK - zapisano",toAdd.length,"nowych rekordow");
+process.exit(0);
+
+script: import { initializeApp } from "/Users/kamilwasik/Desktop/VBS-Stat/node_modules/firebase/app/dist/index.mjs";
+import { getFirestore, doc, getDoc, setDoc } from "/Users/kamilwasik/Desktop/VBS-Stat/node_modules/firebase/firestore/dist/index.mjs";
+
+const app = initializeApp({apiKey:"AIzaSyBJ_1_i_OS3DQ7g0hjJyF6ZTgU9_7LkHcQ",authDomain:"vbs-stats.firebaseapp.com",projectId:"vbs-stats"});
+const db = getFirestore(app);
+
+const records = [
+  {id:"r25_v3_0",vehicleId:"v3",year:2025,month:0,frachty:87.37,costs:{}},
+  {id:"r25_v3_1",vehicleId:"v3",year:2025,month:1,frachty:4593.63,costs:{}},
+  {id:"r25_v3_2",vehicleId:"v3",year:2025,month:2,frachty:-3.37,costs:{}},
+  {id:"r25_v3_3",vehicleId:"v3",year:2025,month:3,frachty:3226.13,costs:{}},
+  {id:"r25_v3_4",vehicleId:"v3",year:2025,month:4,frachty:4362.88,costs:{}},
+  {id:"r25_v3_5",vehicleId:"v3",year:2025,month:5,frachty:3215.05,costs:{}},
+  {id:"r25_v3_6",vehicleId:"v3",year:2025,month:6,frachty:-1908.82,costs:{}},
+  {id:"r25_v3_7",vehicleId:"v3",year:2025,month:7,frachty:1744.32,costs:{}},
+  {id:"r25_v3_8",vehicleId:"v3",year:2025,month:8,frachty:2406.64,costs:{}},
+  {id:"r25_v3_9",vehicleId:"v3",year:2025,month:9,frachty:2387.62,costs:{}},
+  {id:"r25_v3_10",vehicleId:"v3",year:2025,month:10,frachty:2829.37,costs:{}},
+  {id:"r25_v3_11",vehicleId:"v3",year:2025,month:11,frachty:673.96,costs:{}},
+  {id:"r25_v4_0",vehicleId:"v4",year:2025,month:0,frachty:2337.8,costs:{}},
+  {id:"r25_v4_1",vehicleId:"v4",year:2025,month:1,frachty:-370.97,costs:{}},
+  {id:"r25_v4_2",vehicleId:"v4",year:2025,month:2,frachty:-443.16,costs:{}},
+  {id:"r25_v4_3",vehicleId:"v4",year:2025,month:3,frachty:3346.16,costs:{}},
+  {id:"r25_v4_4",vehicleId:"v4",year:2025,month:4,frachty:-1227.22,costs:{}},
+  {id:"r25_v4_5",vehicleId:"v4",year:2025,month:5,frachty:-1227.22,costs:{}},
+  {id:"r25_v4_6",vehicleId:"v4",year:2025,month:6,frachty:-1222.86,costs:{}},
+  {id:"r25_v4_7",vehicleId:"v4",year:2025,month:7,frachty:-1222.86,costs:{}},
+  {id:"r25_v4_8",vehicleId:"v4",year:2025,month:8,frachty:-1222.86,costs:{}},
+  {id:"r25_v4_9",vehicleId:"v4",year:2025,month:9,frachty:-1223.26,costs:{}},
+  {id:"r25_v4_10",vehicleId:"v4",year:2025,month:10,frachty:-1222.86,costs:{}},
+  {id:"r25_v4_11",vehicleId:"v4",year:2025,month:11,frachty:-1222.86,costs:{}},
+  {id:"r25_v2_0",vehicleId:"v2",year:2025,month:0,frachty:4040.39,costs:{}},
+  {id:"r25_v2_1",vehicleId:"v2",year:2025,month:1,frachty:721.1,costs:{}},
+  {id:"r25_v2_2",vehicleId:"v2",year:2025,month:2,frachty:833.08,costs:{}},
+  {id:"r25_v2_3",vehicleId:"v2",year:2025,month:3,frachty:-2208.8,costs:{}},
+  {id:"r25_v2_4",vehicleId:"v2",year:2025,month:4,frachty:-653.53,costs:{}},
+  {id:"r25_v2_5",vehicleId:"v2",year:2025,month:5,frachty:4443.86,costs:{}},
+  {id:"r25_v2_6",vehicleId:"v2",year:2025,month:6,frachty:379.62,costs:{}},
+  {id:"r25_v2_7",vehicleId:"v2",year:2025,month:7,frachty:2495.0,costs:{}},
+  {id:"r25_v2_8",vehicleId:"v2",year:2025,month:8,frachty:837.32,costs:{}},
+  {id:"r25_v2_9",vehicleId:"v2",year:2025,month:9,frachty:2307.94,costs:{}},
+  {id:"r25_v2_10",vehicleId:"v2",year:2025,month:10,frachty:2042.43,costs:{}},
+  {id:"r25_v2_11",vehicleId:"v2",year:2025,month:11,frachty:-759.32,costs:{}},
+  {id:"r25_e_0",vehicleId:"el6e81en",year:2025,month:0,frachty:2314.04,costs:{}},
+  {id:"r25_e_1",vehicleId:"el6e81en",year:2025,month:1,frachty:453.53,costs:{}},
+  {id:"r25_e_2",vehicleId:"el6e81en",year:2025,month:2,frachty:1360.03,costs:{}},
+  {id:"r25_e_3",vehicleId:"el6e81en",year:2025,month:3,frachty:5031.74,costs:{}},
+  {id:"r25_e_4",vehicleId:"el6e81en",year:2025,month:4,frachty:2698.3,costs:{}},
+  {id:"r25_e_5",vehicleId:"el6e81en",year:2025,month:5,frachty:4768.36,costs:{}},
+  {id:"r25_e_6",vehicleId:"el6e81en",year:2025,month:6,frachty:3220.07,costs:{}},
+  {id:"r25_e_7",vehicleId:"el6e81en",year:2025,month:7,frachty:728.9,costs:{}},
+  {id:"r25_e_8",vehicleId:"el6e81en",year:2025,month:8,frachty:2710.16,costs:{}},
+  {id:"r25_e_9",vehicleId:"el6e81en",year:2025,month:9,frachty:5019.95,costs:{}},
+  {id:"r25_e_10",vehicleId:"el6e81en",year:2025,month:10,frachty:-1438.21,costs:{}},
+  {id:"r25_e_11",vehicleId:"el6e81en",year:2025,month:11,frachty:1754.19,costs:{}},
+  {id:"r25_v1_3",vehicleId:"v1",year:2025,month:3,frachty:965.42,costs:{}},
+  {id:"r25_v1_4",vehicleId:"v1",year:2025,month:4,frachty:1461.75,costs:{}},
+  {id:"r25_v1_5",vehicleId:"v1",year:2025,month:5,frachty:3765.77,costs:{}},
+  {id:"r25_v1_6",vehicleId:"v1",year:2025,month:6,frachty:2784.88,costs:{}},
+  {id:"r25_v1_7",vehicleId:"v1",year:2025,month:7,frachty:176.1,costs:{}},
+  {id:"r25_v1_8",vehicleId:"v1",year:2025,month:8,frachty:3184.37,costs:{}},
+  {id:"r25_v1_9",vehicleId:"v1",year:2025,month:9,frachty:-216.17,costs:{}},
+  {id:"r25_v1_10",vehicleId:"v1",year:2025,month:10,frachty:-15.17,costs:{}},
+  {id:"r25_v1_11",vehicleId:"v1",year:2025,month:11,frachty:1837.27,costs:{}},
+];
+
+const ref = doc(db,"fleet","data");
+const snap = await getDoc(ref);
+const existing = snap.exists()?(snap.data().fleetv2_rent||[]):[];
+const existingIds = new Set(existing.map(r=>r.id));
+const toAdd = records.filter(r=>!existingIds.has(r.id));
+await setDoc(ref,{fleetv2_rent:[...existing,...toAdd]},{merge:true});
+console.log("OK - zapisano",toAdd.length,"nowych rekordow");
+process.exit(0);
+: File name too long
+
+Command exit status: 1
+Script done on Thu Mar 12 11:39:02 2026

@@ -254,7 +254,6 @@ function App({ user }) {
   const [imiRecords, setImiRecords] = useState([]);
   const [rentRecords, setRentRecords] = useState([]);
   const [frachtyList, setFrachtyList] = useState([]);
-  const [frachtyList, setFrachtyList] = useState([]);
   const [loaded, setLoaded]         = useState(false);
   const [toast, setToast]           = useState(null);
   const [eurRate, setEurRate]       = useState(null);
