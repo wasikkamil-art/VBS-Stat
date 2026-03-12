@@ -714,6 +714,9 @@ function App({ user }) {
                               )}
                             </div>
                             <div className="text-xs text-gray-400">{v.brand} · {v.year} · {v.type}</div>
+                            {active && active.name && (
+                              <div className="text-xs font-medium text-gray-600 mt-0.5">👤 {active.name}</div>
+                            )}
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -731,26 +734,7 @@ function App({ user }) {
                         </div>
                       </div>
 
-                      {/* ── STATS ROW ── */}
-                      <div className="grid grid-cols-3 divide-x divide-gray-50 border-b border-gray-50">
-                        <div className="px-4 py-3">
-                          <div className="text-xs text-gray-400 mb-0.5">Łączne koszty</div>
-                          <div className="font-bold text-gray-900 text-sm">{fmtEUR(total / stats.rate)}</div>
-                          <div className="text-xs text-gray-400">{fmtPLN(total)}</div>
-                        </div>
-                        <div className="px-4 py-3">
-                          <div className="text-xs text-gray-400 mb-0.5">Wpisów</div>
-                          <div className="font-bold text-gray-900 text-sm">{vc.length}</div>
-                        </div>
-                        <div className="px-4 py-3">
-                          <div className="text-xs text-gray-400 mb-0.5">Rodzaj</div>
-                          <div className="text-xs font-medium text-gray-700 leading-tight">
-                            {v.type}{v.plate2 ? " + Przyczepa" : ""}
-                            {(v.equipment||[]).includes("winda") ? " + winda" : ""}
-                            {(v.equipment||[]).includes("paleciak") ? " + paleciak" : ""}
-                          </div>
-                        </div>
-                      </div>
+
 
                       {/* ── TECH SPECS ── */}
                       <div className="px-5 py-3 border-b border-gray-50">
