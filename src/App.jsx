@@ -3059,7 +3059,7 @@ function ServisTab({ vehicles, onUpdateVehicle }) {
                 <div className="flex items-center gap-3">
                   <span className="text-xl">{v.plate2 ? "🚌" : "🚛"}</span>
                   <div>
-                    <span className="font-bold text-sm text-gray-900" style={{ fontFamily:"'DM Mono',monospace" }}>
+                    <span className="font-normal text-sm text-gray-500 tracking-wide">
                       {v.plate}{v.plate2 ? ` / ${v.plate2}` : ""}
                     </span>
                     <div className="text-xs text-gray-400">{v.brand} · {v.year}</div>
