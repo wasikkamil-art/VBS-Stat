@@ -79,6 +79,11 @@ const SEED_VEHICLES = [
     customEquipment: [],
     dimensions: "", dimensions2: "", loadingType: "Bok", maxWeight: "", maxWeight2: "",
     driverHistory: [] },
+  { id: "v6", plate: "TK 315CL", plate2: "TK 761AP", type: "Bus", brand: "Iveco Bus + Przyczepa", year: 2020,
+    equipment: ["pasy", "gasnica", "apteczka", "trojkat", "tachograf"],
+    customEquipment: [],
+    dimensions: "420x225x245", dimensions2: "640x245x250", loadingType: "Bok", maxWeight: "895", maxWeight2: "2100",
+    driverHistory: [{ id: "dh6", name: "Marcin Gieliniewski", phone: "", from: "2025-01-01", to: "2025-06-30" }] },
 ];
 
 const SEED_CATEGORIES = [
