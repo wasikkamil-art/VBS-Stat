@@ -304,9 +304,8 @@ function App({ user }) {
   useEffect(() => { if (loaded) dbSet(SK.categories, categories); },[categories, loaded]);
   useEffect(() => { if (loaded) dbSet(SK.docs, docs); },            [docs, loaded]);
   useEffect(() => { if (loaded) dbSet(SK.imi, imiRecords); },       [imiRecords, loaded]);
-  useEffect(() => { if (loaded) dbSet(SK.rent, rentRecords); },     [rentRecords, loaded]);
-  useEffect(() => { if (loaded) dbSet(SK.frachty, frachtyList); },  [frachtyList, loaded]);
-  useEffect(() => { if (loaded) dbSet(SK.frachty, frachtyList); },  [frachtyList, loaded]);
+  useEffect(() => { if (loaded && rentRecords.length > 0) dbSet(SK.rent, rentRecords); },     [rentRecords, loaded]);
+  useEffect(() => { if (loaded && frachtyList.length > 0) dbSet(SK.frachty, frachtyList); },  [frachtyList, loaded]);
 
   // ── EUR RATE (NBP API) ──
   useEffect(() => {
