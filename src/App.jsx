@@ -2419,11 +2419,15 @@ const RENT_COSTS = [
   { id: "serwis",     label: "Serwis",               icon: "🔧" },
   { id: "polisa",     label: "Polisa / OC / AC",     icon: "🛡️" },
   { id: "etoll",      label: "E-toll / Autostrady",  icon: "🛣️" },
-  { id: "mandaty",    label: "Mandaty",              icon: "⚠️" },
-  { id: "hotele",     label: "Hotele",               icon: "🏨" },
   { id: "nego",       label: "Nego",                 icon: "🤝" },
+  { id: "hotele",     label: "Hotele",               icon: "🏨" },
+  { id: "mandaty",    label: "Mandaty",              icon: "⚠️" },
   { id: "imi",        label: "IMI / SIPSI",          icon: "🌍" },
   { id: "telefon",    label: "Telefon",              icon: "📱" },
+  { id: "slickshift", label: "SlickShift",           icon: "📡" },
+  { id: "uruchomienie", label: "Koszt uruchomienia", icon: "🔑" },
+  { id: "ocpd",       label: "OCPD (2x OC)",         icon: "🛡️" },
+  { id: "telepass",   label: "Telepass / Myto",      icon: "🛣️" },
   { id: "inne",       label: "Inne",                 icon: "📦" },
 ];
 
