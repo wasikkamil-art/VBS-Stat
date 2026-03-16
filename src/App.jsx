@@ -59,7 +59,7 @@ const SEED_VEHICLES = [
     customEquipment: [],
     dimensions: "607x243x245", dimensions2: "", loadingType: "Bok, tył, góra", maxWeight: "3000", maxWeight2: "",
     driverHistory: [{ id: "dh1", name: "Jan Kowalski", phone: "", from: "2024-01-01", to: "" }] },
-  { id: "v2", plate: "TK 130EF",  plate2: "", type: "Bus",  brand: "Iveco", year: 2020,
+  { id: "v2", plate: "TK 130EF",  plate2: "", type: "Bus",  brand: "Renault Master", year: 2020,
     equipment: ["pasy", "gasnica", "apteczka", "trójkąt", "tachograf"],
     customEquipment: [],
     dimensions: "460x220x230", dimensions2: "", loadingType: "Bok, tył", maxWeight: "820", maxWeight2: "",
