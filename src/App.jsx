@@ -54,26 +54,31 @@ const SK = { vehicles: "fleetv2_vehicles", costs: "fleetv2_costs", categories: "
 
 // ─── SEED DATA ─────────────────────────────────────────────────────────────────
 const SEED_VEHICLES = [
-  { id: "v1", plate: "WGM 0475M", plate2: "", type: "Solo", brand: "MAN TGX", year: 2021,
+  { id: "v1", plate: "WGM 0475M", plate2: "", type: "Solo", brand: "Iveco", year: 2021,
     equipment: ["paleciak", "winda", "pasy", "gasnica", "apteczka", "trójkąt", "tachograf"],
     customEquipment: [],
     dimensions: "607x243x245", dimensions2: "", loadingType: "Bok, tył, góra", maxWeight: "3000", maxWeight2: "",
     driverHistory: [{ id: "dh1", name: "Jan Kowalski", phone: "", from: "2024-01-01", to: "" }] },
-  { id: "v2", plate: "TK 130EF",  plate2: "", type: "Bus",  brand: "Mercedes Sprinter", year: 2020,
+  { id: "v2", plate: "TK 130EF",  plate2: "", type: "Bus",  brand: "Iveco", year: 2020,
     equipment: ["pasy", "gasnica", "apteczka", "trójkąt", "tachograf"],
     customEquipment: [],
     dimensions: "460x220x230", dimensions2: "", loadingType: "Bok, tył", maxWeight: "820", maxWeight2: "",
     driverHistory: [{ id: "dh2", name: "Adam Nowak", phone: "", from: "2023-06-01", to: "" }] },
-  { id: "v3", plate: "WGM 5367K", plate2: "", type: "Solo", brand: "Volvo FH", year: 2022,
+  { id: "v3", plate: "WGM 5367K", plate2: "", type: "Solo", brand: "Iveco", year: 2022,
     equipment: ["paleciak", "winda", "pasy", "gasnica", "apteczka", "trójkąt", "tachograf", "gps"],
     customEquipment: [],
     dimensions: "620x245x260", dimensions2: "", loadingType: "Bok, tył, góra", maxWeight: "3000", maxWeight2: "",
     driverHistory: [{ id: "dh3", name: "Piotr Wiśniewski", phone: "", from: "2022-03-15", to: "" }] },
-  { id: "v4", plate: "TK 314CL", plate2: "TK 760AP", type: "Bus", brand: "Bus + Przyczepa", year: 2020,
+  { id: "v4", plate: "TK 314CL", plate2: "TK 760AP", type: "Bus", brand: "Iveco Bus + Przyczepa", year: 2020,
     equipment: ["pasy", "gasnica", "apteczka", "trójkąt", "tachograf"],
     customEquipment: [],
     dimensions: "420x225x245", dimensions2: "640x245x250", loadingType: "Bok", maxWeight: "895", maxWeight2: "2100",
     driverHistory: [{ id: "dh4", name: "Mirosław Teper", phone: "530127238", from: "2023-01-01", to: "" }] },
+  { id: "v5", plate: "WGM 0507M", plate2: "", type: "Solo", brand: "Iveco", year: 2025,
+    equipment: ["gasnica", "apteczka", "trojkat", "tachograf"],
+    customEquipment: [],
+    dimensions: "", dimensions2: "", loadingType: "Bok", maxWeight: "", maxWeight2: "",
+    driverHistory: [] },
 ];
 
 const SEED_CATEGORIES = [
