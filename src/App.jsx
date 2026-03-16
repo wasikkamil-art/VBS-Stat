@@ -2597,7 +2597,7 @@ function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
                             <button onClick={() => openAdd(v.id, selYear, mi)}
                               className="w-full h-7 rounded-lg text-xs font-bold transition-all hover:opacity-80"
                               style={{ background: zyskBg(z), color: zyskColor(z) }}>
-                              {z >= 0 ? "+" : ""}{(z/1000).toFixed(1)}k
+                              {z >= 0 ? "+" : ""}{Math.round(z).toLocaleString("pl-PL")}
                             </button>
                           </td>
                         );
@@ -2613,7 +2613,7 @@ function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
                     {MONTHS_PL.map((_,mi) => {
                       const z = vehicles.reduce((s,v) => { const r=getRecord(v.id,selYear,mi); if(!r) return s; const f=r.frachty||0; const k=RENT_COSTS.reduce((cs,c)=>cs+(r.costs?.[c.id]||0),0); return s+f-k; }, 0);
                       const hasAny = vehicles.some(v => getRecord(v.id,selYear,mi));
-                      return <td key={mi} className="text-center py-2.5 px-1 font-bold text-xs" style={{ color: hasAny ? zyskColor(z) : "#d1d5db" }}>{hasAny ? (z>=0?"+":"")+Math.round(z/1000)+"k" : "—"}</td>;
+                      return <td key={mi} className="text-center py-2.5 px-1 font-bold text-xs" style={{ color: hasAny ? zyskColor(z) : "#d1d5db" }}>{hasAny ? (z>=0?"+":"")+Math.round(z).toLocaleString("pl-PL") : "—"}</td>;
                     })}
                     <td className="text-right px-4 py-2.5 font-bold text-sm" style={{ color: zyskColor(fleetZysk(selYear)) }}>{fmtS(fleetZysk(selYear))}</td>
                   </tr>
@@ -2697,7 +2697,7 @@ function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
                         <div className="text-xs text-gray-400" style={{ fontSize:9 }}>{d.lbl}</div>
                         {d.hasData && (
                           <div className="text-xs font-bold" style={{ color: zyskColor(d.zysk), fontSize:9 }}>
-                            {d.zysk >= 0 ? "+" : ""}{Math.round(d.zysk/1000)}k
+                            {d.zysk >= 0 ? "+" : ""}{Math.round(d.zysk).toLocaleString("pl-PL")}
                           </div>
                         )}
                       </div>
