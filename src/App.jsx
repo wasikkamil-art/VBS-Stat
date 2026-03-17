@@ -95,7 +95,7 @@ const SEED_CATEGORIES = [
   { id: "ubezpieczenie", label: "Ubezpieczenie",     color: "#10b981", icon: "🛡️" },
   { id: "opony",         label: "Opony",             color: "#3b82f6", icon: "🔄" },
   { id: "myto",          label: "Myto / Opłaty",     color: "#8b5cf6", icon: "🛣️" },
-  { id: "wyplata",       label: "Wypłata kierowcy",  color: "#f43f5e", icon: "👤" },
+  { id: "wyplata",       label: "Wynagrodzenie",  color: "#f43f5e", icon: "👤" },
   { id: "inne",          label: "Inne",              color: "#94a3b8", icon: "📋" },
 ];
 
@@ -296,7 +296,7 @@ function App({ user }) {
       setCosts(c     || SEED_COSTS);
       const loadedCats = ca || SEED_CATEGORIES;
       const REQUIRED_CATS = [
-        { id: "wyplata",       label: "Wypłata kierowcy", color: "#f43f5e", icon: "👤" },
+        { id: "wyplata",       label: "Wynagrodzenie", color: "#f43f5e", icon: "👤" },
         { id: "ubezpieczenie", label: "Ubezpieczenie",    color: "#10b981", icon: "🛡️" },
       ];
       const mergedCats = [...loadedCats];
@@ -353,7 +353,7 @@ function App({ user }) {
   const addCategory  = (cat)   => setCategories((p) => [...p, cat]);
 
   const CAT_FALLBACKS = {
-    wyplata:       { label: "Wypłata kierowcy", color: "#f43f5e", icon: "👤" },
+    wyplata:       { label: "Wynagrodzenie", color: "#f43f5e", icon: "👤" },
     ubezpieczenie: { label: "Ubezpieczenie",    color: "#10b981", icon: "🛡️" },
     opony:         { label: "Opony",            color: "#3b82f6", icon: "🔄" },
     myto:          { label: "Myto / Opłaty",    color: "#8b5cf6", icon: "🛣️" },
@@ -703,7 +703,7 @@ function App({ user }) {
                 })).filter(v => v.total > 0).sort((a,b) => b.total - a.total);
 
                 const allCats = [...categories];
-                if (!allCats.find(c => c.id === "wyplata")) allCats.push({ id:"wyplata", label:"Wypłata kierowcy", color:"#f43f5e", icon:"👤" });
+                if (!allCats.find(c => c.id === "wyplata")) allCats.push({ id:"wyplata", label:"Wynagrodzenie", color:"#f43f5e", icon:"👤" });
                 if (!allCats.find(c => c.id === "ubezpieczenie")) allCats.push({ id:"ubezpieczenie", label:"Ubezpieczenie", color:"#10b981", icon:"🛡️" });
                 const byCat = allCats.map(cat => ({
                   ...cat,
@@ -2552,7 +2552,7 @@ function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, 
 const RENT_COSTS = [
   { id: "paliwo",     label: "Paliwo",              icon: "⛽" },
   { id: "leasing",    label: "Leasing",              icon: "🏦" },
-  { id: "wyplata",    label: "Wypłata kierowcy",     icon: "👤" },
+  { id: "wyplata",    label: "Wynagrodzenie",     icon: "👤" },
   { id: "zus",        label: "ZUS + podatki",        icon: "📋" },
   { id: "serwis",     label: "Serwis",               icon: "🔧" },
   { id: "polisa",     label: "Polisa / OC / AC",     icon: "🛡️" },
