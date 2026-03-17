@@ -281,6 +281,7 @@ function App({ user }) {
   const [filterCat, setFilterCat]             = useState("all");
   const [filterMonth, setFilterMonth]         = useState("all");
   const [filterYear, setCostFilterYear]       = useState("all");
+  const [filterNote, setFilterNote]           = useState("");
 
   // ── LOAD ──
   useEffect(() => {
@@ -421,8 +422,9 @@ function App({ user }) {
     if (filterCat     !== "all" && c.category  !== filterCat)     return false;
     if (filterMonth   !== "all" && !c.date?.startsWith(filterMonth)) return false;
     if (filterYear    !== "all" && !c.date?.startsWith(filterYear))  return false;
+    if (filterNote    !== ""    && !c.note?.toLowerCase().includes(filterNote.toLowerCase())) return false;
     return true;
-  }).sort((a, b) => b.date?.localeCompare(a.date)), [costs, filterVehicle, filterCat, filterMonth, filterYear]);
+  }).sort((a, b) => b.date?.localeCompare(a.date)), [costs, filterVehicle, filterCat, filterMonth, filterYear, filterNote]);
 
   const months = useMemo(() => {
     const s = new Set(costs.map((c) => c.date?.slice(0, 7)).filter(Boolean));
@@ -703,6 +705,22 @@ function App({ user }) {
                   options={[{ value: "all", label: "Wszystkie kategorie" }, ...categories.map((c) => ({ value: c.id, label: `${c.icon} ${c.label}` }))]} />
                 <FSel value={filterMonth} onChange={setFilterMonth}
                   options={[{ value: "all", label: "Wszystkie miesiące" }, ...months.filter(m => filterYear === "all" || m.startsWith(filterYear)).map((m) => ({ value: m, label: m }))]} />
+              </div>
+
+              {/* ── SZUKAJ W OPISACH ── */}
+              <div className="relative mb-5">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>
+                <input
+                  type="text"
+                  value={filterNote}
+                  onChange={e => setFilterNote(e.target.value)}
+                  placeholder="Szukaj w opisach... (np. tankowanie, OC, naprawa)"
+                  className="w-full pl-9 pr-9 py-2 text-sm rounded-xl border border-gray-200 bg-white outline-none focus:border-gray-400"
+                />
+                {filterNote && (
+                  <button onClick={() => setFilterNote("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm">✕</button>
+                )}
               </div>
 
               {/* ── MINI DASHBOARD ── */}
