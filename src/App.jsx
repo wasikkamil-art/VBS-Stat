@@ -446,6 +446,7 @@ function App({ user }) {
             {[
               { id: "dashboard", icon: "◈",  label: "Przegląd" },
               { id: "frachty",   icon: "🚚",  label: "Frachty" },
+              { id: "fv",        icon: "🧾",  label: "FV / Płatności" },
               { id: "costs",     icon: "≡",   label: "Koszty" },
               { id: "vehicles",  icon: "⊡",   label: "Pojazdy" },
               { id: "serwis",    icon: "🔧",  label: "Serwis" },
@@ -892,6 +893,13 @@ function App({ user }) {
                 setFrachtyList(p => [...p, ...withIds]);
                 showToast(`✅ Zaimportowano ${withIds.length} frachtów`);
               }}
+            />
+          )}
+          {tab === "fv" && (
+            <FVTab
+              frachtyList={frachtyList}
+              vehicles={vehicles}
+              onUpdate={(id, data) => setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r))}
             />
           )}
           {tab === "imi" && (
@@ -4057,6 +4065,215 @@ function MSelect({ value, onChange, children }) {
   );
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FV / PŁATNOŚCI TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+const FV_STATUSES = [
+  { id: "nie_wyslana",     label: "Nie wysłana",     bg: "#f3f4f6", color: "#6b7280", dot: "#9ca3af", emoji: "⚪" },
+  { id: "wyslana",         label: "Wysłana / czeka", bg: "#fefce8", color: "#92400e", dot: "#f59e0b", emoji: "🟡" },
+  { id: "przeterminowana", label: "Przeterminowana", bg: "#fef2f2", color: "#991b1b", dot: "#ef4444", emoji: "🔴" },
+  { id: "zaplacona",       label: "Zapłacona",       bg: "#f0fdf4", color: "#166534", dot: "#22c55e", emoji: "🟢" },
+];
+
+function FVTab({ frachtyList, vehicles, onUpdate }) {
+  const [selectedVehicle, setSelectedVehicle] = useState(null);
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterYear, setFilterYear] = useState("all");
+
+  const fmt = (n) => n ? parseFloat(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-";
+
+  const getStatus = (r) => {
+    const isOverdue = r.terminPlatnosci && r.statusFV !== "zaplacona" && new Date(r.terminPlatnosci) < new Date();
+    if (isOverdue && (!r.statusFV || r.statusFV === "wyslana" || r.statusFV === "nie_wyslana")) return "przeterminowana";
+    return r.statusFV || "nie_wyslana";
+  };
+
+  const frachtyWithFV = frachtyList.filter(r => r.nrFV || r.dataWyslania || r.terminPlatnosci || r.cenaEur);
+
+  // Overview — karty pojazdów
+  if (!selectedVehicle) {
+    // Globalne KPI per status
+    const kpiAll = {
+      total: frachtyWithFV.reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0),
+      count: frachtyWithFV.length,
+      przeterminowane: frachtyWithFV.filter(r => getStatus(r) === "przeterminowana").reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0),
+      czeka: frachtyWithFV.filter(r => getStatus(r) === "wyslana").reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0),
+      zaplacone: frachtyWithFV.filter(r => getStatus(r) === "zaplacona").reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0),
+    };
+
+    return (
+      <div className="p-4 md:p-6">
+        <div className="mb-6">
+          <h2 className="text-xl font-bold text-gray-900">FV / Płatności</h2>
+          <p className="text-sm text-gray-400 mt-0.5">{frachtyWithFV.length} faktur łącznie</p>
+        </div>
+
+        {/* KPI statusów */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+          {[
+            { label: "Łącznie EUR",       value: fmt(kpiAll.total),           color: "#111827", bg: "#f9fafb" },
+            { label: "🟡 Czeka na wpłatę", value: fmt(kpiAll.czeka),           color: "#92400e", bg: "#fefce8" },
+            { label: "🔴 Przeterminowane", value: fmt(kpiAll.przeterminowane), color: "#991b1b", bg: "#fef2f2" },
+            { label: "🟢 Zapłacone",       value: fmt(kpiAll.zaplacone),       color: "#166534", bg: "#f0fdf4" },
+          ].map(({ label, value, color, bg }) => (
+            <div key={label} className="rounded-xl p-3 border border-gray-100" style={{ background: bg }}>
+              <div className="text-xs text-gray-500 mb-1">{label}</div>
+              <div className="text-lg font-bold" style={{ color }}>{value}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Karty pojazdów */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {vehicles.map(v => {
+            const vf = frachtyWithFV.filter(r => r.vehicleId === v.id);
+            const przet = vf.filter(r => getStatus(r) === "przeterminowana");
+            const suma = vf.reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0);
+            const hasPrzet = przet.length > 0;
+            return (
+              <div key={v.id} onClick={() => setSelectedVehicle(v.id)}
+                className="bg-white rounded-2xl border p-4 cursor-pointer hover:shadow-sm transition-all"
+                style={{ borderColor: hasPrzet ? "#fca5a5" : "#f3f4f6", background: hasPrzet ? "#fff7f7" : "#fff" }}>
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <div className="font-bold text-gray-900">{v.plate}</div>
+                    <div className="text-xs text-gray-400">{v.brand}</div>
+                  </div>
+                  <div className="text-2xl">{v.plate2 ? "🚌" : "🚛"}</div>
+                </div>
+                <div className="grid grid-cols-3 gap-2 pt-3 border-t border-gray-50">
+                  <div><div className="text-xs text-gray-400">Faktur</div><div className="font-bold text-gray-900">{vf.length}</div></div>
+                  <div><div className="text-xs text-gray-400">Wartość</div><div className="font-bold text-green-700 text-sm">{fmt(suma)}</div></div>
+                  <div><div className="text-xs text-gray-400">Przeter.</div><div className={`font-bold text-sm ${hasPrzet ? "text-red-600" : "text-gray-300"}`}>{przet.length}</div></div>
+                </div>
+                {hasPrzet && <div className="mt-2 text-xs font-semibold text-red-500">⚠️ {przet.length} faktura/-y po terminie!</div>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // Widok per pojazd
+  const v = vehicles.find(x => x.id === selectedVehicle);
+  let rows = frachtyWithFV.filter(r => r.vehicleId === selectedVehicle);
+  if (filterStatus !== "all") rows = rows.filter(r => getStatus(r) === filterStatus);
+  if (filterYear !== "all") rows = rows.filter(r => r.dataZlecenia?.startsWith(filterYear));
+  rows = rows.sort((a,b) => (b.dataZlecenia||"").localeCompare(a.dataZlecenia||""));
+
+  const totalEur = rows.reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0);
+  const totalPrzet = rows.filter(r => getStatus(r) === "przeterminowana").reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0);
+
+  return (
+    <div className="p-4 md:p-6">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-3 mb-5">
+        <button onClick={() => setSelectedVehicle(null)} className="px-3 py-1.5 rounded-lg text-sm text-gray-500 hover:bg-gray-100 border border-gray-200">← Powrót</button>
+        <div className="flex-1">
+          <h2 className="text-xl font-bold text-gray-900">{v?.plate} · FV / Płatności</h2>
+          <p className="text-sm text-gray-400">{v?.brand}</p>
+        </div>
+      </div>
+
+      {/* Filtry */}
+      <div className="flex flex-wrap gap-2 mb-5">
+        <select value={filterYear} onChange={e => setFilterYear(e.target.value)} className="text-sm px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-700">
+          <option value="all">Wszystkie lata</option>
+          <option value="2025">2025</option>
+          <option value="2026">2026</option>
+        </select>
+        <div className="flex gap-1 flex-wrap">
+          {[["all","Wszystkie","#111827","#f3f4f6"], ...FV_STATUSES.map(s => [s.id, s.emoji+" "+s.label, s.color, s.bg])].map(([id, label, color, bg]) => (
+            <button key={id} onClick={() => setFilterStatus(id)}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style={{ background: filterStatus===id ? (id==="all"?"#111827":bg) : "#f3f4f6", color: filterStatus===id ? (id==="all"?"#fff":color) : "#6b7280", border: filterStatus===id ? `1.5px solid ${id==="all"?"#111827":color}` : "1.5px solid transparent" }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* KPI */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        {[
+          ["Faktur", rows.length, "#6366f1"],
+          ["Łącznie EUR", fmt(totalEur), "#16a34a"],
+          ["Przeterminowane", fmt(totalPrzet), "#dc2626"],
+          ["Do otrzymania", fmt(rows.filter(r=>getStatus(r)!=="zaplacona").reduce((s,r)=>s+(parseFloat(r.cenaEur)||0),0)), "#f59e0b"],
+        ].map(([label,value,color]) => (
+          <div key={label} className="rounded-xl p-3 border border-gray-100 bg-white">
+            <div className="text-xs text-gray-400 mb-1">{label}</div>
+            <div className="text-base font-bold" style={{color}}>{value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Tabela */}
+      <div className="overflow-x-auto rounded-xl border border-gray-100 bg-white">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-gray-100 text-gray-400 uppercase bg-gray-50 text-xs">
+              {["Data zlec.","Skąd","Do","Klient","Cena EUR","Nr FV","Wysłano FV","Termin płatn.","Status FV","Akcje"].map(h => (
+                <th key={h} className="px-3 py-2.5 text-left whitespace-nowrap font-semibold">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && (
+              <tr><td colSpan={10} className="text-center py-10 text-gray-400">Brak faktur dla wybranych filtrów</td></tr>
+            )}
+            {rows.map(r => {
+              const st = getStatus(r);
+              const stObj = FV_STATUSES.find(s => s.id === st) || FV_STATUSES[0];
+              const isOverdue = st === "przeterminowana";
+              const daysOverdue = r.terminPlatnosci && isOverdue
+                ? Math.floor((new Date() - new Date(r.terminPlatnosci)) / 86400000)
+                : null;
+              return (
+                <tr key={r.id} className="border-b border-gray-50 transition-colors"
+                  style={{ background: isOverdue ? "#fff7f7" : "white" }}>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-700">{r.dataZlecenia||"-"}</td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-500">{r.skad||"-"}</td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-500">{r.dokod||"-"}</td>
+                  <td className="px-3 py-2.5 max-w-36 truncate font-medium text-gray-800">{r.klient||"-"}</td>
+                  <td className="px-3 py-2.5 text-right font-bold text-green-700 whitespace-nowrap">{r.cenaEur ? fmt(r.cenaEur) : "-"}</td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-600 font-mono text-xs">{r.nrFV||"-"}</td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-500">{r.dataWyslania||"-"}</td>
+                  <td className="px-3 py-2.5 whitespace-nowrap">
+                    <span style={{ color: isOverdue ? "#dc2626" : "#6b7280", fontWeight: isOverdue ? 700 : 400 }}>
+                      {r.terminPlatnosci||"-"}
+                    </span>
+                    {daysOverdue !== null && (
+                      <span className="ml-1.5 text-xs px-1.5 py-0.5 rounded-full font-bold" style={{background:"#fef2f2",color:"#dc2626"}}>
+                        +{daysOverdue}d
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2.5 whitespace-nowrap">
+                    <select
+                      value={r.statusFV || "nie_wyslana"}
+                      onChange={e => onUpdate(r.id, { statusFV: e.target.value })}
+                      onClick={e => e.stopPropagation()}
+                      className="text-xs font-semibold rounded-lg px-2 py-1 cursor-pointer outline-none border-0"
+                      style={{ background: stObj.bg, color: stObj.color, minWidth: 130 }}>
+                      {FV_STATUSES.map(s => <option key={s.id} value={s.id}>{s.emoji} {s.label}</option>)}
+                    </select>
+                  </td>
+                  <td className="px-3 py-2.5 whitespace-nowrap">
+                    <span className="text-xs text-gray-400 italic">CMR / FV wkrótce</span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAdd }) {
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [showForm, setShowForm] = useState(false);
@@ -4209,11 +4426,11 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-gray-100 text-gray-400 uppercase bg-gray-50">
-              {["#","Data zlec.","Data zal.","Data rozl.","Skad","Zaladunek","Rozladunek","Klient","Cena EUR","KM podj.","KM lad.","KM wsz.","EUR/km lad.","EUR/km wsz.","Waga kg","Dyspozytor","Nr FV","Wyslano FV","Termin pl.","Status FV","Uwagi",""].map(h => <th key={h} className="px-2 py-2.5 text-left whitespace-nowrap">{h}</th>)}
+              {["#","Data zlec.","Data zal.","Data rozl.","Skad","Zaladunek","Rozladunek","Klient","Cena EUR","KM podj.","KM lad.","KM wsz.","EUR/km lad.","EUR/km wsz.","Waga kg","Dyspozytor","Nr FV","Uwagi",""].map(h => <th key={h} className="px-2 py-2.5 text-left whitespace-nowrap">{h}</th>)}
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && <tr><td colSpan={22} className="text-center py-10 text-gray-400">Brak frachtow w {miesiaceL[filterMonth]} {filterYear}</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={19} className="text-center py-10 text-gray-400">Brak frachtow w {miesiaceL[filterMonth]} {filterYear}</td></tr>}
             {rows.map((r,idx) => {
               const eurKmLad = r.kmLadowne && r.cenaEur ? (parseFloat(r.cenaEur)/parseInt(r.kmLadowne)).toFixed(2) : "-";
               const eurKmWsz = r.kmWszystkie && r.cenaEur ? (parseFloat(r.cenaEur)/parseInt(r.kmWszystkie)).toFixed(2) : "-";
@@ -4223,12 +4440,8 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
                 { id: "przeterminowana", label: "Przeterminowana", bg: "#fef2f2", color: "#991b1b", dot: "#ef4444" },
                 { id: "zaplacona",    label: "Zapłacona",      bg: "#f0fdf4", color: "#166534", dot: "#22c55e" },
               ];
-              const fvStatus = FV_STATUSES.find(s => s.id === r.statusFV) || FV_STATUSES[0];
-              // Auto-wykryj przeterminowanie jeśli status nie jest zapłacona
-              const isOverdue = r.terminPlatnosci && r.statusFV !== "zaplacona" && new Date(r.terminPlatnosci) < new Date();
-              const displayStatus = isOverdue && (!r.statusFV || r.statusFV === "wyslana") ? FV_STATUSES[2] : fvStatus;
               return (
-                <tr key={r.id} className="border-b border-gray-50 hover:bg-blue-50 transition-colors" style={isOverdue && r.statusFV !== "zaplacona" ? {background:"#fff7f7"} : {}}>
+                <tr key={r.id} className="border-b border-gray-50 hover:bg-blue-50 transition-colors">
                   <td className="px-2 py-2 text-gray-400">{idx+1}</td>
                   <td className="px-2 py-2 whitespace-nowrap">{r.dataZlecenia||"-"}</td>
                   <td className="px-2 py-2 whitespace-nowrap text-gray-500">{r.dataZaladunku||"-"}</td>
@@ -4246,22 +4459,6 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
                   <td className="px-2 py-2 text-gray-500">{r.wagaLadunku||"-"}</td>
                   <td className="px-2 py-2 whitespace-nowrap text-gray-500">{r.dyspozytor||"-"}</td>
                   <td className="px-2 py-2 whitespace-nowrap text-gray-500">{r.nrFV||"-"}</td>
-                  <td className="px-2 py-2 whitespace-nowrap text-gray-500">{r.dataWyslania||"-"}</td>
-                  <td className="px-2 py-2 whitespace-nowrap font-medium" style={{color: isOverdue && r.statusFV !== "zaplacona" ? "#dc2626" : "#6b7280"}}>{r.terminPlatnosci||"-"}</td>
-                  <td className="px-2 py-2 whitespace-nowrap">
-                    <select
-                      value={r.statusFV || "nie_wyslana"}
-                      onChange={e => onUpdate(r.id, { statusFV: e.target.value })}
-                      onClick={e => e.stopPropagation()}
-                      className="text-xs font-semibold rounded-lg px-2 py-1 cursor-pointer outline-none border-0"
-                      style={{ background: displayStatus.bg, color: displayStatus.color, minWidth: 120 }}
-                    >
-                      <option value="nie_wyslana">⚪ Nie wysłana</option>
-                      <option value="wyslana">🟡 Wysłana / czeka</option>
-                      <option value="przeterminowana">🔴 Przeterminowana</option>
-                      <option value="zaplacona">🟢 Zapłacona</option>
-                    </select>
-                  </td>
                   <td className="px-2 py-2 text-gray-500 max-w-24 truncate">{r.uwagi||""}</td>
                   <td className="px-2 py-2 whitespace-nowrap">
                     <div className="flex gap-1">
@@ -4281,7 +4478,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
                 <td className="px-2 py-2.5 text-right text-blue-700">{totalKmWsz.toLocaleString("pl-PL")}</td>
                 <td className="px-2 py-2.5 text-right text-amber-600">{avgEurKm}</td>
                 <td className="px-2 py-2.5 text-right text-blue-600">{avgEurKmWsz}</td>
-                <td colSpan={8}></td>
+                <td colSpan={5}></td>
               </tr>
             )}
           </tbody>
