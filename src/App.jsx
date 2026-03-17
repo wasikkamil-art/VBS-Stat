@@ -4343,39 +4343,6 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
       </div>
 
       {/* Tabela */}
-      {/* BANER PRZYPOMNIENIA O KOMENTARZU */}
-      {(() => {
-        const doRemind = rows.filter(r => r.statusRozladunku === "rozladowano" && !r.komentarzKlienta);
-        if (!doRemind.length) return null;
-        return (
-          <div className="mb-4 px-4 py-3 rounded-xl flex items-center gap-3"
-            style={{ background: "#fefce8", border: "1.5px solid #fde68a" }}>
-            <span className="text-xl flex-shrink-0">⭐</span>
-            <div className="flex-1">
-              <div className="text-sm font-semibold text-amber-800">
-                {doRemind.length === 1
-                  ? "Poproś klienta o komentarz po rozładunku!"
-                  : `${doRemind.length} frachty rozładowane — poproś klientów o komentarz!`}
-              </div>
-              <div className="text-xs text-amber-600 mt-0.5">
-                {doRemind.map(r => r.klient||r.dataZlecenia).filter(Boolean).slice(0,3).join(" · ")}
-                {doRemind.length > 3 ? ` i ${doRemind.length-3} więcej` : ""}
-              </div>
-            </div>
-            <button
-              onClick={() => {
-                const id = doRemind[0].id;
-                onUpdate(id, { komentarzKlienta: "✓" });
-              }}
-              className="text-xs px-3 py-1.5 rounded-lg font-semibold flex-shrink-0"
-              style={{ background: "#fbbf24", color: "#fff" }}
-              title="Oznacz jako wysłane przypomnienie">
-              Oznacz ✓
-            </button>
-          </div>
-        );
-      })()}
-
       <div className="overflow-x-auto rounded-xl border border-gray-100 bg-white">
         <table className="w-full text-xs">
           <thead>
@@ -4576,7 +4543,31 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
                   <div><div className="text-xs text-gray-400">Przychód</div><div className="font-bold text-green-700 text-sm">{fmt(suma)}</div></div>
                   <div><div className="text-xs text-gray-400">KM lad.</div><div className="font-bold text-blue-600 text-sm">{km.toLocaleString("pl-PL")}</div></div>
                 </div>
-                <div className="mt-3 text-xs text-gray-400 text-right">kliknij aby zobaczyc frachty →</div>
+                {(() => {
+                  const doRemind = frachtyList.filter(r => r.vehicleId === v.id && r.statusRozladunku === "rozladowano" && !r.komentarzKlienta);
+                  if (!doRemind.length) return <div className="mt-3 text-xs text-gray-400 text-right">kliknij aby zobaczyc frachty →</div>;
+                  return (
+                    <div className="mt-3 px-3 py-2 rounded-xl flex items-center gap-2"
+                      style={{ background: "#fefce8", border: "1px solid #fde68a" }}>
+                      <span className="text-sm">⭐</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-semibold text-amber-800 truncate">
+                          Poproś o komentarz ({doRemind.length})
+                        </div>
+                        <div className="text-xs text-amber-600 truncate">
+                          {doRemind[0].klient||doRemind[0].dataZlecenia}
+                          {doRemind.length > 1 ? ` +${doRemind.length-1}` : ""}
+                        </div>
+                      </div>
+                      <button
+                        onClick={e => { e.stopPropagation(); onUpdate(doRemind[0].id, { komentarzKlienta: "✓" }); }}
+                        className="text-xs px-2 py-1 rounded-lg font-bold flex-shrink-0"
+                        style={{ background: "#fbbf24", color: "#fff" }}>
+                        ✓
+                      </button>
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}
