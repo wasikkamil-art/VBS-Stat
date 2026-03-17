@@ -4211,6 +4211,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterYear, setFilterYear] = useState("all");
+  const [editFVId, setEditFVId] = useState(null);
 
   const fmt = (n) => n ? parseFloat(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-";
 
@@ -4346,14 +4347,14 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-gray-100 text-gray-400 uppercase bg-gray-50 text-xs">
-              {["Data zlec.","Klient","Cena EUR","Nr FV","Wysłano FV","Termin płatn.","Status FV","📄 FV","📋 Zlecenie"].map(h => (
+              {["Data zlec.","Klient","Cena EUR","Nr FV","Nr zlec.","Wysłano FV","Termin płatn.","Status FV","📄 FV","📋 Zlecenie",""].map(h => (
                 <th key={h} className="px-3 py-2.5 text-left whitespace-nowrap font-semibold">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td colSpan={9} className="text-center py-10 text-gray-400">Brak faktur dla wybranych filtrów</td></tr>
+              <tr><td colSpan={11} className="text-center py-10 text-gray-400">Brak faktur dla wybranych filtrów</td></tr>
             )}
             {rows.map(r => {
               const st = getStatus(r);
@@ -4369,6 +4370,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                   <td className="px-3 py-2.5 max-w-36 truncate font-medium text-gray-800">{r.klient||"-"}</td>
                   <td className="px-3 py-2.5 text-right font-bold text-green-700 whitespace-nowrap">{r.cenaEur ? fmt(r.cenaEur) : "-"}</td>
                   <td className="px-3 py-2.5 whitespace-nowrap text-gray-600 font-mono text-xs">{r.nrFV||"-"}</td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-500 font-mono text-xs">{r.nrZlecenia||"-"}</td>
                   <td className="px-3 py-2.5 whitespace-nowrap text-gray-500">{r.dataWyslania||"-"}</td>
                   <td className="px-3 py-2.5 whitespace-nowrap">
                     <span style={{ color: isOverdue ? "#dc2626" : "#6b7280", fontWeight: isOverdue ? 700 : 400 }}>
@@ -4406,12 +4408,25 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                       : <span className="text-xs text-gray-300 italic">brak</span>
                     }
                   </td>
+                  <td className="px-3 py-2.5 whitespace-nowrap">
+                    <button onClick={() => setEditFVId(r.id)}
+                      className="px-2 py-1 rounded-lg text-xs bg-gray-100 hover:bg-gray-200 font-medium text-gray-600">
+                      ed.
+                    </button>
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
+      {editFVId && (
+        <FVEditModal
+          record={frachtyList.find(r => r.id === editFVId)}
+          onSave={(data) => { onUpdate(editFVId, data); setEditFVId(null); }}
+          onClose={() => setEditFVId(null)}
+        />
+      )}
     </div>
   );
 }
@@ -4878,8 +4893,64 @@ function FrachtyImportModal({ vehicles, onImport, onClose }) {
 }
 
 
+
+// ─── FV EDIT MODAL ───────────────────────────────────────────────────────────
+function FVEditModal({ record, onSave, onClose }) {
+  const [f, setF] = useState({
+    nrFV:            record?.nrFV            || "",
+    klient:          record?.klient          || "",
+    cenaEur:         record?.cenaEur         || "",
+    dataWyslania:    record?.dataWyslania     || "",
+    terminPlatnosci: record?.terminPlatnosci  || "",
+    statusFV:        record?.statusFV         || "nie_wyslana",
+    nrZlecenia:      record?.nrZlecenia       || "",
+    uwagi:           record?.uwagi            || "",
+  });
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const inp = "w-full text-sm px-3 py-2 rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-gray-400";
+  const lbl = "text-xs font-semibold text-gray-500 mb-1 block";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)" }}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col" style={{ maxHeight: "90vh" }}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
+          <div>
+            <h3 className="text-base font-bold text-gray-900">Edycja FV / Płatności</h3>
+            <p className="text-xs text-gray-400 mt-0.5">{record?.dataZlecenia} · {record?.skad} → {record?.dokod}</p>
+          </div>
+          <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs hover:bg-gray-200">✕</button>
+        </div>
+        <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={lbl}>Nr FV</label><input placeholder="F/01/2026" value={f.nrFV} onChange={e => set("nrFV", e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>Nr zlecenia</label><input placeholder="auto z AI" value={f.nrZlecenia} onChange={e => set("nrZlecenia", e.target.value)} className={inp} /></div>
+          </div>
+          <div><label className={lbl}>Klient</label><input placeholder="nazwa klienta" value={f.klient} onChange={e => set("klient", e.target.value)} className={inp} /></div>
+          <div><label className={lbl}>Cena EUR</label><input type="number" placeholder="0.00" value={f.cenaEur} onChange={e => set("cenaEur", e.target.value)} className={inp} /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={lbl}>Data wysłania FV</label><input type="date" value={f.dataWyslania} onChange={e => set("dataWyslania", e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>Termin płatności</label><input type="date" value={f.terminPlatnosci} onChange={e => set("terminPlatnosci", e.target.value)} className={inp} /></div>
+          </div>
+          <div>
+            <label className={lbl}>Status FV</label>
+            <select value={f.statusFV} onChange={e => set("statusFV", e.target.value)} className={inp}>
+              {FV_STATUSES.map(s => <option key={s.id} value={s.id}>{s.emoji} {s.label}</option>)}
+            </select>
+          </div>
+          <div><label className={lbl}>Uwagi</label><textarea rows={2} value={f.uwagi} onChange={e => set("uwagi", e.target.value)} className={inp + " resize-none"} /></div>
+        </div>
+        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-100">Anuluj</button>
+          <button onClick={() => onSave(f)} className="px-5 py-2 rounded-lg text-sm font-semibold text-white" style={{ background: "#111827" }}>Zapisz zmiany</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── ZLECENIE UPLOAD BTN ─────────────────────────────────────────────────────
 function ZlecenieUploadBtn({ frachtId, onUploaded, label = "📎 Wgraj", fullWidth = false }) {
+  // onUploaded(url, nrZlecenia)
   const [status, setStatus] = useState("idle");
   const fileRef = useRef(null);
 
@@ -4892,7 +4963,37 @@ function ZlecenieUploadBtn({ frachtId, onUploaded, label = "📎 Wgraj", fullWid
       const sRef = storageRef(storage, path);
       await uploadBytes(sRef, file);
       const url = await getDownloadURL(sRef);
-      onUploaded(url);
+
+      // AI odczyt nr zlecenia
+      setStatus("reading");
+      const base64 = await new Promise((res, rej) => {
+        const reader = new FileReader();
+        reader.onload = () => res(reader.result.split(",")[1]);
+        reader.onerror = rej;
+        reader.readAsDataURL(file);
+      });
+      const isPDF = file.type === "application/pdf";
+      const body = {
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 500,
+        messages: [{
+          role: "user",
+          content: [
+            { type: isPDF ? "document" : "image", source: { type: "base64", media_type: file.type, data: base64 } },
+            { type: "text", text: 'Znajdź numer zlecenia transportowego w tym dokumencie. Odpowiedz TYLKO w formacie JSON: {"nrZlecenia": "numer"} lub {"nrZlecenia": null} jeśli nie znalazłeś.' }
+          ]
+        }]
+      };
+      try {
+        const resp = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+        });
+        const data = await resp.json();
+        const text = data.content?.find(b => b.type === "text")?.text || "{}";
+        const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
+        onUploaded(url, parsed.nrZlecenia || null);
+      } catch { onUploaded(url, null); }
+
       setStatus("done");
     } catch (err) {
       console.error(err);
@@ -4919,7 +5020,7 @@ function ZlecenieUploadBtn({ frachtId, onUploaded, label = "📎 Wgraj", fullWid
 }
 
 function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }) {
-  const empty = {dataZlecenia:"",dataZaladunku:"",dataRozladunku:"",godzZaladunku:"",godzRozladunku:"",skad:"",zaladunekKod:"",dokod:"",klient:"",cenaEur:"",kmPodjazd:"",kmLadowne:"",kmWszystkie:"",wagaLadunku:"",dyspozytor:"",nrFV:"",dataWyslania:"",terminPlatnosci:"",uwagi:"",urlZlecenie:"",vehicleId:defaultVehicleId};
+  const empty = {dataZlecenia:"",dataZaladunku:"",dataRozladunku:"",godzZaladunku:"",godzRozladunku:"",skad:"",zaladunekKod:"",dokod:"",klient:"",cenaEur:"",kmPodjazd:"",kmLadowne:"",kmWszystkie:"",wagaLadunku:"",dyspozytor:"",nrFV:"",dataWyslania:"",terminPlatnosci:"",uwagi:"",urlZlecenie:"",nrZlecenia:"",vehicleId:defaultVehicleId};
   const [f, setF] = useState(record ? {...empty,...record} : empty);
   const set = (k,v) => setF(prev => { const next={...prev,[k]:v}; const pod=parseInt(next.kmPodjazd)||0; const lad=parseInt(next.kmLadowne)||0; next.kmWszystkie=pod+lad>0?String(pod+lad):""; return next; });
   const eurKmLad = f.kmLadowne && f.cenaEur ? (parseFloat(f.cenaEur)/parseInt(f.kmLadowne)).toFixed(2) : null;
@@ -4978,14 +5079,14 @@ function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }
                 </div>
                 <ZlecenieUploadBtn
                   frachtId={record?.id || "new"}
-                  onUploaded={(url) => set("urlZlecenie", url)}
+                  onUploaded={(url, nr) => { set("urlZlecenie", url); if(nr) set("nrZlecenia", nr); }}
                   label="Zastąp"
                 />
               </div>
             ) : (
               <ZlecenieUploadBtn
                 frachtId={record?.id || "new"}
-                onUploaded={(url) => set("urlZlecenie", url)}
+                onUploaded={(url, nr) => { set("urlZlecenie", url); if(nr) set("nrZlecenia", nr); }}
                 label="📎 Wgraj zlecenie (PDF / JPG)"
                 fullWidth
               />
