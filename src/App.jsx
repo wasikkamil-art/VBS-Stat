@@ -4433,6 +4433,91 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
   );
 }
 
+
+// ─── KOMENTARZ BANER ─────────────────────────────────────────────────────────
+function KomentarzBaner({ frachtyList, vehicleId, onUpdate }) {
+  const [open, setOpen] = useState(false);
+  const doRemind = frachtyList.filter(r =>
+    r.vehicleId === vehicleId &&
+    r.statusRozladunku === "rozladowano" &&
+    !r.komentarzKlienta
+  );
+
+  if (!doRemind.length) {
+    return <div className="mt-3 text-xs text-gray-400 text-right">kliknij aby zobaczyc frachty →</div>;
+  }
+
+  return (
+    <div className="mt-3 relative" onClick={e => e.stopPropagation()}>
+      {/* Baner-przycisk */}
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full px-3 py-2 rounded-xl flex items-center gap-2 transition-all"
+        style={{ background: "#fefce8", border: "1.5px solid #fde68a" }}>
+        <span className="text-sm">⭐</span>
+        <div className="flex-1 min-w-0 text-left">
+          <div className="text-xs font-semibold text-amber-800">
+            Poproś o komentarz ({doRemind.length})
+          </div>
+          <div className="text-xs text-amber-500 truncate">
+            {doRemind.map(r => r.klient || r.dataZlecenia).filter(Boolean).slice(0, 2).join(", ")}
+            {doRemind.length > 2 ? ` +${doRemind.length - 2}` : ""}
+          </div>
+        </div>
+        <span className="text-amber-400 text-xs">{open ? "▲" : "▼"}</span>
+      </button>
+
+      {/* Dropdown lista */}
+      {open && (
+        <div className="absolute left-0 right-0 z-20 mt-1 rounded-xl shadow-xl overflow-hidden"
+          style={{ background: "#fff", border: "1.5px solid #fde68a" }}>
+          <div className="px-3 py-2 border-b" style={{ background: "#fefce8" }}>
+            <span className="text-xs font-bold text-amber-800">Klienci do przypomnienia</span>
+          </div>
+          <div className="max-h-56 overflow-y-auto">
+            {doRemind.map(r => (
+              <div key={r.id}
+                className="flex items-center gap-3 px-3 py-2.5 border-b border-gray-50 hover:bg-amber-50 transition-colors">
+                <button
+                  onClick={() => onUpdate(r.id, { komentarzKlienta: "✓" })}
+                  className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0 border-2 transition-all"
+                  style={{ borderColor: "#fbbf24", background: "#fff" }}
+                  title="Oznacz jako wysłane">
+                  <span className="text-xs text-amber-400">✓</span>
+                </button>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-semibold text-gray-800 truncate">
+                    {r.klient || "—"}
+                  </div>
+                  <div className="text-xs text-gray-400">
+                    {r.dataZlecenia} · {r.dokod || r.zaladunekKod || "—"}
+                  </div>
+                </div>
+                <div className="text-xs font-bold text-green-700 flex-shrink-0">
+                  {r.cenaEur ? `${parseFloat(r.cenaEur).toLocaleString("pl-PL")} €` : ""}
+                </div>
+              </div>
+            ))}
+          </div>
+          {doRemind.length > 1 && (
+            <div className="px-3 py-2 border-t" style={{ background: "#fefce8" }}>
+              <button
+                onClick={() => {
+                  doRemind.forEach(r => onUpdate(r.id, { komentarzKlienta: "✓" }));
+                  setOpen(false);
+                }}
+                className="w-full text-xs font-bold py-1.5 rounded-lg"
+                style={{ background: "#fbbf24", color: "#fff" }}>
+                ✓ Oznacz wszystkich ({doRemind.length})
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAdd }) {
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [showForm, setShowForm] = useState(false);
@@ -4543,31 +4628,11 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
                   <div><div className="text-xs text-gray-400">Przychód</div><div className="font-bold text-green-700 text-sm">{fmt(suma)}</div></div>
                   <div><div className="text-xs text-gray-400">KM lad.</div><div className="font-bold text-blue-600 text-sm">{km.toLocaleString("pl-PL")}</div></div>
                 </div>
-                {(() => {
-                  const doRemind = frachtyList.filter(r => r.vehicleId === v.id && r.statusRozladunku === "rozladowano" && !r.komentarzKlienta);
-                  if (!doRemind.length) return <div className="mt-3 text-xs text-gray-400 text-right">kliknij aby zobaczyc frachty →</div>;
-                  return (
-                    <div className="mt-3 px-3 py-2 rounded-xl flex items-center gap-2"
-                      style={{ background: "#fefce8", border: "1px solid #fde68a" }}>
-                      <span className="text-sm">⭐</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs font-semibold text-amber-800 truncate">
-                          Poproś o komentarz ({doRemind.length})
-                        </div>
-                        <div className="text-xs text-amber-600 truncate">
-                          {doRemind[0].klient||doRemind[0].dataZlecenia}
-                          {doRemind.length > 1 ? ` +${doRemind.length-1}` : ""}
-                        </div>
-                      </div>
-                      <button
-                        onClick={e => { e.stopPropagation(); onUpdate(doRemind[0].id, { komentarzKlienta: "✓" }); }}
-                        className="text-xs px-2 py-1 rounded-lg font-bold flex-shrink-0"
-                        style={{ background: "#fbbf24", color: "#fff" }}>
-                        ✓
-                      </button>
-                    </div>
-                  );
-                })()}
+                <KomentarzBaner
+                  frachtyList={frachtyList}
+                  vehicleId={v.id}
+                  onUpdate={onUpdate}
+                />
               </div>
             );
           })}
