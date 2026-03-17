@@ -281,7 +281,6 @@ function App({ user }) {
   const [filterCat, setFilterCat]             = useState("all");
   const [filterMonth, setFilterMonth]         = useState("all");
   const [filterYear, setCostFilterYear]       = useState("all");
-  const [filterNote, setFilterNote]           = useState("");
 
   // ── LOAD ──
   useEffect(() => {
@@ -422,9 +421,8 @@ function App({ user }) {
     if (filterCat     !== "all" && c.category  !== filterCat)     return false;
     if (filterMonth   !== "all" && !c.date?.startsWith(filterMonth)) return false;
     if (filterYear    !== "all" && !c.date?.startsWith(filterYear))  return false;
-    if (filterNote    !== ""    && !c.note?.toLowerCase().includes(filterNote.toLowerCase())) return false;
     return true;
-  }).sort((a, b) => b.date?.localeCompare(a.date)), [costs, filterVehicle, filterCat, filterMonth, filterYear, filterNote]);
+  }).sort((a, b) => b.date?.localeCompare(a.date)), [costs, filterVehicle, filterCat, filterMonth, filterYear]);
 
   const months = useMemo(() => {
     const s = new Set(costs.map((c) => c.date?.slice(0, 7)).filter(Boolean));
@@ -697,30 +695,44 @@ function App({ user }) {
                 ))}
               </div>
 
-              {/* ── FILTRY ── */}
-              <div className="flex flex-wrap gap-2 mb-5">
-                <FSel value={filterVehicle} onChange={setFilterVehicle}
-                  options={[{ value: "all", label: "Wszystkie pojazdy" }, ...vehicles.map((v) => ({ value: v.id, label: v.plate }))]} />
-                <FSel value={filterCat} onChange={setFilterCat}
-                  options={[{ value: "all", label: "Wszystkie kategorie" }, ...categories.map((c) => ({ value: c.id, label: `${c.icon} ${c.label}` }))]} />
-                <FSel value={filterMonth} onChange={setFilterMonth}
-                  options={[{ value: "all", label: "Wszystkie miesiące" }, ...months.filter(m => filterYear === "all" || m.startsWith(filterYear)).map((m) => ({ value: m, label: m }))]} />
+              {/* ── FILTRY POJAZDY ── */}
+              <div className="flex flex-wrap gap-2 mb-2">
+                {[{ value: "all", label: "Wszystkie pojazdy" }, ...vehicles.map(v => ({ value: v.id, label: v.plate }))].map(opt => (
+                  <button key={opt.value} onClick={() => setFilterVehicle(opt.value)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                    style={{ background: filterVehicle === opt.value ? "#111827" : "#f3f4f6", color: filterVehicle === opt.value ? "#fff" : "#6b7280" }}>
+                    {opt.label}
+                  </button>
+                ))}
               </div>
 
-              {/* ── SZUKAJ W OPISACH ── */}
-              <div className="relative mb-5">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>
-                <input
-                  type="text"
-                  value={filterNote}
-                  onChange={e => setFilterNote(e.target.value)}
-                  placeholder="Szukaj w opisach... (np. tankowanie, OC, naprawa)"
-                  className="w-full pl-9 pr-9 py-2 text-sm rounded-xl border border-gray-200 bg-white outline-none focus:border-gray-400"
-                />
-                {filterNote && (
-                  <button onClick={() => setFilterNote("")}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm">✕</button>
-                )}
+              {/* ── FILTRY KATEGORIE ── */}
+              <div className="flex flex-wrap gap-2 mb-2">
+                {[{ value: "all", label: "Wszystkie kategorie", color: "#111827" },
+                  ...categories.map(c => ({ value: c.id, label: `${c.icon} ${c.label}`, color: c.color }))
+                ].map(opt => (
+                  <button key={opt.value} onClick={() => setFilterCat(opt.value)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                    style={{
+                      background: filterCat === opt.value ? (opt.color || "#111827") : "#f3f4f6",
+                      color: filterCat === opt.value ? "#fff" : "#6b7280",
+                    }}>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* ── FILTRY MIESIĄCE ── */}
+              <div className="flex flex-wrap gap-2 mb-5">
+                {[{ value: "all", label: "Wszystkie miesiące" },
+                  ...months.filter(m => filterYear === "all" || m.startsWith(filterYear)).map(m => ({ value: m, label: m }))
+                ].map(opt => (
+                  <button key={opt.value} onClick={() => setFilterMonth(opt.value)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                    style={{ background: filterMonth === opt.value ? "#111827" : "#f3f4f6", color: filterMonth === opt.value ? "#fff" : "#6b7280" }}>
+                    {opt.label}
+                  </button>
+                ))}
               </div>
 
               {/* ── MINI DASHBOARD ── */}
