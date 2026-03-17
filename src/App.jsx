@@ -4062,6 +4062,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
   const [showImport, setShowImport] = useState(false);
+  const [overviewYear, setOverviewYear] = useState("all");
   const [filterMonth, setFilterMonth] = useState(new Date().getMonth());
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
   const fmt = (n) => n ? parseFloat(n).toLocaleString("pl-PL",{minimumFractionDigits:2,maximumFractionDigits:2}) : "-";
@@ -4072,9 +4073,23 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
     return d.getFullYear() === filterYear && d.getMonth() === filterMonth;
   }).sort((a,b) => (a.dataZlecenia||"").localeCompare(b.dataZlecenia||""));
   const editRecord = editId ? frachtyList.find(r => r.id === editId) : null;
+
+  // Filtruje frachty po roku na overview
+  const filterByYear = (list, year) => year === "all" ? list : list.filter(r => r.dataZlecenia?.startsWith(year));
+  const visibleList = filterByYear(frachtyList, overviewYear);
+
+  // KPI per rok dla baner-przycisków
+  const yearStats = (year) => {
+    const l = filterByYear(frachtyList, year);
+    return {
+      count: l.length,
+      eur: l.reduce((s,r) => s + (parseFloat(r.cenaEur)||0), 0),
+      km: l.reduce((s,r) => s + (parseInt(r.kmLadowne)||0), 0),
+    };
+  };
+
   if (!selectedVehicle) {
-    const totalAll = frachtyList.reduce((s,r) => s + (parseFloat(r.cenaEur)||0), 0);
-    const totalKm = frachtyList.reduce((s,r) => s + (parseInt(r.kmLadowne)||0), 0);
+    const kpi = { count: visibleList.length, eur: visibleList.reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0), km: visibleList.reduce((s,r) => s+(parseInt(r.kmLadowne)||0),0) };
     return (
       <div className="p-4 md:p-6">
         {showImport && (
@@ -4084,20 +4099,61 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
             onClose={() => setShowImport(false)}
           />
         )}
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-          <div><h2 className="text-xl font-bold text-gray-900">Frachty</h2><p className="text-sm text-gray-400 mt-0.5">{frachtyList.length} wpisow lacznie</p></div>
+
+        {/* HEADER */}
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+          <div><h2 className="text-xl font-bold text-gray-900">Frachty</h2><p className="text-sm text-gray-400 mt-0.5">{frachtyList.length} wpisów łącznie</p></div>
           <button onClick={() => setShowImport(true)} className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 flex items-center gap-2">
             📥 Importuj z Excel
           </button>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-          {[["Frachtow",frachtyList.length,"#6366f1"],["Lacznie EUR",fmt(totalAll),"#16a34a"],["KM ladowne",totalKm.toLocaleString("pl-PL"),"#0ea5e9"],["Pojazdow",vehicles.length,"#f59e0b"]].map(([label,value,color]) => (
-            <div key={label} className="rounded-xl p-3 border border-gray-100 bg-white"><div className="text-xs text-gray-400 mb-1">{label}</div><div className="text-lg font-bold" style={{color}}>{value}</div></div>
+
+        {/* BANERY LAT */}
+        <div className="grid grid-cols-3 gap-3 mb-5">
+          {[
+            { key: "2025", label: "2025", color: "#6366f1", bg: "#eef2ff", border: "#c7d2fe" },
+            { key: "2026", label: "2026", color: "#0ea5e9", bg: "#f0f9ff", border: "#bae6fd" },
+            { key: "all",  label: "Wszystkie", color: "#111827", bg: "#f9fafb", border: "#e5e7eb" },
+          ].map(({ key, label, color, bg, border }) => {
+            const s = key === "all" ? { count: frachtyList.length, eur: frachtyList.reduce((a,r)=>a+(parseFloat(r.cenaEur)||0),0), km: frachtyList.reduce((a,r)=>a+(parseInt(r.kmLadowne)||0),0) } : yearStats(key);
+            const active = overviewYear === key;
+            return (
+              <button key={key} onClick={() => setOverviewYear(key)}
+                className="rounded-2xl p-4 text-left transition-all w-full"
+                style={{ background: active ? bg : "#fff", border: `2px solid ${active ? border : "#f3f4f6"}`, boxShadow: active ? `0 0 0 1px ${border}` : "none" }}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold uppercase tracking-wider" style={{ color }}>{label}</span>
+                  {active && <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: border, color }}>aktywny</span>}
+                </div>
+                <div className="font-bold text-lg text-gray-900">{fmt(s.eur)} €</div>
+                <div className="flex gap-3 mt-1.5">
+                  <span className="text-xs text-gray-500">{s.count} frachtów</span>
+                  <span className="text-xs text-gray-400">·</span>
+                  <span className="text-xs text-gray-500">{s.km.toLocaleString("pl-PL")} km</span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* KPI aktywnego widoku */}
+        <div className="grid grid-cols-3 gap-3 mb-6">
+          {[
+            ["Frachtów", kpi.count, "#6366f1"],
+            ["Łącznie EUR", fmt(kpi.eur), "#16a34a"],
+            ["KM ładowne", kpi.km.toLocaleString("pl-PL"), "#0ea5e9"],
+          ].map(([label, value, color]) => (
+            <div key={label} className="rounded-xl p-3 border border-gray-100 bg-white">
+              <div className="text-xs text-gray-400 mb-1">{label}</div>
+              <div className="text-lg font-bold" style={{color}}>{value}</div>
+            </div>
           ))}
         </div>
+
+        {/* KARTY POJAZDÓW */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {vehicles.map(v => {
-            const vf = frachtyList.filter(r => r.vehicleId === v.id);
+            const vf = visibleList.filter(r => r.vehicleId === v.id);
             const suma = vf.reduce((s,r) => s + (parseFloat(r.cenaEur)||0), 0);
             const km = vf.reduce((s,r) => s + (parseInt(r.kmLadowne)||0), 0);
             return (
@@ -4107,8 +4163,8 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
                   <div className="text-2xl">{v.plate2 ? "🚌" : "🚛"}</div>
                 </div>
                 <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-gray-50">
-                  <div><div className="text-xs text-gray-400">Frachtow</div><div className="font-bold text-gray-900">{vf.length}</div></div>
-                  <div><div className="text-xs text-gray-400">Przychod</div><div className="font-bold text-green-700 text-sm">{fmt(suma)}</div></div>
+                  <div><div className="text-xs text-gray-400">Frachtów</div><div className="font-bold text-gray-900">{vf.length}</div></div>
+                  <div><div className="text-xs text-gray-400">Przychód</div><div className="font-bold text-green-700 text-sm">{fmt(suma)}</div></div>
                   <div><div className="text-xs text-gray-400">KM lad.</div><div className="font-bold text-blue-600 text-sm">{km.toLocaleString("pl-PL")}</div></div>
                 </div>
                 <div className="mt-3 text-xs text-gray-400 text-right">kliknij aby zobaczyc frachty →</div>
