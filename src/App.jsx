@@ -4343,6 +4343,39 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
       </div>
 
       {/* Tabela */}
+      {/* BANER PRZYPOMNIENIA O KOMENTARZU */}
+      {(() => {
+        const doRemind = rows.filter(r => r.statusRozladunku === "rozladowano" && !r.komentarzKlienta);
+        if (!doRemind.length) return null;
+        return (
+          <div className="mb-4 px-4 py-3 rounded-xl flex items-center gap-3"
+            style={{ background: "#fefce8", border: "1.5px solid #fde68a" }}>
+            <span className="text-xl flex-shrink-0">⭐</span>
+            <div className="flex-1">
+              <div className="text-sm font-semibold text-amber-800">
+                {doRemind.length === 1
+                  ? "Poproś klienta o komentarz po rozładunku!"
+                  : `${doRemind.length} frachty rozładowane — poproś klientów o komentarz!`}
+              </div>
+              <div className="text-xs text-amber-600 mt-0.5">
+                {doRemind.map(r => r.klient||r.dataZlecenia).filter(Boolean).slice(0,3).join(" · ")}
+                {doRemind.length > 3 ? ` i ${doRemind.length-3} więcej` : ""}
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                const id = doRemind[0].id;
+                onUpdate(id, { komentarzKlienta: "✓" });
+              }}
+              className="text-xs px-3 py-1.5 rounded-lg font-semibold flex-shrink-0"
+              style={{ background: "#fbbf24", color: "#fff" }}
+              title="Oznacz jako wysłane przypomnienie">
+              Oznacz ✓
+            </button>
+          </div>
+        );
+      })()}
+
       <div className="overflow-x-auto rounded-xl border border-gray-100 bg-white">
         <table className="w-full text-xs">
           <thead>
@@ -4585,11 +4618,11 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-gray-100 text-gray-400 uppercase bg-gray-50">
-              {["#","Data zlec.","Data zal.","Data rozl.","Zaladunek","Rozladunek","Klient","Cena EUR","KM podj.","KM lad.","KM wsz.","EUR/km lad.","EUR/km wsz.","Waga kg","Dyspozytor","Nr FV","Uwagi",""].map(h => <th key={h} className="px-2 py-2.5 text-left whitespace-nowrap">{h}</th>)}
+              {["#","Data zlec.","Data zal.","Data rozl.","Zaladunek","Rozladunek","Status rozł.","Klient","Cena EUR","KM podj.","KM lad.","KM wsz.","EUR/km lad.","EUR/km wsz.","Waga kg","Dyspozytor","Nr FV","Uwagi",""].map(h => <th key={h} className="px-2 py-2.5 text-left whitespace-nowrap">{h}</th>)}
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && <tr><td colSpan={18} className="text-center py-10 text-gray-400">Brak frachtow w {miesiaceL[filterMonth]} {filterYear}</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={19} className="text-center py-10 text-gray-400">Brak frachtow w {miesiaceL[filterMonth]} {filterYear}</td></tr>}
             {rows.map((r,idx) => {
               const eurKmLad = r.kmLadowne && r.cenaEur ? (parseFloat(r.cenaEur)/parseInt(r.kmLadowne)).toFixed(2) : "-";
               const eurKmWsz = r.kmWszystkie && r.cenaEur ? (parseFloat(r.cenaEur)/parseInt(r.kmWszystkie)).toFixed(2) : "-";
@@ -4607,6 +4640,32 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
                   <td className="px-2 py-2 whitespace-nowrap text-gray-500">{r.dataRozladunku||"-"}</td>
                   <td className="px-2 py-2 whitespace-nowrap">{[r.skad, r.zaladunekKod].filter(Boolean).join(" · ")||"-"}</td>
                   <td className="px-2 py-2 whitespace-nowrap">{r.dokod||"-"}</td>
+                  <td className="px-2 py-2 whitespace-nowrap">
+                    {(() => {
+                      const s = r.statusRozladunku || "w_trasie";
+                      const cfg = {
+                        rozladowano: { emoji:"✅", label:"Rozładowano", bg:"#f0fdf4", color:"#166534" },
+                        w_trasie:    { emoji:"🚛", label:"W trasie",    bg:"#f0f9ff", color:"#0369a1" },
+                        problem:     { emoji:"⚠️", label:"Problem",     bg:"#fef2f2", color:"#991b1b" },
+                      };
+                      const c = cfg[s] || cfg.w_trasie;
+                      return (
+                        <div className="flex items-center gap-1">
+                          <select
+                            value={s}
+                            onChange={e => onUpdate(r.id, { statusRozladunku: e.target.value })}
+                            onClick={ev => ev.stopPropagation()}
+                            className="text-xs font-semibold rounded-lg px-2 py-1 cursor-pointer outline-none border-0"
+                            style={{ background: c.bg, color: c.color, minWidth: 118 }}
+                          >
+                            <option value="w_trasie">🚛 W trasie</option>
+                            <option value="rozladowano">✅ Rozładowano</option>
+                            <option value="problem">⚠️ Problem</option>
+                          </select>
+                        </div>
+                      );
+                    })()}
+                  </td>
                   <td className="px-2 py-2 whitespace-nowrap max-w-24 truncate">{r.klient||"-"}</td>
                   <td className="px-2 py-2 text-right font-semibold text-green-700 whitespace-nowrap">{r.cenaEur ? fmt(r.cenaEur) : "-"}</td>
                   <td className="px-2 py-2 text-right text-gray-600">{r.kmPodjazd||"-"}</td>
@@ -4629,7 +4688,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
             })}
             {rows.length > 0 && (
               <tr className="bg-gray-50 font-bold border-t-2 border-gray-200">
-                <td colSpan={7} className="px-2 py-2.5 text-gray-700 text-xs uppercase">SUMA</td>
+                <td colSpan={8} className="px-2 py-2.5 text-gray-700 text-xs uppercase">SUMA</td>
                 <td className="px-2 py-2.5 text-right text-green-700">{fmt(totalCena)}</td>
                 <td></td>
                 <td className="px-2 py-2.5 text-right text-blue-700">{totalKmLad.toLocaleString("pl-PL")}</td>
