@@ -4399,12 +4399,12 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                     />
                   </td>
                   <td className="px-3 py-2.5 whitespace-nowrap">
-                    <DocUploadCell
-                      frachtId={r.id}
-                      docType="zlecenie"
-                      existingUrl={r.urlZlecenie}
-                      onUploaded={(url) => onUpdate(r.id, { urlZlecenie: url })}
-                    />
+                    {r.urlZlecenie
+                      ? <a href={r.urlZlecenie} target="_blank" rel="noopener noreferrer"
+                          className="text-xs px-2 py-1 rounded-lg font-semibold"
+                          style={{background:"#eff6ff",color:"#1d4ed8"}}>📋 Zlec.</a>
+                      : <span className="text-xs text-gray-300 italic">brak</span>
+                    }
                   </td>
                 </tr>
               );
@@ -4877,8 +4877,49 @@ function FrachtyImportModal({ vehicles, onImport, onClose }) {
   );
 }
 
+
+// ─── ZLECENIE UPLOAD BTN ─────────────────────────────────────────────────────
+function ZlecenieUploadBtn({ frachtId, onUploaded, label = "📎 Wgraj", fullWidth = false }) {
+  const [status, setStatus] = useState("idle");
+  const fileRef = useRef(null);
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setStatus("uploading");
+    try {
+      const path = `documents/${frachtId}/zlecenie_${Date.now()}_${file.name}`;
+      const sRef = storageRef(storage, path);
+      await uploadBytes(sRef, file);
+      const url = await getDownloadURL(sRef);
+      onUploaded(url);
+      setStatus("done");
+    } catch (err) {
+      console.error(err);
+      setStatus("error");
+    }
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  return (
+    <div className={fullWidth ? "w-full" : ""}>
+      {status === "idle" && (
+        <button onClick={() => fileRef.current?.click()}
+          className={`text-sm px-3 py-2 rounded-xl border border-dashed font-medium transition-all hover:bg-blue-50 ${fullWidth ? "w-full text-center" : ""}`}
+          style={{ borderColor: "#93c5fd", color: "#2563eb" }}>
+          {label}
+        </button>
+      )}
+      {status === "uploading" && <span className="text-xs text-gray-400 animate-pulse">⬆️ wysyłam…</span>}
+      {status === "done"      && <span className="text-xs text-green-600">✅ wgrane!</span>}
+      {status === "error"     && <button onClick={() => setStatus("idle")} className="text-xs text-red-500">⚠️ błąd — spróbuj ponownie</button>}
+      <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={handleFile} />
+    </div>
+  );
+}
+
 function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }) {
-  const empty = {dataZlecenia:"",dataZaladunku:"",dataRozladunku:"",godzZaladunku:"",godzRozladunku:"",skad:"",zaladunekKod:"",dokod:"",klient:"",cenaEur:"",kmPodjazd:"",kmLadowne:"",kmWszystkie:"",wagaLadunku:"",dyspozytor:"",nrFV:"",dataWyslania:"",terminPlatnosci:"",uwagi:"",vehicleId:defaultVehicleId};
+  const empty = {dataZlecenia:"",dataZaladunku:"",dataRozladunku:"",godzZaladunku:"",godzRozladunku:"",skad:"",zaladunekKod:"",dokod:"",klient:"",cenaEur:"",kmPodjazd:"",kmLadowne:"",kmWszystkie:"",wagaLadunku:"",dyspozytor:"",nrFV:"",dataWyslania:"",terminPlatnosci:"",uwagi:"",urlZlecenie:"",vehicleId:defaultVehicleId};
   const [f, setF] = useState(record ? {...empty,...record} : empty);
   const set = (k,v) => setF(prev => { const next={...prev,[k]:v}; const pod=parseInt(next.kmPodjazd)||0; const lad=parseInt(next.kmLadowne)||0; next.kmWszystkie=pod+lad>0?String(pod+lad):""; return next; });
   const eurKmLad = f.kmLadowne && f.cenaEur ? (parseFloat(f.cenaEur)/parseInt(f.kmLadowne)).toFixed(2) : null;
@@ -4924,6 +4965,32 @@ function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }
             <div><label className={lbl}>Termin platnosci</label><input type="date" value={f.terminPlatnosci} onChange={e => set("terminPlatnosci",e.target.value)} className={inp} /></div>
           </div>
           <div><label className={lbl}>Uwagi</label><textarea rows={2} placeholder="dodatkowe informacje..." value={f.uwagi} onChange={e => set("uwagi",e.target.value)} className={inp+" resize-none"} /></div>
+
+          {/* ZLECENIE */}
+          <div className="pt-2 border-t border-gray-100">
+            <label className={lbl}>📋 Zlecenie transportowe</label>
+            {f.urlZlecenie ? (
+              <div className="flex items-center gap-3 p-3 rounded-xl bg-blue-50 border border-blue-100">
+                <span className="text-2xl">📋</span>
+                <div className="flex-1">
+                  <div className="text-sm font-semibold text-blue-800">Zlecenie wgrane</div>
+                  <a href={f.urlZlecenie} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">Otwórz dokument →</a>
+                </div>
+                <ZlecenieUploadBtn
+                  frachtId={record?.id || "new"}
+                  onUploaded={(url) => set("urlZlecenie", url)}
+                  label="Zastąp"
+                />
+              </div>
+            ) : (
+              <ZlecenieUploadBtn
+                frachtId={record?.id || "new"}
+                onUploaded={(url) => set("urlZlecenie", url)}
+                label="📎 Wgraj zlecenie (PDF / JPG)"
+                fullWidth
+              />
+            )}
+          </div>
         </div>
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0">
           <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-100">Anuluj</button>
