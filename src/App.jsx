@@ -89,13 +89,14 @@ const SEED_VEHICLES = [
 ];
 
 const SEED_CATEGORIES = [
-  { id: "paliwo",        label: "Paliwo",        color: "#f59e0b", icon: "⛽" },
-  { id: "leasing",       label: "Leasing",        color: "#6366f1", icon: "🏦" },
-  { id: "naprawa",       label: "Naprawa",        color: "#ef4444", icon: "🔧" },
-  { id: "ubezpieczenie", label: "Ubezpieczenie",  color: "#10b981", icon: "🛡️" },
-  { id: "opony",         label: "Opony",          color: "#3b82f6", icon: "🔄" },
-  { id: "myto",          label: "Myto / Opłaty",  color: "#8b5cf6", icon: "🛣️" },
-  { id: "inne",          label: "Inne",           color: "#94a3b8", icon: "📋" },
+  { id: "paliwo",        label: "Paliwo",           color: "#f59e0b", icon: "⛽" },
+  { id: "leasing",       label: "Leasing",           color: "#6366f1", icon: "🏦" },
+  { id: "naprawa",       label: "Naprawa",           color: "#ef4444", icon: "🔧" },
+  { id: "ubezpieczenie", label: "Ubezpieczenie",     color: "#10b981", icon: "🛡️" },
+  { id: "opony",         label: "Opony",             color: "#3b82f6", icon: "🔄" },
+  { id: "myto",          label: "Myto / Opłaty",     color: "#8b5cf6", icon: "🛣️" },
+  { id: "wyplata",       label: "Wypłata kierowcy",  color: "#f43f5e", icon: "👤" },
+  { id: "inne",          label: "Inne",              color: "#94a3b8", icon: "📋" },
 ];
 
 const SEED_COSTS = [
@@ -273,6 +274,7 @@ function App({ user }) {
   const [eurLoading, setEurLoading] = useState(true);
 
   const [showAddCost, setShowAddCost]         = useState(false);
+  const [showCostsImport, setShowCostsImport]   = useState(false);
   const [showAddVehicle, setShowAddVehicle]   = useState(false);
   const [editVehicleId, setEditVehicleId]     = useState(null);
   const [filterVehicle, setFilterVehicle]     = useState("all");
@@ -620,13 +622,32 @@ function App({ user }) {
           {/* ══ KOSZTY ══════════════════════════════════════════════════════ */}
           {tab === "costs" && (
             <div>
+              {showCostsImport && (
+                <CostsImportModal
+                  vehicles={vehicles}
+                  categories={categories}
+                  onImport={(rows) => {
+                    const withIds = rows.map(r => ({ ...r, id: uid() }));
+                    setCosts(p => [...p, ...withIds]);
+                    showToast(`✅ Zaimportowano ${withIds.length} kosztów`);
+                    setShowCostsImport(false);
+                  }}
+                  onClose={() => setShowCostsImport(false)}
+                />
+              )}
               <div className="flex items-center justify-between mb-5">
                 <PageTitle>Rejestr kosztów</PageTitle>
-                <button onClick={() => setShowAddCost(true)}
-                  className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
-                  style={{ background: "#111827" }}>
-                  + Dodaj koszt
-                </button>
+                <div className="flex gap-2">
+                  <button onClick={() => setShowCostsImport(true)}
+                    className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 flex items-center gap-2">
+                    📥 Importuj z Excel
+                  </button>
+                  <button onClick={() => setShowAddCost(true)}
+                    className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
+                    style={{ background: "#111827" }}>
+                    + Dodaj koszt
+                  </button>
+                </div>
               </div>
 
               <div className="flex flex-wrap gap-2 mb-4">
@@ -4193,6 +4214,228 @@ Jeśli nie możesz odczytać danego pola, wpisz null.`,
           className="text-xs text-red-500 hover:underline">⚠️ błąd</button>
       )}
       <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={handleFile} />
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// COSTS IMPORT MODAL
+// ═══════════════════════════════════════════════════════════════════════════════
+function CostsImportModal({ vehicles, categories, onImport, onClose }) {
+  const [status, setStatus] = useState("idle");
+  const [rows, setRows]     = useState([]);
+  const [errorMsg, setErrorMsg] = useState("");
+  const fileRef = useRef(null);
+
+  const fmt = (n) => n ? parseFloat(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-";
+
+  const CAT_VALID = ["paliwo","leasing","naprawa","ubezpieczenie","opony","myto","inne","wyplata"];
+
+  const parseFile = async (file) => {
+    setStatus("parsing");
+    setErrorMsg("");
+    try {
+      const XLSX = window.XLSX || await new Promise((res, rej) => {
+        const s = document.createElement("script");
+        s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+        s.onload = () => res(window.XLSX);
+        s.onerror = () => rej(new Error("Błąd ładowania XLSX"));
+        document.head.appendChild(s);
+      });
+
+      const ab = await file.arrayBuffer();
+      const wb = XLSX.read(ab, { type: "array", cellDates: true });
+      const sheetName = wb.SheetNames.find(n => n.toLowerCase().includes("koszt")) || wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+
+      // Znajdź wiersz nagłówkowy z "vehicleId"
+      let keyRow = -1;
+      for (let i = 0; i < Math.min(10, raw.length); i++) {
+        if (raw[i].some(c => String(c).toLowerCase().includes("vehicleid") || String(c).toLowerCase().includes("pojazd id"))) {
+          keyRow = i; break;
+        }
+      }
+      if (keyRow === -1) throw new Error("Nie znaleziono nagłówka. Upewnij się że używasz szablonu VBS-Stat_Koszty.");
+
+      const keys = raw[keyRow].map(k => String(k).trim().toLowerCase());
+      const parsed = [];
+
+      for (let i = keyRow + 1; i < raw.length; i++) {
+        const row = raw[i];
+        if (!row || row.every(c => c === "" || c === null)) continue;
+
+        const get = (name) => {
+          const idx = keys.findIndex(k => k.includes(name));
+          return idx >= 0 ? row[idx] : "";
+        };
+
+        const vid      = String(get("vehicleid") || get("pojazd id") || "").trim();
+        const cat      = String(get("kategoria") || "").trim().toLowerCase();
+        const amtPLN   = parseFloat(String(get("kwota pln") || get("amountpln") || "").replace(",",".")) || null;
+        const amtEUR   = parseFloat(String(get("kwota eur") || get("amounteur") || "").replace(",",".")) || null;
+        const currency = String(get("waluta") || get("currency") || "PLN").trim().toUpperCase();
+        let   date     = get("data") || get("date") || "";
+        const note     = String(get("opis") || get("note") || "").trim();
+
+        if (!vid || !cat) continue;
+        if (!amtPLN && !amtEUR) continue;
+
+        // Normalizuj datę
+        if (date instanceof Date) {
+          date = date.toISOString().slice(0, 10);
+        } else {
+          date = String(date).trim();
+          if (!date.match(/\d{4}-\d{2}-\d{2}/)) date = "2025-01-01";
+        }
+
+        // Normalizuj kategorię
+        const catNorm = cat.replace(/[^a-ząćęłńóśźż]/gi,"").toLowerCase();
+        const catId = CAT_VALID.includes(catNorm) ? catNorm :
+          catNorm.includes("paliw") ? "paliwo" :
+          catNorm.includes("leas")  ? "leasing" :
+          catNorm.includes("napr") || catNorm.includes("serwis") ? "naprawa" :
+          catNorm.includes("ubezp") || catNorm.includes("ocpd") ? "ubezpieczenie" :
+          catNorm.includes("opon")  ? "opony" :
+          catNorm.includes("myto") || catNorm.includes("toll") || catNorm.includes("etoll") ? "myto" :
+          catNorm.includes("wyplat") || catNorm.includes("zus") ? "wyplata" : "inne";
+
+        parsed.push({
+          vehicleId:  vid,
+          category:   catId,
+          amountPLN:  currency === "PLN" ? (amtPLN || null) : null,
+          amountEUR:  currency === "EUR" ? (amtEUR || null) : null,
+          currency,
+          date,
+          note,
+        });
+      }
+
+      if (parsed.length === 0) throw new Error("Brak danych do importu. Sprawdź format pliku.");
+      setRows(parsed);
+      setStatus("preview");
+    } catch (e) {
+      setErrorMsg(e.message || "Błąd parsowania");
+      setStatus("error");
+    }
+  };
+
+  const handleFile = (e) => { const f = e.target.files?.[0]; if (f) parseFile(f); };
+
+  // Statystyki podglądu
+  const totalAmt  = rows.reduce((s,r) => s + (r.currency==="EUR" ? (r.amountEUR||0) : (r.amountPLN||0)), 0);
+  const byCat     = {};
+  const byVehicle = {};
+  rows.forEach(r => {
+    byCat[r.category] = (byCat[r.category]||0) + (r.currency==="EUR" ? (r.amountEUR||0) : (r.amountPLN||0));
+    byVehicle[r.vehicleId] = (byVehicle[r.vehicleId]||0) + (r.currency==="EUR" ? (r.amountEUR||0) : (r.amountPLN||0));
+  });
+  const currency0 = rows[0]?.currency || "PLN";
+  const vName = (id) => vehicles.find(v => v.id === id)?.plate || id;
+
+  const CAT_ICONS = {paliwo:"⛽",leasing:"🏦",naprawa:"🔧",ubezpieczenie:"🛡️",opony:"🔄",myto:"🛣️",inne:"📋",wyplata:"👤"};
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background:"rgba(0,0,0,0.45)", backdropFilter:"blur(4px)" }}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col" style={{ maxHeight:"90vh" }}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
+          <div>
+            <h3 className="text-base font-bold text-gray-900">Import kosztów z Excel</h3>
+            <p className="text-xs text-gray-400 mt-0.5">Wgraj plik VBS-Stat_Koszty_2025_EUR.xlsx</p>
+          </div>
+          <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200">✕</button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 px-6 py-5">
+          {(status === "idle" || status === "error") && (
+            <div>
+              <div onClick={() => fileRef.current?.click()}
+                className="border-2 border-dashed border-gray-200 rounded-xl p-10 text-center cursor-pointer hover:border-gray-400 hover:bg-gray-50 transition-all">
+                <div className="text-4xl mb-3">📂</div>
+                <div className="font-semibold text-gray-700 mb-1">Kliknij aby wybrać plik</div>
+                <div className="text-xs text-gray-400">Obsługiwane: .xlsx (szablon VBS-Stat_Koszty)</div>
+                <input ref={fileRef} type="file" accept=".xlsx" className="hidden" onChange={handleFile} />
+              </div>
+              {status === "error" && (
+                <div className="mt-4 px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-red-600 text-sm">⚠️ {errorMsg}</div>
+              )}
+            </div>
+          )}
+
+          {status === "parsing" && (
+            <div className="text-center py-16 text-gray-400">
+              <div className="text-3xl mb-4">⏳</div>
+              <div className="font-medium">Parsowanie pliku…</div>
+            </div>
+          )}
+
+          {status === "preview" && (
+            <div>
+              {/* KPI */}
+              <div className="grid grid-cols-3 gap-3 mb-5">
+                <div className="rounded-xl p-3 bg-gray-50 border border-gray-100">
+                  <div className="text-xs text-gray-400 mb-1">Wpisów</div>
+                  <div className="text-xl font-bold text-gray-900">{rows.length}</div>
+                </div>
+                <div className="rounded-xl p-3 bg-green-50 border border-green-100">
+                  <div className="text-xs text-gray-400 mb-1">Łącznie {currency0}</div>
+                  <div className="text-xl font-bold text-green-700">{fmt(totalAmt)}</div>
+                </div>
+                <div className="rounded-xl p-3 bg-blue-50 border border-blue-100">
+                  <div className="text-xs text-gray-400 mb-1">Pojazdów</div>
+                  <div className="text-xl font-bold text-blue-700">{Object.keys(byVehicle).length}</div>
+                </div>
+              </div>
+
+              {/* Per kategoria */}
+              <div className="mb-4">
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Per kategoria</div>
+                <div className="grid grid-cols-2 gap-2">
+                  {Object.entries(byCat).sort((a,b) => b[1]-a[1]).map(([cat, amt]) => (
+                    <div key={cat} className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-50 border border-gray-100">
+                      <span className="text-xs font-medium text-gray-700">{CAT_ICONS[cat]||"📋"} {cat}</span>
+                      <span className="text-xs font-bold text-gray-900">{fmt(amt)} {currency0}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Per pojazd */}
+              <div>
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Per pojazd</div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                  {Object.entries(byVehicle).sort().map(([vid, amt]) => (
+                    <div key={vid} className="px-3 py-2 rounded-lg bg-gray-50 border border-gray-100">
+                      <div className="text-xs font-bold text-blue-700">{vName(vid)}</div>
+                      <div className="text-xs font-semibold text-gray-900 mt-0.5">{fmt(amt)} {currency0}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-100">
+            {status === "done" ? "Zamknij" : "Anuluj"}
+          </button>
+          {status === "preview" && (
+            <button onClick={() => onImport(rows)}
+              className="px-5 py-2 rounded-lg text-sm font-semibold text-white"
+              style={{ background:"#111827" }}>
+              Importuj {rows.length} kosztów →
+            </button>
+          )}
+          {status === "error" && (
+            <button onClick={() => { setStatus("idle"); if(fileRef.current) fileRef.current.value=""; }}
+              className="px-5 py-2 rounded-lg text-sm font-semibold text-white" style={{ background:"#111827" }}>
+              Spróbuj ponownie
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
