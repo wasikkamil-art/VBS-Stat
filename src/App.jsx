@@ -294,7 +294,16 @@ function App({ user }) {
       const fr = await dbGet(SK.frachty);
       setVehicles(v  || SEED_VEHICLES);
       setCosts(c     || SEED_COSTS);
-      setCategories(ca || SEED_CATEGORIES);
+      const loadedCats = ca || SEED_CATEGORIES;
+      const REQUIRED_CATS = [
+        { id: "wyplata",       label: "Wypłata kierowcy", color: "#f43f5e", icon: "👤" },
+        { id: "ubezpieczenie", label: "Ubezpieczenie",    color: "#10b981", icon: "🛡️" },
+      ];
+      const mergedCats = [...loadedCats];
+      REQUIRED_CATS.forEach(req => {
+        if (!mergedCats.find(c => c.id === req.id)) mergedCats.push(req);
+      });
+      setCategories(mergedCats);
       setDocs(d || []);
       setImiRecords(im || []);
       setRentRecords(rn || []);
@@ -343,7 +352,17 @@ function App({ user }) {
   const updateVehicle= (updated) => { setVehicles((p) => p.map((v) => v.id === updated.id ? updated : v)); showToast("✅ Zmiany zapisane"); setEditVehicleId(null); };
   const addCategory  = (cat)   => setCategories((p) => [...p, cat]);
 
-  const catById  = (id) => categories.find((c) => c.id === id);
+  const CAT_FALLBACKS = {
+    wyplata:       { label: "Wypłata kierowcy", color: "#f43f5e", icon: "👤" },
+    ubezpieczenie: { label: "Ubezpieczenie",    color: "#10b981", icon: "🛡️" },
+    opony:         { label: "Opony",            color: "#3b82f6", icon: "🔄" },
+    myto:          { label: "Myto / Opłaty",    color: "#8b5cf6", icon: "🛣️" },
+    naprawa:       { label: "Naprawa",          color: "#ef4444", icon: "🔧" },
+    paliwo:        { label: "Paliwo",           color: "#f59e0b", icon: "⛽" },
+    leasing:       { label: "Leasing",          color: "#6366f1", icon: "🏦" },
+    inne:          { label: "Inne",             color: "#94a3b8", icon: "📋" },
+  };
+  const catById  = (id) => categories.find((c) => c.id === id) || (CAT_FALLBACKS[id] ? { id, ...CAT_FALLBACKS[id] } : null);
   const catColor = (id) => catById(id)?.color || "#94a3b8";
   const catLabel = (id) => { const c = catById(id); return c ? `${c.icon} ${c.label}` : id; };
 
@@ -683,7 +702,10 @@ function App({ user }) {
                   total: filteredCosts.filter(c => c.vehicleId === v.id).reduce((s,c) => s + (c.currency==="EUR" ? (c.amountEUR||0) : getPLN(c)/stats.rate), 0),
                 })).filter(v => v.total > 0).sort((a,b) => b.total - a.total);
 
-                const byCat = categories.map(cat => ({
+                const allCats = [...categories];
+                if (!allCats.find(c => c.id === "wyplata")) allCats.push({ id:"wyplata", label:"Wypłata kierowcy", color:"#f43f5e", icon:"👤" });
+                if (!allCats.find(c => c.id === "ubezpieczenie")) allCats.push({ id:"ubezpieczenie", label:"Ubezpieczenie", color:"#10b981", icon:"🛡️" });
+                const byCat = allCats.map(cat => ({
                   ...cat,
                   total: filteredCosts.filter(c => c.category === cat.id).reduce((s,c) => s + (c.currency==="EUR" ? (c.amountEUR||0) : getPLN(c)/stats.rate), 0),
                 })).filter(c => c.total > 0).sort((a,b) => b.total - a.total);
