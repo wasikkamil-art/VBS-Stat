@@ -293,13 +293,23 @@ function App({ user }) {
       const rn = await dbGet(SK.rent);
       const fr = await dbGet(SK.frachty);
       setVehicles(v  || SEED_VEHICLES);
-      setCosts(c     || SEED_COSTS);
+      // Patch kategorii — nego→myto, naprawa nie zawiera nego
+      const rawCosts = c || SEED_COSTS;
+      const patchedCosts = rawCosts.map(cost => {
+        const n = (cost.note || "").toLowerCase();
+        if (n.includes("nego") || n.includes("negometal")) return { ...cost, category: "myto" };
+        return cost;
+      });
+      setCosts(patchedCosts);
       const loadedCats = ca || SEED_CATEGORIES;
       const REQUIRED_CATS = [
         { id: "wyplata",       label: "Wynagrodzenie", color: "#f43f5e", icon: "👤" },
         { id: "ubezpieczenie", label: "Ubezpieczenie",    color: "#10b981", icon: "🛡️" },
       ];
-      const mergedCats = [...loadedCats];
+      const mergedCats = [...loadedCats].map(cat => {
+        if (cat.id === "wyplata") return { ...cat, label: "Wynagrodzenie", icon: "👤", color: "#f43f5e" };
+        return cat;
+      });
       REQUIRED_CATS.forEach(req => {
         if (!mergedCats.find(c => c.id === req.id)) mergedCats.push(req);
       });
@@ -4408,8 +4418,8 @@ function CostsImportModal({ vehicles, categories, onImport, onClose }) {
           catNorm.includes("napr") || catNorm.includes("serwis") ? "naprawa" :
           catNorm.includes("ubezp") || catNorm.includes("ocpd") ? "ubezpieczenie" :
           catNorm.includes("opon")  ? "opony" :
-          catNorm.includes("myto") || catNorm.includes("toll") || catNorm.includes("etoll") ? "myto" :
-          catNorm.includes("wyplat") || catNorm.includes("zus") ? "wyplata" : "inne";
+          catNorm.includes("myto") || catNorm.includes("toll") || catNorm.includes("etoll") || catNorm.includes("nego") || catNorm.includes("autostr") ? "myto" :
+          catNorm.includes("wyplat") || catNorm.includes("zus") || catNorm.includes("podatek") ? "wyplata" : "inne";
 
         parsed.push({
           vehicleId:  vid,
