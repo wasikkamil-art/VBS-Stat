@@ -280,6 +280,7 @@ function App({ user }) {
   const [filterVehicle, setFilterVehicle]     = useState("all");
   const [filterCat, setFilterCat]             = useState("all");
   const [filterMonth, setFilterMonth]         = useState("all");
+  const [filterYear, setCostFilterYear]       = useState("all");
 
   // ── LOAD ──
   useEffect(() => {
@@ -390,8 +391,9 @@ function App({ user }) {
     if (filterVehicle !== "all" && c.vehicleId !== filterVehicle) return false;
     if (filterCat     !== "all" && c.category  !== filterCat)     return false;
     if (filterMonth   !== "all" && !c.date?.startsWith(filterMonth)) return false;
+    if (filterYear    !== "all" && !c.date?.startsWith(filterYear))  return false;
     return true;
-  }).sort((a, b) => b.date?.localeCompare(a.date)), [costs, filterVehicle, filterCat, filterMonth]);
+  }).sort((a, b) => b.date?.localeCompare(a.date)), [costs, filterVehicle, filterCat, filterMonth, filterYear]);
 
   const months = useMemo(() => {
     const s = new Set(costs.map((c) => c.date?.slice(0, 7)).filter(Boolean));
@@ -650,23 +652,109 @@ function App({ user }) {
                 </div>
               </div>
 
-              <div className="flex flex-wrap gap-2 mb-4">
+              {/* ── FILTR ROK — szybkie przyciski ── */}
+              <div className="flex gap-2 mb-3">
+                {["all","2025","2026"].map(y => (
+                  <button key={y} onClick={() => { setCostFilterYear(y); setFilterMonth("all"); }}
+                    className="px-4 py-1.5 rounded-lg text-sm font-semibold transition-all"
+                    style={{
+                      background: filterYear === y ? "#111827" : "#f3f4f6",
+                      color: filterYear === y ? "#fff" : "#6b7280",
+                    }}>
+                    {y === "all" ? "Wszystkie lata" : y}
+                  </button>
+                ))}
+              </div>
+
+              {/* ── FILTRY ── */}
+              <div className="flex flex-wrap gap-2 mb-5">
                 <FSel value={filterVehicle} onChange={setFilterVehicle}
                   options={[{ value: "all", label: "Wszystkie pojazdy" }, ...vehicles.map((v) => ({ value: v.id, label: v.plate }))]} />
                 <FSel value={filterCat} onChange={setFilterCat}
                   options={[{ value: "all", label: "Wszystkie kategorie" }, ...categories.map((c) => ({ value: c.id, label: `${c.icon} ${c.label}` }))]} />
                 <FSel value={filterMonth} onChange={setFilterMonth}
-                  options={[{ value: "all", label: "Wszystkie miesiące" }, ...months.map((m) => ({ value: m, label: m }))]} />
+                  options={[{ value: "all", label: "Wszystkie miesiące" }, ...months.filter(m => filterYear === "all" || m.startsWith(filterYear)).map((m) => ({ value: m, label: m }))]} />
               </div>
 
-              <div className="flex items-center justify-between px-4 py-3 rounded-xl mb-4"
-                style={{ background: "#f9fafb", border: "1px solid #e5e7eb" }}>
-                <span className="text-sm text-gray-500">Suma ({filteredCosts.length} wpisów)</span>
-                <div>
-                  <span className="font-bold text-gray-900">{fmtEUR(filteredTotal / stats.rate)}</span>
-                  <span className="text-xs text-gray-400 ml-2">{fmtPLN(filteredTotal)}</span>
-                </div>
-              </div>
+              {/* ── MINI DASHBOARD ── */}
+              {(() => {
+                const byVehicle = vehicles.map(v => ({
+                  ...v,
+                  total: filteredCosts.filter(c => c.vehicleId === v.id).reduce((s,c) => s + (c.currency==="EUR" ? (c.amountEUR||0) : getPLN(c)/stats.rate), 0),
+                })).filter(v => v.total > 0).sort((a,b) => b.total - a.total);
+
+                const byCat = categories.map(cat => ({
+                  ...cat,
+                  total: filteredCosts.filter(c => c.category === cat.id).reduce((s,c) => s + (c.currency==="EUR" ? (c.amountEUR||0) : getPLN(c)/stats.rate), 0),
+                })).filter(c => c.total > 0).sort((a,b) => b.total - a.total);
+
+                const totalEUR = filteredCosts.reduce((s,c) => s + (c.currency==="EUR" ? (c.amountEUR||0) : getPLN(c)/stats.rate), 0);
+                const totalPLN = filteredTotal;
+
+                return (
+                  <div className="mb-5 space-y-3">
+                    {/* KPI */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="bg-white rounded-xl p-3 border border-gray-100">
+                        <div className="text-xs text-gray-400 mb-1">Łącznie EUR</div>
+                        <div className="text-lg font-bold text-gray-900">{totalEUR.toLocaleString("pl-PL",{minimumFractionDigits:2,maximumFractionDigits:2})} €</div>
+                      </div>
+                      <div className="bg-white rounded-xl p-3 border border-gray-100">
+                        <div className="text-xs text-gray-400 mb-1">Wpisów</div>
+                        <div className="text-lg font-bold text-gray-900">{filteredCosts.length}</div>
+                      </div>
+                      <div className="bg-white rounded-xl p-3 border border-gray-100">
+                        <div className="text-xs text-gray-400 mb-1">Najdroższe auto</div>
+                        <div className="text-sm font-bold text-gray-900 truncate">{byVehicle[0] ? `${vehicles.find(v=>v.id===byVehicle[0].id)?.plate} · ${byVehicle[0].total.toLocaleString("pl-PL",{maximumFractionDigits:0})} €` : "—"}</div>
+                      </div>
+                      <div className="bg-white rounded-xl p-3 border border-gray-100">
+                        <div className="text-xs text-gray-400 mb-1">Główna kategoria</div>
+                        <div className="text-sm font-bold text-gray-900 truncate">{byCat[0] ? `${byCat[0].icon} ${byCat[0].label}` : "—"}</div>
+                      </div>
+                    </div>
+
+                    {/* Paski per pojazd */}
+                    <div className="bg-white rounded-xl p-4 border border-gray-100">
+                      <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Koszty per pojazd</div>
+                      <div className="space-y-2">
+                        {byVehicle.map(v => {
+                          const pct = totalEUR > 0 ? (v.total / totalEUR * 100) : 0;
+                          return (
+                            <div key={v.id} className="flex items-center gap-3">
+                              <div className="text-xs font-medium text-gray-600 w-24 flex-shrink-0">{v.plate}</div>
+                              <div className="flex-1 h-2 rounded-full bg-gray-100 overflow-hidden">
+                                <div className="h-full rounded-full" style={{ width:`${pct}%`, background:"#111827" }} />
+                              </div>
+                              <div className="text-xs font-semibold text-gray-700 w-20 text-right">{v.total.toLocaleString("pl-PL",{maximumFractionDigits:0})} €</div>
+                              <div className="text-xs text-gray-400 w-10 text-right">{pct.toFixed(0)}%</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Paski per kategoria */}
+                    <div className="bg-white rounded-xl p-4 border border-gray-100">
+                      <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Struktura kosztów</div>
+                      <div className="space-y-2">
+                        {byCat.map(cat => {
+                          const pct = totalEUR > 0 ? (cat.total / totalEUR * 100) : 0;
+                          return (
+                            <div key={cat.id} className="flex items-center gap-3">
+                              <div className="text-xs font-medium text-gray-600 w-28 flex-shrink-0">{cat.icon} {cat.label}</div>
+                              <div className="flex-1 h-2 rounded-full bg-gray-100 overflow-hidden">
+                                <div className="h-full rounded-full" style={{ width:`${pct}%`, background: cat.color || "#111827" }} />
+                              </div>
+                              <div className="text-xs font-semibold text-gray-700 w-20 text-right">{cat.total.toLocaleString("pl-PL",{maximumFractionDigits:0})} €</div>
+                              <div className="text-xs text-gray-400 w-10 text-right">{pct.toFixed(0)}%</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
                 <div className="hidden md:grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-medium text-gray-400 uppercase tracking-wider">
