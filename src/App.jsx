@@ -6,6 +6,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 
 // ─── STORAGE HELPERS (per-user, per-key documents) ───────────────────────────
 // Każdy klucz to osobny dokument: fleet/{uid}/{key}
@@ -22,8 +23,9 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-const db   = getFirestore(app);
-const auth = getAuth(app);
+const db      = getFirestore(app);
+const auth    = getAuth(app);
+const storage = getStorage(app);
 
 // ─── STORAGE (Firebase Firestore) ────────────────────────────────────────────
 // Dane w jednym dokumencie fleet/data (merge strategy)
@@ -4066,6 +4068,135 @@ function MSelect({ value, onChange, children }) {
 }
 
 
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DOC UPLOAD CELL — wgrywanie FV / Zlecenia z AI odczytem
+// ═══════════════════════════════════════════════════════════════════════════════
+function DocUploadCell({ frachtId, docType, existingUrl, onUploaded }) {
+  const [status, setStatus] = useState("idle"); // idle | uploading | reading | done | error
+  const [errorMsg, setErrorMsg] = useState("");
+  const fileRef = useRef(null);
+  const isFV = docType === "fv";
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setStatus("uploading");
+    setErrorMsg("");
+    try {
+      // 1. Upload do Firebase Storage
+      const path = `documents/${frachtId}/${docType}_${Date.now()}_${file.name}`;
+      const sRef = storageRef(storage, path);
+      await uploadBytes(sRef, file);
+      const url = await getDownloadURL(sRef);
+
+      // 2. Jeśli FV — odczytaj przez AI (Claude Vision)
+      if (isFV) {
+        setStatus("reading");
+        const base64 = await new Promise((res, rej) => {
+          const reader = new FileReader();
+          reader.onload = () => res(reader.result.split(",")[1]);
+          reader.onerror = rej;
+          reader.readAsDataURL(file);
+        });
+
+        const isPDF = file.type === "application/pdf";
+        const mediaType = isPDF ? "application/pdf" : file.type;
+
+        const body = {
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1000,
+          messages: [{
+            role: "user",
+            content: [
+              {
+                type: isPDF ? "document" : "image",
+                source: { type: "base64", media_type: mediaType, data: base64 },
+              },
+              {
+                type: "text",
+                text: `Przeanalizuj ten dokument (faktura/invoice). Wyodrębnij następujące dane i odpowiedz TYLKO w formacie JSON, bez żadnego dodatkowego tekstu:
+{
+  "nrFV": "numer faktury",
+  "klient": "nazwa klienta/firmy",
+  "cenaEur": "kwota w EUR jako liczba lub null",
+  "dataWyslania": "data wystawienia YYYY-MM-DD lub null",
+  "terminPlatnosci": "termin płatności YYYY-MM-DD lub null"
+}
+Jeśli nie możesz odczytać danego pola, wpisz null.`,
+              }
+            ]
+          }]
+        };
+
+        const resp = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await resp.json();
+        const text = data.content?.find(b => b.type === "text")?.text || "{}";
+        let fields = {};
+        try {
+          const clean = text.replace(/```json|```/g, "").trim();
+          const parsed = JSON.parse(clean);
+          // Tylko niepuste pola
+          if (parsed.nrFV)             fields.nrFV = parsed.nrFV;
+          if (parsed.klient)            fields.klient = parsed.klient;
+          if (parsed.cenaEur != null)   fields.cenaEur = String(parsed.cenaEur);
+          if (parsed.dataWyslania)      fields.dataWyslania = parsed.dataWyslania;
+          if (parsed.terminPlatnosci)   fields.terminPlatnosci = parsed.terminPlatnosci;
+        } catch {}
+        onUploaded(url, fields);
+      } else {
+        onUploaded(url, {});
+      }
+      setStatus("done");
+    } catch (err) {
+      console.error("DocUpload error", err);
+      setErrorMsg(err.message || "Błąd");
+      setStatus("error");
+    }
+    // reset input
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  if (existingUrl) {
+    return (
+      <div className="flex items-center gap-1">
+        <a href={existingUrl} target="_blank" rel="noopener noreferrer"
+          className="text-xs px-2 py-1 rounded-lg font-semibold"
+          style={{ background: isFV ? "#f0fdf4" : "#eff6ff", color: isFV ? "#166534" : "#1d4ed8" }}>
+          {isFV ? "📄 FV" : "📋 Zlec."}
+        </a>
+        <button onClick={() => fileRef.current?.click()} title="Zastąp plik"
+          className="text-gray-300 hover:text-gray-500 text-xs">↺</button>
+        <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={handleFile} />
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {status === "idle" && (
+        <button onClick={() => fileRef.current?.click()}
+          className="text-xs px-2 py-1 rounded-lg border border-dashed transition-all font-medium"
+          style={{ borderColor: isFV ? "#86efac" : "#93c5fd", color: isFV ? "#16a34a" : "#2563eb", background: "white" }}>
+          {isFV ? "+ FV" : "+ Zlec."}
+        </button>
+      )}
+      {status === "uploading" && <span className="text-xs text-gray-400 animate-pulse">⬆️ wysyłam…</span>}
+      {status === "reading"   && <span className="text-xs text-amber-500 animate-pulse">🤖 AI czyta…</span>}
+      {status === "done"      && <span className="text-xs text-green-600">✅ zapisano</span>}
+      {status === "error"     && (
+        <button onClick={() => setStatus("idle")} title={errorMsg}
+          className="text-xs text-red-500 hover:underline">⚠️ błąd</button>
+      )}
+      <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={handleFile} />
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // FV / PŁATNOŚCI TAB
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -4215,14 +4346,14 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-gray-100 text-gray-400 uppercase bg-gray-50 text-xs">
-              {["Data zlec.","Skąd","Do","Klient","Cena EUR","Nr FV","Wysłano FV","Termin płatn.","Status FV","Akcje"].map(h => (
+              {["Data zlec.","Klient","Cena EUR","Nr FV","Wysłano FV","Termin płatn.","Status FV","📄 FV","📋 Zlecenie"].map(h => (
                 <th key={h} className="px-3 py-2.5 text-left whitespace-nowrap font-semibold">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td colSpan={10} className="text-center py-10 text-gray-400">Brak faktur dla wybranych filtrów</td></tr>
+              <tr><td colSpan={9} className="text-center py-10 text-gray-400">Brak faktur dla wybranych filtrów</td></tr>
             )}
             {rows.map(r => {
               const st = getStatus(r);
@@ -4235,8 +4366,6 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                 <tr key={r.id} className="border-b border-gray-50 transition-colors"
                   style={{ background: isOverdue ? "#fff7f7" : "white" }}>
                   <td className="px-3 py-2.5 whitespace-nowrap text-gray-700">{r.dataZlecenia||"-"}</td>
-                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-500">{r.skad||"-"}</td>
-                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-500">{r.dokod||"-"}</td>
                   <td className="px-3 py-2.5 max-w-36 truncate font-medium text-gray-800">{r.klient||"-"}</td>
                   <td className="px-3 py-2.5 text-right font-bold text-green-700 whitespace-nowrap">{r.cenaEur ? fmt(r.cenaEur) : "-"}</td>
                   <td className="px-3 py-2.5 whitespace-nowrap text-gray-600 font-mono text-xs">{r.nrFV||"-"}</td>
@@ -4262,7 +4391,20 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                     </select>
                   </td>
                   <td className="px-3 py-2.5 whitespace-nowrap">
-                    <span className="text-xs text-gray-400 italic">CMR / FV wkrótce</span>
+                    <DocUploadCell
+                      frachtId={r.id}
+                      docType="fv"
+                      existingUrl={r.urlFV}
+                      onUploaded={(url, fields) => onUpdate(r.id, { urlFV: url, ...fields })}
+                    />
+                  </td>
+                  <td className="px-3 py-2.5 whitespace-nowrap">
+                    <DocUploadCell
+                      frachtId={r.id}
+                      docType="zlecenie"
+                      existingUrl={r.urlZlecenie}
+                      onUploaded={(url) => onUpdate(r.id, { urlZlecenie: url })}
+                    />
                   </td>
                 </tr>
               );
