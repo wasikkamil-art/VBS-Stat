@@ -408,6 +408,7 @@ function App({ user }) {
   return (
     <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", color: "#111827" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" async />
 
       {/* TOAST */}
       {toast && (
@@ -886,15 +887,11 @@ function App({ user }) {
               onAdd={(r) => setFrachtyList(p => [{ ...r, id: uid() }, ...p])}
               onDelete={(id) => setFrachtyList(p => p.filter(r => r.id !== id))}
               onUpdate={(id, data) => setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r))}
-            />
-          )}
-          {tab === "frachty" && (
-            <FrachtyTab
-              frachtyList={frachtyList}
-              vehicles={vehicles}
-              onAdd={(r) => setFrachtyList(p => [{ ...r, id: uid() }, ...p])}
-              onDelete={(id) => setFrachtyList(p => p.filter(r => r.id !== id))}
-              onUpdate={(id, data) => setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r))}
+              onBulkAdd={(rows) => {
+                const withIds = rows.map(r => ({ ...r, id: uid() }));
+                setFrachtyList(p => [...p, ...withIds]);
+                showToast(`✅ Zaimportowano ${withIds.length} frachtów`);
+              }}
             />
           )}
           {tab === "imi" && (
@@ -4060,10 +4057,11 @@ function MSelect({ value, onChange, children }) {
   );
 }
 
-function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate }) {
+function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAdd }) {
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
+  const [showImport, setShowImport] = useState(false);
   const [filterMonth, setFilterMonth] = useState(new Date().getMonth());
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
   const fmt = (n) => n ? parseFloat(n).toLocaleString("pl-PL",{minimumFractionDigits:2,maximumFractionDigits:2}) : "-";
@@ -4079,8 +4077,18 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate }) {
     const totalKm = frachtyList.reduce((s,r) => s + (parseInt(r.kmLadowne)||0), 0);
     return (
       <div className="p-4 md:p-6">
+        {showImport && (
+          <FrachtyImportModal
+            vehicles={vehicles}
+            onImport={(rows) => { onBulkAdd(rows); setTimeout(() => setShowImport(false), 1500); }}
+            onClose={() => setShowImport(false)}
+          />
+        )}
         <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
           <div><h2 className="text-xl font-bold text-gray-900">Frachty</h2><p className="text-sm text-gray-400 mt-0.5">{frachtyList.length} wpisow lacznie</p></div>
+          <button onClick={() => setShowImport(true)} className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 flex items-center gap-2">
+            📥 Importuj z Excel
+          </button>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
           {[["Frachtow",frachtyList.length,"#6366f1"],["Lacznie EUR",fmt(totalAll),"#16a34a"],["KM ladowne",totalKm.toLocaleString("pl-PL"),"#0ea5e9"],["Pojazdow",vehicles.length,"#f59e0b"]].map(([label,value,color]) => (
@@ -4198,6 +4206,252 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate }) {
         </table>
       </div>
       {showForm && <FrachtyModal record={editRecord} vehicles={vehicles} defaultVehicleId={selectedVehicle} onSave={(data) => { if(editId) onUpdate(editId,data); else onAdd(data); setShowForm(false); setEditId(null); }} onClose={() => { setShowForm(false); setEditId(null); }} />}
+    </div>
+  );
+}
+
+
+// ─── FRACHTY IMPORT MODAL ────────────────────────────────────────────────────
+function FrachtyImportModal({ vehicles, onImport, onClose }) {
+  const [status, setStatus] = useState("idle"); // idle | parsing | preview | importing | done | error
+  const [rows, setRows]     = useState([]);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [skipDupes, setSkipDupes] = useState(true);
+  const fileRef = useRef(null);
+
+  const TEMPLATE_KEYS = [
+    "vehicleId","dataZlecenia","dataZaladunku","dataRozladunku",
+    "godzZaladunku","godzRozladunku","skad","zaladunekKod","dokod",
+    "klient","cenaEur","kmPodjazd","kmLadowne","kmWszystkie",
+    "eurKmLad","eurKmWsz","wagaLadunku","dyspozytor",
+    "nrFV","dataWyslania","terminPlatnosci","uwagi"
+  ];
+  const FORMULA_KEYS = new Set(["kmWszystkie","eurKmLad","eurKmWsz"]);
+
+  const parseXLSX = async (file) => {
+    setStatus("parsing");
+    setErrorMsg("");
+    try {
+      const XLSX = window.XLSX || await new Promise((res, rej) => {
+        if (window.XLSX) { res(window.XLSX); return; }
+        const s = document.createElement("script");
+        s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+        s.onload = () => res(window.XLSX);
+        s.onerror = () => rej(new Error("Nie udało się załadować biblioteki XLSX"));
+        document.head.appendChild(s);
+      });
+      const ab = await file.arrayBuffer();
+      const wb = XLSX.read(ab, { type: "array", cellDates: true });
+
+      // Szukaj arkusza IMPORT
+      const sheetName = wb.SheetNames.find(n => n === "IMPORT") || wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+
+      // Znajdź wiersz z kluczami (wiersz 3 w szablonie = indeks 2)
+      let keyRow = -1;
+      for (let i = 0; i < Math.min(10, raw.length); i++) {
+        if (raw[i].includes("vehicleId")) { keyRow = i; break; }
+      }
+      if (keyRow === -1) throw new Error("Nie znaleziono wiersza z kluczami (vehicleId). Upewnij się że używasz właściwego szablonu.");
+
+      const keys = raw[keyRow];
+      const parsed = [];
+      for (let i = keyRow + 2; i < raw.length; i++) { // +2 bo wiersz 4 to labele
+        const rowArr = raw[i];
+        if (!rowArr || rowArr.every(c => c === "" || c === null || c === undefined)) continue;
+
+        const obj = {};
+        keys.forEach((k, ci) => {
+          if (!k || FORMULA_KEYS.has(k)) return;
+          let val = rowArr[ci];
+          if (val === null || val === undefined) val = "";
+          // Daty z XLSX mogą być obiektami Date
+          if (val instanceof Date) {
+            const y = val.getFullYear();
+            if (y < 2000 || y > 2035) { val = ""; }
+            else val = val.toISOString().slice(0, 10);
+          } else {
+            val = String(val).trim();
+            if (val.toLowerCase() === "nan" || val.toLowerCase() === "none") val = "";
+          }
+          obj[k] = val;
+        });
+
+        // Walidacja minimalna: vehicleId + cenaEur
+        if (!obj.vehicleId || !obj.cenaEur || parseFloat(obj.cenaEur) <= 0) continue;
+        // Przelicz km wszystkie
+        const kp = parseInt(obj.kmPodjazd) || 0;
+        const kl = parseInt(obj.kmLadowne) || 0;
+        if (kp + kl > 0) obj.kmWszystkie = String(kp + kl);
+        parsed.push(obj);
+      }
+
+      if (parsed.length === 0) throw new Error("Brak danych do importu. Sprawdź czy arkusz IMPORT zawiera wiersze z vehicleId i cenaEur.");
+      setRows(parsed);
+      setStatus("preview");
+    } catch (e) {
+      setErrorMsg(e.message || "Błąd parsowania pliku");
+      setStatus("error");
+    }
+  };
+
+  const handleFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    parseXLSX(file);
+  };
+
+  const doImport = () => {
+    setStatus("importing");
+    onImport(rows);
+    setStatus("done");
+  };
+
+  const vName = (id) => {
+    const v = vehicles.find(v => v.id === id);
+    return v ? v.plate : id;
+  };
+
+  const fmt = (n) => n ? parseFloat(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-";
+
+  const byVehicle = {};
+  rows.forEach(r => {
+    if (!byVehicle[r.vehicleId]) byVehicle[r.vehicleId] = { count: 0, sum: 0 };
+    byVehicle[r.vehicleId].count++;
+    byVehicle[r.vehicleId].sum += parseFloat(r.cenaEur) || 0;
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)" }}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col" style={{ maxHeight: "88vh" }}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
+          <div>
+            <h3 className="text-base font-bold text-gray-900">Import frachtów z Excel</h3>
+            <p className="text-xs text-gray-400 mt-0.5">Wgraj plik .xlsx ze szablonu VBS-Stat</p>
+          </div>
+          <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs hover:bg-gray-200">✕</button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 px-6 py-5">
+
+          {/* IDLE / DROP ZONE */}
+          {(status === "idle" || status === "error") && (
+            <div>
+              <div
+                onClick={() => fileRef.current?.click()}
+                className="border-2 border-dashed border-gray-200 rounded-xl p-10 text-center cursor-pointer hover:border-gray-400 hover:bg-gray-50 transition-all"
+              >
+                <div className="text-4xl mb-3">📂</div>
+                <div className="font-semibold text-gray-700 mb-1">Kliknij aby wybrać plik</div>
+                <div className="text-xs text-gray-400">Obsługiwane: .xlsx (szablon VBS-Stat_Frachty_Import)</div>
+                <input ref={fileRef} type="file" accept=".xlsx" className="hidden" onChange={handleFile} />
+              </div>
+              {status === "error" && (
+                <div className="mt-4 px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-red-600 text-sm">
+                  ⚠️ {errorMsg}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* PARSING */}
+          {status === "parsing" && (
+            <div className="text-center py-16 text-gray-400">
+              <div className="text-3xl mb-4 animate-spin">⏳</div>
+              <div className="font-medium">Parsowanie pliku…</div>
+            </div>
+          )}
+
+          {/* PREVIEW */}
+          {status === "preview" && (
+            <div>
+              {/* Podsumowanie per pojazd */}
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
+                {Object.entries(byVehicle).map(([vid, stat]) => (
+                  <div key={vid} className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
+                    <div className="font-bold text-sm text-gray-900">{vName(vid)}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">{stat.count} frachtów · {fmt(stat.sum)} €</div>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-semibold text-gray-700">Podgląd danych ({rows.length} wierszy)</div>
+              </div>
+              {/* Tabela podglądu */}
+              <div className="overflow-x-auto rounded-xl border border-gray-100">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-100">
+                      {["Pojazd","Data zlec.","Klient","Skąd","Dokąd","EUR","KM lad.","Nr FV","Dyspozytor"].map(h => (
+                        <th key={h} className="px-3 py-2 text-left font-semibold text-gray-500">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.slice(0, 50).map((r, i) => (
+                      <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
+                        <td className="px-3 py-1.5 font-semibold text-blue-700">{vName(r.vehicleId)}</td>
+                        <td className="px-3 py-1.5 text-gray-500">{r.dataZlecenia || "-"}</td>
+                        <td className="px-3 py-1.5 max-w-32 truncate">{r.klient || "-"}</td>
+                        <td className="px-3 py-1.5 text-gray-500">{r.skad || "-"}</td>
+                        <td className="px-3 py-1.5 text-gray-500">{r.dokod || "-"}</td>
+                        <td className="px-3 py-1.5 text-right font-semibold text-green-700">{fmt(r.cenaEur)}</td>
+                        <td className="px-3 py-1.5 text-right text-gray-500">{r.kmLadowne || "-"}</td>
+                        <td className="px-3 py-1.5 text-gray-400">{r.nrFV || "-"}</td>
+                        <td className="px-3 py-1.5 text-gray-400">{r.dyspozytor || "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {rows.length > 50 && (
+                  <div className="text-xs text-gray-400 text-center py-2">… i {rows.length - 50} więcej wierszy</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* IMPORTING */}
+          {status === "importing" && (
+            <div className="text-center py-16 text-gray-400">
+              <div className="text-3xl mb-4">💾</div>
+              <div className="font-medium">Zapisywanie do Firebase…</div>
+            </div>
+          )}
+
+          {/* DONE */}
+          {status === "done" && (
+            <div className="text-center py-16">
+              <div className="text-4xl mb-4">✅</div>
+              <div className="font-bold text-gray-900 text-lg mb-1">Import zakończony!</div>
+              <div className="text-sm text-gray-400">Zaimportowano {rows.length} frachtów</div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-100">
+            {status === "done" ? "Zamknij" : "Anuluj"}
+          </button>
+          {status === "preview" && (
+            <button
+              onClick={doImport}
+              className="px-5 py-2 rounded-lg text-sm font-semibold text-white"
+              style={{ background: "#111827" }}
+            >
+              Importuj {rows.length} frachtów →
+            </button>
+          )}
+          {status === "error" && (
+            <button onClick={() => { setStatus("idle"); fileRef.current && (fileRef.current.value = ""); }}
+              className="px-5 py-2 rounded-lg text-sm font-semibold text-white" style={{ background: "#111827" }}>
+              Spróbuj ponownie
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
