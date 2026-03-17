@@ -4410,8 +4410,10 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                   </td>
                   <td className="px-3 py-2.5 whitespace-nowrap">
                     <button onClick={() => setEditFVId(r.id)}
-                      className="px-2 py-1 rounded-lg text-xs bg-gray-100 hover:bg-gray-200 font-medium text-gray-600">
-                      ed.
+                      className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:bg-indigo-50"
+                      style={{background:"#f3f4f6"}}
+                      title="Edytuj">
+                      ✏️
                     </button>
                   </td>
                 </tr>
