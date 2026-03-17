@@ -4585,11 +4585,11 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-gray-100 text-gray-400 uppercase bg-gray-50">
-              {["#","Data zlec.","Data zal.","Data rozl.","Skad","Zaladunek","Rozladunek","Klient","Cena EUR","KM podj.","KM lad.","KM wsz.","EUR/km lad.","EUR/km wsz.","Waga kg","Dyspozytor","Nr FV","Uwagi",""].map(h => <th key={h} className="px-2 py-2.5 text-left whitespace-nowrap">{h}</th>)}
+              {["#","Data zlec.","Data zal.","Data rozl.","Zaladunek","Rozladunek","Klient","Cena EUR","KM podj.","KM lad.","KM wsz.","EUR/km lad.","EUR/km wsz.","Waga kg","Dyspozytor","Nr FV","Uwagi",""].map(h => <th key={h} className="px-2 py-2.5 text-left whitespace-nowrap">{h}</th>)}
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && <tr><td colSpan={19} className="text-center py-10 text-gray-400">Brak frachtow w {miesiaceL[filterMonth]} {filterYear}</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={18} className="text-center py-10 text-gray-400">Brak frachtow w {miesiaceL[filterMonth]} {filterYear}</td></tr>}
             {rows.map((r,idx) => {
               const eurKmLad = r.kmLadowne && r.cenaEur ? (parseFloat(r.cenaEur)/parseInt(r.kmLadowne)).toFixed(2) : "-";
               const eurKmWsz = r.kmWszystkie && r.cenaEur ? (parseFloat(r.cenaEur)/parseInt(r.kmWszystkie)).toFixed(2) : "-";
@@ -4605,8 +4605,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
                   <td className="px-2 py-2 whitespace-nowrap">{r.dataZlecenia||"-"}</td>
                   <td className="px-2 py-2 whitespace-nowrap text-gray-500">{r.dataZaladunku||"-"}</td>
                   <td className="px-2 py-2 whitespace-nowrap text-gray-500">{r.dataRozladunku||"-"}</td>
-                  <td className="px-2 py-2 whitespace-nowrap">{r.skad||"-"}</td>
-                  <td className="px-2 py-2 whitespace-nowrap">{r.zaladunekKod||"-"}</td>
+                  <td className="px-2 py-2 whitespace-nowrap">{[r.skad, r.zaladunekKod].filter(Boolean).join(" · ")||"-"}</td>
                   <td className="px-2 py-2 whitespace-nowrap">{r.dokod||"-"}</td>
                   <td className="px-2 py-2 whitespace-nowrap max-w-24 truncate">{r.klient||"-"}</td>
                   <td className="px-2 py-2 text-right font-semibold text-green-700 whitespace-nowrap">{r.cenaEur ? fmt(r.cenaEur) : "-"}</td>
@@ -4621,7 +4620,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
                   <td className="px-2 py-2 text-gray-500 max-w-24 truncate">{r.uwagi||""}</td>
                   <td className="px-2 py-2 whitespace-nowrap">
                     <div className="flex gap-1">
-                      <button onClick={() => { setEditId(r.id); setShowForm(true); }} className="px-2 py-1 rounded text-xs bg-gray-100 hover:bg-gray-200">ed.</button>
+                      <button onClick={() => { setEditId(r.id); setShowForm(true); }} className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:bg-indigo-50" style={{background:"#f3f4f6"}} title="Edytuj">✏️</button>
                       <button onClick={() => { if(window.confirm("Usunac?")) onDelete(r.id); }} className="px-2 py-1 rounded text-xs bg-red-50 hover:bg-red-100 text-red-500">x</button>
                     </div>
                   </td>
@@ -4630,7 +4629,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
             })}
             {rows.length > 0 && (
               <tr className="bg-gray-50 font-bold border-t-2 border-gray-200">
-                <td colSpan={8} className="px-2 py-2.5 text-gray-700 text-xs uppercase">SUMA</td>
+                <td colSpan={7} className="px-2 py-2.5 text-gray-700 text-xs uppercase">SUMA</td>
                 <td className="px-2 py-2.5 text-right text-green-700">{fmt(totalCena)}</td>
                 <td></td>
                 <td className="px-2 py-2.5 text-right text-blue-700">{totalKmLad.toLocaleString("pl-PL")}</td>
@@ -5045,10 +5044,9 @@ function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }
             <div><label className={lbl}>Godz. zaladunku</label><input type="time" value={f.godzZaladunku} onChange={e => set("godzZaladunku",e.target.value)} className={inp} /></div>
             <div><label className={lbl}>Godz. rozladunku</label><input type="time" value={f.godzRozladunku} onChange={e => set("godzRozladunku",e.target.value)} className={inp} /></div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div><label className={lbl}>Skad</label><input placeholder="PL 25-650" value={f.skad} onChange={e => set("skad",e.target.value)} className={inp} /></div>
-            <div><label className={lbl}>Zaladunek</label><input placeholder="DE 67304" value={f.zaladunekKod} onChange={e => set("zaladunekKod",e.target.value)} className={inp} /></div>
-            <div><label className={lbl}>Rozladunek</label><input placeholder="FR 93000" value={f.dokod} onChange={e => set("dokod",e.target.value)} className={inp} /></div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div><label className={lbl}>Zaladunek (kod)</label><input placeholder="DE 67304" value={f.zaladunekKod} onChange={e => set("zaladunekKod",e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>Rozladunek (kod)</label><input placeholder="FR 93000" value={f.dokod} onChange={e => set("dokod",e.target.value)} className={inp} /></div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div><label className={lbl}>Klient</label><input placeholder="nazwa klienta" value={f.klient} onChange={e => set("klient",e.target.value)} className={inp} /></div>
