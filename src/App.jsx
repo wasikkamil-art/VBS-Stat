@@ -601,8 +601,8 @@ function App({ user }) {
                       const driverName = (v.driverHistory||[]).find(d => !d.to)?.name || "—";
                       // Ostatni fracht dla tego pojazdu
                       const vFrachty = frachtyList
-                        .filter(r => r.vehicleId === v.id && r.dataZalad)
-                        .sort((a,b) => (b.dataZalad||"").localeCompare(a.dataZalad||""));
+                        .filter(r => r.vehicleId === v.id && r.dataZaladunku)
+                        .sort((a,b) => (b.dataZaladunku||"").localeCompare(a.dataZaladunku||""));
                       const lastF = vFrachty[0] || null;
 
                       // Logika statusów na podstawie dat frachtów
@@ -617,8 +617,8 @@ function App({ user }) {
 
                       // Szukaj aktywnego frachtu (zał <= dziś <= rozł)
                       const activeF = vFrachty.find(r => {
-                        const zal = r.dataZalad ? new Date(r.dataZalad) : null;
-                        const rozl = r.dataRozl ? new Date(r.dataRozl) : null;
+                        const zal = r.dataZaladunku ? new Date(r.dataZaladunku) : null;
+                        const rozl = r.dataRozladunku ? new Date(r.dataRozladunku) : null;
                         if (!zal || !rozl) return false;
                         zal.setHours(0,0,0,0); rozl.setHours(0,0,0,0);
                         return zal <= todayMidnight && todayMidnight <= rozl;
@@ -626,12 +626,12 @@ function App({ user }) {
 
                       // Szukaj następnego zaplanowanego (zał > dziś)
                       const nextF = vFrachty
-                        .filter(r => r.dataZalad && new Date(r.dataZalad) > todayMidnight)
-                        .sort((a,b) => a.dataZalad.localeCompare(b.dataZalad))[0] || null;
+                        .filter(r => r.dataZaladunku && new Date(r.dataZaladunku) > todayMidnight)
+                        .sort((a,b) => a.dataZaladunku.localeCompare(b.dataZaladunku))[0] || null;
 
                       // Ostatni rozładowany (rozł < dziś)
                       const lastDoneF = vFrachty.find(r => {
-                        const rozl = r.dataRozl ? new Date(r.dataRozl) : null;
+                        const rozl = r.dataRozladunku ? new Date(r.dataRozladunku) : null;
                         if (!rozl) return false;
                         rozl.setHours(0,0,0,0);
                         return rozl < todayMidnight;
@@ -645,7 +645,7 @@ function App({ user }) {
                         statusBg = "#f0fdf4";
                       } else if (nextF) {
                         // Sprawdź czy data zał jest jutro lub później
-                        const nextZal = new Date(nextF.dataZalad); nextZal.setHours(0,0,0,0);
+                        const nextZal = new Date(nextF.dataZaladunku); nextZal.setHours(0,0,0,0);
                         const diffDays = Math.round((nextZal - todayMidnight) / 86400000);
                         status = "planowany";
                         statusLabel = diffDays === 1 ? "Jutro załadunek" : diffDays === 0 ? "Dziś załadunek" : `Zał. za ${diffDays}d`;
@@ -653,7 +653,7 @@ function App({ user }) {
                         statusColor = "#1d4ed8";
                         statusBg = "#eff6ff";
                       } else if (lastDoneF) {
-                        const rozl = new Date(lastDoneF.dataRozl); rozl.setHours(0,0,0,0);
+                        const rozl = new Date(lastDoneF.dataRozladunku); rozl.setHours(0,0,0,0);
                         const diffDays = Math.round((todayMidnight - rozl) / 86400000);
                         if (diffDays <= 1) {
                           status = "czeka";
@@ -686,8 +686,8 @@ function App({ user }) {
                       const km = displayF?.kmLadowne ? parseInt(displayF.kmLadowne) : null;
                       const eurKm = cena && km ? (cena/km).toFixed(2) : null;
                       const klient = displayF?.klient || "—";
-                      const dataZal = displayF?.dataZalad || null;
-                      const dataRozl = displayF?.dataRozl || null;
+                      const dataZal = displayF?.dataZaladunku || null;
+                      const dataRozl = displayF?.dataRozladunku || null;
                       const fmtD = (d) => d ? new Date(d).toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit"}) : "—";
 
                       return (
