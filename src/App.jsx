@@ -446,6 +446,7 @@ function App({ user }) {
     <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", color: "#111827" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
       <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" async />
+      <style>{`.no-scrollbar::-webkit-scrollbar{display:none}.no-scrollbar{-ms-overflow-style:none;scrollbar-width:none}`}</style>
 
       {/* TOAST */}
       {toast && (
@@ -539,7 +540,7 @@ function App({ user }) {
         </aside>
 
         {/* ── MAIN ──────────────────────────────────────────────────────── */}
-        <main className="flex-1 px-4 py-6 md:px-8 md:py-8 pb-24 overflow-y-auto">
+        <main className="flex-1 px-4 py-6 md:px-8 md:py-8 pb-32 md:pb-8 overflow-y-auto">
 
           {/* Mobile header */}
           <div className="flex md:hidden items-center justify-between mb-5">
@@ -618,7 +619,33 @@ function App({ user }) {
                 </div>
               </div>
 
-              <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+              {/* MOBILE — karty kosztów */}
+              <div className="md:hidden space-y-2 mb-4">
+                {filteredCosts.length === 0 && <div className="text-center py-8 text-gray-400 text-sm">Brak wyników</div>}
+                {filteredCosts.map(c => {
+                  const v = vehicles.find(vv => vv.id === c.vehicleId);
+                  const amtEUR = c.currency === "EUR" ? c.amountEUR : toEUR(c.amountPLN);
+                  return (
+                    <div key={c.id} className="bg-white rounded-xl border border-gray-100 px-4 py-3 flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-base"
+                        style={{ background: catColor(c.category) + "20" }}>
+                        {catLabel(c.category).split(" ")[0]}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-semibold text-gray-800 truncate">{catLabel(c.category)}</div>
+                        <div className="text-xs text-gray-400 truncate">{v?.plate} · {c.date} · {c.note||"—"}</div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <div className="font-bold text-gray-900">{amtEUR ? `${parseFloat(amtEUR).toLocaleString("pl-PL",{minimumFractionDigits:2})} €` : "—"}</div>
+                        <button onClick={() => deleteCost(c.id)} className="text-xs text-red-400 hover:text-red-600">usuń</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* DESKTOP */}
+              <div className="hidden md:block bg-white rounded-2xl border border-gray-100 overflow-hidden">
                 <div className="px-5 py-3.5 border-b border-gray-50">
                   <span className="text-sm font-semibold text-gray-700">Koszty per pojazd</span>
                 </div>
@@ -1062,19 +1089,28 @@ function App({ user }) {
       </div>
 
       {/* MOBILE BOTTOM NAV */}
-      <div className="fixed bottom-0 left-0 right-0 md:hidden bg-white border-t border-gray-100 flex px-3 py-2 gap-1">
-        {[["dashboard","◈","Przegląd"],["frachty","🚚","Frachty"],["costs","≡","Koszty"],["vehicles","⊡","Pojazdy"],["serwis","🔧","Serwis"],["rent","📊","Rentow."],["docs","🛡️","Dok."],["imi","🌍","IMI"]].map(([id,icon,label]) => (
-          <button key={id} onClick={() => setTab(id)} className="flex-1 flex flex-col items-center gap-0.5 py-1.5 rounded-lg transition-all"
-            style={{ color: tab === id ? "#111827" : "#9ca3af", background: tab === id ? "#f3f4f6" : "transparent" }}>
-            <span className="text-base">{icon}</span>
-            <span className="text-xs">{label}</span>
-          </button>
-        ))}
-        <button onClick={() => setShowAddCost(true)} className="flex-1 flex flex-col items-center gap-0.5 py-1.5 rounded-lg"
-          style={{ color: "#fff", background: "#111827" }}>
-          <span className="text-base">＋</span>
-          <span className="text-xs">Dodaj</span>
-        </button>
+      <div className="fixed bottom-0 left-0 right-0 md:hidden bg-white border-t border-gray-100 safe-area-pb"
+        style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+        <div className="flex overflow-x-auto px-2 py-1.5 gap-1 no-scrollbar">
+          {[
+            ["dashboard","◈","Przegląd"],
+            ["frachty","🚚","Frachty"],
+            ["fv","🧾","FV"],
+            ["costs","≡","Koszty"],
+            ["vehicles","🚛","Pojazdy"],
+            ["rent","📊","Rentow."],
+            ["docs","🛡️","Dok."],
+            ["imi","🌍","IMI"],
+            ["serwis","🔧","Serwis"],
+          ].map(([id,icon,label]) => (
+            <button key={id} onClick={() => setTab(id)}
+              className="flex-shrink-0 flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all min-w-14"
+              style={{ color: tab === id ? "#111827" : "#9ca3af", background: tab === id ? "#f3f4f6" : "transparent", fontWeight: tab === id ? 600 : 400 }}>
+              <span className="text-lg leading-none">{icon}</span>
+              <span className="text-xs leading-none mt-0.5">{label}</span>
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -5037,7 +5073,47 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
           <div key={label} className="rounded-xl p-3 border border-gray-100 bg-white"><div className="text-xs text-gray-400 mb-1">{label}</div><div className="text-lg font-bold" style={{color}}>{value}</div></div>
         ))}
       </div>
-      <div className="overflow-x-auto rounded-xl border border-gray-100 bg-white">
+      {/* MOBILE — widok kartkowy */}
+      <div className="md:hidden space-y-3 mb-4">
+        {rows.length === 0 && <div className="text-center py-8 text-gray-400 text-sm">Brak frachtów w tym miesiącu</div>}
+        {rows.map((r, idx) => {
+          const eurKmLad = r.kmLadowne && r.cenaEur ? (parseFloat(r.cenaEur)/parseInt(r.kmLadowne)).toFixed(2) : null;
+          const stRozl = r.statusRozladunku || "w_trasie";
+          const stColors = { rozladowano: ["#f0fdf4","#166534","✅"], w_trasie: ["#f0f9ff","#0369a1","🚛"], problem: ["#fef2f2","#991b1b","⚠️"] };
+          const [stBg, stColor, stEmoji] = stColors[stRozl] || stColors.w_trasie;
+          return (
+            <div key={r.id} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <div className="font-bold text-gray-900">{r.klient || "—"}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">{r.dataZlecenia} · #{idx+1}</div>
+                </div>
+                <div className="text-right">
+                  <div className="font-bold text-green-700 text-lg">{r.cenaEur ? `${parseFloat(r.cenaEur).toLocaleString("pl-PL",{minimumFractionDigits:2})} €` : "—"}</div>
+                  {eurKmLad && <div className="text-xs text-amber-600">{eurKmLad} €/km</div>}
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 mb-3">
+                <span className="text-xs px-2 py-1 rounded-lg bg-gray-50 text-gray-600">📍 {[r.zaladunekKod, r.dokod].filter(Boolean).join(" → ") || "—"}</span>
+                {r.kmLadowne && <span className="text-xs px-2 py-1 rounded-lg bg-blue-50 text-blue-700">🛣 {r.kmLadowne} km lad.</span>}
+                <span className="text-xs px-2 py-1 rounded-lg font-semibold" style={{background: stBg, color: stColor}}>{stEmoji} {stRozl === "rozladowano" ? "Rozładowano" : stRozl === "w_trasie" ? "W trasie" : "Problem"}</span>
+              </div>
+              <div className="flex items-center justify-between pt-2 border-t border-gray-50">
+                <div className="text-xs text-gray-400">{r.dyspozytor || "—"} · {r.nrFV || "brak FV"}</div>
+                <div className="flex gap-1">
+                  <button onClick={() => { setEditId(r.id); setShowForm(true); }}
+                    className="w-8 h-8 rounded-lg flex items-center justify-center bg-gray-100 hover:bg-gray-200">✏️</button>
+                  <button onClick={() => { if(window.confirm("Usunąć?")) onDelete(r.id); }}
+                    className="w-8 h-8 rounded-lg flex items-center justify-center bg-red-50 hover:bg-red-100 text-red-400">✕</button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* DESKTOP — tabela */}
+      <div className="hidden md:block overflow-x-auto rounded-xl border border-gray-100 bg-white">
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-gray-100 text-gray-400 uppercase bg-gray-50">
