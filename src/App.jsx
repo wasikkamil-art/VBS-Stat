@@ -605,37 +605,94 @@ function App({ user }) {
                         .sort((a,b) => (b.dataZalad||"").localeCompare(a.dataZalad||""));
                       const lastF = vFrachty[0] || null;
 
-                      // Status: w trasie jeśli data zał <= dziś <= data rozł
-                      let status = "postoj";
-                      let statusLabel = "Postój";
+                      // Logika statusów na podstawie dat frachtów
+                      let status = "brak";
+                      let statusLabel = "Brak zleceń";
                       let statusColor = "#94a3b8";
                       let statusBg = "#f8fafc";
-                      if (lastF) {
-                        const zalDate = lastF.dataZalad ? new Date(lastF.dataZalad) : null;
-                        const rozlDate = lastF.dataRozl ? new Date(lastF.dataRozl) : null;
-                        if (zalDate && rozlDate && zalDate <= today && today <= rozlDate) {
-                          status = "trasa"; statusLabel = "W trasie 🚛"; statusColor = "#16a34a"; statusBg = "#f0fdf4";
-                        } else if (zalDate && zalDate > today) {
-                          status = "planowany"; statusLabel = "Zaplanowany"; statusColor = "#2563eb"; statusBg = "#eff6ff";
-                        } else if (rozlDate && rozlDate < today) {
-                          status = "postoj"; statusLabel = "Postój"; statusColor = "#94a3b8"; statusBg = "#f8fafc";
+                      let statusIcon = "⬜";
+
+                      const todayMidnight = new Date(today); todayMidnight.setHours(0,0,0,0);
+                      const yesterday = new Date(todayMidnight); yesterday.setDate(yesterday.getDate()-1);
+
+                      // Szukaj aktywnego frachtu (zał <= dziś <= rozł)
+                      const activeF = vFrachty.find(r => {
+                        const zal = r.dataZalad ? new Date(r.dataZalad) : null;
+                        const rozl = r.dataRozl ? new Date(r.dataRozl) : null;
+                        if (!zal || !rozl) return false;
+                        zal.setHours(0,0,0,0); rozl.setHours(0,0,0,0);
+                        return zal <= todayMidnight && todayMidnight <= rozl;
+                      });
+
+                      // Szukaj następnego zaplanowanego (zał > dziś)
+                      const nextF = vFrachty
+                        .filter(r => r.dataZalad && new Date(r.dataZalad) > todayMidnight)
+                        .sort((a,b) => a.dataZalad.localeCompare(b.dataZalad))[0] || null;
+
+                      // Ostatni rozładowany (rozł < dziś)
+                      const lastDoneF = vFrachty.find(r => {
+                        const rozl = r.dataRozl ? new Date(r.dataRozl) : null;
+                        if (!rozl) return false;
+                        rozl.setHours(0,0,0,0);
+                        return rozl < todayMidnight;
+                      });
+
+                      if (activeF) {
+                        status = "trasa";
+                        statusLabel = "W trasie";
+                        statusIcon = "🚛";
+                        statusColor = "#15803d";
+                        statusBg = "#f0fdf4";
+                      } else if (nextF) {
+                        // Sprawdź czy data zał jest jutro lub później
+                        const nextZal = new Date(nextF.dataZalad); nextZal.setHours(0,0,0,0);
+                        const diffDays = Math.round((nextZal - todayMidnight) / 86400000);
+                        status = "planowany";
+                        statusLabel = diffDays === 1 ? "Jutro załadunek" : diffDays === 0 ? "Dziś załadunek" : `Zał. za ${diffDays}d`;
+                        statusIcon = "📋";
+                        statusColor = "#1d4ed8";
+                        statusBg = "#eff6ff";
+                      } else if (lastDoneF) {
+                        const rozl = new Date(lastDoneF.dataRozl); rozl.setHours(0,0,0,0);
+                        const diffDays = Math.round((todayMidnight - rozl) / 86400000);
+                        if (diffDays <= 1) {
+                          status = "czeka";
+                          statusLabel = "Czeka na załadunek";
+                          statusIcon = "⏳";
+                          statusColor = "#d97706";
+                          statusBg = "#fffbeb";
+                        } else {
+                          status = "postoj";
+                          statusLabel = `Postój · ${diffDays}d`;
+                          statusIcon = "🅿️";
+                          statusColor = "#94a3b8";
+                          statusBg = "#f8fafc";
                         }
+                      } else if (vFrachty.length === 0) {
+                        status = "brak";
+                        statusLabel = "Brak zleceń";
+                        statusIcon = "⬜";
+                        statusColor = "#94a3b8";
+                        statusBg = "#f8fafc";
                       }
 
-                      // Dane trasy
-                      const skad = lastF ? [lastF.skad, lastF.zaladunekKod].filter(Boolean).join(" ") || "—" : "—";
-                      const dokad = lastF ? [lastF.dokad, lastF.dokod].filter(Boolean).join(" ") || "—" : "—";
-                      const cena = lastF?.cenaEur ? parseFloat(lastF.cenaEur) : null;
-                      const km = lastF?.kmLadowne ? parseInt(lastF.kmLadowne) : null;
+                      // Aktywny fracht do wyświetlenia na karcie
+                      const displayF = activeF || nextF || lastF;
+
+                      // Dane trasy z aktywnego/następnego/ostatniego frachtu
+                      const skad = displayF ? [displayF.skad, displayF.zaladunekKod].filter(Boolean).join(" ") || "—" : "—";
+                      const dokad = displayF ? [displayF.dokad, displayF.dokod].filter(Boolean).join(" ") || "—" : "—";
+                      const cena = displayF?.cenaEur ? parseFloat(displayF.cenaEur) : null;
+                      const km = displayF?.kmLadowne ? parseInt(displayF.kmLadowne) : null;
                       const eurKm = cena && km ? (cena/km).toFixed(2) : null;
-                      const klient = lastF?.klient || "—";
-                      const dataZal = lastF?.dataZalad || null;
-                      const dataRozl = lastF?.dataRozl || null;
+                      const klient = displayF?.klient || "—";
+                      const dataZal = displayF?.dataZalad || null;
+                      const dataRozl = displayF?.dataRozl || null;
                       const fmtD = (d) => d ? new Date(d).toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit"}) : "—";
 
                       return (
                         <div key={v.id} className="bg-white rounded-2xl border overflow-hidden"
-                          style={{ borderColor: status === "trasa" ? "#bbf7d0" : "#f3f4f6" }}>
+                          style={{ borderColor: status === "trasa" ? "#bbf7d0" : status === "czeka" ? "#fde68a" : status === "planowany" ? "#bfdbfe" : "#f3f4f6" }}>
 
                           {/* HEADER karty */}
                           <div className="px-4 pt-4 pb-3 flex items-start justify-between"
@@ -650,14 +707,15 @@ function App({ user }) {
                                 <div className="text-xs text-gray-400">{v.brand} · {driverName}</div>
                               </div>
                             </div>
-                            <span className="text-xs px-2 py-1 rounded-full font-semibold"
+                            <span className="text-xs px-2.5 py-1 rounded-full font-semibold flex items-center gap-1"
                               style={{ background: statusBg, color: statusColor }}>
-                              {statusLabel}
+                              <span>{statusIcon}</span>
+                              <span>{statusLabel}</span>
                             </span>
                           </div>
 
                           {/* TRASA */}
-                          {lastF ? (
+                          {displayF ? (
                             <div className="px-4 py-3">
                               {/* Trasa skąd → dokąd */}
                               <div className="flex items-center gap-2 mb-2.5">
