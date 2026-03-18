@@ -2,8 +2,8 @@ name: Nocny backup Firebase
 
 on:
   schedule:
-    - cron: '0 23 * * *'  # co noc o 00:00 czasu polskiego (UTC+1)
-  workflow_dispatch:       # możliwość ręcznego uruchomienia
+    - cron: '0 23 * * *'
+  workflow_dispatch:
 
 jobs:
   backup:
@@ -26,13 +26,13 @@ jobs:
 
       - name: Run backup
         env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: |
-          cat > backup.js << 'SCRIPT'
+          node << 'SCRIPT'
           const admin = require('firebase-admin');
           const fs = require('fs');
 
-          const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+          const serviceAccount = JSON.parse(process.env.FIREBASE_SA);
           admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 
           const db = admin.firestore();
@@ -41,25 +41,26 @@ jobs:
             const snap = await db.doc('fleet/data').get();
             const data = snap.data() || {};
             const date = new Date().toISOString().slice(0, 10);
-            const filename = `backup-repo/backups/${date}.json`;
 
             fs.mkdirSync('backup-repo/backups', { recursive: true });
-            fs.writeFileSync(filename, JSON.stringify(data, null, 2));
+            fs.writeFileSync(
+              `backup-repo/backups/${date}.json`,
+              JSON.stringify(data, null, 2)
+            );
 
             const stats = {
               date,
-              vehicles:  (data.fleetv2_vehicles  || []).length,
-              costs:     (data.fleetv2_costs      || []).length,
-              frachty:   (data.fleetv2_frachty    || []).length,
-              docs:      (data.fleetv2_docs        || []).length,
+              vehicles: (data.fleetv2_vehicles || []).length,
+              costs:    (data.fleetv2_costs    || []).length,
+              frachty:  (data.fleetv2_frachty  || []).length,
+              docs:     (data.fleetv2_docs      || []).length,
             };
-            console.log('Backup OK:', stats);
+            console.log('Backup OK:', JSON.stringify(stats));
             fs.writeFileSync('backup-repo/latest.json', JSON.stringify(stats, null, 2));
           }
 
           backup().catch(e => { console.error(e); process.exit(1); });
           SCRIPT
-          node backup.js
 
       - name: Commit backup
         run: |
