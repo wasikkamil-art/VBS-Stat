@@ -27,11 +27,14 @@ jobs:
       - name: Create service account file
         env:
           SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-        run: printenv SA > sa.json
-
-      - name: Run backup
         run: |
-          node -e "
+          printenv SA > sa.json
+          echo "SA file size: $(wc -c < sa.json) bytes"
+          head -c 50 sa.json
+
+      - name: Write backup script
+        run: |
+          cat > run_backup.js << 'JS'
           const admin = require('firebase-admin');
           const fs = require('fs');
           const sa = JSON.parse(fs.readFileSync('sa.json', 'utf8'));
@@ -48,7 +51,10 @@ jobs:
             fs.writeFileSync('backup-repo/latest.json', JSON.stringify(stats, null, 2));
           }
           run().catch(e => { console.error(e); process.exit(1); });
-          "
+          JS
+
+      - name: Run backup
+        run: node run_backup.js
 
       - name: Commit backup
         run: |
