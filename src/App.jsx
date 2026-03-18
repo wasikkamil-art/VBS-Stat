@@ -748,6 +748,55 @@ function App({ user }) {
                                 </div>
                               </div>
 
+                              {/* LICZNIK TACHOGRAFU 28 DNI */}
+                              {(() => {
+                                const isPL = (kod) => kod && kod.toUpperCase().includes("PL");
+                                
+                                // Znajdź ostatni fracht który startował z PL
+                                const lastPLStart = vFrachty
+                                  .filter(r => isPL(r.zaladunekKod) || isPL(r.zaladunekKod2) || isPL(r.zaladunekKod3))
+                                  .sort((a,b) => (b.dataZaladunku||"").localeCompare(a.dataZaladunku||""))[0];
+
+                                if (!lastPLStart?.dataZaladunku) return null;
+
+                                // Sprawdź czy od tamtej pory był powrót do PL (rozładunek PL)
+                                const startDate = new Date(lastPLStart.dataZaladunku);
+                                const powrotPL = vFrachty.find(r => {
+                                  const rDate = r.dataRozladunku ? new Date(r.dataRozladunku) : null;
+                                  if (!rDate || rDate <= startDate) return false;
+                                  return isPL(r.dokod) || isPL(r.dokod2) || isPL(r.dokod3);
+                                });
+
+                                if (powrotPL) return null; // wrócił do PL — licznik zresetowany
+
+                                // Ile dni minęło od wyjazdu z PL
+                                const daysSinceStart = Math.floor((new Date() - startDate) / 86400000);
+                                const daysLeft = 28 - daysSinceStart;
+
+                                if (daysSinceStart < 0) return null; // jeszcze nie wyjechał
+
+                                const isRed    = daysLeft < 5;
+                                const isYellow = daysLeft >= 5 && daysLeft < 10;
+                                const bg    = isRed ? "#fef2f2" : isYellow ? "#fffbeb" : "#f0fdf4";
+                                const color = isRed ? "#b91c1c" : isYellow ? "#92400e" : "#15803d";
+                                const icon  = isRed ? "🔴" : isYellow ? "🟡" : "🟢";
+
+                                return (
+                                  <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg mb-2"
+                                    style={{ background: bg }}>
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-sm">{icon}</span>
+                                      <span className="text-xs font-semibold" style={{ color }}>
+                                        {daysLeft > 0 ? `Tacho: ${daysLeft} dni do powrotu` : `Tacho: PRZEKROCZONE o ${Math.abs(daysLeft)} dni`}
+                                      </span>
+                                    </div>
+                                    <span className="text-xs" style={{ color, opacity: 0.7 }}>
+                                      {daysSinceStart}/28d
+                                    </span>
+                                  </div>
+                                );
+                              })()}
+
                               {/* Cena + EUR/km */}
                               <div className="flex items-center justify-between pt-2"
                                 style={{ borderTop: "1px solid #f3f4f6" }}>
@@ -790,7 +839,27 @@ function App({ user }) {
                   const docAlerts = docs.filter(d => d.validTo && d.validTo <= in30Str && d.validTo >= todayStr).length;
                   const expiredDocs = docs.filter(d => d.validTo && d.validTo < todayStr).length;
 
+                  // Sprawdź tachografy
+                  const isPL = (k) => k && k.toUpperCase().includes("PL");
+                  const tachoAlerts = vehicles.map(v => {
+                    const vf = frachtyList.filter(r => r.vehicleId === v.id);
+                    const lastPL = vf.filter(r => isPL(r.zaladunekKod)||isPL(r.zaladunekKod2)||isPL(r.zaladunekKod3))
+                      .sort((a,b) => (b.dataZaladunku||"").localeCompare(a.dataZaladunku||""))[0];
+                    if (!lastPL?.dataZaladunku) return null;
+                    const startDate = new Date(lastPL.dataZaladunku);
+                    const powrot = vf.find(r => {
+                      const rd = r.dataRozladunku ? new Date(r.dataRozladunku) : null;
+                      if (!rd || rd <= startDate) return false;
+                      return isPL(r.dokod)||isPL(r.dokod2)||isPL(r.dokod3);
+                    });
+                    if (powrot) return null;
+                    const daysLeft = 28 - Math.floor((new Date()-startDate)/86400000);
+                    if (daysLeft < 5) return { plate: v.plate, daysLeft };
+                    return null;
+                  }).filter(Boolean);
+
                   const alerts = [
+                    ...tachoAlerts.map(t => ({ type: "red", text: `${t.plate} — tacho: tylko ${t.daysLeft} dni do powrotu!` })),
                     overdueInv > 0 && { type: "red", text: `${overdueInv} ${overdueInv===1?"faktura":"faktury"} po terminie płatności` },
                     expiredDocs > 0 && { type: "red", text: `${expiredDocs} ${expiredDocs===1?"dokument wygasł":"dokumenty wygasły"}` },
                     docAlerts > 0 && { type: "yellow", text: `${docAlerts} ${docAlerts===1?"dokument wygasa":"dokumenty wygasają"} w ciągu 30 dni` },
