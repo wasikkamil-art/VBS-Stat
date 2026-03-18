@@ -215,7 +215,7 @@ function LoginScreen() {
       <div style={{ background:"#fff", borderRadius:16, padding:40, width:360, boxShadow:"0 4px 24px rgba(0,0,0,0.08)" }}>
         <div style={{ textAlign:"center", marginBottom:32 }}>
           <div style={{ fontSize:40 }}>🚛</div>
-          <h1 style={{ fontFamily:"DM Sans,sans-serif", fontWeight:700, fontSize:24, margin:"8px 0 4px" }}>FleetOS</h1>
+          <h1 style={{ fontFamily:"DM Sans,sans-serif", fontWeight:700, fontSize:24, margin:"8px 0 4px" }}>FleetStat</h1>
           <p style={{ color:"#6b7280", fontSize:14 }}>Zarządzanie flotą</p>
         </div>
         <form onSubmit={handleLogin}>
@@ -488,7 +488,7 @@ function App({ user }) {
           <div className="px-2 mb-8">
             <div className="flex items-center gap-2 mb-0.5">
               <div className="w-7 h-7 rounded-lg bg-gray-900 flex items-center justify-center text-white text-xs font-bold">F</div>
-              <span className="font-bold text-base text-gray-900">FleetOS</span>
+              <span className="font-bold text-base text-gray-900">FleetStat</span>
             </div>
             <div className="text-xs text-gray-400 pl-9">Zarządzanie flotą</div>
           </div>
@@ -557,7 +557,7 @@ function App({ user }) {
 
           {/* Mobile header */}
           <div className="flex md:hidden items-center justify-between mb-5">
-            <span className="font-bold text-lg text-gray-900">FleetOS</span>
+            <span className="font-bold text-lg text-gray-900">FleetStat</span>
             <div className="flex gap-1">
               {[["dashboard","◈"],["costs","≡"],["vehicles","⊡"],["docs","🛡️"],["imi","🌍"]].map(([id,icon]) => (
                 <button key={id} onClick={() => setTab(id)}
@@ -569,124 +569,214 @@ function App({ user }) {
             </div>
           </div>
 
-          {/* ══ DASHBOARD ═══════════════════════════════════════════════════ */}
+          {/* ══ DASHBOARD — TABLICA DYSPOZYTORSKA ═══════════════════════════ */}
           {tab === "dashboard" && (
             <div>
-              <PageTitle>Przegląd floty</PageTitle>
-
-              {!eurLoading && (
-                <div className="flex flex-wrap items-center gap-2 mb-5 px-4 py-2.5 rounded-xl text-sm"
-                  style={{ background: "#fffbeb", border: "1px solid #fde68a", color: "#92400e" }}>
-                  <span>💱</span>
-                  <span>Kurs NBP ({eurRateDate}): <strong>1 € = {eurRate?.toFixed(4)} zł</strong></span>
-                  <span className="ml-auto text-xs text-amber-500 hidden sm:block">Kwoty EUR przeliczane automatycznie</span>
+              {/* NAGŁÓWEK */}
+              <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                    style={{ background: "#111827" }}>FS</div>
+                  <div>
+                    <div className="font-bold text-gray-900 text-lg leading-tight">FleetStat</div>
+                    <div className="text-xs text-gray-400">{new Date().toLocaleDateString("pl-PL",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>
+                  </div>
                 </div>
-              )}
-
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-                <KpiCard label="Łączne koszty"  value={fmtEUR(stats.totalPLN / stats.rate)}  sub={fmtPLN(stats.totalPLN)} accent="#111827" />
-                <KpiCard label="Ten miesiąc"    value={fmtEUR(stats.monthPLN / stats.rate)}  sub={fmtPLN(stats.monthPLN)} accent="#f59e0b" />
-                <KpiCard label="Pojazdy"        value={`${vehicles.length} szt.`} sub="w bazie" accent="#6366f1" />
-                <KpiCard label="Wpisy kosztów"  value={`${costs.length} szt.`}    sub="wszystkie" accent="#10b981" />
+                {!eurLoading && (
+                  <div className="px-3 py-2 rounded-xl text-sm flex items-center gap-2"
+                    style={{ background: "#fffbeb", border: "1px solid #fde68a", color: "#92400e" }}>
+                    <span>💱</span>
+                    <span className="font-semibold">1 € = {eurRate?.toFixed(4)} zł</span>
+                    <span className="text-xs opacity-60 hidden sm:inline">· NBP {eurRateDate}</span>
+                  </div>
+                )}
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-5">
-                <div className="lg:col-span-3 bg-white rounded-2xl p-5 border border-gray-100">
-                  <div className="text-sm font-semibold text-gray-700 mb-4">Koszty miesięczne</div>
-                  <ResponsiveContainer width="100%" height={170}>
-                    <BarChart data={stats.monthly} barSize={20}>
-                      <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#9ca3af", fontFamily: "DM Sans" }} axisLine={false} tickLine={false} />
-                      <YAxis hide />
-                      <Tooltip
-                        contentStyle={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "10px", fontSize: "12px", fontFamily: "DM Sans" }}
-                        formatter={(v) => [fmtPLN(v), "Koszty"]} />
-                      <Bar dataKey="total" fill="#111827" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+              {/* KARTY POJAZDÓW — główna sekcja */}
+              {(() => {
+                const today = new Date();
+                return (
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
+                    {vehicles.map(v => {
+                      const driverName = (v.driverHistory||[]).find(d => !d.to)?.name || "—";
+                      // Ostatni fracht dla tego pojazdu
+                      const vFrachty = frachtyList
+                        .filter(r => r.vehicleId === v.id && r.dataZalad)
+                        .sort((a,b) => (b.dataZalad||"").localeCompare(a.dataZalad||""));
+                      const lastF = vFrachty[0] || null;
 
-                <div className="lg:col-span-2 bg-white rounded-2xl p-5 border border-gray-100">
-                  <div className="text-sm font-semibold text-gray-700 mb-4">Struktura kosztów</div>
-                  {stats.byCategory.length > 0 ? (
-                    <div className="flex gap-4 items-center">
-                      <ResponsiveContainer width={100} height={100}>
-                        <PieChart>
-                          <Pie data={stats.byCategory} cx={45} cy={45} innerRadius={27} outerRadius={46} dataKey="total" strokeWidth={0}>
-                            {stats.byCategory.map((c, i) => <Cell key={i} fill={c.color} />)}
-                          </Pie>
-                        </PieChart>
-                      </ResponsiveContainer>
-                      <div className="space-y-1.5 flex-1 min-w-0">
-                        {stats.byCategory.map((c) => (
-                          <div key={c.id} className="flex items-center justify-between gap-1">
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: c.color }} />
-                              <span className="text-xs text-gray-500 truncate">{c.icon} {c.label}</span>
+                      // Status: w trasie jeśli data zał <= dziś <= data rozł
+                      let status = "postoj";
+                      let statusLabel = "Postój";
+                      let statusColor = "#94a3b8";
+                      let statusBg = "#f8fafc";
+                      if (lastF) {
+                        const zalDate = lastF.dataZalad ? new Date(lastF.dataZalad) : null;
+                        const rozlDate = lastF.dataRozl ? new Date(lastF.dataRozl) : null;
+                        if (zalDate && rozlDate && zalDate <= today && today <= rozlDate) {
+                          status = "trasa"; statusLabel = "W trasie 🚛"; statusColor = "#16a34a"; statusBg = "#f0fdf4";
+                        } else if (zalDate && zalDate > today) {
+                          status = "planowany"; statusLabel = "Zaplanowany"; statusColor = "#2563eb"; statusBg = "#eff6ff";
+                        } else if (rozlDate && rozlDate < today) {
+                          status = "postoj"; statusLabel = "Postój"; statusColor = "#94a3b8"; statusBg = "#f8fafc";
+                        }
+                      }
+
+                      // Dane trasy
+                      const skad = lastF ? [lastF.skad, lastF.zaladunekKod].filter(Boolean).join(" ") || "—" : "—";
+                      const dokad = lastF ? [lastF.dokad, lastF.dokod].filter(Boolean).join(" ") || "—" : "—";
+                      const cena = lastF?.cenaEur ? parseFloat(lastF.cenaEur) : null;
+                      const km = lastF?.kmLadowne ? parseInt(lastF.kmLadowne) : null;
+                      const eurKm = cena && km ? (cena/km).toFixed(2) : null;
+                      const klient = lastF?.klient || "—";
+                      const dataZal = lastF?.dataZalad || null;
+                      const dataRozl = lastF?.dataRozl || null;
+                      const fmtD = (d) => d ? new Date(d).toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit"}) : "—";
+
+                      return (
+                        <div key={v.id} className="bg-white rounded-2xl border overflow-hidden"
+                          style={{ borderColor: status === "trasa" ? "#bbf7d0" : "#f3f4f6" }}>
+
+                          {/* HEADER karty */}
+                          <div className="px-4 pt-4 pb-3 flex items-start justify-between"
+                            style={{ borderBottom: "1px solid #f9fafb" }}>
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0"
+                                style={{ background: "#f3f4f6" }}>
+                                {v.plate2 ? "🚌" : "🚛"}
+                              </div>
+                              <div>
+                                <div className="font-semibold text-gray-900 text-sm">{v.plate}</div>
+                                <div className="text-xs text-gray-400">{v.brand} · {driverName}</div>
+                              </div>
                             </div>
-                            <span className="text-xs font-semibold text-gray-800 whitespace-nowrap">{fmtPLN(c.total)}</span>
+                            <span className="text-xs px-2 py-1 rounded-full font-semibold"
+                              style={{ background: statusBg, color: statusColor }}>
+                              {statusLabel}
+                            </span>
                           </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : <div className="text-sm text-gray-400 mt-2">Brak danych</div>}
-                </div>
-              </div>
 
-              {/* MOBILE — karty kosztów */}
-              <div className="md:hidden space-y-2 mb-4">
-                {filteredCosts.length === 0 && <div className="text-center py-8 text-gray-400 text-sm">Brak wyników</div>}
-                {filteredCosts.map(c => {
-                  const v = vehicles.find(vv => vv.id === c.vehicleId);
-                  const amtEUR = c.currency === "EUR" ? c.amountEUR : toEUR(c.amountPLN);
+                          {/* TRASA */}
+                          {lastF ? (
+                            <div className="px-4 py-3">
+                              {/* Trasa skąd → dokąd */}
+                              <div className="flex items-center gap-2 mb-2.5">
+                                <span className="text-xs font-mono font-semibold text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded">{skad}</span>
+                                <span className="text-gray-300 text-sm">→</span>
+                                <span className="text-xs font-mono font-semibold text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded">{dokad}</span>
+                              </div>
+
+                              {/* Klient */}
+                              <div className="text-xs text-gray-500 mb-2 truncate">👤 {klient}</div>
+
+                              {/* Daty */}
+                              <div className="flex items-center gap-3 mb-2.5">
+                                <div className="flex items-center gap-1">
+                                  <span className="text-xs text-gray-400">Zał.</span>
+                                  <span className="text-xs font-semibold text-gray-700">{fmtD(dataZal)}</span>
+                                </div>
+                                <span className="text-gray-200">·</span>
+                                <div className="flex items-center gap-1">
+                                  <span className="text-xs text-gray-400">Rozł.</span>
+                                  <span className="text-xs font-semibold text-gray-700">{fmtD(dataRozl)}</span>
+                                </div>
+                              </div>
+
+                              {/* Cena + EUR/km */}
+                              <div className="flex items-center justify-between pt-2"
+                                style={{ borderTop: "1px solid #f3f4f6" }}>
+                                <span className="text-base font-bold text-gray-900">
+                                  {cena ? `${cena.toLocaleString("pl-PL")} €` : "—"}
+                                </span>
+                                {eurKm && (
+                                  <span className="text-xs text-gray-400">
+                                    {eurKm} €/km · {km?.toLocaleString("pl-PL")} km
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="px-4 py-5 text-center text-gray-400 text-xs">
+                              Brak zleceń w systemie
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              {/* ALERTY + SZYBKIE AKCJE */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Alerty */}
+                {(() => {
+                  const today = new Date();
+                  const todayStr = today.toISOString().slice(0,10);
+                  const in30 = new Date(today); in30.setDate(in30.getDate()+30);
+                  const in30Str = in30.toISOString().slice(0,10);
+
+                  const overdueInv = frachtyList.filter(r => {
+                    if (!r.terminPlatnosci || !r.statusFV) return false;
+                    return r.terminPlatnosci < todayStr && !["paid","zapłacona"].includes(r.statusFV?.toLowerCase());
+                  }).length;
+
+                  const docAlerts = docs.filter(d => d.validTo && d.validTo <= in30Str && d.validTo >= todayStr).length;
+                  const expiredDocs = docs.filter(d => d.validTo && d.validTo < todayStr).length;
+
+                  const alerts = [
+                    overdueInv > 0 && { type: "red", text: `${overdueInv} ${overdueInv===1?"faktura":"faktury"} po terminie płatności` },
+                    expiredDocs > 0 && { type: "red", text: `${expiredDocs} ${expiredDocs===1?"dokument wygasł":"dokumenty wygasły"}` },
+                    docAlerts > 0 && { type: "yellow", text: `${docAlerts} ${docAlerts===1?"dokument wygasa":"dokumenty wygasają"} w ciągu 30 dni` },
+                  ].filter(Boolean);
+
                   return (
-                    <div key={c.id} className="bg-white rounded-xl border border-gray-100 px-4 py-3 flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-base"
-                        style={{ background: catColor(c.category) + "20" }}>
-                        {catLabel(c.category).split(" ")[0]}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-semibold text-gray-800 truncate">{catLabel(c.category)}</div>
-                        <div className="text-xs text-gray-400 truncate">{v?.plate} · {c.date} · {c.note||"—"}</div>
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <div className="font-bold text-gray-900">{amtEUR ? `${parseFloat(amtEUR).toLocaleString("pl-PL",{minimumFractionDigits:2})} €` : "—"}</div>
-                        <button onClick={() => deleteCost(c.id)} className="text-xs text-red-400 hover:text-red-600">usuń</button>
-                      </div>
+                    <div className="bg-white rounded-2xl border border-gray-100 p-4">
+                      <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Wymaga uwagi</div>
+                      {alerts.length === 0 ? (
+                        <div className="flex items-center gap-2 text-sm text-green-600">
+                          <span>✅</span> Wszystko w porządku
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {alerts.map((a,i) => (
+                            <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium"
+                              style={{
+                                background: a.type==="red" ? "#fef2f2" : "#fffbeb",
+                                color: a.type==="red" ? "#b91c1c" : "#92400e"
+                              }}>
+                              <span>{a.type==="red" ? "🔴" : "🟡"}</span>
+                              {a.text}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   );
-                })}
-              </div>
+                })()}
 
-              {/* DESKTOP */}
-              <div className="hidden md:block bg-white rounded-2xl border border-gray-100 overflow-hidden">
-                <div className="px-5 py-3.5 border-b border-gray-50">
-                  <span className="text-sm font-semibold text-gray-700">Koszty per pojazd</span>
-                </div>
-                <div className="divide-y divide-gray-50">
-                  {stats.byVehicle.sort((a, b) => b.total - a.total).map((v) => {
-                    const pct = stats.totalPLN > 0 ? (v.total / stats.totalPLN) * 100 : 0;
-                    return (
-                      <div key={v.id} className="px-5 py-4">
-                        <div className="flex justify-between items-start mb-1.5">
-                          <div>
-                            <span className="font-normal text-gray-500 tracking-wide text-sm">{v.plate}</span>
-                            <span className="text-xs text-gray-400 ml-2">{v.brand} · {v.activeDriver}</span>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-sm font-semibold text-gray-900">{fmtEUR(v.total / stats.rate)}</div>
-                            <div className="text-xs text-gray-400">{fmtPLN(v.total)}</div>
-                          </div>
-                        </div>
-                        <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-                          <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: "#111827" }} />
-                        </div>
-                        <div className="flex justify-between mt-1">
-                          <span className="text-xs text-gray-400">{v.count} wpisów</span>
-                          <span className="text-xs text-gray-400">{pct.toFixed(1)}%</span>
-                        </div>
-                      </div>
-                    );
-                  })}
+                {/* Szybkie akcje */}
+                <div className="bg-white rounded-2xl border border-gray-100 p-4">
+                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Szybkie akcje</div>
+                  <div className="space-y-2">
+                    <button onClick={() => setTab("frachty")}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90"
+                      style={{ background: "#111827" }}>
+                      <span>🚚</span> Dodaj fracht
+                    </button>
+                    <button onClick={() => setShowAddCost(true)}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-gray-700 border border-gray-200 bg-white hover:bg-gray-50 transition-all">
+                      <span>💰</span> Dodaj koszt
+                    </button>
+                    <button onClick={() => setTab("fv")}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-gray-700 border border-gray-200 bg-white hover:bg-gray-50 transition-all">
+                      <span>🧾</span> FV / Płatności
+                    </button>
+                    <button onClick={() => setTab("docs")}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-gray-700 border border-gray-200 bg-white hover:bg-gray-50 transition-all">
+                      <span>🛡️</span> Dokumenty
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
