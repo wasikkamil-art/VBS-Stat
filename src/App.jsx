@@ -4929,7 +4929,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
   const [overviewYear, setOverviewYear] = useState("all");
   const [filterMonth, setFilterMonth] = useState(new Date().getMonth());
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
-  const fmt = (n) => n ? parseFloat(n).toLocaleString("pl-PL",{minimumFractionDigits:2,maximumFractionDigits:2}) : "-";
+  const fmt = (n) => n && parseFloat(n) > 0 ? parseFloat(n).toLocaleString("pl-PL",{minimumFractionDigits:2,maximumFractionDigits:2}) : "—";
   const monthFreights = (vid) => frachtyList.filter(r => {
     if (r.vehicleId !== vid) return false;
     if (!r.dataZlecenia) return false;
@@ -4973,7 +4973,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
         </div>
 
         {/* BANERY LAT */}
-        <div className="grid grid-cols-3 gap-3 mb-5">
+        <div className="grid grid-cols-3 gap-2 mb-5">
           {[
             { key: "2025", label: "2025", color: "#6366f1", bg: "#eef2ff", border: "#c7d2fe" },
             { key: "2026", label: "2026", color: "#0ea5e9", bg: "#f0f9ff", border: "#bae6fd" },
@@ -4983,18 +4983,14 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
             const active = overviewYear === key;
             return (
               <button key={key} onClick={() => setOverviewYear(key)}
-                className="rounded-2xl p-4 text-left transition-all w-full"
-                style={{ background: active ? bg : "#fff", border: `2px solid ${active ? border : "#f3f4f6"}`, boxShadow: active ? `0 0 0 1px ${border}` : "none" }}>
-                <div className="flex items-center justify-between mb-2">
+                className="rounded-2xl p-2.5 md:p-4 text-left transition-all w-full"
+                style={{ background: active ? bg : "#fff", border: `2px solid ${active ? border : "#f3f4f6"}` }}>
+                <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-bold uppercase tracking-wider" style={{ color }}>{label}</span>
-                  {active && <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: border, color }}>aktywny</span>}
+                  {active && <span className="hidden md:inline text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: border, color }}>✓</span>}
                 </div>
-                <div className="font-bold text-lg text-gray-900">{fmt(s.eur)} €</div>
-                <div className="flex gap-3 mt-1.5">
-                  <span className="text-xs text-gray-500">{s.count} frachtów</span>
-                  <span className="text-xs text-gray-400">·</span>
-                  <span className="text-xs text-gray-500">{s.km.toLocaleString("pl-PL")} km</span>
-                </div>
+                <div className="font-bold text-sm md:text-lg text-gray-900 leading-tight">{s.eur > 0 ? parseFloat(s.eur).toLocaleString("pl-PL",{maximumFractionDigits:0}) : "—"} €</div>
+                <div className="text-xs text-gray-400 mt-1">{s.count} fr.</div>
               </button>
             );
           })}
