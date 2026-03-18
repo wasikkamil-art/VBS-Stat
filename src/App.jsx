@@ -680,8 +680,8 @@ function App({ user }) {
                       const displayF = activeF || nextF || lastF;
 
                       // Dane trasy z aktywnego/następnego/ostatniego frachtu
-                      const skad = displayF ? [displayF.skad, displayF.zaladunekKod].filter(Boolean).join(" ") || "—" : "—";
-                      const dokad = displayF ? [displayF.dokad, displayF.dokod].filter(Boolean).join(" ") || "—" : "—";
+                      const skad = displayF ? [displayF.zaladunekKod,displayF.zaladunekKod2,displayF.zaladunekKod3].filter(s=>s&&s.trim()).join(" / ") || displayF.skad || "—" : "—";
+                      const dokad = displayF ? [displayF.dokod,displayF.dokod2,displayF.dokod3].filter(s=>s&&s.trim()).join(" / ") || displayF.dokad || "—" : "—";
                       const cena = displayF?.cenaEur ? parseFloat(displayF.cenaEur) : null;
                       const km = displayF?.kmLadowne ? parseInt(displayF.kmLadowne) : null;
                       const eurKm = cena && km ? (cena/km).toFixed(2) : null;
@@ -5249,7 +5249,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
                 </div>
               </div>
               <div className="flex flex-wrap gap-2 mb-3">
-                <span className="text-xs px-2 py-1 rounded-lg bg-gray-50 text-gray-600">📍 {[r.zaladunekKod, r.dokod].filter(Boolean).join(" → ") || "—"}</span>
+                <span className="text-xs px-2 py-1 rounded-lg bg-gray-50 text-gray-600">📍 {[[r.zaladunekKod,r.zaladunekKod2,r.zaladunekKod3].filter(s=>s&&s.trim()).join("/"), [r.dokod,r.dokod2,r.dokod3].filter(s=>s&&s.trim()).join("/")].filter(Boolean).join(" → ") || "—"}</span>
                 {r.kmLadowne && <span className="text-xs px-2 py-1 rounded-lg bg-blue-50 text-blue-700">🛣 {r.kmLadowne} km lad.</span>}
                 <span className="text-xs px-2 py-1 rounded-lg font-semibold" style={{background: stBg, color: stColor}}>{stEmoji} {stRozl === "rozladowano" ? "Rozładowano" : stRozl === "w_trasie" ? "W trasie" : "Problem"}</span>
               </div>
@@ -5292,8 +5292,8 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
                   <td className="px-2 py-2 whitespace-nowrap">{r.dataZlecenia||"-"}</td>
                   <td className="px-2 py-2 whitespace-nowrap text-gray-500">{r.dataZaladunku||"-"}</td>
                   <td className="px-2 py-2 whitespace-nowrap text-gray-500">{r.dataRozladunku||"-"}</td>
-                  <td className="px-2 py-2 whitespace-nowrap">{[r.skad, r.zaladunekKod].filter(Boolean).join(" · ")||"-"}</td>
-                  <td className="px-2 py-2 whitespace-nowrap">{r.dokod||"-"}</td>
+                  <td className="px-2 py-2 whitespace-nowrap">{[r.zaladunekKod,r.zaladunekKod2,r.zaladunekKod3].filter(s=>s&&s.trim()).join(" / ")||[r.skad].filter(Boolean).join("")||"-"}</td>
+                  <td className="px-2 py-2 whitespace-nowrap">{[r.dokod,r.dokod2,r.dokod3].filter(s=>s&&s.trim()).join(" / ")||"-"}</td>
                   <td className="px-2 py-2 whitespace-nowrap">
                     {(() => {
                       const s = r.statusRozladunku || "w_trasie";
@@ -5734,7 +5734,7 @@ function ZlecenieUploadBtn({ frachtId, onUploaded, label = "📎 Wgraj", fullWid
 }
 
 function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }) {
-  const empty = {dataZlecenia:"",dataZaladunku:"",dataRozladunku:"",godzZaladunku:"",godzRozladunku:"",skad:"",zaladunekKod:"",dokod:"",klient:"",cenaEur:"",kmPodjazd:"",kmLadowne:"",kmWszystkie:"",wagaLadunku:"",dyspozytor:"",nrFV:"",dataWyslania:"",terminPlatnosci:"",uwagi:"",urlZlecenie:"",nrZlecenia:"",vehicleId:defaultVehicleId};
+  const empty = {dataZlecenia:"",dataZaladunku:"",dataRozladunku:"",godzZaladunku:"",godzRozladunku:"",skad:"",zaladunekKod:"",zaladunekKod2:"",zaladunekKod3:"",dokod:"",dokod2:"",dokod3:"",klient:"",cenaEur:"",kmPodjazd:"",kmLadowne:"",kmWszystkie:"",wagaLadunku:"",dyspozytor:"",nrFV:"",dataWyslania:"",terminPlatnosci:"",uwagi:"",urlZlecenie:"",nrZlecenia:"",vehicleId:defaultVehicleId};
   const [f, setF] = useState(record ? {...empty,...record} : empty);
   const set = (k,v) => setF(prev => { const next={...prev,[k]:v}; const pod=parseInt(next.kmPodjazd)||0; const lad=parseInt(next.kmLadowne)||0; next.kmWszystkie=pod+lad>0?String(pod+lad):""; return next; });
   const eurKmLad = f.kmLadowne && f.cenaEur ? (parseFloat(f.cenaEur)/parseInt(f.kmLadowne)).toFixed(2) : null;
@@ -5757,9 +5757,65 @@ function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }
             <div><label className={lbl}>Godz. zaladunku</label><input type="time" value={f.godzZaladunku} onChange={e => set("godzZaladunku",e.target.value)} className={inp} /></div>
             <div><label className={lbl}>Godz. rozladunku</label><input type="time" value={f.godzRozladunku} onChange={e => set("godzRozladunku",e.target.value)} className={inp} /></div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div><label className={lbl}>Zaladunek (kod)</label><input placeholder="DE 67304" value={f.zaladunekKod} onChange={e => set("zaladunekKod",e.target.value)} className={inp} /></div>
-            <div><label className={lbl}>Rozladunek (kod)</label><input placeholder="FR 93000" value={f.dokod} onChange={e => set("dokod",e.target.value)} className={inp} /></div>
+          {/* ZAŁADUNEK — dynamiczne kody */}
+          <div className="space-y-2">
+            <label className={lbl}>Załadunek (kody)</label>
+            <div className="flex gap-2 items-center">
+              <input placeholder="np. PL44-100" value={f.zaladunekKod} onChange={e => set("zaladunekKod",e.target.value)} className={inp+" flex-1"} />
+            </div>
+            {(f.zaladunekKod2 !== undefined || f.zaladunekKod) && f.zaladunekKod && (
+              <div className="flex gap-2 items-center">
+                <input placeholder="kod 2" value={f.zaladunekKod2||""} onChange={e => set("zaladunekKod2",e.target.value)} className={inp+" flex-1"} />
+                {!f.zaladunekKod2 && <button type="button" onClick={() => set("zaladunekKod2","")} className="text-xs text-blue-500 hover:text-blue-700 whitespace-nowrap">+ dodaj</button>}
+                {f.zaladunekKod2 && (
+                  <button type="button" onClick={() => set("zaladunekKod2","")} className="text-gray-400 hover:text-red-400 text-sm">✕</button>
+                )}
+              </div>
+            )}
+            {f.zaladunekKod2 && (
+              <div className="flex gap-2 items-center">
+                <input placeholder="kod 3" value={f.zaladunekKod3||""} onChange={e => set("zaladunekKod3",e.target.value)} className={inp+" flex-1"} />
+                {f.zaladunekKod3 && (
+                  <button type="button" onClick={() => set("zaladunekKod3","")} className="text-gray-400 hover:text-red-400 text-sm">✕</button>
+                )}
+              </div>
+            )}
+            {f.zaladunekKod && !f.zaladunekKod2 && (
+              <button type="button" onClick={() => set("zaladunekKod2"," ")}
+                className="text-xs text-blue-500 hover:text-blue-700 flex items-center gap-1">
+                <span>＋</span> dodaj miejsce załadunku
+              </button>
+            )}
+          </div>
+
+          {/* ROZŁADUNEK — dynamiczne kody */}
+          <div className="space-y-2">
+            <label className={lbl}>Rozładunek (kody)</label>
+            <div className="flex gap-2 items-center">
+              <input placeholder="np. FR 93000" value={f.dokod} onChange={e => set("dokod",e.target.value)} className={inp+" flex-1"} />
+            </div>
+            {f.dokod && (
+              <div className="flex gap-2 items-center">
+                <input placeholder="kod 2" value={f.dokod2||""} onChange={e => set("dokod2",e.target.value)} className={inp+" flex-1"} />
+                {f.dokod2 && (
+                  <button type="button" onClick={() => set("dokod2","")} className="text-gray-400 hover:text-red-400 text-sm">✕</button>
+                )}
+              </div>
+            )}
+            {f.dokod2 && (
+              <div className="flex gap-2 items-center">
+                <input placeholder="kod 3" value={f.dokod3||""} onChange={e => set("dokod3",e.target.value)} className={inp+" flex-1"} />
+                {f.dokod3 && (
+                  <button type="button" onClick={() => set("dokod3","")} className="text-gray-400 hover:text-red-400 text-sm">✕</button>
+                )}
+              </div>
+            )}
+            {f.dokod && !f.dokod2 && (
+              <button type="button" onClick={() => set("dokod2"," ")}
+                className="text-xs text-blue-500 hover:text-blue-700 flex items-center gap-1">
+                <span>＋</span> dodaj miejsce rozładunku
+              </button>
+            )}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div><label className={lbl}>Klient</label><input placeholder="nazwa klienta" value={f.klient} onChange={e => set("klient",e.target.value)} className={inp} /></div>
