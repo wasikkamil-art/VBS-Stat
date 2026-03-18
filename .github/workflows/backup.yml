@@ -24,43 +24,29 @@ jobs:
       - name: Install Firebase Admin
         run: npm install firebase-admin
 
+      - name: Create service account file
+        run: echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > sa.json
+
       - name: Run backup
-        env:
-          FIREBASE_SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: |
-          node << 'SCRIPT'
+          node -e "
           const admin = require('firebase-admin');
           const fs = require('fs');
-
-          const serviceAccount = JSON.parse(process.env.FIREBASE_SA);
-          admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-
+          const sa = JSON.parse(fs.readFileSync('sa.json', 'utf8'));
+          admin.initializeApp({ credential: admin.credential.cert(sa) });
           const db = admin.firestore();
-
-          async function backup() {
+          async function run() {
             const snap = await db.doc('fleet/data').get();
             const data = snap.data() || {};
-            const date = new Date().toISOString().slice(0, 10);
-
+            const date = new Date().toISOString().slice(0,10);
             fs.mkdirSync('backup-repo/backups', { recursive: true });
-            fs.writeFileSync(
-              `backup-repo/backups/${date}.json`,
-              JSON.stringify(data, null, 2)
-            );
-
-            const stats = {
-              date,
-              vehicles: (data.fleetv2_vehicles || []).length,
-              costs:    (data.fleetv2_costs    || []).length,
-              frachty:  (data.fleetv2_frachty  || []).length,
-              docs:     (data.fleetv2_docs      || []).length,
-            };
+            fs.writeFileSync('backup-repo/backups/' + date + '.json', JSON.stringify(data, null, 2));
+            const stats = { date, vehicles: (data.fleetv2_vehicles||[]).length, costs: (data.fleetv2_costs||[]).length, frachty: (data.fleetv2_frachty||[]).length };
             console.log('Backup OK:', JSON.stringify(stats));
             fs.writeFileSync('backup-repo/latest.json', JSON.stringify(stats, null, 2));
           }
-
-          backup().catch(e => { console.error(e); process.exit(1); });
-          SCRIPT
+          run().catch(e => { console.error(e); process.exit(1); });
+          "
 
       - name: Commit backup
         run: |
