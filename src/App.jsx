@@ -597,7 +597,15 @@ function App({ user }) {
                 const today = new Date();
                 return (
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
-                    {vehicles.map(v => {
+                    {vehicles.filter(v => {
+                      const vf = frachtyList.filter(r => r.vehicleId === v.id && r.dataZaladunku)
+                        .sort((a,b) => (b.dataZaladunku||"").localeCompare(a.dataZaladunku||""));
+                      if (vf.length === 0) return false; // brak zleceń w ogóle — ukryj
+                      const lastDone = vf.find(r => r.dataRozladunku && r.dataRozladunku < new Date().toISOString().slice(0,10));
+                      if (!lastDone) return true; // aktywny lub zaplanowany — pokaż
+                      const daysSince = Math.round((new Date() - new Date(lastDone.dataRozladunku)) / 86400000);
+                      return daysSince <= 30; // pokaż tylko jeśli rozładunek był w ciągu 30 dni
+                    }).map(v => {
                       const driverName = (v.driverHistory||[]).find(d => !d.to)?.name || "—";
                       // Ostatni fracht dla tego pojazdu
                       const vFrachty = frachtyList
