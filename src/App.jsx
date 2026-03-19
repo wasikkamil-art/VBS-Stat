@@ -1180,6 +1180,23 @@ function App({ user }) {
                       {/* ── TECH SPECS ── */}
                       <div className="px-5 py-3 border-b border-gray-50">
                         <div className="grid grid-cols-1 gap-1.5">
+                          {/* VIN + Wartość */}
+                          {(v.vin || v.wartoscNet) && (
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pb-1.5 mb-0.5 border-b border-dashed border-gray-100">
+                              {v.vin && (
+                                <div className="col-span-2 flex items-center gap-2">
+                                  <span className="text-xs text-gray-400 w-20 flex-shrink-0">VIN</span>
+                                  <span className="text-xs font-medium text-gray-700" style={{ fontFamily: "'DM Mono', monospace" }}>{v.vin}</span>
+                                </div>
+                              )}
+                              {v.wartoscNet && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs text-gray-400 w-20 flex-shrink-0">Wartość</span>
+                                  <span className="text-xs font-medium text-gray-700">{Number(v.wartoscNet).toLocaleString("pl-PL")} zł</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
                           <div className={`grid gap-x-4 gap-y-1.5 ${v.plate2 ? "grid-cols-2" : "grid-cols-2"}`}>
                             {v.dimensions && (
                               <div className="flex items-center gap-2">
@@ -1194,6 +1211,21 @@ function App({ user }) {
                               </div>
                             )}
                           </div>
+                          {/* Ubezpieczenia */}
+                          {(v.ocNumber || v.ocAmount || v.acNumber || v.acAmount || v.caloscPolis || v.gap || v.assistance || v.autoszyba || v.nnw) && (
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-1.5 mt-0.5 border-t border-dashed border-gray-100">
+                              {v.ocNumber && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">OC nr</span><span className="text-xs font-medium text-gray-700" style={{fontFamily:"'DM Mono',monospace"}}>{v.ocNumber}</span></div>}
+                              {v.ocAmount && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">OC składka</span><span className="text-xs font-medium text-gray-700">{v.ocAmount} zł</span></div>}
+                              {v.acNumber && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">AC nr</span><span className="text-xs font-medium text-gray-700" style={{fontFamily:"'DM Mono',monospace"}}>{v.acNumber}</span></div>}
+                              {v.acAmount && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">AC składka</span><span className="text-xs font-medium text-gray-700">{v.acAmount} zł</span></div>}
+                              {v.assistance && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">Assistance</span><span className="text-xs font-medium text-gray-700">{v.assistance} zł</span></div>}
+                              {v.autoszyba && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">Autoszyba</span><span className="text-xs font-medium text-gray-700">{v.autoszyba} zł</span></div>}
+                              {v.nnw && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">NNW</span><span className="text-xs font-medium text-gray-700">{v.nnw} zł</span></div>}
+                              {v.ochronaZnizki && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">Ochr. zniżki</span><span className="text-xs font-medium text-gray-700">{v.ochronaZnizki} zł</span></div>}
+                              {v.caloscPolis && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">Polisy łącznie</span><span className="text-xs font-semibold text-gray-900">{v.caloscPolis} zł</span></div>}
+                              {v.gap && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">GAP</span><span className="text-xs font-medium text-gray-700">{v.gap} zł{v.gapExpiry ? ` · do ${new Date(v.gapExpiry).toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric"})}` : ""}</span></div>}
+                            </div>
+                          )}
                           {v.plate2 && (
                             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-1.5 mt-0.5 border-t border-dashed border-gray-100">
                               {v.dimensions2 && (
@@ -3941,8 +3973,21 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
     maxWeight2:      vehicle.maxWeight2      || "",
     driverHistory: (vehicle.driverHistory || []).map((d) => ({ ...d })),
     // Insurance
+    ocNumber:        vehicle.ocNumber        || "",
+    ocAmount:        vehicle.ocAmount        || "",
     ocExpiry:        vehicle.ocExpiry        || "",
+    acNumber:        vehicle.acNumber        || "",
+    acAmount:        vehicle.acAmount        || "",
     acExpiry:        vehicle.acExpiry        || "",
+    assistance:      vehicle.assistance      || "",
+    autoszyba:       vehicle.autoszyba       || "",
+    nnw:             vehicle.nnw             || "",
+    ochronaZnizki:   vehicle.ochronaZnizki   || "",
+    caloscPolis:     vehicle.caloscPolis     || "",
+    gap:             vehicle.gap             || "",
+    gapExpiry:       vehicle.gapExpiry       || "",
+    vin:             vehicle.vin             || "",
+    wartoscNet:      vehicle.wartoscNet      || "",
     // Inspection
     inspectionExpiry: vehicle.inspectionExpiry || "",
     // UDT
@@ -4202,21 +4247,79 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
         </div>
       </div>
 
+      {/* ── DANE POJAZDU ── */}
+      <div className="px-5 py-4 border-t border-gray-100">
+        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">🚗 Dane pojazdu</div>
+        <div className="grid grid-cols-2 gap-3">
+          <MF label="VIN">
+            <MInput value={v.vin} onChange={val=>setF("vin",val)} placeholder="ZCFC672C5R56..." />
+          </MF>
+          <MF label="Wartość netto (zł)">
+            <MInput type="number" value={v.wartoscNet} onChange={val=>setF("wartoscNet",val)} placeholder="210000" />
+          </MF>
+        </div>
+      </div>
+
       {/* ── UBEZPIECZENIA & PRZEGLĄD ── */}
       <div className="px-5 py-4 border-t border-gray-100">
-        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">🛡️ Ubezpieczenia & Przegląd</div>
-        <div className="grid grid-cols-2 gap-3">
-          <MF label="OC — ważny do">
+        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">🛡️ OC</div>
+        <div className="grid grid-cols-3 gap-3 mb-4">
+          <MF label="Nr polisy OC">
+            <MInput value={v.ocNumber} onChange={val=>setF("ocNumber",val)} placeholder="1102324224" />
+          </MF>
+          <MF label="Składka OC (zł)">
+            <MInput type="number" value={v.ocAmount} onChange={val=>setF("ocAmount",val)} placeholder="2178" />
+          </MF>
+          <MF label="OC — ważna do">
             <MInput type="date" value={v.ocExpiry} onChange={val=>setF("ocExpiry",val)} />
           </MF>
-          <MF label="AC — ważny do">
+        </div>
+        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">🛡️ AC</div>
+        <div className="grid grid-cols-3 gap-3 mb-4">
+          <MF label="Nr polisy AC">
+            <MInput value={v.acNumber} onChange={val=>setF("acNumber",val)} placeholder="920059750652" />
+          </MF>
+          <MF label="Składka AC (zł)">
+            <MInput type="number" value={v.acAmount} onChange={val=>setF("acAmount",val)} placeholder="1954" />
+          </MF>
+          <MF label="AC — ważna do">
             <MInput type="date" value={v.acExpiry} onChange={val=>setF("acExpiry",val)} />
           </MF>
+        </div>
+        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">📦 Pakiet ubezpieczeń</div>
+        <div className="grid grid-cols-3 gap-3 mb-4">
+          <MF label="Assistance (zł)">
+            <MInput type="number" value={v.assistance} onChange={val=>setF("assistance",val)} placeholder="200" />
+          </MF>
+          <MF label="Autoszyba (zł)">
+            <MInput type="number" value={v.autoszyba} onChange={val=>setF("autoszyba",val)} placeholder="400" />
+          </MF>
+          <MF label="NNW (zł)">
+            <MInput type="number" value={v.nnw} onChange={val=>setF("nnw",val)} placeholder="50" />
+          </MF>
+          <MF label="Ochrona zniżki (zł)">
+            <MInput type="number" value={v.ochronaZnizki} onChange={val=>setF("ochronaZnizki",val)} placeholder="—" />
+          </MF>
+          <MF label="Całość polis (zł)">
+            <MInput type="number" value={v.caloscPolis} onChange={val=>setF("caloscPolis",val)} placeholder="5659" />
+          </MF>
+        </div>
+        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">📊 GAP</div>
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <MF label="Składka GAP (zł)">
+            <MInput type="number" value={v.gap} onChange={val=>setF("gap",val)} placeholder="6233" />
+          </MF>
+          <MF label="GAP — ważny do">
+            <MInput type="date" value={v.gapExpiry} onChange={val=>setF("gapExpiry",val)} />
+          </MF>
+        </div>
+        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">🔧 Przegląd</div>
+        <div className="grid grid-cols-1 gap-3">
           <MF label="Przegląd techniczny — ważny do">
             <MInput type="date" value={v.inspectionExpiry} onChange={val=>setF("inspectionExpiry",val)} />
           </MF>
         </div>
-        <div className="flex gap-2 mt-3">
+        <div className="flex gap-2 mt-4">
           <button onClick={()=>{ if(!v.plate.trim()) return; onSave(v); }}
             className="flex-1 py-2 rounded-xl text-sm font-bold text-white hover:opacity-90"
             style={{ background:"#111827" }}>Zapisz zmiany</button>
@@ -4654,7 +4757,7 @@ function CostsImportModal({ vehicles, categories, onImport, onClose }) {
 
   const fmt = (n) => n ? parseFloat(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-";
 
-  const CAT_VALID = ["paliwo","leasing","naprawa","ubezpieczenie","opony","myto","inne","wyplata"];
+  const CAT_VALID = ["paliwo","leasing","naprawa","ubezpieczenie","opony","myto","nego","inne","wyplata","wynagrodzenie"];
 
   const parseFile = async (file) => {
     setStatus("parsing");
@@ -4722,7 +4825,8 @@ function CostsImportModal({ vehicles, categories, onImport, onClose }) {
           catNorm.includes("napr") || catNorm.includes("serwis") ? "naprawa" :
           catNorm.includes("ubezp") || catNorm.includes("ocpd") ? "ubezpieczenie" :
           catNorm.includes("opon")  ? "opony" :
-          catNorm.includes("myto") || catNorm.includes("toll") || catNorm.includes("etoll") || catNorm.includes("nego") || catNorm.includes("autostr") ? "myto" :
+          catNorm.includes("myto") || catNorm.includes("toll") || catNorm.includes("etoll") || catNorm.includes("autostr") ? "myto" :
+          catNorm.includes("nego") || catNorm.includes("negometal") ? "nego" :
           catNorm.includes("wyplat") || catNorm.includes("zus") || catNorm.includes("podatek") ? "wyplata" : "inne";
 
         parsed.push({
