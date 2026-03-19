@@ -987,12 +987,11 @@ function App({ user }) {
                   total: filteredCosts.filter(c => c.vehicleId === v.id).reduce((s,c) => s + (c.currency==="EUR" ? (c.amountEUR||0) : getPLN(c)/stats.rate), 0),
                 })).filter(v => v.total > 0).sort((a,b) => b.total - a.total);
 
-                const allCats = [...categories];
+                let allCats = [...categories];
                 if (!allCats.find(c => c.id === "wyplata")) allCats.push({ id:"wyplata", label:"Wynagrodzenie", color:"#f43f5e", icon:"👤" });
                 if (!allCats.find(c => c.id === "ubezpieczenie")) allCats.push({ id:"ubezpieczenie", label:"Ubezpieczenie", color:"#10b981", icon:"🛡️" });
-        // Migracja: myto, nego, etoll → oplaty
-        if (!allCats.find(c => c.id === "oplaty")) allCats.push({ id:"oplaty", label:"Opłaty drogowe", color:"#8b5cf6", icon:"🛣️" });
-        allCats = allCats.filter(c => c.id !== "myto" && c.id !== "nego" && c.id !== "etoll");
+                if (!allCats.find(c => c.id === "oplaty")) allCats.push({ id:"oplaty", label:"Opłaty drogowe", color:"#8b5cf6", icon:"🛣️" });
+                allCats = allCats.filter(c => c.id !== "myto" && c.id !== "nego" && c.id !== "etoll");
                 const byCat = allCats.map(cat => ({
                   ...cat,
                   total: filteredCosts.filter(c => c.category === cat.id).reduce((s,c) => s + (c.currency==="EUR" ? (c.amountEUR||0) : getPLN(c)/stats.rate), 0),
