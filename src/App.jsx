@@ -89,14 +89,14 @@ const SEED_VEHICLES = [
 ];
 
 const SEED_CATEGORIES = [
-  { id: "paliwo",        label: "Paliwo",           color: "#f59e0b", icon: "⛽" },
-  { id: "leasing",       label: "Leasing",           color: "#6366f1", icon: "🏦" },
-  { id: "naprawa",       label: "Naprawa",           color: "#ef4444", icon: "🔧" },
-  { id: "ubezpieczenie", label: "Ubezpieczenie",     color: "#10b981", icon: "🛡️" },
-  { id: "opony",         label: "Opony",             color: "#3b82f6", icon: "🔄" },
-  { id: "myto",          label: "Myto / Opłaty",     color: "#8b5cf6", icon: "🛣️" },
-  { id: "wyplata",       label: "Wynagrodzenie",  color: "#f43f5e", icon: "👤" },
-  { id: "inne",          label: "Inne",              color: "#94a3b8", icon: "📋" },
+  { id: "paliwo",        label: "Paliwo",             color: "#f59e0b", icon: "⛽" },
+  { id: "leasing",       label: "Leasing",             color: "#6366f1", icon: "🏦" },
+  { id: "naprawa",       label: "Naprawa",             color: "#ef4444", icon: "🔧" },
+  { id: "ubezpieczenie", label: "Ubezpieczenie",       color: "#10b981", icon: "🛡️" },
+  { id: "opony",         label: "Opony",               color: "#3b82f6", icon: "🔄" },
+  { id: "oplaty",        label: "Opłaty drogowe",      color: "#8b5cf6", icon: "🛣️" },
+  { id: "wyplata",       label: "Wynagrodzenie",       color: "#f43f5e", icon: "👤" },
+  { id: "inne",          label: "Inne",                color: "#94a3b8", icon: "📋" },
 ];
 
 const SEED_COSTS = [
@@ -298,7 +298,10 @@ function App({ user }) {
       const rawCosts = c || SEED_COSTS;
       const patchedCosts = rawCosts.map(cost => {
         const n = (cost.note || "").toLowerCase();
-        if (n.includes("nego") || n.includes("negometal")) return { ...cost, category: "myto" };
+        if (n.includes("nego") || n.includes("negometal")) return { ...cost, category: "oplaty" };
+        if (cost.category === "myto") return { ...cost, category: "oplaty" };
+        if (cost.category === "nego") return { ...cost, category: "oplaty" };
+        if (cost.category === "etoll") return { ...cost, category: "oplaty" };
         return cost;
       });
       setCosts(patchedCosts);
@@ -378,10 +381,13 @@ function App({ user }) {
   const addCategory  = (cat)   => setCategories((p) => [...p, cat]);
 
   const CAT_FALLBACKS = {
-    wyplata:       { label: "Wynagrodzenie", color: "#f43f5e", icon: "👤" },
+    wyplata:       { label: "Wynagrodzenie",    color: "#f43f5e", icon: "👤" },
     ubezpieczenie: { label: "Ubezpieczenie",    color: "#10b981", icon: "🛡️" },
     opony:         { label: "Opony",            color: "#3b82f6", icon: "🔄" },
-    myto:          { label: "Myto / Opłaty",    color: "#8b5cf6", icon: "🛣️" },
+    oplaty:        { label: "Opłaty drogowe",   color: "#8b5cf6", icon: "🛣️" },
+    myto:          { label: "Opłaty drogowe",   color: "#8b5cf6", icon: "🛣️" },
+    nego:          { label: "Opłaty drogowe",   color: "#8b5cf6", icon: "🛣️" },
+    etoll:         { label: "Opłaty drogowe",   color: "#8b5cf6", icon: "🛣️" },
     naprawa:       { label: "Naprawa",          color: "#ef4444", icon: "🔧" },
     paliwo:        { label: "Paliwo",           color: "#f59e0b", icon: "⛽" },
     leasing:       { label: "Leasing",          color: "#6366f1", icon: "🏦" },
@@ -984,6 +990,9 @@ function App({ user }) {
                 const allCats = [...categories];
                 if (!allCats.find(c => c.id === "wyplata")) allCats.push({ id:"wyplata", label:"Wynagrodzenie", color:"#f43f5e", icon:"👤" });
                 if (!allCats.find(c => c.id === "ubezpieczenie")) allCats.push({ id:"ubezpieczenie", label:"Ubezpieczenie", color:"#10b981", icon:"🛡️" });
+        // Migracja: myto, nego, etoll → oplaty
+        if (!allCats.find(c => c.id === "oplaty")) allCats.push({ id:"oplaty", label:"Opłaty drogowe", color:"#8b5cf6", icon:"🛣️" });
+        allCats = allCats.filter(c => c.id !== "myto" && c.id !== "nego" && c.id !== "etoll");
                 const byCat = allCats.map(cat => ({
                   ...cat,
                   total: filteredCosts.filter(c => c.category === cat.id).reduce((s,c) => s + (c.currency==="EUR" ? (c.amountEUR||0) : getPLN(c)/stats.rate), 0),
@@ -4757,7 +4766,7 @@ function CostsImportModal({ vehicles, categories, onImport, onClose }) {
 
   const fmt = (n) => n ? parseFloat(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-";
 
-  const CAT_VALID = ["paliwo","leasing","naprawa","ubezpieczenie","opony","myto","nego","inne","wyplata","wynagrodzenie"];
+  const CAT_VALID = ["paliwo","leasing","naprawa","ubezpieczenie","opony","oplaty","myto","nego","inne","wyplata","wynagrodzenie"];
 
   const parseFile = async (file) => {
     setStatus("parsing");
@@ -4825,8 +4834,7 @@ function CostsImportModal({ vehicles, categories, onImport, onClose }) {
           catNorm.includes("napr") || catNorm.includes("serwis") ? "naprawa" :
           catNorm.includes("ubezp") || catNorm.includes("ocpd") ? "ubezpieczenie" :
           catNorm.includes("opon")  ? "opony" :
-          catNorm.includes("myto") || catNorm.includes("toll") || catNorm.includes("etoll") || catNorm.includes("autostr") ? "myto" :
-          catNorm.includes("nego") || catNorm.includes("negometal") ? "nego" :
+          catNorm.includes("myto") || catNorm.includes("toll") || catNorm.includes("etoll") || catNorm.includes("autostr") || catNorm.includes("oplaty") || catNorm.includes("opłaty") || catNorm.includes("nego") || catNorm.includes("negometal") ? "oplaty" :
           catNorm.includes("wyplat") || catNorm.includes("zus") || catNorm.includes("podatek") ? "wyplata" : "inne";
 
         parsed.push({
@@ -4862,7 +4870,7 @@ function CostsImportModal({ vehicles, categories, onImport, onClose }) {
   const currency0 = rows[0]?.currency || "PLN";
   const vName = (id) => vehicles.find(v => v.id === id)?.plate || id;
 
-  const CAT_ICONS = {paliwo:"⛽",leasing:"🏦",naprawa:"🔧",ubezpieczenie:"🛡️",opony:"🔄",myto:"🛣️",inne:"📋",wyplata:"👤"};
+  const CAT_ICONS = {paliwo:"⛽",leasing:"🏦",naprawa:"🔧",ubezpieczenie:"🛡️",opony:"🔄",oplaty:"🛣️",myto:"🛣️",nego:"🛣️",inne:"📋",wyplata:"👤"};
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background:"rgba(0,0,0,0.45)", backdropFilter:"blur(4px)" }}>
