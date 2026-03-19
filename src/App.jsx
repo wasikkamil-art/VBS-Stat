@@ -1161,12 +1161,7 @@ function App({ user }) {
                       </div>
 
                       {/* ── STATS ROW ── */}
-                      <div className="grid grid-cols-3 divide-x divide-gray-50 border-b border-gray-50">
-                        <div className="px-4 py-3">
-                          <div className="text-xs text-gray-400 mb-0.5">Łączne koszty</div>
-                          <div className="font-bold text-gray-900 text-sm">{fmtEUR(total / stats.rate)}</div>
-                          <div className="text-xs text-gray-400">{fmtPLN(total)}</div>
-                        </div>
+                      <div className="grid grid-cols-2 divide-x divide-gray-50 border-b border-gray-50">
                         <div className="px-4 py-3">
                           <div className="text-xs text-gray-400 mb-0.5">We flocie od</div>
                           <div className="font-bold text-gray-900 text-sm">{v.fleetJoinDate ? new Date(v.fleetJoinDate).toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric"}) : "—"}</div>
