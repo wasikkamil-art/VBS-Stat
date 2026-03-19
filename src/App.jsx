@@ -1168,8 +1168,9 @@ function App({ user }) {
                           <div className="text-xs text-gray-400">{fmtPLN(total)}</div>
                         </div>
                         <div className="px-4 py-3">
-                          <div className="text-xs text-gray-400 mb-0.5">Wpisów</div>
-                          <div className="font-bold text-gray-900 text-sm">{vc.length}</div>
+                          <div className="text-xs text-gray-400 mb-0.5">We flocie od</div>
+                          <div className="font-bold text-gray-900 text-sm">{v.fleetJoinDate ? new Date(v.fleetJoinDate).toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric"}) : "—"}</div>
+                          {v.fleetLeaveDate && <div className="text-xs text-red-400">do {new Date(v.fleetLeaveDate).toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric"})}</div>}
                         </div>
                         <div className="px-4 py-3">
                           <div className="text-xs text-gray-400 mb-0.5">Rodzaj</div>
@@ -3615,6 +3616,23 @@ function ServiceEditForm({ vehicle, onSave, onClose }) {
   return (
     <div className="px-5 py-5 space-y-5 border-t border-gray-100">
 
+      {/* DATY WE FLOCIE */}
+      <div className="rounded-2xl p-4 space-y-3" style={{ background:"#f0fdf4", border:"1.5px solid #bbf7d0" }}>
+        <div className="text-xs font-bold text-green-700 uppercase tracking-wider">📅 Daty we flocie</div>
+        <div className="grid grid-cols-2 gap-3">
+          <MF label="Data dołączenia do floty">
+            <input type="date" value={v.fleetJoinDate||""} onChange={e => setF("fleetJoinDate", e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-lg text-sm outline-none"
+              style={{ background:"#f9fafb", border:"1.5px solid #e5e7eb", fontFamily:"'DM Sans',sans-serif", color:"#111827" }} />
+          </MF>
+          <MF label="Data opuszczenia floty">
+            <input type="date" value={v.fleetLeaveDate||""} onChange={e => setF("fleetLeaveDate", e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-lg text-sm outline-none"
+              style={{ background:"#f9fafb", border:"1.5px solid #e5e7eb", fontFamily:"'DM Sans',sans-serif", color:"#111827" }} />
+          </MF>
+        </div>
+      </div>
+
       {/* UBEZPIECZENIA + PRZEGLĄD */}
       <div className="rounded-2xl p-4 space-y-3" style={{ background:"#f8faff", border:"1.5px solid #e0e7ff" }}>
         <div className="text-xs font-bold text-indigo-600 uppercase tracking-wider">🛡️ Ubezpieczenia & Przegląd</div>
@@ -3948,6 +3966,9 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
     lastOilServiceDate: vehicle.lastOilServiceDate || "",
     oilServiceEveryKm:  vehicle.oilServiceEveryKm  || "",
     oilServiceEveryMonths: vehicle.oilServiceEveryMonths || "",
+    // Daty floty
+    fleetJoinDate:  vehicle.fleetJoinDate  || "",
+    fleetLeaveDate: vehicle.fleetLeaveDate || "",
   });
   const [newEqInput, setNewEqInput] = useState("");
   const setF  = (k, val) => setV((p) => ({ ...p, [k]: val }));
@@ -4302,7 +4323,7 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 function AddVehicleModal({ onSave, onClose }) {
   const today = new Date().toISOString().split("T")[0];
-  const [form, setForm] = useState({ plate: "", plate2: "", brand: "", type: "Solo", year: new Date().getFullYear(), equipment: [], customEquipment: [], dimensions: "", dimensions2: "", loadingType: "", maxWeight: "", maxWeight2: "", driverName: "", driverPhone: "", driverFrom: today });
+  const [form, setForm] = useState({ plate: "", plate2: "", brand: "", type: "Solo", year: new Date().getFullYear(), equipment: [], customEquipment: [], dimensions: "", dimensions2: "", loadingType: "", maxWeight: "", maxWeight2: "", driverName: "", driverPhone: "", driverFrom: today, fleetJoinDate: today, fleetLeaveDate: "" });
   const [newEqInput, setNewEqInput] = useState("");
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -4319,7 +4340,7 @@ function AddVehicleModal({ onSave, onClose }) {
     const driverHistory = form.driverName
       ? [{ id: uid(), name: form.driverName, phone: form.driverPhone || "", from: form.driverFrom, to: "" }]
       : [];
-    onSave({ plate: form.plate, plate2: form.plate2, brand: form.brand, type: form.type, year: Number(form.year), equipment: form.equipment, customEquipment: form.customEquipment, dimensions: form.dimensions, dimensions2: form.dimensions2, loadingType: form.loadingType, maxWeight: form.maxWeight, maxWeight2: form.maxWeight2, driverHistory });
+    onSave({ plate: form.plate, plate2: form.plate2, brand: form.brand, type: form.type, year: Number(form.year), equipment: form.equipment, customEquipment: form.customEquipment, dimensions: form.dimensions, dimensions2: form.dimensions2, loadingType: form.loadingType, maxWeight: form.maxWeight, maxWeight2: form.maxWeight2, driverHistory, fleetJoinDate: form.fleetJoinDate, fleetLeaveDate: form.fleetLeaveDate });
   };
 
   return (
@@ -4402,6 +4423,18 @@ function AddVehicleModal({ onSave, onClose }) {
               </div>
             </div>
           </div>
+          <div className="pt-2 border-t border-gray-100">
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Daty we flocie</div>
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <MF label="Data dołączenia">
+                <MInput type="date" value={form.fleetJoinDate} onChange={(v) => set("fleetJoinDate", v)} />
+              </MF>
+              <MF label="Data opuszczenia (opcjonalnie)">
+                <MInput type="date" value={form.fleetLeaveDate} onChange={(v) => set("fleetLeaveDate", v)} />
+              </MF>
+            </div>
+          </div>
+
           <div className="pt-2 border-t border-gray-100">
             <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Kierowca startowy (opcjonalnie)</div>
             <div className="space-y-3">
