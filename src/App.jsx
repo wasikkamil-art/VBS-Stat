@@ -677,7 +677,7 @@ function App({ user }) {
                           statusBg = "#fffbeb";
                         } else {
                           status = "postoj";
-                          statusLabel = `Postój · ${diffDays}d`;
+                          statusLabel = diffDays <= 3 ? `Wolny · ${diffDays}d` : `Wolny`;
                           statusIcon = "🅿️";
                           statusColor = "#94a3b8";
                           statusBg = "#f8fafc";
@@ -793,7 +793,7 @@ function App({ user }) {
                                     <div className="flex items-center gap-1.5">
                                       <span className="text-sm">{icon}</span>
                                       <span className="text-xs font-semibold" style={{ color }}>
-                                        {daysLeft > 0 ? `Tacho: ${daysLeft} dni do powrotu` : `Tacho: PRZEKROCZONE o ${Math.abs(daysLeft)} dni`}
+                                        {daysLeft > 0 ? `Tacho: ${daysLeft} dni do powrotu` : daysLeft === 0 ? `Tacho: dziś powrót!` : `Tacho: przekroczone o ${Math.abs(daysLeft)} dni`}
                                       </span>
                                     </div>
                                     <span className="text-xs" style={{ color, opacity: 0.7 }}>
@@ -860,12 +860,12 @@ function App({ user }) {
                     });
                     if (powrot) return null;
                     const daysLeft = 28 - Math.floor((new Date()-startDate)/86400000);
-                    if (daysLeft < 5) return { plate: v.plate, daysLeft };
+                    if (daysLeft < 5 && daysLeft >= -30) return { plate: v.plate, daysLeft };
                     return null;
                   }).filter(Boolean);
 
                   const alerts = [
-                    ...tachoAlerts.map(t => ({ type: "red", text: `${t.plate} — tacho: tylko ${t.daysLeft} dni do powrotu!` })),
+                    ...tachoAlerts.map(t => ({ type: "red", text: t.daysLeft >= 0 ? `${t.plate} — tacho: ${t.daysLeft} dni do powrotu` : `${t.plate} — tacho: przekroczone o ${Math.abs(t.daysLeft)} dni` })),
                     overdueInv > 0 && { type: "red", text: `${overdueInv} ${overdueInv===1?"faktura":"faktury"} po terminie płatności` },
                     expiredDocs > 0 && { type: "red", text: `${expiredDocs} ${expiredDocs===1?"dokument wygasł":"dokumenty wygasły"}` },
                     docAlerts > 0 && { type: "yellow", text: `${docAlerts} ${docAlerts===1?"dokument wygasa":"dokumenty wygasają"} w ciągu 30 dni` },
