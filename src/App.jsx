@@ -635,6 +635,8 @@ function App({ user }) {
                         const rozl = r.dataRozladunku ? new Date(r.dataRozladunku) : null;
                         if (!zal || !rozl) return false;
                         zal.setHours(0,0,0,0); rozl.setHours(0,0,0,0);
+                        // Nie traktuj jako aktywnego jeśli już oznaczono jako rozładowany
+                        if (r.statusRozladunku === "rozladowano") return false;
                         return zal <= todayMidnight && todayMidnight <= rozl;
                       });
 
