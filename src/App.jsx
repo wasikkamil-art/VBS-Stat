@@ -5372,7 +5372,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-gray-100 text-gray-400 uppercase bg-gray-50 text-xs">
-              {["Data zlec.","Klient","Cena EUR","Nr FV","Nr zlec.","Wysłano FV","Termin płatn.","Status FV","📄 FV","📋 Zlecenie",""].map(h => (
+              {["Data zlec.","Klient","Cena EUR","Nr FV","Nr zlec.","Wysłano FV","Termin płatn.","Status FV","📄 FV",""].map(h => (
                 <th key={h} className="px-3 py-2.5 text-left whitespace-nowrap font-semibold">{h}</th>
               ))}
             </tr>
@@ -5426,32 +5426,19 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                     />
                   </td>
                   <td className="px-3 py-2.5 whitespace-nowrap">
-                    <div className="flex flex-col gap-0.5">
-                      {r.nrZlecenia && <span className="text-xs font-mono text-gray-600">{r.nrZlecenia}</span>}
+                    <div className="flex items-center gap-1">
                       {r.urlZlecenie
                         ? <a href={r.urlZlecenie} target="_blank" rel="noopener noreferrer"
-                            className="text-xs px-2 py-0.5 rounded-lg font-semibold w-fit"
-                            style={{background:"#eff6ff",color:"#1d4ed8"}}>📋 Otwórz</a>
-                        : <ZlecenieUploadBtn
-                            frachtId={r.id}
-                            onUploaded={(url, nr) => onUpdate(r.id, { urlZlecenie: url, ...(nr ? {nrZlecenia: nr} : {}) })}
-                          />
+                            className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:bg-blue-50"
+                            style={{background:"#eff6ff"}} title="Otwórz zlecenie">
+                            📋
+                          </a>
+                        : <ZlecenieUploadBtn frachtId={r.id}
+                            onUploaded={(url, nr) => onUpdate(r.id, { urlZlecenie: url, ...(nr ? {nrZlecenia: nr} : {}) })} />
                       }
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5 whitespace-nowrap">
-                    <div className="flex items-center gap-1">
-                      {r.urlZlecenie && (
-                        <a href={r.urlZlecenie} target="_blank" rel="noopener noreferrer"
-                          className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:bg-blue-50"
-                          style={{background:"#eff6ff"}} title="Otwórz zlecenie">
-                          📋
-                        </a>
-                      )}
                       <button onClick={() => setEditFVId(r.id)}
                         className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:bg-indigo-50"
-                        style={{background:"#f3f4f6"}}
-                        title="Edytuj">
+                        style={{background:"#f3f4f6"}} title="Edytuj">
                         ✏️
                       </button>
                     </div>
@@ -5841,8 +5828,8 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
                     <div className="flex gap-1">
                       {r.urlZlecenie
                         ? <a href={r.urlZlecenie} target="_blank" rel="noopener noreferrer"
-                            className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:bg-blue-100"
-                            style={{background:"#eff6ff"}} title="Otwórz / pobierz zlecenie">📋</a>
+                            className="text-xs px-2 py-1 rounded-lg font-medium transition-all hover:bg-blue-100"
+                            style={{background:"#eff6ff", color:"#1d4ed8"}} title="Otwórz / pobierz zlecenie">Otwórz</a>
                         : <ZlecenieUploadBtn frachtId={r.id}
                             onUploaded={(url, nr) => onUpdate(r.id, { urlZlecenie: url, ...(nr ? {nrZlecenia: nr} : {}) })} />
                       }
