@@ -5072,8 +5072,8 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
   const v = vehicles.find(x => x.id === selectedVehicle);
   let rows = frachtyWithFV.filter(r => r.vehicleId === selectedVehicle);
   if (filterStatus !== "all") rows = rows.filter(r => getStatus(r) === filterStatus);
-  if (filterYear !== "all") rows = rows.filter(r => r.dataZlecenia?.startsWith(filterYear));
-  rows = rows.sort((a,b) => (b.dataZlecenia||"").localeCompare(a.dataZlecenia||""));
+  if (filterYear !== "all") rows = rows.filter(r => (r.dataZaladunku||r.dataZlecenia)?.startsWith(filterYear));
+  rows = rows.sort((a,b) => (b.dataZaladunku||b.dataZlecenia||"").localeCompare(a.dataZaladunku||a.dataZlecenia||""));
 
   const totalEur = rows.reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0);
   const totalPrzet = rows.filter(r => getStatus(r) === "przeterminowana").reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0);
@@ -5309,14 +5309,15 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
   const fmt = (n) => n && parseFloat(n) > 0 ? parseFloat(n).toLocaleString("pl-PL",{minimumFractionDigits:2,maximumFractionDigits:2}) : "—";
   const monthFreights = (vid) => frachtyList.filter(r => {
     if (r.vehicleId !== vid) return false;
-    if (!r.dataZlecenia) return false;
-    const d = new Date(r.dataZlecenia);
+    const dateStr = r.dataZaladunku || r.dataZlecenia;
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
     return d.getFullYear() === filterYear && d.getMonth() === filterMonth;
-  }).sort((a,b) => (a.dataZlecenia||"").localeCompare(b.dataZlecenia||""));
+  }).sort((a,b) => (a.dataZaladunku||a.dataZlecenia||"").localeCompare(b.dataZaladunku||b.dataZlecenia||""));
   const editRecord = editId ? frachtyList.find(r => r.id === editId) : null;
 
   // Filtruje frachty po roku na overview
-  const filterByYear = (list, year) => year === "all" ? list : list.filter(r => r.dataZlecenia?.startsWith(year));
+  const filterByYear = (list, year) => year === "all" ? list : list.filter(r => (r.dataZaladunku||r.dataZlecenia)?.startsWith(year));
   const visibleList = filterByYear(frachtyList, overviewYear);
 
   // KPI per rok dla baner-przycisków
