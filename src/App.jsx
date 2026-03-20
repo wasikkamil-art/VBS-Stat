@@ -709,7 +709,7 @@ function App({ user }) {
                       const skad = displayF ? [displayF.zaladunekKod,displayF.zaladunekKod2,displayF.zaladunekKod3].filter(s=>s&&s.trim()).join(" / ") || displayF.skad || "—" : "—";
                       const dokad = displayF ? [displayF.dokod,displayF.dokod2,displayF.dokod3].filter(s=>s&&s.trim()).join(" / ") || displayF.dokad || "—" : "—";
                       const cena = displayF?.cenaEur ? parseFloat(displayF.cenaEur) : null;
-                      const km = displayF?.kmLadowne ? parseInt(displayF.kmLadowne) : null;
+                      const km = displayF?.kmWszystkie ? parseInt(displayF.kmWszystkie) : (displayF?.kmLadowne ? parseInt(displayF.kmLadowne) : null);
                       const eurKm = cena && km ? (cena/km).toFixed(2) : null;
                       const klient = displayF?.klient || "—";
                       const dataZal = displayF?.dataZaladunku || null;
@@ -844,15 +844,22 @@ function App({ user }) {
                                 );
                               })()}
 
-                              {/* Cena + EUR/km */}
+                              {/* EUR/km główna + cena pomocnicza */}
                               <div className="flex items-center justify-between pt-2"
                                 style={{ borderTop: "1px solid #f3f4f6" }}>
-                                <span className="text-base font-bold text-gray-900">
-                                  {cena ? `${cena.toLocaleString("pl-PL")} €` : "—"}
-                                </span>
-                                {eurKm && (
+                                <div>
+                                  {eurKm ? (
+                                    <span className="text-base font-bold text-gray-900">{eurKm} €/km</span>
+                                  ) : (
+                                    <span className="text-base font-bold text-gray-900">{cena ? `${cena.toLocaleString("pl-PL")} €` : "—"}</span>
+                                  )}
+                                  {eurKm && km && (
+                                    <span className="text-xs text-gray-400 ml-1">· {km?.toLocaleString("pl-PL")} km</span>
+                                  )}
+                                </div>
+                                {eurKm && cena && (
                                   <span className="text-xs text-gray-400">
-                                    {eurKm} €/km · {km?.toLocaleString("pl-PL")} km
+                                    {cena.toLocaleString("pl-PL")} €
                                   </span>
                                 )}
                               </div>
@@ -5357,12 +5364,12 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
     return {
       count: l.length,
       eur: l.reduce((s,r) => s + (parseFloat(r.cenaEur)||0), 0),
-      km: l.reduce((s,r) => s + (parseInt(r.kmLadowne)||0), 0),
+      km: l.reduce((s,r) => s + (parseInt(r.kmWszystkie)||parseInt(r.kmLadowne)||0), 0),
     };
   };
 
   if (!selectedVehicle) {
-    const kpi = { count: visibleList.length, eur: visibleList.reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0), km: visibleList.reduce((s,r) => s+(parseInt(r.kmLadowne)||0),0) };
+    const kpi = { count: visibleList.length, eur: visibleList.reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0), km: visibleList.reduce((s,r) => s+(parseInt(r.kmWszystkie)||parseInt(r.kmLadowne)||0),0) };
     return (
       <div className="p-4 md:p-6">
         {showImport && (
@@ -5388,7 +5395,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
             { key: "2026", label: "2026", color: "#0ea5e9", bg: "#f0f9ff", border: "#bae6fd" },
             { key: "all",  label: "Wszystkie", color: "#111827", bg: "#f9fafb", border: "#e5e7eb" },
           ].map(({ key, label, color, bg, border }) => {
-            const s = key === "all" ? { count: frachtyList.length, eur: frachtyList.reduce((a,r)=>a+(parseFloat(r.cenaEur)||0),0), km: frachtyList.reduce((a,r)=>a+(parseInt(r.kmLadowne)||0),0) } : yearStats(key);
+            const s = key === "all" ? { count: frachtyList.length, eur: frachtyList.reduce((a,r)=>a+(parseFloat(r.cenaEur)||0),0), km: frachtyList.reduce((a,r)=>a+(parseInt(r.kmWszystkie)||parseInt(r.kmLadowne)||0),0) } : yearStats(key);
             const active = overviewYear === key;
             return (
               <button key={key} onClick={() => setOverviewYear(key)}
@@ -5424,7 +5431,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
           {vehicles.map(v => {
             const vf = visibleList.filter(r => r.vehicleId === v.id);
             const suma = vf.reduce((s,r) => s + (parseFloat(r.cenaEur)||0), 0);
-            const km = vf.reduce((s,r) => s + (parseInt(r.kmLadowne)||0), 0);
+            const km = vf.reduce((s,r) => s + (parseInt(r.kmWszystkie)||parseInt(r.kmLadowne)||0), 0);
             return (
               <div key={v.id} onClick={() => setSelectedVehicle(v.id)} className="bg-white rounded-2xl border border-gray-100 p-4 cursor-pointer hover:border-gray-300 hover:shadow-sm transition-all">
                 <div className="flex items-center justify-between mb-3">
@@ -5451,6 +5458,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
   const v = vehicles.find(v => v.id === selectedVehicle);
   const rows = monthFreights(selectedVehicle);
   const totalCena = rows.reduce((s,r) => s + (parseFloat(r.cenaEur)||0), 0);
+  const totalKmWszAll = rows.reduce((s,r) => s + (parseInt(r.kmWszystkie)||parseInt(r.kmLadowne)||0), 0);
   const totalKmLad = rows.reduce((s,r) => s + (parseInt(r.kmLadowne)||0), 0);
   const totalKmWsz = rows.reduce((s,r) => s + (parseInt(r.kmWszystkie)||0), 0);
   const avgEurKm = totalKmLad > 0 ? (totalCena/totalKmLad).toFixed(2) : "-";
@@ -5482,7 +5490,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
       <div className="md:hidden space-y-3 mb-4">
         {rows.length === 0 && <div className="text-center py-8 text-gray-400 text-sm">Brak frachtów w tym miesiącu</div>}
         {rows.map((r, idx) => {
-          const eurKmLad = r.kmLadowne && r.cenaEur ? (parseFloat(r.cenaEur)/parseInt(r.kmLadowne)).toFixed(2) : null;
+          const eurKmLad = (r.kmWszystkie||r.kmLadowne) && r.cenaEur ? (parseFloat(r.cenaEur)/(parseInt(r.kmWszystkie)||parseInt(r.kmLadowne))).toFixed(2) : null;
           const stRozl = r.statusRozladunku || "w_trasie";
           const stColors = { rozladowano: ["#f0fdf4","#166534","✅"], w_trasie: ["#f0f9ff","#0369a1","🚛"], problem: ["#fef2f2","#991b1b","⚠️"] };
           const [stBg, stColor, stEmoji] = stColors[stRozl] || stColors.w_trasie;
