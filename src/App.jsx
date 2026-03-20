@@ -5277,6 +5277,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
   let rows = frachtyWithFV.filter(r => r.vehicleId === selectedVehicle);
   if (filterStatus !== "all") rows = rows.filter(r => getStatus(r) === filterStatus);
   if (filterYear !== "all") rows = rows.filter(r => (r.dataZaladunku||r.dataZlecenia)?.startsWith(filterYear));
+  if (filterMonth !== "all") rows = rows.filter(r => (r.dataZaladunku||r.dataZlecenia||"").slice(5,7) === filterMonth);
   rows = rows.sort((a,b) => (b.dataZaladunku||b.dataZlecenia||"").localeCompare(a.dataZaladunku||a.dataZlecenia||""));
 
   const totalEur = rows.reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0);
@@ -5295,11 +5296,29 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
 
       {/* Filtry */}
       <div className="flex flex-wrap gap-2 mb-5">
-        <select value={filterYear} onChange={e => setFilterYear(e.target.value)} className="text-sm px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-700">
-          <option value="all">Wszystkie lata</option>
-          <option value="2025">2025</option>
-          <option value="2026">2026</option>
-        </select>
+        <div className="flex gap-1.5">
+          {[["all","Wszystkie"],["2026","2026"],["2025","2025"]].map(([key,label]) => (
+            <button key={key} onClick={() => { setFilterYear(key); setFilterMonth("all"); }}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style={{ background: filterYear===key && filterMonth==="all" ? "#111827" : "#f3f4f6", color: filterYear===key && filterMonth==="all" ? "#fff" : "#6b7280" }}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {filterYear !== "all" && (
+          <div className="flex gap-1 flex-wrap">
+            {["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paź","Lis","Gru"].map((m,i) => {
+              const mm = String(i+1).padStart(2,"0");
+              return (
+                <button key={mm} onClick={() => setFilterMonth(filterMonth===mm ? "all" : mm)}
+                  className="px-2 py-1.5 rounded-lg text-xs font-medium transition-all"
+                  style={{ background: filterMonth===mm ? "#111827" : "#f3f4f6", color: filterMonth===mm ? "#fff" : "#6b7280" }}>
+                  {m}
+                </button>
+              );
+            })}
+          </div>
+        )}
         <div className="flex gap-1 flex-wrap">
           {[["all","Wszystkie","#111827","#f3f4f6"], ...FV_STATUSES.map(s => [s.id, s.emoji+" "+s.label, s.color, s.bg])].map(([id, label, color, bg]) => (
             <button key={id} onClick={() => setFilterStatus(id)}
@@ -5314,14 +5333,19 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
       {/* KPI */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         {[
-          ["Faktur", rows.length, "#6366f1"],
-          ["Łącznie EUR", fmt(totalEur), "#16a34a"],
-          ["Przeterminowane", fmt(totalPrzet), "#dc2626"],
-          ["Do otrzymania", fmt(rows.filter(r=>getStatus(r)!=="zaplacona").reduce((s,r)=>s+(parseFloat(r.cenaEur)||0),0)), "#f59e0b"],
-        ].map(([label,value,color]) => (
-          <div key={label} className="rounded-xl p-3 border border-gray-100 bg-white">
-            <div className="text-xs text-gray-400 mb-1">{label}</div>
+          ["Faktur", rows.length, "#6366f1", "#eef2ff"],
+          ["Łącznie EUR", fmt(totalEur), "#16a34a", "#f0fdf4"],
+          ["Przeterminowane", fmt(totalPrzet), "#dc2626", "#fef2f2"],
+          ["Do otrzymania", fmt(rows.filter(r=>getStatus(r)!=="zaplacona").reduce((s,r)=>s+(parseFloat(r.cenaEur)||0),0)), "#d97706", "#fffbeb"],
+        ].map(([label,value,color,bg]) => (
+          <div key={label} className="rounded-xl p-3 border border-gray-100" style={{background:bg}}>
+            <div className="text-xs text-gray-500 mb-1">{label}</div>
             <div className="text-base font-bold" style={{color}}>{value}</div>
+            <div className="text-xs mt-0.5" style={{color, opacity:0.6}}>
+              {filterMonth !== "all"
+                ? `${["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paź","Lis","Gru"][parseInt(filterMonth)-1]} ${filterYear}`
+                : filterYear !== "all" ? filterYear : "wszystkie"}
+            </div>
           </div>
         ))}
       </div>
