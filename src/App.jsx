@@ -5671,12 +5671,18 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
         <button onClick={() => { setEditId(null); setShowForm(true); }} className="px-4 py-2 rounded-lg text-sm font-semibold text-white" style={{background:"#111827"}}>+ Dodaj fracht</button>
       </div>
       <div className="flex flex-wrap gap-2 mb-4">
-        <select value={filterYear} onChange={e => setFilterYear(parseInt(e.target.value))} className="text-sm px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-700">
-          {[2024,2025,2026].map(y => <option key={y} value={y}>{y}</option>)}
-        </select>
+        <div className="flex gap-1.5">
+          {[2026,2025,2024].map(y => (
+            <button key={y} onClick={() => setFilterYear(y)}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style={{ background: filterYear===y ? "#111827" : "#f3f4f6", color: filterYear===y ? "#fff" : "#6b7280" }}>
+              {y}
+            </button>
+          ))}
+        </div>
         <div className="flex gap-1 flex-wrap">
           {["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paz","Lis","Gru"].map((m,i) => (
-            <button key={i} onClick={() => setFilterMonth(i)} className="px-2.5 py-1 rounded-lg text-xs font-medium transition-all" style={{background:filterMonth===i?"#111827":"#f3f4f6",color:filterMonth===i?"#fff":"#6b7280"}}>{m}</button>
+            <button key={i} onClick={() => setFilterMonth(i)} className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all" style={{background:filterMonth===i?"#111827":"#f3f4f6",color:filterMonth===i?"#fff":"#6b7280"}}>{m}</button>
           ))}
         </div>
       </div>
