@@ -5133,10 +5133,12 @@ const FV_STATUSES = [
 function FVTab({ frachtyList, vehicles, onUpdate }) {
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [filterStatus, setFilterStatus] = useState("all");
-  const [filterYear, setFilterYear] = useState("all");
+  const [filterYear, setFilterYear] = useState(String(new Date().getFullYear()));
+  const [filterMonth, setFilterMonth] = useState("all");
   const [editFVId, setEditFVId] = useState(null);
 
   const fmt = (n) => n ? parseFloat(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-";
+  const MONTHS = ["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paź","Lis","Gru"];
 
   const getStatus = (r) => {
     const isOverdue = r.terminPlatnosci && r.statusFV !== "zaplacona" && new Date(r.terminPlatnosci) < new Date();
@@ -5146,67 +5148,174 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
 
   const frachtyWithFV = frachtyList.filter(r => r.nrFV || r.dataWyslania || r.terminPlatnosci || r.cenaEur);
 
+  // Filtruj wg roku i miesiąca
+  const filtered = frachtyWithFV.filter(r => {
+    const d = r.dataZaladunku || r.dataZlecenia || "";
+    if (filterYear !== "all" && !d.startsWith(filterYear)) return false;
+    if (filterMonth !== "all" && d.slice(5,7) !== filterMonth) return false;
+    return true;
+  });
+
   // Overview — karty pojazdów
   if (!selectedVehicle) {
-    // Globalne KPI per status
     const kpiAll = {
-      total: frachtyWithFV.reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0),
-      count: frachtyWithFV.length,
-      przeterminowane: frachtyWithFV.filter(r => getStatus(r) === "przeterminowana").reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0),
-      czeka: frachtyWithFV.filter(r => getStatus(r) === "wyslana").reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0),
-      zaplacone: frachtyWithFV.filter(r => getStatus(r) === "zaplacona").reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0),
+      total:           filtered.reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0),
+      count:           filtered.length,
+      przeterminowane: filtered.filter(r => getStatus(r) === "przeterminowana").reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0),
+      przeterminowane_count: filtered.filter(r => getStatus(r) === "przeterminowana").length,
+      czeka:           filtered.filter(r => getStatus(r) === "wyslana").reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0),
+      czeka_count:     filtered.filter(r => getStatus(r) === "wyslana").length,
+      nie_wyslane:     filtered.filter(r => getStatus(r) === "nie_wyslana").reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0),
+      nie_wyslane_count: filtered.filter(r => getStatus(r) === "nie_wyslana").length,
+      zaplacone:       filtered.filter(r => getStatus(r) === "zaplacona").reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0),
+      zaplacone_count: filtered.filter(r => getStatus(r) === "zaplacona").length,
     };
+
+    // Dostępne lata
+    const years = [...new Set(frachtyWithFV.map(r => (r.dataZaladunku||r.dataZlecenia||"").slice(0,4)).filter(Boolean))].sort().reverse();
 
     return (
       <div className="p-4 md:p-6">
-        <div className="mb-6">
-          <h2 className="text-xl font-bold text-gray-900">FV / Płatności</h2>
-          <p className="text-sm text-gray-400 mt-0.5">{frachtyWithFV.length} faktur łącznie</p>
-        </div>
 
-        {/* KPI statusów */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-          {[
-            { label: "Łącznie EUR",       value: fmt(kpiAll.total),           color: "#111827", bg: "#f9fafb" },
-            { label: "🟡 Czeka na wpłatę", value: fmt(kpiAll.czeka),           color: "#92400e", bg: "#fefce8" },
-            { label: "🔴 Przeterminowane", value: fmt(kpiAll.przeterminowane), color: "#991b1b", bg: "#fef2f2" },
-            { label: "🟢 Zapłacone",       value: fmt(kpiAll.zaplacone),       color: "#166534", bg: "#f0fdf4" },
-          ].map(({ label, value, color, bg }) => (
-            <div key={label} className="rounded-xl p-3 border border-gray-100" style={{ background: bg }}>
-              <div className="text-xs text-gray-500 mb-1">{label}</div>
-              <div className="text-lg font-bold" style={{ color }}>{value}</div>
+        {/* FILTR OKRESU */}
+        <div className="bg-white rounded-2xl border border-gray-100 p-4 mb-5">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex gap-1.5">
+              <button onClick={() => { setFilterYear("all"); setFilterMonth("all"); }}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                style={{ background: filterYear==="all" ? "#111827" : "#f3f4f6", color: filterYear==="all" ? "#fff" : "#6b7280" }}>
+                Wszystkie
+              </button>
+              {years.map(y => (
+                <button key={y} onClick={() => { setFilterYear(y); setFilterMonth("all"); }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                  style={{ background: filterYear===y && filterMonth==="all" ? "#111827" : "#f3f4f6", color: filterYear===y && filterMonth==="all" ? "#fff" : "#6b7280" }}>
+                  {y}
+                </button>
+              ))}
             </div>
-          ))}
+            {filterYear !== "all" && (
+              <div className="flex gap-1 flex-wrap">
+                {MONTHS.map((m,i) => {
+                  const mm = String(i+1).padStart(2,"0");
+                  return (
+                    <button key={mm} onClick={() => setFilterMonth(filterMonth===mm ? "all" : mm)}
+                      className="px-2 py-1 rounded-lg text-xs font-medium transition-all"
+                      style={{ background: filterMonth===mm ? "#111827" : "#f3f4f6", color: filterMonth===mm ? "#fff" : "#6b7280" }}>
+                      {m}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <div className="ml-auto text-xs text-gray-400">
+              {filtered.length} faktur · {filterYear === "all" ? "wszystkie lata" : filterMonth === "all" ? filterYear : `${MONTHS[parseInt(filterMonth)-1]} ${filterYear}`}
+            </div>
+          </div>
         </div>
 
-        {/* Karty pojazdów */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {vehicles.map(v => {
-            const vf = frachtyWithFV.filter(r => r.vehicleId === v.id);
-            const przet = vf.filter(r => getStatus(r) === "przeterminowana");
-            const suma = vf.reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0);
-            const hasPrzet = przet.length > 0;
-            return (
-              <div key={v.id} onClick={() => setSelectedVehicle(v.id)}
-                className="bg-white rounded-2xl border p-4 cursor-pointer hover:shadow-sm transition-all"
-                style={{ borderColor: hasPrzet ? "#fca5a5" : "#f3f4f6", background: hasPrzet ? "#fff7f7" : "#fff" }}>
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <div className="font-bold text-gray-900">{v.plate}</div>
-                    <div className="text-xs text-gray-400">{v.brand}</div>
-                  </div>
-                  <div className="text-2xl">{v.plate2 ? "🚌" : "🚛"}</div>
-                </div>
-                <div className="grid grid-cols-3 gap-2 pt-3 border-t border-gray-50">
-                  <div><div className="text-xs text-gray-400">Faktur</div><div className="font-bold text-gray-900">{vf.length}</div></div>
-                  <div><div className="text-xs text-gray-400">Wartość</div><div className="font-bold text-green-700 text-sm">{fmt(suma)}</div></div>
-                  <div><div className="text-xs text-gray-400">Przeter.</div><div className={`font-bold text-sm ${hasPrzet ? "text-red-600" : "text-gray-300"}`}>{przet.length}</div></div>
-                </div>
-                {hasPrzet && <div className="mt-2 text-xs font-semibold text-red-500">⚠️ {przet.length} faktura/-y po terminie!</div>}
-              </div>
-            );
-          })}
+        {/* KPI — 2 rzędy */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+          <div className="rounded-xl p-3 border border-gray-100 bg-gray-50">
+            <div className="text-xs text-gray-500 mb-1">Łącznie EUR</div>
+            <div className="text-lg font-bold text-gray-900">{fmt(kpiAll.total)}</div>
+            <div className="text-xs text-gray-400">{kpiAll.count} faktur</div>
+          </div>
+          <div className="rounded-xl p-3 border border-red-100 bg-red-50">
+            <div className="text-xs text-red-700 mb-1">🔴 Przeterminowane</div>
+            <div className="text-lg font-bold text-red-600">{fmt(kpiAll.przeterminowane)}</div>
+            <div className="text-xs text-red-400">{kpiAll.przeterminowane_count} faktur</div>
+          </div>
+          <div className="rounded-xl p-3 border border-yellow-100 bg-yellow-50">
+            <div className="text-xs text-yellow-700 mb-1">🟡 Wysłane / czekają</div>
+            <div className="text-lg font-bold text-yellow-600">{fmt(kpiAll.czeka)}</div>
+            <div className="text-xs text-yellow-500">{kpiAll.czeka_count} faktur</div>
+          </div>
+          <div className="rounded-xl p-3 border border-green-100 bg-green-50">
+            <div className="text-xs text-green-700 mb-1">🟢 Zapłacone</div>
+            <div className="text-lg font-bold text-green-600">{fmt(kpiAll.zaplacone)}</div>
+            <div className="text-xs text-green-400">{kpiAll.zaplacone_count} faktur</div>
+          </div>
         </div>
+
+        {/* KARTY KIEROWCÓW — wysłane/przeterminowane */}
+        <div className="mb-4">
+          <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Per pojazd / kierowca</div>
+          <div className="space-y-2">
+            {vehicles.filter(v => !v.archived).map(v => {
+              const vf = filtered.filter(r => r.vehicleId === v.id);
+              if (vf.length === 0) return null;
+              const przet = vf.filter(r => getStatus(r) === "przeterminowana");
+              const suma = vf.reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0);
+              const driver = (v.driverHistory||[]).find(d => !d.to)?.name || "—";
+              const initials = driver.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
+              const hasPrzet = przet.length > 0;
+              return (
+                <div key={v.id} onClick={() => setSelectedVehicle(v.id)}
+                  className="flex items-center justify-between px-4 py-3 rounded-xl border cursor-pointer hover:shadow-sm transition-all"
+                  style={{ borderColor: hasPrzet ? "#fca5a5" : "#f3f4f6", background: hasPrzet ? "#fff7f7" : "#fff" }}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0"
+                      style={{ background: hasPrzet ? "#fef2f2" : "#f0fdf4", color: hasPrzet ? "#dc2626" : "#15803d" }}>
+                      {initials || (v.plate2 ? "🚌" : "🚛")}
+                    </div>
+                    <div>
+                      <div className="text-sm font-semibold text-gray-900">{driver !== "—" ? driver : v.plate} · {v.plate}</div>
+                      <div className="text-xs text-gray-400">{vf.length} faktur</div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm font-semibold text-green-700">{fmt(suma)}</div>
+                    {hasPrzet
+                      ? <div className="text-xs text-red-500">{przet.length} przeterminowane</div>
+                      : <div className="text-xs text-gray-300">ok</div>}
+                  </div>
+                </div>
+              );
+            }).filter(Boolean)}
+          </div>
+        </div>
+
+        {/* NIE WYSŁANE — osobna sekcja */}
+        {kpiAll.nie_wyslane_count > 0 && (
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <div className="h-px flex-1 bg-gray-100" />
+              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-2">
+                Nie wysłane FV — {kpiAll.nie_wyslane_count} faktur · {fmt(kpiAll.nie_wyslane)}
+              </span>
+              <div className="h-px flex-1 bg-gray-100" />
+            </div>
+            <div className="space-y-2">
+              {vehicles.filter(v => !v.archived).map(v => {
+                const vf = filtered.filter(r => r.vehicleId === v.id && getStatus(r) === "nie_wyslana");
+                if (vf.length === 0) return null;
+                const suma = vf.reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0);
+                const driver = (v.driverHistory||[]).find(d => !d.to)?.name || "—";
+                const initials = driver.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
+                return (
+                  <div key={v.id} onClick={() => setSelectedVehicle(v.id)}
+                    className="flex items-center justify-between px-4 py-3 rounded-xl border border-dashed border-gray-200 cursor-pointer hover:border-gray-300 transition-all bg-gray-50">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0"
+                        style={{ background: "#f3f4f6", color: "#6b7280" }}>
+                        {initials || (v.plate2 ? "🚌" : "🚛")}
+                      </div>
+                      <div>
+                        <div className="text-sm font-semibold text-gray-600">{driver !== "—" ? driver : v.plate} · {v.plate}</div>
+                        <div className="text-xs text-gray-400">{vf.length} faktur do wysłania</div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-sm font-semibold text-gray-700">{fmt(suma)}</div>
+                      <div className="text-xs text-gray-400">nie wysłane</div>
+                    </div>
+                  </div>
+                );
+              }).filter(Boolean)}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
