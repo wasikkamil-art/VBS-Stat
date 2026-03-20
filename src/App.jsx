@@ -5381,42 +5381,51 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
           </button>
         </div>
 
-        {/* BANERY LAT */}
-        <div className="grid grid-cols-3 gap-2 mb-5">
-          {[
-            { key: "2025", label: "2025", color: "#6366f1", bg: "#eef2ff", border: "#c7d2fe" },
-            { key: "2026", label: "2026", color: "#0ea5e9", bg: "#f0f9ff", border: "#bae6fd" },
-            { key: "all",  label: "Wszystkie", color: "#111827", bg: "#f9fafb", border: "#e5e7eb" },
-          ].map(({ key, label, color, bg, border }) => {
-            const s = key === "all" ? { count: frachtyList.length, eur: frachtyList.reduce((a,r)=>a+(parseFloat(r.cenaEur)||0),0), km: frachtyList.reduce((a,r)=>a+(parseInt(r.kmWszystkie)||parseInt(r.kmLadowne)||0),0) } : yearStats(key);
-            const active = overviewYear === key;
-            return (
-              <button key={key} onClick={() => setOverviewYear(key)}
-                className="rounded-2xl p-2.5 md:p-4 text-left transition-all w-full"
-                style={{ background: active ? bg : "#fff", border: `2px solid ${active ? border : "#f3f4f6"}` }}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-bold uppercase tracking-wider" style={{ color }}>{label}</span>
-                  {active && <span className="hidden md:inline text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: border, color }}>✓</span>}
-                </div>
-                <div className="font-bold text-sm md:text-lg text-gray-900 leading-tight">{s.eur > 0 ? parseFloat(s.eur).toLocaleString("pl-PL",{maximumFractionDigits:0}) : "—"} €</div>
-                <div className="text-xs text-gray-400 mt-1">{s.count} fr.</div>
-              </button>
-            );
-          })}
-        </div>
+        {/* SELEKTOR LAT + KPI */}
+        <div className="flex gap-4 mb-5">
+          {/* Lista wyboru lat — po lewej */}
+          <div className="flex flex-col gap-1.5 flex-shrink-0">
+            {[
+              { key: "2025", label: "2025", color: "#6366f1", bg: "#eef2ff", border: "#c7d2fe" },
+              { key: "2026", label: "2026", color: "#0ea5e9", bg: "#f0f9ff", border: "#bae6fd" },
+              { key: "all",  label: "Wszystkie", color: "#111827", bg: "#f9fafb", border: "#e5e7eb" },
+            ].map(({ key, label, color, bg, border }) => {
+              const active = overviewYear === key;
+              return (
+                <button key={key} onClick={() => setOverviewYear(key)}
+                  className="rounded-xl px-4 py-2 text-left transition-all whitespace-nowrap"
+                  style={{
+                    background: active ? bg : "#fff",
+                    border: `2px solid ${active ? border : "#f3f4f6"}`,
+                    color: active ? color : "#9ca3af",
+                    fontWeight: active ? 700 : 500,
+                    fontSize: "13px",
+                  }}>
+                  {active && "✓ "}{label}
+                </button>
+              );
+            })}
+          </div>
 
-        {/* KPI aktywnego widoku */}
-        <div className="grid grid-cols-3 gap-3 mb-6">
-          {[
-            ["Frachtów", kpi.count, "#6366f1"],
-            ["Łącznie EUR", fmt(kpi.eur), "#16a34a"],
-            ["KM ładowne", kpi.km.toLocaleString("pl-PL"), "#0ea5e9"],
-          ].map(([label, value, color]) => (
-            <div key={label} className="rounded-xl p-3 border border-gray-100 bg-white">
-              <div className="text-xs text-gray-400 mb-1">{label}</div>
-              <div className="text-lg font-bold" style={{color}}>{value}</div>
-            </div>
-          ))}
+          {/* KPI zależne od wyboru */}
+          <div className="flex-1 grid grid-cols-3 gap-3">
+            {(() => {
+              const s = overviewYear === "all"
+                ? { count: frachtyList.length, eur: frachtyList.reduce((a,r)=>a+(parseFloat(r.cenaEur)||0),0), km: frachtyList.reduce((a,r)=>a+(parseInt(r.kmWszystkie)||parseInt(r.kmLadowne)||0),0) }
+                : yearStats(overviewYear);
+              const avgKm = s.km > 0 ? (s.eur / s.km).toFixed(2) : "—";
+              return [
+                ["Frachtów", s.count, "#6366f1"],
+                ["Łącznie EUR", s.eur > 0 ? parseFloat(s.eur).toLocaleString("pl-PL",{maximumFractionDigits:0})+" €" : "—", "#16a34a"],
+                ["Śr. €/km", avgKm !== "—" ? avgKm+" €" : "—", "#f59e0b"],
+              ].map(([label, value, color]) => (
+                <div key={label} className="rounded-xl p-3 border border-gray-100 bg-white flex flex-col justify-center">
+                  <div className="text-xs text-gray-400 mb-1">{label}</div>
+                  <div className="text-lg font-bold leading-tight" style={{color}}>{value}</div>
+                </div>
+              ));
+            })()}
+          </div>
         </div>
 
         {/* KARTY POJAZDÓW */}
