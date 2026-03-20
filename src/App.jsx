@@ -756,27 +756,32 @@ function App({ user }) {
                                 </div>
                               </div>
 
-                              {/* LICZNIK TACHOGRAFU 28 DNI — ręczny */}
+                              {/* LICZNIK TACHOGRAFU 28 DNI — ręczny z kalendarzem */}
                               {(() => {
                                 const tachoStart = v.tachoStart ? new Date(v.tachoStart) : null;
                                 const today = new Date(); today.setHours(0,0,0,0);
 
-                                const handleTachoStart = () => {
-                                  const todayStr = new Date().toISOString().slice(0,10);
-                                  updateVehicle({ ...v, tachoStart: todayStr });
-                                };
-                                const handleTachoReset = () => {
-                                  const { tachoStart, ...rest } = v;
-                                  updateVehicle(rest);
+                                const handleTachoChange = (dateStr) => {
+                                  if (!dateStr) {
+                                    const { tachoStart: _, ...rest } = v;
+                                    updateVehicle(rest);
+                                  } else {
+                                    updateVehicle({ ...v, tachoStart: dateStr });
+                                  }
                                 };
 
                                 if (!tachoStart) {
                                   return (
-                                    <button onClick={handleTachoStart}
-                                      className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg mb-2 text-xs font-semibold transition-all hover:opacity-80"
-                                      style={{ background: "#f3f4f6", color: "#6b7280", border: "1.5px dashed #d1d5db" }}>
-                                      <span>⏱️</span> Start tacho — dziś
-                                    </button>
+                                    <div className="mb-2">
+                                      <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg"
+                                        style={{ background: "#f3f4f6", border: "1.5px dashed #d1d5db" }}>
+                                        <span className="text-xs text-gray-400 flex-shrink-0">⏱️ Start tacho:</span>
+                                        <input type="date"
+                                          onChange={e => handleTachoChange(e.target.value)}
+                                          className="flex-1 text-xs outline-none bg-transparent text-gray-600"
+                                          style={{ fontFamily: "'DM Sans', sans-serif" }} />
+                                      </div>
+                                    </div>
                                   );
                                 }
 
@@ -784,6 +789,7 @@ function App({ user }) {
                                 const daysLeft = 28 - daysSinceStart;
                                 const stopDate = new Date(tachoStart); stopDate.setDate(stopDate.getDate() + 28);
                                 const stopStr = stopDate.toLocaleDateString("pl-PL", {day:"2-digit", month:"2-digit"});
+                                const startStr = tachoStart.toISOString().slice(0,10);
 
                                 const isRed    = daysLeft < 5;
                                 const isYellow = daysLeft >= 5 && daysLeft < 10;
@@ -792,23 +798,29 @@ function App({ user }) {
                                 const icon  = isRed ? "🔴" : isYellow ? "🟡" : "🟢";
 
                                 return (
-                                  <div className="mb-2">
+                                  <div className="mb-2 space-y-1">
                                     <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg"
                                       style={{ background: bg }}>
                                       <div className="flex items-center gap-1.5">
                                         <span className="text-sm">{icon}</span>
                                         <span className="text-xs font-semibold" style={{ color }}>
-                                          {daysLeft > 0 ? `Tacho: ${daysLeft} dni (powrót do ${stopStr})` : daysLeft === 0 ? `Tacho: dziś powrót!` : `Tacho: przekroczone o ${Math.abs(daysLeft)} dni`}
+                                          {daysLeft > 0 ? `Tacho: ${daysLeft} dni (do ${stopStr})` : daysLeft === 0 ? `Tacho: dziś powrót!` : `Tacho: przekroczone o ${Math.abs(daysLeft)} dni`}
                                         </span>
                                       </div>
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-xs" style={{ color, opacity: 0.7 }}>{daysSinceStart}/28d</span>
-                                        <button onClick={handleTachoReset}
-                                          className="text-xs px-1.5 py-0.5 rounded hover:opacity-70 transition-all"
-                                          style={{ background: color + "20", color }}>
-                                          Reset
-                                        </button>
-                                      </div>
+                                      <span className="text-xs" style={{ color, opacity: 0.7 }}>{daysSinceStart}/28d</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg"
+                                      style={{ background: "#f9fafb", border: "1px solid #e5e7eb" }}>
+                                      <span className="text-xs text-gray-400 flex-shrink-0">⏱️ Start:</span>
+                                      <input type="date"
+                                        value={startStr}
+                                        onChange={e => handleTachoChange(e.target.value)}
+                                        className="flex-1 text-xs outline-none bg-transparent text-gray-700"
+                                        style={{ fontFamily: "'DM Sans', sans-serif" }} />
+                                      <button onClick={() => handleTachoChange("")}
+                                        className="text-xs text-gray-400 hover:text-red-400 transition-all flex-shrink-0">
+                                        Reset
+                                      </button>
                                     </div>
                                   </div>
                                 );
