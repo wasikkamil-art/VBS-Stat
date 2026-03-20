@@ -5160,7 +5160,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
     return r.statusFV || "nie_wyslana";
   };
 
-  const frachtyWithFV = frachtyList.filter(r => r.nrFV || r.dataWyslania || r.terminPlatnosci || r.cenaEur);
+  const frachtyWithFV = frachtyList.filter(r => r.nrFV || r.dataWyslania || r.terminPlatnosci);
 
   // Filtruj wg roku i miesiąca
   const filtered = frachtyWithFV.filter(r => {
@@ -5426,12 +5426,15 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                     />
                   </td>
                   <td className="px-3 py-2.5 whitespace-nowrap">
-                    {r.urlZlecenie
-                      ? <a href={r.urlZlecenie} target="_blank" rel="noopener noreferrer"
-                          className="text-xs px-2 py-1 rounded-lg font-semibold"
-                          style={{background:"#eff6ff",color:"#1d4ed8"}}>📋 Zlec.</a>
-                      : <span className="text-xs text-gray-300 italic">brak</span>
-                    }
+                    <div className="flex flex-col gap-0.5">
+                      {r.nrZlecenia && <span className="text-xs font-mono text-gray-600">{r.nrZlecenia}</span>}
+                      {r.urlZlecenie
+                        ? <a href={r.urlZlecenie} target="_blank" rel="noopener noreferrer"
+                            className="text-xs px-2 py-0.5 rounded-lg font-semibold w-fit"
+                            style={{background:"#eff6ff",color:"#1d4ed8"}}>📋 Zlec.</a>
+                        : !r.nrZlecenia && <span className="text-xs text-gray-300 italic">brak</span>
+                      }
+                    </div>
                   </td>
                   <td className="px-3 py-2.5 whitespace-nowrap">
                     <button onClick={() => setEditFVId(r.id)}
