@@ -844,22 +844,15 @@ function App({ user }) {
                                 );
                               })()}
 
-                              {/* EUR/km główna po lewej + cena po prawej */}
+                              {/* Cena po lewej + EUR/km po prawej */}
                               <div className="flex items-center justify-between pt-2"
                                 style={{ borderTop: "1px solid #f3f4f6" }}>
-                                <div>
-                                  {eurKm ? (
-                                    <span className="text-base font-bold text-gray-900">{eurKm} €/km</span>
-                                  ) : (
-                                    <span className="text-base font-bold text-gray-900">{cena ? `${cena.toLocaleString("pl-PL")} €` : "—"}</span>
-                                  )}
-                                  {eurKm && km && (
-                                    <span className="text-xs text-gray-400 ml-1">· {km?.toLocaleString("pl-PL")} km</span>
-                                  )}
-                                </div>
-                                {eurKm && cena && (
+                                <span className="text-base font-bold text-gray-900">
+                                  {cena ? `${cena.toLocaleString("pl-PL")} €` : "—"}
+                                </span>
+                                {eurKm && km && (
                                   <span className="text-xs text-gray-400">
-                                    {cena.toLocaleString("pl-PL")} €
+                                    {eurKm} €/km · {km?.toLocaleString("pl-PL")} km
                                   </span>
                                 )}
                               </div>
