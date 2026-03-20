@@ -5171,9 +5171,6 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
       zaplacone_count: filtered.filter(r => getStatus(r) === "zaplacona").length,
     };
 
-    // Dostępne lata
-    const years = [...new Set(frachtyWithFV.map(r => (r.dataZaladunku||r.dataZlecenia||"").slice(0,4)).filter(Boolean))].sort().reverse();
-
     return (
       <div className="p-4 md:p-6">
 
@@ -5181,16 +5178,11 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
         <div className="bg-white rounded-2xl border border-gray-100 p-4 mb-5">
           <div className="flex items-center gap-3 flex-wrap">
             <div className="flex gap-1.5">
-              <button onClick={() => { setFilterYear("all"); setFilterMonth("all"); }}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-                style={{ background: filterYear==="all" ? "#111827" : "#f3f4f6", color: filterYear==="all" ? "#fff" : "#6b7280" }}>
-                Wszystkie
-              </button>
-              {years.map(y => (
-                <button key={y} onClick={() => { setFilterYear(y); setFilterMonth("all"); }}
+              {[["all","Wszystkie"],["2026","2026"],["2025","2025"]].map(([key,label]) => (
+                <button key={key} onClick={() => { setFilterYear(key); setFilterMonth("all"); }}
                   className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-                  style={{ background: filterYear===y && filterMonth==="all" ? "#111827" : "#f3f4f6", color: filterYear===y && filterMonth==="all" ? "#fff" : "#6b7280" }}>
-                  {y}
+                  style={{ background: filterYear===key && filterMonth==="all" ? "#111827" : "#f3f4f6", color: filterYear===key && filterMonth==="all" ? "#fff" : "#6b7280" }}>
+                  {label}
                 </button>
               ))}
             </div>
@@ -5276,46 +5268,6 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
           </div>
         </div>
 
-        {/* NIE WYSŁANE — osobna sekcja */}
-        {kpiAll.nie_wyslane_count > 0 && (
-          <div>
-            <div className="flex items-center gap-2 mb-3">
-              <div className="h-px flex-1 bg-gray-100" />
-              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-2">
-                Nie wysłane FV — {kpiAll.nie_wyslane_count} faktur · {fmt(kpiAll.nie_wyslane)}
-              </span>
-              <div className="h-px flex-1 bg-gray-100" />
-            </div>
-            <div className="space-y-2">
-              {vehicles.filter(v => !v.archived).map(v => {
-                const vf = filtered.filter(r => r.vehicleId === v.id && getStatus(r) === "nie_wyslana");
-                if (vf.length === 0) return null;
-                const suma = vf.reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0);
-                const driver = (v.driverHistory||[]).find(d => !d.to)?.name || "—";
-                const initials = driver.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
-                return (
-                  <div key={v.id} onClick={() => setSelectedVehicle(v.id)}
-                    className="flex items-center justify-between px-4 py-3 rounded-xl border border-dashed border-gray-200 cursor-pointer hover:border-gray-300 transition-all bg-gray-50">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0"
-                        style={{ background: "#f3f4f6", color: "#6b7280" }}>
-                        {initials || (v.plate2 ? "🚌" : "🚛")}
-                      </div>
-                      <div>
-                        <div className="text-sm font-semibold text-gray-600">{driver !== "—" ? driver : v.plate} · {v.plate}</div>
-                        <div className="text-xs text-gray-400">{vf.length} faktur do wysłania</div>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-sm font-semibold text-gray-700">{fmt(suma)}</div>
-                      <div className="text-xs text-gray-400">nie wysłane</div>
-                    </div>
-                  </div>
-                );
-              }).filter(Boolean)}
-            </div>
-          </div>
-        )}
       </div>
     );
   }
