@@ -6176,7 +6176,7 @@ function FVEditModal({ record, onSave, onClose }) {
 }
 
 // ─── ZLECENIE UPLOAD BTN ─────────────────────────────────────────────────────
-function ZlecenieUploadBtn({ frachtId, onUploaded, label = "📎 Wgraj", fullWidth = false }) {
+function ZlecenieUploadBtn({ frachtId, onUploaded, label = "📎 zlecenie", fullWidth = false }) {
   // onUploaded(url, nrZlecenia)
   const [status, setStatus] = useState("idle");
   const fileRef = useRef(null);
@@ -6233,7 +6233,7 @@ function ZlecenieUploadBtn({ frachtId, onUploaded, label = "📎 Wgraj", fullWid
     <div className={fullWidth ? "w-full" : ""}>
       {status === "idle" && (
         <button onClick={() => fileRef.current?.click()}
-          className={`text-sm px-3 py-2 rounded-xl border border-dashed font-medium transition-all hover:bg-blue-50 ${fullWidth ? "w-full text-center" : ""}`}
+          className={`text-xs px-2 py-1 rounded-lg border border-dashed font-medium transition-all hover:bg-blue-50 ${fullWidth ? "w-full text-center" : ""}`}
           style={{ borderColor: "#93c5fd", color: "#2563eb" }}>
           {label}
         </button>
