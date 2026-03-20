@@ -756,32 +756,34 @@ function App({ user }) {
                                 </div>
                               </div>
 
-                              {/* LICZNIK TACHOGRAFU 28 DNI */}
+                              {/* LICZNIK TACHOGRAFU 28 DNI — ręczny */}
                               {(() => {
-                                const isPL = (kod) => kod && kod.toUpperCase().includes("PL");
-                                
-                                // Znajdź ostatni fracht który startował z PL
-                                const lastPLStart = vFrachty
-                                  .filter(r => isPL(r.zaladunekKod) || isPL(r.zaladunekKod2) || isPL(r.zaladunekKod3))
-                                  .sort((a,b) => (b.dataZaladunku||"").localeCompare(a.dataZaladunku||""))[0];
+                                const tachoStart = v.tachoStart ? new Date(v.tachoStart) : null;
+                                const today = new Date(); today.setHours(0,0,0,0);
 
-                                if (!lastPLStart?.dataZaladunku) return null;
+                                const handleTachoStart = () => {
+                                  const todayStr = new Date().toISOString().slice(0,10);
+                                  updateVehicle({ ...v, tachoStart: todayStr });
+                                };
+                                const handleTachoReset = () => {
+                                  const { tachoStart, ...rest } = v;
+                                  updateVehicle(rest);
+                                };
 
-                                // Sprawdź czy od tamtej pory był powrót do PL (rozładunek PL)
-                                const startDate = new Date(lastPLStart.dataZaladunku);
-                                const powrotPL = vFrachty.find(r => {
-                                  const rDate = r.dataRozladunku ? new Date(r.dataRozladunku) : null;
-                                  if (!rDate || rDate <= startDate) return false;
-                                  return isPL(r.dokod) || isPL(r.dokod2) || isPL(r.dokod3);
-                                });
+                                if (!tachoStart) {
+                                  return (
+                                    <button onClick={handleTachoStart}
+                                      className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg mb-2 text-xs font-semibold transition-all hover:opacity-80"
+                                      style={{ background: "#f3f4f6", color: "#6b7280", border: "1.5px dashed #d1d5db" }}>
+                                      <span>⏱️</span> Start tacho — dziś
+                                    </button>
+                                  );
+                                }
 
-                                if (powrotPL) return null; // wrócił do PL — licznik zresetowany
-
-                                // Ile dni minęło od wyjazdu z PL
-                                const daysSinceStart = Math.floor((new Date() - startDate) / 86400000);
+                                const daysSinceStart = Math.floor((today - tachoStart) / 86400000);
                                 const daysLeft = 28 - daysSinceStart;
-
-                                if (daysSinceStart < 0) return null; // jeszcze nie wyjechał
+                                const stopDate = new Date(tachoStart); stopDate.setDate(stopDate.getDate() + 28);
+                                const stopStr = stopDate.toLocaleDateString("pl-PL", {day:"2-digit", month:"2-digit"});
 
                                 const isRed    = daysLeft < 5;
                                 const isYellow = daysLeft >= 5 && daysLeft < 10;
@@ -790,17 +792,24 @@ function App({ user }) {
                                 const icon  = isRed ? "🔴" : isYellow ? "🟡" : "🟢";
 
                                 return (
-                                  <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg mb-2"
-                                    style={{ background: bg }}>
-                                    <div className="flex items-center gap-1.5">
-                                      <span className="text-sm">{icon}</span>
-                                      <span className="text-xs font-semibold" style={{ color }}>
-                                        {daysLeft > 0 ? `Tacho: ${daysLeft} dni do powrotu` : daysLeft === 0 ? `Tacho: dziś powrót!` : `Tacho: przekroczone o ${Math.abs(daysLeft)} dni`}
-                                      </span>
+                                  <div className="mb-2">
+                                    <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg"
+                                      style={{ background: bg }}>
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-sm">{icon}</span>
+                                        <span className="text-xs font-semibold" style={{ color }}>
+                                          {daysLeft > 0 ? `Tacho: ${daysLeft} dni (powrót do ${stopStr})` : daysLeft === 0 ? `Tacho: dziś powrót!` : `Tacho: przekroczone o ${Math.abs(daysLeft)} dni`}
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-xs" style={{ color, opacity: 0.7 }}>{daysSinceStart}/28d</span>
+                                        <button onClick={handleTachoReset}
+                                          className="text-xs px-1.5 py-0.5 rounded hover:opacity-70 transition-all"
+                                          style={{ background: color + "20", color }}>
+                                          Reset
+                                        </button>
+                                      </div>
                                     </div>
-                                    <span className="text-xs" style={{ color, opacity: 0.7 }}>
-                                      {daysSinceStart}/28d
-                                    </span>
                                   </div>
                                 );
                               })()}
@@ -847,21 +856,11 @@ function App({ user }) {
                   const docAlerts = docs.filter(d => d.validTo && d.validTo <= in30Str && d.validTo >= todayStr).length;
                   const expiredDocs = docs.filter(d => d.validTo && d.validTo < todayStr).length;
 
-                  // Sprawdź tachografy
-                  const isPL = (k) => k && k.toUpperCase().includes("PL");
+                  // Sprawdź tachografy — ręczny start
                   const tachoAlerts = vehicles.map(v => {
-                    const vf = frachtyList.filter(r => r.vehicleId === v.id);
-                    const lastPL = vf.filter(r => isPL(r.zaladunekKod)||isPL(r.zaladunekKod2)||isPL(r.zaladunekKod3))
-                      .sort((a,b) => (b.dataZaladunku||"").localeCompare(a.dataZaladunku||""))[0];
-                    if (!lastPL?.dataZaladunku) return null;
-                    const startDate = new Date(lastPL.dataZaladunku);
-                    const powrot = vf.find(r => {
-                      const rd = r.dataRozladunku ? new Date(r.dataRozladunku) : null;
-                      if (!rd || rd <= startDate) return false;
-                      return isPL(r.dokod)||isPL(r.dokod2)||isPL(r.dokod3);
-                    });
-                    if (powrot) return null;
-                    const daysLeft = 28 - Math.floor((new Date()-startDate)/86400000);
+                    if (!v.tachoStart) return null;
+                    const startDate = new Date(v.tachoStart); startDate.setHours(0,0,0,0);
+                    const daysLeft = 28 - Math.floor((new Date() - startDate) / 86400000);
                     if (daysLeft < 5 && daysLeft >= -30) return { plate: v.plate, daysLeft };
                     return null;
                   }).filter(Boolean);
