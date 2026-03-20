@@ -387,7 +387,15 @@ function App({ user }) {
   const addCost      = (entry) => { setCosts((p) => [...p, { ...entry, id: uid() }]); showToast("✅ Koszt zapisany"); setShowAddCost(false); };
   const deleteCost   = (id)    => { setCosts((p) => p.filter((c) => c.id !== id)); showToast("Usunięto wpis"); };
   const addVehicle   = (v)     => { setVehicles((p) => [...p, { ...v, id: uid(), driverHistory: v.driverHistory || [] }]); showToast("🚛 Pojazd dodany"); setShowAddVehicle(false); };
-  const delVehicle   = (id)    => { setVehicles((p) => p.filter((v) => v.id !== id)); setCosts((p) => p.filter((c) => c.vehicleId !== id)); showToast("Pojazd usunięty"); };
+  const delVehicle   = (id, reason) => {
+    setVehicles((p) => p.map((v) => v.id !== id ? v : {
+      ...v,
+      archived: true,
+      archivedDate: new Date().toISOString().slice(0,10),
+      archivedReason: reason || "",
+    }));
+    showToast("✅ Pojazd przeniesiony do archiwum");
+  };
   const updateVehicle= (updated) => { setVehicles((p) => p.map((v) => v.id === updated.id ? updated : v)); showToast("✅ Zmiany zapisane"); setEditVehicleId(null); };
   const addCategory  = (cat)   => setCategories((p) => [...p, cat]);
 
@@ -500,7 +508,7 @@ function App({ user }) {
       {deleteVehicleModal && <DeleteVehicleModal
         plate={deleteVehicleModal.plate}
         onConfirm={(reason) => {
-          delVehicle(deleteVehicleModal.id);
+          delVehicle(deleteVehicleModal.id, reason);
           setDeleteVehicleModal(null);
         }}
         onClose={() => setDeleteVehicleModal(null)}
@@ -1163,7 +1171,7 @@ function App({ user }) {
                 </button>
               </div>
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                {vehicles.map((v) => {
+                {vehicles.filter(v => !v.archived).map((v) => {
                   const vc      = costs.filter((c) => c.vehicleId === v.id);
                   const total   = vc.reduce((s, c) => s + getPLN(c), 0);
                   const topCat  = categories.map((cat) => ({
@@ -1342,6 +1350,38 @@ function App({ user }) {
                   );
                 })}
               </div>
+
+              {/* ARCHIWUM POJAZDÓW */}
+              {vehicles.filter(v => v.archived).length > 0 && (
+                <div className="mt-8">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="h-px flex-1 bg-gray-100" />
+                    <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-2">Archiwum pojazdów</span>
+                    <div className="h-px flex-1 bg-gray-100" />
+                  </div>
+                  <div className="space-y-2">
+                    {vehicles.filter(v => v.archived).map(v => (
+                      <div key={v.id} className="flex items-center justify-between px-4 py-3 rounded-xl border border-dashed border-gray-200 bg-gray-50">
+                        <div className="flex items-center gap-3">
+                          <span className="text-xl opacity-30">{v.plate2 ? "🚌" : "🚛"}</span>
+                          <div>
+                            <div className="text-sm font-semibold text-gray-400">{v.plate}{v.plate2 ? ` / ${v.plate2}` : ""}</div>
+                            <div className="text-xs text-gray-400">{v.brand} · {v.year}</div>
+                          </div>
+                        </div>
+                        <div className="flex-1 mx-4 text-right">
+                          {v.archivedReason && <div className="text-xs text-gray-500">{v.archivedReason}</div>}
+                          {v.archivedDate && <div className="text-xs text-gray-300">{v.archivedDate}</div>}
+                        </div>
+                        <button onClick={() => setVehicles(p => p.map(vv => vv.id===v.id ? (({archived, archivedDate, archivedReason, ...rest}) => rest)(vv) : vv))}
+                          className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-400 hover:text-gray-700 hover:border-gray-300 transition-all flex-shrink-0">
+                          Przywróć
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
