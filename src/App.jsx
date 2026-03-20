@@ -277,6 +277,7 @@ function App({ user }) {
   const [showCostsImport, setShowCostsImport]   = useState(false);
   const [showAddVehicle, setShowAddVehicle]   = useState(false);
   const [editVehicleId, setEditVehicleId]     = useState(null);
+  const [deleteVehicleModal, setDeleteVehicleModal] = useState(null); // { id, plate }
   const [filterVehicle, setFilterVehicle]     = useState("all");
   const [filterCat, setFilterCat]             = useState("all");
   const [filterMonth, setFilterMonth]         = useState("all");
@@ -496,6 +497,14 @@ function App({ user }) {
         />
       )}
       {showAddVehicle && <AddVehicleModal onSave={addVehicle} onClose={() => setShowAddVehicle(false)} />}
+      {deleteVehicleModal && <DeleteVehicleModal
+        plate={deleteVehicleModal.plate}
+        onConfirm={(reason) => {
+          delVehicle(deleteVehicleModal.id);
+          setDeleteVehicleModal(null);
+        }}
+        onClose={() => setDeleteVehicleModal(null)}
+      />}
 
       <div className="flex min-h-screen">
 
@@ -1196,7 +1205,7 @@ function App({ user }) {
                             }}>
                             {isEditing ? "Zamknij" : "✏️ Edytuj"}
                           </button>
-                          <button onClick={() => delVehicle(v.id)}
+                          <button onClick={() => setDeleteVehicleModal({ id: v.id, plate: v.plate })}
                             className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-all text-xs">✕</button>
                         </div>
                       </div>
@@ -4460,6 +4469,69 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // MODAL: ADD VEHICLE
 // ═══════════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DELETE VEHICLE MODAL
+// ═══════════════════════════════════════════════════════════════════════════════
+function DeleteVehicleModal({ plate, onConfirm, onClose }) {
+  const [reason, setReason] = useState("");
+  const REASONS = ["Sprzedaż pojazdu", "Koniec leasingu", "Szkoda całkowita", "Wymiana na nowy", "Inne"];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+      style={{ background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)" }}>
+      <div className="w-full sm:max-w-sm bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden"
+        style={{ fontFamily: "'DM Sans', sans-serif" }}>
+        <div className="px-6 pt-5 pb-4 border-b border-gray-100">
+          <h3 className="text-base font-bold text-gray-900">Usuń pojazd</h3>
+          <p className="text-sm text-gray-400 mt-0.5">{plate}</p>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <div>
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Przyczyna usunięcia</div>
+            <div className="space-y-1.5">
+              {REASONS.map(r => (
+                <button key={r} onClick={() => setReason(r)}
+                  className="w-full text-left px-3 py-2 rounded-lg text-sm transition-all"
+                  style={{
+                    background: reason === r ? "#fef2f2" : "#f9fafb",
+                    border: `1.5px solid ${reason === r ? "#fca5a5" : "#e5e7eb"}`,
+                    color: reason === r ? "#dc2626" : "#374151",
+                    fontWeight: reason === r ? 600 : 400,
+                  }}>
+                  {reason === r ? "✓ " : ""}{r}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Dodatkowe uwagi (opcjonalnie)</div>
+            <textarea rows={2} placeholder="np. sprzedano dnia 20.03.2026..."
+              value={reason && !["Sprzedaż pojazdu","Koniec leasingu","Szkoda całkowita","Wymiana na nowy","Inne"].includes(reason) ? reason : ""}
+              onChange={e => setReason(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-lg text-sm outline-none resize-none"
+              style={{ background: "#f9fafb", border: "1.5px solid #e5e7eb", fontFamily: "'DM Sans', sans-serif", color: "#111827" }} />
+          </div>
+          <div className="p-3 rounded-xl text-sm" style={{ background: "#fef2f2", color: "#991b1b" }}>
+            ⚠️ Tej operacji nie można cofnąć. Pojazd zostanie usunięty wraz z historią kierowców.
+          </div>
+        </div>
+        <div className="px-6 pb-6 flex gap-3">
+          <button onClick={onClose}
+            className="flex-1 py-2.5 rounded-xl text-sm font-semibold border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 transition-all">
+            Anuluj
+          </button>
+          <button onClick={() => onConfirm(reason)} disabled={!reason}
+            className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 disabled:opacity-30"
+            style={{ background: "#dc2626" }}>
+            Usuń pojazd
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AddVehicleModal({ onSave, onClose }) {
   const today = new Date().toISOString().split("T")[0];
   const [form, setForm] = useState({ plate: "", plate2: "", brand: "", type: "Solo", year: new Date().getFullYear(), equipment: [], customEquipment: [], dimensions: "", dimensions2: "", loadingType: "", maxWeight: "", maxWeight2: "", driverName: "", driverPhone: "", driverFrom: today, fleetJoinDate: today, fleetLeaveDate: "" });
