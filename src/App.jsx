@@ -5839,6 +5839,13 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
                   <td className="px-2 py-2 text-gray-500 max-w-24 truncate">{r.uwagi||""}</td>
                   <td className="px-2 py-2 whitespace-nowrap">
                     <div className="flex gap-1">
+                      {r.urlZlecenie
+                        ? <a href={r.urlZlecenie} target="_blank" rel="noopener noreferrer"
+                            className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:bg-blue-100"
+                            style={{background:"#eff6ff"}} title="Otwórz / pobierz zlecenie">📋</a>
+                        : <ZlecenieUploadBtn frachtId={r.id}
+                            onUploaded={(url, nr) => onUpdate(r.id, { urlZlecenie: url, ...(nr ? {nrZlecenia: nr} : {}) })} />
+                      }
                       <button onClick={() => { setEditId(r.id); setShowForm(true); }} className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:bg-indigo-50" style={{background:"#f3f4f6"}} title="Edytuj">✏️</button>
                       <button onClick={() => { if(window.confirm("Usunac?")) onDelete(r.id); }} className="px-2 py-1 rounded text-xs bg-red-50 hover:bg-red-100 text-red-500">x</button>
                     </div>
