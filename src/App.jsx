@@ -844,7 +844,7 @@ function App({ user }) {
                                 );
                               })()}
 
-                              {/* EUR/km główna + cena pomocnicza */}
+                              {/* EUR/km główna po lewej + cena po prawej */}
                               <div className="flex items-center justify-between pt-2"
                                 style={{ borderTop: "1px solid #f3f4f6" }}>
                                 <div>
