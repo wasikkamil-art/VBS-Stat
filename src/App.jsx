@@ -1004,18 +1004,34 @@ function App({ user }) {
                 </div>
               </div>
 
-              {/* ── FILTR ROK — szybkie przyciski ── */}
-              <div className="flex gap-2 mb-3">
-                {["all","2025","2026"].map(y => (
-                  <button key={y} onClick={() => { setCostFilterYear(y); setFilterMonth("all"); }}
-                    className="px-4 py-1.5 rounded-lg text-sm font-semibold transition-all"
-                    style={{
-                      background: filterYear === y ? "#111827" : "#f3f4f6",
-                      color: filterYear === y ? "#fff" : "#6b7280",
-                    }}>
-                    {y === "all" ? "Wszystkie lata" : y}
-                  </button>
-                ))}
+              {/* ── FILTR ROK + MIESIĄCE ── */}
+              <div className="flex items-center gap-2 flex-wrap mb-3">
+                <div className="flex gap-1.5 flex-shrink-0">
+                  {[["2026","2026","#0ea5e9","#f0f9ff","#bae6fd"],["2025","2025","#6366f1","#eef2ff","#c7d2fe"],["all","Wszystkie","#111827","#f9fafb","#e5e7eb"]].map(([key,label,color,bg,border]) => {
+                    const active = filterYear===key && filterMonth==="all";
+                    return (
+                      <button key={key} onClick={() => { setCostFilterYear(key); setFilterMonth("all"); }}
+                        className="rounded-xl px-3 py-1.5 transition-all whitespace-nowrap"
+                        style={{ background: active ? bg : "#fff", border: `2px solid ${active ? border : "#f3f4f6"}`, color: active ? color : "#9ca3af", fontWeight: active ? 700 : 500, fontSize: "13px" }}>
+                        {active && "✓ "}{label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {filterYear !== "all" && (
+                  <div className="flex gap-1 flex-wrap">
+                    {["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paź","Lis","Gru"].map((m,i) => {
+                      const mm = `${filterYear}-${String(i+1).padStart(2,"0")}`;
+                      return (
+                        <button key={mm} onClick={() => setFilterMonth(filterMonth===mm ? "all" : mm)}
+                          className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
+                          style={{ background: filterMonth===mm ? "#111827" : "#f3f4f6", color: filterMonth===mm ? "#fff" : "#6b7280" }}>
+                          {m}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* ── FILTRY ── */}
@@ -1024,8 +1040,6 @@ function App({ user }) {
                   options={[{ value: "all", label: "Wszystkie pojazdy" }, ...vehicles.map((v) => ({ value: v.id, label: v.plate }))]} />
                 <FSel value={filterCat} onChange={setFilterCat}
                   options={[{ value: "all", label: "Wszystkie kategorie" }, ...categories.map((c) => ({ value: c.id, label: `${c.icon} ${c.label}` }))]} />
-                <FSel value={filterMonth} onChange={setFilterMonth}
-                  options={[{ value: "all", label: "Wszystkie miesiące" }, ...months.filter(m => filterYear === "all" || m.startsWith(filterYear)).map((m) => ({ value: m, label: m }))]} />
                 <FSel value={filterNote} onChange={setFilterNote}
                   options={[{ value: "all", label: "Wszystkie opisy" }, ...[...new Set(costs.map(c => c.note).filter(Boolean))].sort().map(n => ({ value: n, label: n }))]} />
               </div>
