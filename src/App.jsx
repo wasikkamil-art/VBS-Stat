@@ -5147,7 +5147,7 @@ const FV_STATUSES = [
 function FVTab({ frachtyList, vehicles, onUpdate }) {
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [filterStatus, setFilterStatus] = useState("all");
-  const [filterYear, setFilterYear] = useState(String(new Date().getFullYear()));
+  const [filterYear, setFilterYear] = useState("all");
   const [filterMonth, setFilterMonth] = useState("all");
   const [editFVId, setEditFVId] = useState(null);
 
@@ -5160,7 +5160,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
     return r.statusFV || "nie_wyslana";
   };
 
-  const frachtyWithFV = frachtyList.filter(r => r.nrFV || r.dataWyslania || r.terminPlatnosci);
+  const frachtyWithFV = frachtyList.filter(r => r.cenaEur);
 
   // Filtruj wg roku i miesiąca
   const filtered = frachtyWithFV.filter(r => {
@@ -5431,18 +5431,30 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                       {r.urlZlecenie
                         ? <a href={r.urlZlecenie} target="_blank" rel="noopener noreferrer"
                             className="text-xs px-2 py-0.5 rounded-lg font-semibold w-fit"
-                            style={{background:"#eff6ff",color:"#1d4ed8"}}>📋 Zlec.</a>
-                        : !r.nrZlecenia && <span className="text-xs text-gray-300 italic">brak</span>
+                            style={{background:"#eff6ff",color:"#1d4ed8"}}>📋 Otwórz</a>
+                        : <ZlecenieUploadBtn
+                            frachtId={r.id}
+                            onUploaded={(url, nr) => onUpdate(r.id, { urlZlecenie: url, ...(nr ? {nrZlecenia: nr} : {}) })}
+                          />
                       }
                     </div>
                   </td>
                   <td className="px-3 py-2.5 whitespace-nowrap">
-                    <button onClick={() => setEditFVId(r.id)}
-                      className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:bg-indigo-50"
-                      style={{background:"#f3f4f6"}}
-                      title="Edytuj">
-                      ✏️
-                    </button>
+                    <div className="flex items-center gap-1">
+                      {r.urlZlecenie && (
+                        <a href={r.urlZlecenie} target="_blank" rel="noopener noreferrer"
+                          className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:bg-blue-50"
+                          style={{background:"#eff6ff"}} title="Otwórz zlecenie">
+                          📋
+                        </a>
+                      )}
+                      <button onClick={() => setEditFVId(r.id)}
+                        className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:bg-indigo-50"
+                        style={{background:"#f3f4f6"}}
+                        title="Edytuj">
+                        ✏️
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );
