@@ -4,7 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 // ─── FIREBASE CONFIG ────────────────────────────────────────────────────────
 // 👇 WKLEJ TUTAJ SWÓJ firebaseConfig z Firebase Console
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
+import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 
@@ -283,18 +283,23 @@ function App({ user }) {
   const [filterYear, setCostFilterYear]       = useState("all");
   const [filterNote, setFilterNote]           = useState("all");
 
-  // ── LOAD ──
+  // ── LOAD — real-time onSnapshot ──
   useEffect(() => {
-    (async () => {
-      const v  = await dbGet(SK.vehicles);
-      const c  = await dbGet(SK.costs);
-      const ca = await dbGet(SK.categories);
-      const d  = await dbGet(SK.docs);
-      const im = await dbGet(SK.imi);
-      const rn = await dbGet(SK.rent);
-      const fr = await dbGet(SK.frachty);
-      setVehicles(v  || SEED_VEHICLES);
-      // Patch kategorii — nego→myto, naprawa nie zawiera nego
+    const unsub = onSnapshot(DATA_REF(), (snap) => {
+      if (!snap.exists()) { setLoaded(true); return; }
+      const data = snap.data();
+
+      const v  = data[SK.vehicles];
+      const c  = data[SK.costs];
+      const ca = data[SK.categories];
+      const d  = data[SK.docs];
+      const im = data[SK.imi];
+      const rn = data[SK.rent];
+      const fr = data[SK.frachty];
+
+      setVehicles(v || SEED_VEHICLES);
+
+      // Patch kategorii — nego/myto/etoll → oplaty
       const rawCosts = c || SEED_COSTS;
       const patchedCosts = rawCosts.map(cost => {
         const n = (cost.note || "").toLowerCase();
@@ -305,10 +310,11 @@ function App({ user }) {
         return cost;
       });
       setCosts(patchedCosts);
+
       const loadedCats = ca || SEED_CATEGORIES;
       const REQUIRED_CATS = [
         { id: "wyplata",       label: "Wynagrodzenie", color: "#f43f5e", icon: "👤" },
-        { id: "ubezpieczenie", label: "Ubezpieczenie",    color: "#10b981", icon: "🛡️" },
+        { id: "ubezpieczenie", label: "Ubezpieczenie",  color: "#10b981", icon: "🛡️" },
       ];
       const mergedCats = [...loadedCats].map(cat => {
         if (cat.id === "wyplata") return { ...cat, label: "Wynagrodzenie", icon: "👤", color: "#f43f5e" };
@@ -323,7 +329,11 @@ function App({ user }) {
       setRentRecords(rn || []);
       setFrachtyList(fr || []);
       setLoaded(true);
-    })();
+    }, (err) => {
+      console.error("onSnapshot error", err);
+      setLoaded(true);
+    });
+    return () => unsub(); // cleanup przy odmontowaniu
   }, []);
 
   // ── PERSIST ──
@@ -758,7 +768,15 @@ function App({ user }) {
 
                               {/* LICZNIK TACHOGRAFU 28 DNI — ręczny z kalendarzem */}
                               {(() => {
-                                const tachoStart = v.tachoStart ? new Date(v.tachoStart) : null;
+                                // Parsuj datę jako lokalną (nie UTC) żeby uniknąć błędu strefy czasowej
+                                const parseDateLocal = (str) => {
+                                  if (!str) return null;
+                                  const [y,m,d] = str.split("-").map(Number);
+                                  const dt = new Date(y, m-1, d);
+                                  dt.setHours(0,0,0,0);
+                                  return dt;
+                                };
+                                const tachoStart = parseDateLocal(v.tachoStart);
                                 const today = new Date(); today.setHours(0,0,0,0);
 
                                 const handleTachoChange = (dateStr) => {
@@ -785,7 +803,7 @@ function App({ user }) {
                                   );
                                 }
 
-                                const daysSinceStart = Math.floor((today - tachoStart) / 86400000);
+                                const daysSinceStart = Math.round((today - tachoStart) / 86400000);
                                 const daysLeft = 28 - daysSinceStart;
                                 const stopDate = new Date(tachoStart); stopDate.setDate(stopDate.getDate() + 28);
                                 const stopStr = stopDate.toLocaleDateString("pl-PL", {day:"2-digit", month:"2-digit"});
@@ -871,8 +889,10 @@ function App({ user }) {
                   // Sprawdź tachografy — ręczny start
                   const tachoAlerts = vehicles.map(v => {
                     if (!v.tachoStart) return null;
-                    const startDate = new Date(v.tachoStart); startDate.setHours(0,0,0,0);
-                    const daysLeft = 28 - Math.floor((new Date() - startDate) / 86400000);
+                    const [ty,tm,td] = v.tachoStart.split("-").map(Number);
+                    const startDate = new Date(ty, tm-1, td); startDate.setHours(0,0,0,0);
+                    const todayD = new Date(); todayD.setHours(0,0,0,0);
+                    const daysLeft = 28 - Math.round((todayD - startDate) / 86400000);
                     if (daysLeft < 5 && daysLeft >= -30) return { plate: v.plate, daysLeft };
                     return null;
                   }).filter(Boolean);
