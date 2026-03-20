@@ -807,7 +807,7 @@ function App({ user }) {
                                 const daysLeft = 28 - daysSinceStart;
                                 const stopDate = new Date(tachoStart); stopDate.setDate(stopDate.getDate() + 28);
                                 const stopStr = stopDate.toLocaleDateString("pl-PL", {day:"2-digit", month:"2-digit"});
-                                const startStr = tachoStart.toISOString().slice(0,10);
+                                const startStr = v.tachoStart; // użyj oryginalnego stringa z Firebase, nie konwertuj przez UTC
 
                                 const isRed    = daysLeft < 5;
                                 const isYellow = daysLeft >= 5 && daysLeft < 10;
