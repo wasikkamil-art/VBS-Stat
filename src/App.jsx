@@ -1413,6 +1413,8 @@ function App({ user }) {
             <RentownoscTab
               vehicles={vehicles}
               records={rentRecords}
+              frachtyList={frachtyList}
+              costs={costs}
               onAdd={(r) => setRentRecords(p => [...p, { ...r, id: uid() }])}
               onUpdate={(id, data) => setRentRecords(p => p.map(r => r.id === id ? { ...r, ...data } : r))}
               onDelete={(id) => setRentRecords(p => p.filter(r => r.id !== id))}
@@ -2991,17 +2993,54 @@ const MONTHS_PL = ["Styczeń","Luty","Marzec","Kwiecień","Maj","Czerwiec","Lipi
 
 function rentKey(vehicleId, year, month) { return `${vehicleId}_${year}_${month}`; }
 
-function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
-  const [view, setView]           = useState("flota");    // flota | pojazd | trendy
+function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], onAdd, onUpdate, onDelete }) {
+  const [view, setView]           = useState("flota");
   const [selVehicle, setSelVehicle] = useState(null);
   const [selYear, setSelYear]     = useState(new Date().getFullYear());
   const [showForm, setShowForm]   = useState(false);
-  const [editRecord, setEditRecord] = useState(null);     // record being edited
+  const [editRecord, setEditRecord] = useState(null);
   const [formVehicle, setFormVehicle] = useState("");
   const [formYear, setFormYear]   = useState(new Date().getFullYear());
   const [formMonth, setFormMonth] = useState(new Date().getMonth());
 
   const years = [2024, 2025, 2026];
+
+  // Mapowanie kategorii kosztów → RENT_COSTS
+  const CAT_TO_RENT = {
+    paliwo: "paliwo", leasing: "leasing",
+    wyplata: "wyplata", zus: "zus",
+    naprawa: "serwis", serwis: "serwis",
+    ubezpieczenie: "polisa",
+    oplaty: "etoll", etoll: "etoll", myto: "etoll", nego: "nego",
+    inne: "inne",
+  };
+
+  // Generuj wpisy z frachtów i kosztów dla wybranego miesiąca
+  const generateFromData = (year, month) => {
+    const monthStr = `${year}-${String(month+1).padStart(2,"0")}`;
+    vehicles.filter(v => !v.archived).forEach(v => {
+      // Przychody z frachtów
+      const frachtySum = frachtyList
+        .filter(f => f.vehicleId === v.id && (f.dataZaladunku||f.dataZlecenia||"").startsWith(monthStr))
+        .reduce((s,f) => s + (parseFloat(f.cenaEur)||0), 0);
+
+      // Koszty per kategoria
+      const costsObj = {};
+      costs
+        .filter(c => c.vehicleId === v.id && (c.date||"").startsWith(monthStr))
+        .forEach(c => {
+          const rentCat = CAT_TO_RENT[c.category] || "inne";
+          costsObj[rentCat] = (costsObj[rentCat]||0) + (parseFloat(c.amountEUR)||0);
+        });
+
+      if (frachtySum === 0 && Object.keys(costsObj).length === 0) return;
+
+      const existing = records.find(r => r.vehicleId === v.id && r.year === year && r.month === month);
+      const entry = { vehicleId: v.id, year, month, frachty: Math.round(frachtySum), costs: Object.fromEntries(Object.entries(costsObj).map(([k,v]) => [k, Math.round(v)])) };
+      if (existing) onUpdate(existing.id, entry);
+      else onAdd(entry);
+    });
+  };
 
   // find record for vehicle+year+month
   const getRecord = (vid, y, m) => records.find(r => r.vehicleId === vid && r.year === y && r.month === m) || null;
@@ -3051,6 +3090,17 @@ function RentownoscTab({ vehicles, records, onAdd, onUpdate, onDelete }) {
             className="px-4 py-2 rounded-xl text-sm font-bold text-white hover:opacity-90 transition-all"
             style={{ background: "#111827" }}>
             + Dodaj wpis
+          </button>
+          <button onClick={() => {
+            const m = window.prompt(`Generuj dane za miesiąc (1-12) roku ${selYear}:`, String(new Date().getMonth()));
+            if (!m) return;
+            const mi = parseInt(m) - 1;
+            if (mi < 0 || mi > 11) return;
+            generateFromData(selYear, mi);
+          }}
+            className="px-4 py-2 rounded-xl text-sm font-bold hover:opacity-90 transition-all border border-gray-200"
+            style={{ background: "#f0fdf4", color: "#16a34a" }}>
+            ⚡ Generuj z danych
           </button>
         </div>
       </div>
