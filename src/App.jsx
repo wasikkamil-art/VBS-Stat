@@ -5386,8 +5386,8 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
           {/* Lista wyboru lat — po lewej */}
           <div className="flex flex-col gap-1.5 flex-shrink-0">
             {[
-              { key: "2025", label: "2025", color: "#6366f1", bg: "#eef2ff", border: "#c7d2fe" },
               { key: "2026", label: "2026", color: "#0ea5e9", bg: "#f0f9ff", border: "#bae6fd" },
+              { key: "2025", label: "2025", color: "#6366f1", bg: "#eef2ff", border: "#c7d2fe" },
               { key: "all",  label: "Wszystkie", color: "#111827", bg: "#f9fafb", border: "#e5e7eb" },
             ].map(({ key, label, color, bg, border }) => {
               const active = overviewYear === key;
@@ -5443,7 +5443,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
                 <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-gray-50">
                   <div><div className="text-xs text-gray-400">Frachtów</div><div className="font-bold text-gray-900">{vf.length}</div></div>
                   <div><div className="text-xs text-gray-400">Przychód</div><div className="font-bold text-green-700 text-sm">{fmt(suma)}</div></div>
-                  <div><div className="text-xs text-gray-400">KM lad.</div><div className="font-bold text-blue-600 text-sm">{km.toLocaleString("pl-PL")}</div></div>
+                  <div><div className="text-xs text-gray-400">Śr. €/km</div><div className="font-bold text-amber-500 text-sm">{km > 0 ? (suma/km).toFixed(2) : "—"}</div></div>
                 </div>
                 <KomentarzBaner
                   frachtyList={frachtyList}
@@ -5463,7 +5463,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
   const totalKmWszAll = rows.reduce((s,r) => s + (parseInt(r.kmWszystkie)||parseInt(r.kmLadowne)||0), 0);
   const totalKmLad = rows.reduce((s,r) => s + (parseInt(r.kmLadowne)||0), 0);
   const totalKmWsz = rows.reduce((s,r) => s + (parseInt(r.kmWszystkie)||0), 0);
-  const avgEurKm = totalKmLad > 0 ? (totalCena/totalKmLad).toFixed(2) : "-";
+  const avgEurKm = totalKmWszAll > 0 ? (totalCena/totalKmWszAll).toFixed(2) : (totalKmLad > 0 ? (totalCena/totalKmLad).toFixed(2) : "-");
   const avgEurKmWsz = totalKmWsz > 0 ? (totalCena/totalKmWsz).toFixed(2) : "-";
   const miesiaceL = ["Styczniu","Lutym","Marcu","Kwietniu","Maju","Czerwcu","Lipcu","Sierpniu","Wrzesniu","Pazdzierniku","Listopadzie","Grudniu"];
   return (
@@ -5484,7 +5484,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
         </div>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-        {[["Frachtow",rows.length,"#6366f1"],["Przychod EUR",fmt(totalCena),"#16a34a"],["KM ladowne",totalKmLad.toLocaleString("pl-PL"),"#0ea5e9"],["Sr. EUR/km",avgEurKm,"#f59e0b"]].map(([label,value,color]) => (
+        {[["Frachtow",rows.length,"#6366f1"],["Przychod EUR",fmt(totalCena),"#16a34a"],["KM wszystkie",totalKmWszAll.toLocaleString("pl-PL"),"#0ea5e9"],["Sr. EUR/km",avgEurKm,"#f59e0b"]].map(([label,value,color]) => (
           <div key={label} className="rounded-xl p-3 border border-gray-100 bg-white"><div className="text-xs text-gray-400 mb-1">{label}</div><div className="text-lg font-bold" style={{color}}>{value}</div></div>
         ))}
       </div>
