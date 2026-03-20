@@ -5425,19 +5425,17 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                       onUploaded={(url, fields) => onUpdate(r.id, { urlFV: url, ...fields })}
                     />
                   </td>
-                  <td className="px-3 py-2.5 whitespace-nowrap">
-                    <div className="flex items-center gap-1">
+                  <td className="px-3 py-2.5 whitespace-nowrap text-right">
+                    <div className="flex items-center gap-1 justify-end">
                       {r.urlZlecenie
                         ? <a href={r.urlZlecenie} target="_blank" rel="noopener noreferrer"
-                            className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:bg-blue-50"
-                            style={{background:"#eff6ff"}} title="Otwórz zlecenie">
-                            📋
-                          </a>
+                            className="text-xs px-2 py-1 rounded-lg font-medium transition-all hover:bg-blue-100"
+                            style={{background:"#eff6ff", color:"#1d4ed8"}}>Otwórz</a>
                         : <ZlecenieUploadBtn frachtId={r.id}
                             onUploaded={(url, nr) => onUpdate(r.id, { urlZlecenie: url, ...(nr ? {nrZlecenia: nr} : {}) })} />
                       }
                       <button onClick={() => setEditFVId(r.id)}
-                        className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:bg-indigo-50"
+                        className="w-6 h-6 rounded-lg flex items-center justify-center transition-all hover:bg-indigo-50 text-xs"
                         style={{background:"#f3f4f6"}} title="Edytuj">
                         ✏️
                       </button>
@@ -5824,17 +5822,17 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
                   <td className="px-2 py-2 whitespace-nowrap text-gray-500">{r.dyspozytor||"-"}</td>
                   <td className="px-2 py-2 whitespace-nowrap text-gray-500">{r.nrFV||"-"}</td>
                   <td className="px-2 py-2 text-gray-500 max-w-24 truncate">{r.uwagi||""}</td>
-                  <td className="px-2 py-2 whitespace-nowrap">
-                    <div className="flex gap-1">
+                  <td className="px-2 py-2 whitespace-nowrap text-right">
+                    <div className="flex gap-1 justify-end items-center">
                       {r.urlZlecenie
                         ? <a href={r.urlZlecenie} target="_blank" rel="noopener noreferrer"
                             className="text-xs px-2 py-1 rounded-lg font-medium transition-all hover:bg-blue-100"
-                            style={{background:"#eff6ff", color:"#1d4ed8"}} title="Otwórz / pobierz zlecenie">Otwórz</a>
+                            style={{background:"#eff6ff", color:"#1d4ed8"}}>Otwórz</a>
                         : <ZlecenieUploadBtn frachtId={r.id}
                             onUploaded={(url, nr) => onUpdate(r.id, { urlZlecenie: url, ...(nr ? {nrZlecenia: nr} : {}) })} />
                       }
-                      <button onClick={() => { setEditId(r.id); setShowForm(true); }} className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:bg-indigo-50" style={{background:"#f3f4f6"}} title="Edytuj">✏️</button>
-                      <button onClick={() => { if(window.confirm("Usunac?")) onDelete(r.id); }} className="px-2 py-1 rounded text-xs bg-red-50 hover:bg-red-100 text-red-500">x</button>
+                      <button onClick={() => { setEditId(r.id); setShowForm(true); }} className="w-6 h-6 rounded-lg flex items-center justify-center transition-all hover:bg-indigo-50 text-xs" style={{background:"#f3f4f6"}} title="Edytuj">✏️</button>
+                      <button onClick={() => { if(window.confirm("Usunac?")) onDelete(r.id); }} className="w-6 h-6 rounded-lg flex items-center justify-center text-xs bg-red-50 hover:bg-red-100 text-red-400">✕</button>
                     </div>
                   </td>
                 </tr>
