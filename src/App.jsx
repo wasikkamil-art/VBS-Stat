@@ -751,7 +751,7 @@ function App({ user }) {
                               </div>
 
                               {/* Klient */}
-                              <div className="text-xs text-gray-500 mb-2 truncate">👤 {klient}</div>
+                              <div className="text-xs text-gray-500 mb-2 truncate">👤 {klient}{displayF?.dyspozytor ? <span className="text-gray-300 ml-2">· {displayF.dyspozytor}</span> : null}</div>
 
                               {/* Daty */}
                               <div className="flex items-center gap-3 mb-2.5">
