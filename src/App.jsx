@@ -96,6 +96,12 @@ const SEED_CATEGORIES = [
   { id: "opony",         label: "Opony",               color: "#3b82f6", icon: "🔄" },
   { id: "oplaty",        label: "Opłaty drogowe",      color: "#8b5cf6", icon: "🛣️" },
   { id: "wyplata",       label: "Wynagrodzenie",       color: "#f43f5e", icon: "👤" },
+  { id: "zus",           label: "ZUS + podatki",       color: "#f97316", icon: "🏛️" },
+  { id: "mandaty",       label: "Mandaty",             color: "#dc2626", icon: "⚠️" },
+  { id: "slickshift",    label: "SlickShift",          color: "#0ea5e9", icon: "📡" },
+  { id: "telefon",       label: "Telefon",             color: "#06b6d4", icon: "📱" },
+  { id: "hotele",        label: "Hotele",              color: "#84cc16", icon: "🏨" },
+  { id: "przyczepa",     label: "Przyczepa",           color: "#a78bfa", icon: "🚛" },
   { id: "inne",          label: "Inne",                color: "#94a3b8", icon: "📋" },
 ];
 
