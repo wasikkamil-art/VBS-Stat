@@ -4,7 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 // ─── FIREBASE CONFIG ────────────────────────────────────────────────────────
 // 👇 WKLEJ TUTAJ SWÓJ firebaseConfig z Firebase Console
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
+import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs } from "firebase/firestore";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 
@@ -250,15 +250,54 @@ function LoginScreen() {
 // ROOT — auth wrapper
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function Root() {
-  const [user, setUser]         = useState(undefined); // undefined = loading
-  useEffect(() => onAuthStateChanged(auth, u => setUser(u)), []);
+  const [user, setUser]         = useState(undefined);
+  const [role, setRole]         = useState(null);
+  const [roleLoaded, setRoleLoaded] = useState(false);
+
+  useEffect(() => {
+    return onAuthStateChanged(auth, async (u) => {
+      setUser(u);
+      if (u) {
+        try {
+          const snap = await getDoc(doc(db, "users", u.uid));
+          if (snap.exists()) {
+            setRole(snap.data().role || "podglad");
+          } else {
+            const usersSnap = await getDocs(collection(db, "users"));
+            const isFirst = usersSnap.empty;
+            const assignedRole = isFirst ? "admin" : "podglad";
+            await setDoc(doc(db, "users", u.uid), {
+              email: u.email,
+              role: assignedRole,
+              createdAt: new Date().toISOString(),
+            });
+            setRole(assignedRole);
+          }
+        } catch (e) {
+          console.error("Blad ladowania roli:", e);
+          setRole("podglad");
+        }
+        setRoleLoaded(true);
+      } else {
+        setRole(null);
+        setRoleLoaded(false);
+      }
+    });
+  }, []);
+
   if (user === undefined) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f8f9fb",fontSize:32}}>🚛</div>;
   if (!user) return <LoginScreen />;
-  return <App user={user} />;
+  if (!roleLoaded) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f8f9fb",fontSize:32}}>🚛</div>;
+  return <App user={user} role={role} />;
 }
 
 
-function App({ user }) {
+function App({ user, role }) {
+  const isAdmin      = role === "admin";
+  const isDyspozytor = role === "dyspozytor";
+  const isPodglad    = role === "podglad";
+  const canEdit      = isAdmin || isDyspozytor;  // może edytować
+  const canFinance   = isAdmin || isDyspozytor;  // widzi finanse
   const [tab, setTab]               = useState("dashboard");
   const [vehicles, setVehicles]     = useState([]);
   const [costs, setCosts]           = useState([]);
@@ -530,13 +569,20 @@ function App({ user }) {
             {[
               { id: "dashboard", icon: "◈",  label: "Przegląd" },
               { id: "frachty",   icon: "🚚",  label: "Frachty" },
-              { id: "fv",        icon: "🧾",  label: "FV / Płatności" },
-              { id: "costs",     icon: "≡",   label: "Koszty" },
+              ...(canFinance ? [
+                { id: "fv",      icon: "🧾",  label: "FV / Płatności" },
+                { id: "costs",   icon: "≡",   label: "Koszty" },
+              ] : []),
               { id: "vehicles",  icon: "⊡",   label: "Pojazdy" },
               { id: "serwis",    icon: "🔧",  label: "Serwis" },
-              { id: "rent",      icon: "📊",  label: "Rentowność" },
+              ...(canFinance ? [
+                { id: "rent",    icon: "📊",  label: "Rentowność" },
+              ] : []),
               { id: "docs",      icon: "🛡️",  label: "Dokumenty" },
               { id: "imi",       icon: "🌍",  label: "IMI / SIPSI" },
+              ...(isAdmin ? [
+                { id: "users",   icon: "👥",  label: "Użytkownicy" },
+              ] : []),
             ].map((item) => (
               <button key={item.id} onClick={() => setTab(item.id)}
                 className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm text-left transition-all"
@@ -564,6 +610,7 @@ function App({ user }) {
           </div>
 
           <div className="space-y-2 px-1">
+            {canEdit && <>
             <button onClick={() => setShowAddCost(true)}
               className="w-full py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
               style={{ background: "#111827" }}>
@@ -574,8 +621,18 @@ function App({ user }) {
               style={{ background: "#f3f4f6", color: "#374151" }}>
               + Dodaj pojazd
             </button>
+            </>}
             <div style={{ borderTop:"1px solid #f3f4f6", paddingTop:8, marginTop:4 }}>
-              <div className="text-xs text-gray-400 px-1 mb-1 truncate">{user?.email}</div>
+              <div className="text-xs text-gray-400 px-1 mb-0.5 truncate">{user?.email}</div>
+              <div className="px-1 mb-2">
+                <span className="inline-block px-2 py-0.5 rounded-full text-xs font-semibold"
+                  style={{
+                    background: isAdmin ? "#fef3c7" : isDyspozytor ? "#eff6ff" : "#f3f4f6",
+                    color: isAdmin ? "#92400e" : isDyspozytor ? "#1d4ed8" : "#6b7280",
+                  }}>
+                  {isAdmin ? "👑 Admin" : isDyspozytor ? "🚚 Dyspozytor" : "👁 Podgląd"}
+                </span>
+              </div>
               <button onClick={() => signOut(auth)}
                 className="w-full py-2 rounded-lg text-sm font-medium transition-all hover:bg-red-50"
                 style={{ color: "#ef4444", background: "transparent" }}>
@@ -1160,8 +1217,10 @@ function App({ user }) {
                         {amtEUR != null && <div className="text-xs text-gray-400">{fmtPLN(amtPLN)}</div>}
                       </div>
                       <div className="col-span-1 flex justify-end">
+                        {canEdit && (
                         <button onClick={() => deleteCost(c.id)}
                           className="w-6 h-6 rounded flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-all text-xs">✕</button>
+                        )}
                       </div>
                     </div>
                   );
@@ -1178,11 +1237,13 @@ function App({ user }) {
             <div>
               <div className="flex items-center justify-between mb-5">
                 <PageTitle>Flota pojazdów</PageTitle>
+                {canEdit && (
                 <button onClick={() => setShowAddVehicle(true)}
                   className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
                   style={{ background: "#111827" }}>
                   + Dodaj pojazd
                 </button>
+                )}
               </div>
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                 {vehicles.filter(v => !v.archived).map((v) => {
