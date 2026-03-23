@@ -1516,6 +1516,10 @@ function App({ user, role }) {
             />
           )}
 
+          {tab === "users" && isAdmin && (
+            <UsersTab currentUid={user.uid} showToast={showToast} />
+          )}
+
         </main>
       </div>
 
@@ -1542,6 +1546,136 @@ function App({ user, role }) {
             </button>
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// USERS TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+function UsersTab({ currentUid, showToast }) {
+  const [users, setUsers]     = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const snap = await getDocs(collection(db, "users"));
+        const list = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+        setUsers(list.sort((a,b) => (a.email||"").localeCompare(b.email||"")));
+      } catch(e) {
+        console.error("Błąd ładowania użytkowników:", e);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  async function changeRole(uid, newRole) {
+    try {
+      await setDoc(doc(db, "users", uid), { role: newRole }, { merge: true });
+      setUsers(p => p.map(u => u.uid === uid ? { ...u, role: newRole } : u));
+      showToast("✅ Rola zaktualizowana");
+    } catch(e) {
+      showToast("❌ Błąd zapisu roli");
+    }
+  }
+
+  const ROLES = [
+    { id: "admin",      label: "Admin",      icon: "👑", desc: "Pełny dostęp",                      color: "#92400e", bg: "#fef3c7" },
+    { id: "dyspozytor", label: "Dyspozytor", icon: "🚚", desc: "Edycja frachtów i kosztów",          color: "#1d4ed8", bg: "#eff6ff" },
+    { id: "podglad",    label: "Podgląd",    icon: "👁",  desc: "Tylko odczyt, bez finansów",        color: "#6b7280", bg: "#f3f4f6" },
+  ];
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">Użytkownicy</h2>
+          <p className="text-sm text-gray-400 mt-0.5">Zarządzanie dostępem do FleetStat</p>
+        </div>
+      </div>
+
+      {/* ROLE LEGEND */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+        {ROLES.map(r => (
+          <div key={r.id} className="rounded-xl p-4 border border-gray-100 bg-white">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-lg">{r.icon}</span>
+              <span className="font-semibold text-gray-800 text-sm">{r.label}</span>
+              <span className="ml-auto px-2 py-0.5 rounded-full text-xs font-semibold"
+                style={{ background: r.bg, color: r.color }}>{r.id}</span>
+            </div>
+            <p className="text-xs text-gray-400">{r.desc}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* USERS LIST */}
+      <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+        <div className="hidden md:grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-medium text-gray-400 uppercase tracking-wider">
+          <span className="col-span-5">Email</span>
+          <span className="col-span-3">Aktualna rola</span>
+          <span className="col-span-4">Zmień rolę</span>
+        </div>
+
+        {loading && (
+          <div className="px-5 py-10 text-center text-gray-400 text-sm">Ładowanie użytkowników…</div>
+        )}
+
+        {!loading && users.length === 0 && (
+          <div className="px-5 py-10 text-center text-gray-400 text-sm">Brak użytkowników — zaloguj się na każdym koncie aby pojawili się tutaj</div>
+        )}
+
+        {!loading && users.map((u, i) => {
+          const roleInfo = ROLES.find(r => r.id === u.role) || ROLES[2];
+          const isMe = u.uid === currentUid;
+          return (
+            <div key={u.uid}
+              className="md:grid md:grid-cols-12 flex flex-wrap gap-y-2 px-5 py-4 items-center border-b border-gray-50 hover:bg-gray-50 transition-colors"
+              style={{ borderBottomColor: i === users.length - 1 ? "transparent" : undefined }}>
+
+              <div className="col-span-5 flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+                  style={{ background: "#f3f4f6", color: "#374151" }}>
+                  {(u.email||"?")[0].toUpperCase()}
+                </div>
+                <div>
+                  <div className="text-sm font-medium text-gray-800 truncate max-w-48">{u.email || "—"}</div>
+                  {isMe && <div className="text-xs text-amber-500 font-medium">to Ty</div>}
+                </div>
+              </div>
+
+              <div className="col-span-3">
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold"
+                  style={{ background: roleInfo.bg, color: roleInfo.color }}>
+                  {roleInfo.icon} {roleInfo.label}
+                </span>
+              </div>
+
+              <div className="col-span-4 flex gap-1.5 flex-wrap">
+                {ROLES.filter(r => r.id !== u.role).map(r => (
+                  <button key={r.id}
+                    onClick={() => {
+                      if (isMe && r.id !== "admin") {
+                        if (!window.confirm("Zmieniasz własną rolę — stracisz dostęp admina. Kontynuować?")) return;
+                      }
+                      changeRole(u.uid, r.id);
+                    }}
+                    className="px-3 py-1 rounded-lg text-xs font-medium border transition-all hover:opacity-80"
+                    style={{ borderColor: r.bg, background: r.bg, color: r.color }}>
+                    {r.icon} {r.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-4 px-1 text-xs text-gray-400">
+        💡 Nowy użytkownik pojawi się na liście po pierwszym zalogowaniu. Domyślnie otrzymuje rolę <strong>Podgląd</strong>.
       </div>
     </div>
   );
