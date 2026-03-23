@@ -5617,9 +5617,16 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-gray-100 text-gray-400 uppercase bg-gray-50 text-xs">
-              {["Data zlec.","Klient","Cena EUR","Nr FV","Nr zlec.","Wysłano FV","Termin płatn.","Status FV","📄 FV",""].map(h => (
-                <th key={h} className="px-3 py-2.5 text-left whitespace-nowrap font-semibold">{h}</th>
-              ))}
+              <th className="px-3 py-2.5 text-center whitespace-nowrap font-semibold">Data zlec.</th>
+              <th className="px-3 py-2.5 text-left whitespace-nowrap font-semibold">Klient</th>
+              <th className="px-3 py-2.5 text-center whitespace-nowrap font-semibold">Cena EUR</th>
+              <th className="px-3 py-2.5 text-center whitespace-nowrap font-semibold">Nr FV</th>
+              <th className="px-3 py-2.5 text-center whitespace-nowrap font-semibold">Nr zlec.</th>
+              <th className="px-3 py-2.5 text-center whitespace-nowrap font-semibold">Wysłano FV</th>
+              <th className="px-3 py-2.5 text-center whitespace-nowrap font-semibold">Termin płatn.</th>
+              <th className="px-3 py-2.5 text-center whitespace-nowrap font-semibold">Status FV</th>
+              <th className="px-3 py-2.5 text-center whitespace-nowrap font-semibold">📄 FV</th>
+              <th className="px-3 py-2.5 text-center whitespace-nowrap font-semibold"></th>
             </tr>
           </thead>
           <tbody>
@@ -5636,13 +5643,13 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
               return (
                 <tr key={r.id} className="border-b border-gray-50 transition-colors"
                   style={{ background: isOverdue ? "#fff7f7" : "white" }}>
-                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-700">{r.dataZlecenia||"-"}</td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-700 text-center">{r.dataZlecenia||"-"}</td>
                   <td className="px-3 py-2.5 max-w-36 truncate font-medium text-gray-800">{r.klient||"-"}</td>
-                  <td className="px-3 py-2.5 text-right font-bold text-green-700 whitespace-nowrap">{r.cenaEur ? fmt(r.cenaEur) : "-"}</td>
-                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-600 font-mono text-xs">{r.nrFV||"-"}</td>
-                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-500 font-mono text-xs">{r.nrZlecenia||"-"}</td>
-                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-500">{r.dataWyslania||"-"}</td>
-                  <td className="px-3 py-2.5 whitespace-nowrap">
+                  <td className="px-3 py-2.5 text-center font-bold text-green-700 whitespace-nowrap">{r.cenaEur ? fmt(r.cenaEur) : "-"}</td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-600 font-mono text-xs text-center">{r.nrFV||"-"}</td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-500 font-mono text-xs text-center">{r.nrZlecenia||"-"}</td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-500 text-center">{r.dataWyslania||"-"}</td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-center">
                     <span style={{ color: isOverdue ? "#dc2626" : "#6b7280", fontWeight: isOverdue ? 700 : 400 }}>
                       {r.terminPlatnosci||"-"}
                     </span>
@@ -5652,7 +5659,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                       </span>
                     )}
                   </td>
-                  <td className="px-3 py-2.5 whitespace-nowrap">
+                  <td className="px-3 py-2.5 whitespace-nowrap text-center">
                     <select
                       value={r.statusFV || "nie_wyslana"}
                       onChange={e => onUpdate(r.id, { statusFV: e.target.value })}
