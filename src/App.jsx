@@ -464,6 +464,13 @@ function App({ user, role }) {
   // ── GET PLN VALUE ──
   const getPLN = (c) => c.currency === "EUR" ? (toPLN(c.amountEUR) || 0) : (c.amountPLN || 0);
 
+  // ── GET EUR VALUE — używa amountEUR bezpośrednio gdy dostępne ──
+  const getEUR = (c) => {
+    if (c.amountEUR) return parseFloat(c.amountEUR);
+    if (c.amountPLN && eurRate) return c.amountPLN / eurRate;
+    return 0;
+  };
+
   // ── STATS ──
   const stats = useMemo(() => {
     const rate      = eurRate || 4.25;
@@ -1105,7 +1112,7 @@ function App({ user, role }) {
               {(() => {
                 const byVehicle = vehicles.map(v => ({
                   ...v,
-                  total: filteredCosts.filter(c => c.vehicleId === v.id).reduce((s,c) => s + (c.currency==="EUR" ? (c.amountEUR||0) : getPLN(c)/stats.rate), 0),
+                  total: filteredCosts.filter(c => c.vehicleId === v.id).reduce((s,c) => s + getEUR(c), 0),
                 })).filter(v => v.total > 0).sort((a,b) => b.total - a.total);
 
                 let allCats = [...categories];
@@ -1115,10 +1122,10 @@ function App({ user, role }) {
                 allCats = allCats.filter(c => c.id !== "myto" && c.id !== "nego" && c.id !== "etoll");
                 const byCat = allCats.map(cat => ({
                   ...cat,
-                  total: filteredCosts.filter(c => c.category === cat.id).reduce((s,c) => s + (c.currency==="EUR" ? (c.amountEUR||0) : getPLN(c)/stats.rate), 0),
+                  total: filteredCosts.filter(c => c.category === cat.id).reduce((s,c) => s + getEUR(c), 0),
                 })).filter(c => c.total > 0).sort((a,b) => b.total - a.total);
 
-                const totalEUR = filteredCosts.reduce((s,c) => s + (c.currency==="EUR" ? (c.amountEUR||0) : getPLN(c)/stats.rate), 0);
+                const totalEUR = filteredCosts.reduce((s,c) => s + getEUR(c), 0);
                 const totalPLN = filteredTotal;
 
                 return (
@@ -1213,7 +1220,7 @@ function App({ user, role }) {
                       </div>
                       <span className="col-span-3 text-gray-400 text-xs truncate">{c.note || "—"}{c.liters ? ` · ${c.liters} L` : ""}</span>
                       <div className="col-span-2 text-right">
-                        <div className="font-semibold text-gray-900 text-sm">{fmtEUR(amtPLN / stats.rate)}</div>
+                        <div className="font-semibold text-gray-900 text-sm">{fmtEUR(getEUR(c))}</div>
                         {amtEUR != null && <div className="text-xs text-gray-400">{fmtPLN(amtPLN)}</div>}
                       </div>
                       <div className="col-span-1 flex justify-end">
@@ -2971,7 +2978,7 @@ function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, 
   const [form, setForm] = useState({
     vehicleId: vehicles[0]?.id || "",
     category:  categories[0]?.id || "",
-    currency:  "PLN",
+    currency:  "EUR",
     amountPLN: "",
     amountEUR: "",
     date:      today,
@@ -3113,15 +3120,15 @@ function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, 
 
           {/* KWOTY */}
           <div className="grid grid-cols-2 gap-3">
-            <MF label="Kwota w złotych (zł)">
-              <MInput type="number" placeholder="0.00" value={form.amountPLN}
-                onChange={(v) => handleAmountChange("amountPLN", v)}
-                highlight={form.currency === "PLN"} />
-            </MF>
-            <MF label={`Kwota EUR${!eurLoading && eurRate ? ` (1€ = ${eurRate.toFixed(2)} zł)` : ""}`}>
+            <MF label={`Kwota EUR${!eurLoading && eurRate ? ` (kurs: ${eurRate.toFixed(4)})` : ""}`}>
               <MInput type="number" placeholder="0.00" value={form.amountEUR}
                 onChange={(v) => handleAmountChange("amountEUR", v)}
                 highlight={form.currency === "EUR"} />
+            </MF>
+            <MF label="Kwota PLN (opcjonalnie)">
+              <MInput type="number" placeholder="0.00" value={form.amountPLN}
+                onChange={(v) => handleAmountChange("amountPLN", v)}
+                highlight={form.currency === "PLN"} />
             </MF>
           </div>
           {!eurLoading && (
@@ -3225,7 +3232,8 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], onAdd,
         .filter(c => c.vehicleId === v.id && (c.date||"").startsWith(monthStr))
         .forEach(c => {
           const rentCat = CAT_TO_RENT[c.category] || "inne";
-          costsObj[rentCat] = (costsObj[rentCat]||0) + (parseFloat(c.amountEUR)||0);
+          const eur = c.amountEUR ? parseFloat(c.amountEUR) : (c.amountPLN && eurRate ? c.amountPLN / eurRate : 0);
+          costsObj[rentCat] = (costsObj[rentCat]||0) + eur;
         });
 
       if (frachtySum === 0 && Object.keys(costsObj).length === 0) return;
