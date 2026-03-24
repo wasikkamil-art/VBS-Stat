@@ -253,6 +253,7 @@ export default function Root() {
   const [user, setUser]         = useState(undefined);
   const [role, setRole]         = useState(null);
   const [roleLoaded, setRoleLoaded] = useState(false);
+  const [appUsers, setAppUsers] = useState([]);
 
   useEffect(() => {
     return onAuthStateChanged(auth, async (u) => {
@@ -278,6 +279,10 @@ export default function Root() {
           setRole("podglad");
         }
         setRoleLoaded(true);
+        // Wczytaj wszystkich użytkowników
+        getDocs(collection(db, "users")).then(snap => {
+          setAppUsers(snap.docs.map(d => ({ uid: d.id, ...d.data() })));
+        }).catch(() => {});
       } else {
         setRole(null);
         setRoleLoaded(false);
@@ -288,7 +293,7 @@ export default function Root() {
   if (user === undefined) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f8f9fb",fontSize:32}}>🚛</div>;
   if (!user) return <LoginScreen />;
   if (!roleLoaded) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f8f9fb",fontSize:32}}>🚛</div>;
-  return <App user={user} role={role} />;
+  return <App user={user} role={role} appUsers={appUsers} />;
 }
 
 
@@ -443,7 +448,7 @@ function exportCostsToExcel(costs, vehicles, categories, filterYear, filterMonth
   XLSX.writeFile(wb, fileName);
 }
 
-function App({ user, role }) {
+function App({ user, role, appUsers = [] }) {
   const isAdmin      = role === "admin";
   const [showExportModal, setShowExportModal] = useState(false);
   const isDyspozytor = role === "dyspozytor";
@@ -775,7 +780,15 @@ function App({ user, role }) {
 
           <div className="space-y-2 px-1">
             <div style={{ borderTop:"1px solid #f3f4f6", paddingTop:8, marginTop:4 }}>
-              <div className="text-xs text-gray-400 px-1 mb-0.5 truncate">{user?.email}</div>
+              <div className="text-xs text-gray-400 px-1 mb-0.5 truncate flex items-center gap-1">
+                {user?.email}
+                {(() => {
+                  const mentions = sprawyList.reduce((acc, s) => {
+                    return acc + (s.zdarzenia||[]).filter(z => z.mentions && z.mentions.includes(user?.email) && !z.seenBy?.includes(user?.email)).length;
+                  }, 0);
+                  return mentions > 0 ? <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs font-bold" style={{background:"#ef4444",color:"#fff"}}>{mentions}</span> : null;
+                })()}
+              </div>
               <div className="px-1 mb-2">
                 <span className="inline-block px-2 py-0.5 rounded-full text-xs font-semibold"
                   style={{
@@ -1681,6 +1694,7 @@ function App({ user, role }) {
               sprawyList={sprawyList}
               vehicles={vehicles}
               currentUser={user}
+              appUsers={appUsers}
               showToast={showToast}
               onAdd={(s) => setSprawyList(p => [...p, { ...s, id: uid() }])}
               onUpdate={(id, data) => setSprawyList(p => p.map(s => s.id === id ? { ...s, ...data } : s))}
@@ -1806,11 +1820,13 @@ function NowaSprawaModal({ allTypy, vehicles, onSave, onClose }) {
   );
 }
 
-function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, onUpdate, onDelete, onBack, showToast }) {
+function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpdate, onDelete, onBack, showToast }) {
   const [showAddZdarzenie, setShowAddZdarzenie] = useState(false);
   const [zdType, setZdType] = useState("notatka");
   const [zdTresc, setZdTresc] = useState("");
   const [zdKtoDoKogo, setZdKtoDoKogo] = useState("");
+  const [zdMentions, setZdMentions] = useState([]);
+  const [mentionInput, setMentionInput] = useState("");
   const [editMode, setEditMode] = useState(false);
   const [editData, setEditData] = useState({...sprawa});
 
@@ -1826,11 +1842,13 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, onUpdate, onDele
       typ: zdType,
       tresc: zdTresc,
       ktoDoKogo: zdKtoDoKogo,
+      mentions: zdMentions,
       data: new Date().toISOString(),
       autor: currentUser.email,
+      seenBy: [currentUser.email],
     };
     onUpdate({ zdarzenia: [...(sprawa.zdarzenia||[]), nowe] });
-    setZdTresc(""); setZdKtoDoKogo(""); setShowAddZdarzenie(false);
+    setZdTresc(""); setZdKtoDoKogo(""); setZdMentions([]); setMentionInput(""); setShowAddZdarzenie(false);
     showToast("✅ Zdarzenie dodane");
   };
 
@@ -1935,6 +1953,30 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, onUpdate, onDele
             <label className={lbl}>Treść / Notatka</label>
             <textarea className={inp+" resize-none"} rows={3} placeholder="Opis zdarzenia, treść emaila, notatka..." value={zdTresc} onChange={e=>setZdTresc(e.target.value)} />
           </div>
+          <div className="mb-3">
+            <label className={lbl}>@ Oznacz osobę (przypomnienie)</label>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:6}}>
+              {zdMentions.map(m => (
+                <span key={m} style={{background:"#eff6ff",color:"#1d4ed8",padding:"2px 10px",borderRadius:99,fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:4}}>
+                  @{m} <button onClick={() => setZdMentions(p=>p.filter(x=>x!==m))} style={{background:"none",border:"none",cursor:"pointer",color:"#6b7280",fontSize:11}}>✕</button>
+                </span>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:6}}>
+              <select value="" onChange={e => { if(e.target.value && !zdMentions.includes(e.target.value)) setZdMentions(p=>[...p,e.target.value]); }}
+                style={{flex:1,padding:"7px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",background:"#fff"}}>
+                <option value="">Wybierz z listy...</option>
+                {appUsers.map(u => <option key={u.uid} value={u.email}>{u.email}</option>)}
+              </select>
+              <input value={mentionInput} onChange={e=>setMentionInput(e.target.value)}
+                placeholder="lub wpisz email..."
+                style={{flex:1,padding:"7px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none"}}
+                onKeyDown={e => { if(e.key==="Enter" && mentionInput.trim()) { setZdMentions(p=>[...p,mentionInput.trim()]); setMentionInput(""); }}}
+              />
+              <button onClick={() => { if(mentionInput.trim() && !zdMentions.includes(mentionInput.trim())) { setZdMentions(p=>[...p,mentionInput.trim()]); setMentionInput(""); }}}
+                style={{padding:"7px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontSize:13}}>+</button>
+            </div>
+          </div>
           <div className="flex gap-2 justify-end">
             <button onClick={() => setShowAddZdarzenie(false)} style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer"}}>Anuluj</button>
             <button onClick={addZdarzenie} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Dodaj</button>
@@ -1961,7 +2003,12 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, onUpdate, onDele
                     <span className="ml-auto text-xs text-gray-400">{dt.toLocaleDateString("pl-PL")} {dt.toLocaleTimeString("pl-PL",{hour:"2-digit",minute:"2-digit"})}</span>
                   </div>
                   <div className="text-sm text-gray-700 whitespace-pre-wrap">{z.tresc}</div>
-                  <div className="text-xs text-gray-400 mt-1.5">👤 {z.autor}</div>
+                  <div className="text-xs text-gray-400 mt-1.5 flex items-center gap-2 flex-wrap">
+                    <span>👤 {z.autor}</span>
+                    {z.mentions && z.mentions.length > 0 && z.mentions.map(m => (
+                      <span key={m} style={{background:"#eff6ff",color:"#1d4ed8",padding:"1px 8px",borderRadius:99,fontSize:11,fontWeight:600}}>@{m}</span>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1972,7 +2019,7 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, onUpdate, onDele
   );
 }
 
-function SprawyTab({ sprawyList, vehicles, currentUser, showToast, onAdd, onUpdate, onDelete }) {
+function SprawyTab({ sprawyList, vehicles, currentUser, appUsers, showToast, onAdd, onUpdate, onDelete }) {
   const [view, setView] = useState("lista");
   const [selectedId, setSelectedId] = useState(null);
   const [showNewSprawa, setShowNewSprawa] = useState(false);
@@ -2000,6 +2047,7 @@ function SprawyTab({ sprawyList, vehicles, currentUser, showToast, onAdd, onUpda
       vehicles={vehicles}
       allTypy={allTypy}
       currentUser={currentUser}
+      appUsers={appUsers}
       onUpdate={(data) => onUpdate(selected.id, data)}
       onDelete={() => { onDelete(selected.id); setView("lista"); setSelectedId(null); showToast("Sprawa usunięta"); }}
       onBack={() => setView("lista")}
