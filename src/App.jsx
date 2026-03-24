@@ -400,6 +400,67 @@ function ExportCostsModal({ costs, vehicles, categories, onClose }) {
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// UPLOAD ZAŁĄCZNIKA DO FIREBASE STORAGE
+// ═══════════════════════════════════════════════════════════════════════════════
+async function uploadSprawaFile(file, sprawaId, subfolder) {
+  const ext = file.name.split(".").pop();
+  const name = `sprawy/${sprawaId}/${subfolder}/${Date.now()}_${file.name}`;
+  const ref = storageRef(storage, name);
+  await uploadBytes(ref, file);
+  const url = await getDownloadURL(ref);
+  return { url, name: file.name, type: file.type, size: file.size };
+}
+
+function SprawaFileUpload({ sprawaId, subfolder, onUploaded, label = "📎 Dodaj załącznik" }) {
+  const [uploading, setUploading] = useState(false);
+  const inputRef = useRef(null);
+
+  const handleFile = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const allowed = ["application/pdf","image/jpeg","image/png","image/jpg"];
+    if (!allowed.includes(file.type)) { alert("Dozwolone: PDF, JPG, PNG"); return; }
+    if (file.size > 10 * 1024 * 1024) { alert("Maks. 10 MB"); return; }
+    setUploading(true);
+    try {
+      const result = await uploadSprawaFile(file, sprawaId, subfolder);
+      onUploaded(result);
+    } catch(e) {
+      alert("Błąd uploadu: " + e.message);
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  };
+
+  return (
+    <>
+      <input ref={inputRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={handleFile} />
+      <button onClick={() => inputRef.current?.click()} disabled={uploading}
+        className="px-3 py-1.5 rounded-lg text-xs font-medium border border-dashed border-gray-300 text-gray-500 hover:bg-gray-50 transition-all disabled:opacity-50">
+        {uploading ? "Uploading..." : label}
+      </button>
+    </>
+  );
+}
+
+function AttachmentList({ files, onDelete }) {
+  if (!files || files.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-2 mt-2">
+      {files.map((f, i) => (
+        <div key={i} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-xs">
+          <span>{f.type === "application/pdf" ? "📄" : "🖼️"}</span>
+          <a href={f.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline max-w-32 truncate">{f.name}</a>
+          {onDelete && <button onClick={() => onDelete(i)} className="text-gray-300 hover:text-red-400 ml-1">✕</button>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // EXPORT KOSZTOW DO EXCEL
 // ═══════════════════════════════════════════════════════════════════════════════
 function exportCostsToExcel(costs, vehicles, categories, filterYear, filterMonth) {
@@ -1852,6 +1913,7 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
   const [zdKtoDoKogo, setZdKtoDoKogo] = useState("");
   const [zdMentions, setZdMentions] = useState([]);
   const [mentionInput, setMentionInput] = useState("");
+  const [zdFile, setZdFile] = useState(null);
   const [editMode, setEditMode] = useState(false);
   const [editData, setEditData] = useState({...sprawa});
 
@@ -1868,12 +1930,13 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
       tresc: zdTresc,
       ktoDoKogo: zdKtoDoKogo,
       mentions: zdMentions,
+      zalacznik: zdFile || null,
       data: new Date().toISOString(),
       autor: currentUser.email,
       seenBy: [currentUser.email],
     };
     onUpdate({ zdarzenia: [...(sprawa.zdarzenia||[]), nowe] });
-    setZdTresc(""); setZdKtoDoKogo(""); setZdMentions([]); setMentionInput(""); setShowAddZdarzenie(false);
+    setZdTresc(""); setZdKtoDoKogo(""); setZdMentions([]); setMentionInput(""); setZdFile(null); setShowAddZdarzenie(false);
     showToast("✅ Zdarzenie dodane");
   };
 
@@ -1939,6 +2002,22 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
               </div>
             </div>
           )}
+          <div className="col-span-2 md:col-span-4">
+            <div className="text-xs text-gray-400 mb-2">Załączniki sprawy</div>
+            <AttachmentList files={sprawa.zalaczniki || []} onDelete={(i) => {
+              const nowe = [...(sprawa.zalaczniki||[])];
+              nowe.splice(i,1);
+              onUpdate({zalaczniki: nowe});
+            }} />
+            <div className="mt-2">
+              <SprawaFileUpload
+                sprawaId={sprawa.id}
+                subfolder="glowne"
+                label="📎 Dodaj załącznik (PDF/JPG/PNG)"
+                onUploaded={(f) => onUpdate({zalaczniki: [...(sprawa.zalaczniki||[]), f]})}
+              />
+            </div>
+          </div>
         </div>
       ) : (
         <div className="bg-white rounded-xl border border-gray-100 p-5 mb-5">
@@ -2013,6 +2092,23 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
                 style={{padding:"7px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontSize:13}}>+</button>
             </div>
           </div>
+          <div className="mb-3">
+            <label className={lbl}>Załącznik (opcjonalnie)</label>
+            {zdFile ? (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-xs">
+                <span>{zdFile.type === "application/pdf" ? "📄" : "🖼️"}</span>
+                <span className="text-gray-700 truncate max-w-48">{zdFile.name}</span>
+                <button onClick={() => setZdFile(null)} className="ml-auto text-gray-400 hover:text-red-400">✕</button>
+              </div>
+            ) : (
+              <SprawaFileUpload
+                sprawaId={sprawa.id}
+                subfolder="zdarzenia"
+                label="📎 Dodaj plik (PDF/JPG/PNG)"
+                onUploaded={(f) => setZdFile(f)}
+              />
+            )}
+          </div>
           <div className="flex gap-2 justify-end">
             <button onClick={() => setShowAddZdarzenie(false)} style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer"}}>Anuluj</button>
             <button onClick={addZdarzenie} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Dodaj</button>
@@ -2039,6 +2135,15 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
                     <span className="ml-auto text-xs text-gray-400">{dt.toLocaleDateString("pl-PL")} {dt.toLocaleTimeString("pl-PL",{hour:"2-digit",minute:"2-digit"})}</span>
                   </div>
                   <div className="text-sm text-gray-700 whitespace-pre-wrap">{z.tresc}</div>
+                  {z.zalacznik && (
+                    <div className="mt-2">
+                      <a href={z.zalacznik.url} target="_blank" rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-gray-50 text-xs text-blue-600 hover:bg-blue-50 transition-all">
+                        <span>{z.zalacznik.type === "application/pdf" ? "📄" : "🖼️"}</span>
+                        <span className="max-w-48 truncate">{z.zalacznik.name}</span>
+                      </a>
+                    </div>
+                  )}
                   <div className="text-xs text-gray-400 mt-1.5 flex items-center gap-2 flex-wrap">
                     <span>👤 {z.autor}</span>
                     {z.mentions && z.mentions.length > 0 && z.mentions.map(m => (
