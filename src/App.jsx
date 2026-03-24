@@ -1763,6 +1763,7 @@ function App({ user, role, appUsers = [] }) {
               vehicles={vehicles}
               currentUser={user}
               appUsers={appUsers}
+              eurRate={eurRate}
               showToast={showToast}
               onAdd={(s) => setSprawyList(p => [...p, { ...s, id: uid() }])}
               onUpdate={(id, data) => setSprawyList(p => p.map(s => s.id === id ? { ...s, ...data } : s))}
@@ -2053,7 +2054,31 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
         <div className="bg-white rounded-xl border border-gray-100 p-5 mb-5">
           <div className="grid grid-cols-2 gap-3 mb-3">
             <div><label className={lbl}>Klient</label><input className={inp} value={editData.klient||""} onChange={e=>setEditData(p=>({...p,klient:e.target.value}))} /></div>
-            <div><label className={lbl}>Kwota (EUR)</label><input className={inp} type="number" value={editData.kwota||""} onChange={e=>setEditData(p=>({...p,kwota:e.target.value}))} /></div>
+            <div>
+              <label className={lbl}>Kwota</label>
+              <div style={{display:"flex",gap:4}}>
+                <input className={inp} type="number" value={editData.kwota||""} style={{flex:1}}
+                  onChange={e=>setEditData(p=>({...p,kwota:e.target.value}))} />
+                <div style={{display:"flex",borderRadius:8,border:"1.5px solid #e5e7eb",overflow:"hidden",flexShrink:0}}>
+                  {["EUR","PLN"].map(w => (
+                    <button key={w} type="button" onClick={() => setEditData(p=>({...p,waluta:w}))}
+                      style={{padding:"0 10px",fontSize:12,fontWeight:600,border:"none",cursor:"pointer",
+                        background:(editData.waluta||sprawa.waluta||"EUR")===w?"#111827":"#fff",
+                        color:(editData.waluta||sprawa.waluta||"EUR")===w?"#fff":"#6b7280"}}>
+                      {w}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {(editData.kwota||sprawa.kwota) && (
+                <div style={{fontSize:11,color:"#9ca3af",marginTop:3}}>
+                  {(editData.waluta||sprawa.waluta||"EUR")==="EUR"
+                    ? `≈ ${(parseFloat(editData.kwota||sprawa.kwota)*4.27).toFixed(2)} zł`
+                    : `≈ ${(parseFloat(editData.kwota||sprawa.kwota)/4.27).toFixed(2)} €`}
+                  <span style={{marginLeft:4,color:"#d1d5db"}}>· kurs ~4.27</span>
+                </div>
+              )}
+            </div>
             <div><label className={lbl}>Termin płatności</label><input className={inp} type="date" value={editData.terminPlatnosci||""} onChange={e=>setEditData(p=>({...p,terminPlatnosci:e.target.value}))} /></div>
             <div><label className={lbl}>Przypomnienie</label><input className={inp} type="date" value={editData.przypomnienie||""} onChange={e=>setEditData(p=>({...p,przypomnienie:e.target.value}))} /></div>
             <div><label className={lbl}>Nr zlecenia</label><input className={inp} value={editData.nrZlecenia||""} onChange={e=>setEditData(p=>({...p,nrZlecenia:e.target.value}))} /></div>
@@ -2240,7 +2265,7 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
   );
 }
 
-function SprawyTab({ sprawyList, vehicles, currentUser, appUsers, showToast, onAdd, onUpdate, onDelete }) {
+function SprawyTab({ sprawyList, vehicles, currentUser, appUsers, eurRate, showToast, onAdd, onUpdate, onDelete }) {
   const [view, setView] = useState("lista");
   const [selectedId, setSelectedId] = useState(null);
   const [showNewSprawa, setShowNewSprawa] = useState(false);
@@ -2288,11 +2313,18 @@ function SprawyTab({ sprawyList, vehicles, currentUser, appUsers, showToast, onA
           <h2 className="text-xl font-bold text-gray-900">Sprawy</h2>
           <p className="text-sm text-gray-400 mt-0.5">{sprawyList.filter(s=>s.status==="otwarta"||s.status==="w_toku").length} aktywnych · {sprawyList.length} łącznie</p>
         </div>
-        <button onClick={() => setShowNewSprawa(true)}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white hover:opacity-90 transition-all"
-          style={{background:"#111827"}}>
-          + Nowa sprawa
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="px-3 py-2 rounded-xl text-sm flex items-center gap-1.5"
+            style={{background:"#fffbeb",border:"1px solid #fde68a",color:"#92400e"}}>
+            <span>💱</span>
+            <span className="font-semibold text-xs">1 € = {eurRate ? eurRate.toFixed(4) : "4.27"} zł</span>
+          </div>
+          <button onClick={() => setShowNewSprawa(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white hover:opacity-90 transition-all"
+            style={{background:"#111827"}}>
+            + Nowa sprawa
+          </button>
+        </div>
       </div>
 
       {/* PRZYPOMNIENIA DZISIAJ */}
