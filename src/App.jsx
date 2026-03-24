@@ -1760,11 +1760,11 @@ const ZDARZENIE_TYPY = [
   { id: "akcja",    label: "Podjęte działanie", icon: "✅" },
 ];
 
-function NowaSprawaModal({ allTypy, vehicles, onSave, onClose }) {
+function NowaSprawaModal({ allTypy, vehicles, appUsers = [], onSave, onClose }) {
   const [f, setF] = useState({
     numer:"", typ: allTypy[0]?.id || "brak_zaplaty", klient:"", kwota:"",
     nrZlecenia:"", nrNoty:"", terminPlatnosci:"", nrNadania:"",
-    telefon:"", vehicleId:"", przypomnienie:"", uwagi:""
+    telefon:"", vehicleId:"", przypomnienie:"", uwagi:"", przypisani:[]
   });
   const set = (k,v) => setF(p => ({...p,[k]:v}));
   const inp = "w-full px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none focus:border-gray-400";
@@ -1809,6 +1809,20 @@ function NowaSprawaModal({ allTypy, vehicles, onSave, onClose }) {
             <div><label className={lbl}>Przypomnienie</label><input className={inp} type="date" value={f.przypomnienie} onChange={e=>set("przypomnienie",e.target.value)} /></div>
           </div>
           <div><label className={lbl}>Uwagi</label><textarea className={inp+" resize-none"} rows={2} placeholder="Opis sprawy..." value={f.uwagi} onChange={e=>set("uwagi",e.target.value)} /></div>
+          <div>
+            <label className={lbl}>Przypisani</label>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
+              {(f.przypisani||[]).map(m => (
+                <span key={m} style={{background:"#eff6ff",color:"#1d4ed8",padding:"2px 10px",borderRadius:99,fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:4}}>
+                  {m} <button type="button" onClick={() => set("przypisani",(f.przypisani||[]).filter(x=>x!==m))} style={{background:"none",border:"none",cursor:"pointer",color:"#6b7280",fontSize:11}}>x</button>
+                </span>
+              ))}
+            </div>
+            <select value="" onChange={e => { if(e.target.value && !(f.przypisani||[]).includes(e.target.value)) set("przypisani",[...(f.przypisani||[]),e.target.value]); }} className={inp}>
+              <option value="">+ Dodaj osobę...</option>
+              {appUsers.map(u => <option key={u.uid} value={u.email}>{u.email}</option>)}
+            </select>
+          </div>
         </div>
         <div style={{padding:"14px 24px",borderTop:"1px solid #f3f4f6",display:"flex",justifyContent:"flex-end",gap:8}}>
           <button onClick={onClose} style={{padding:"9px 18px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer",color:"#6b7280"}}>Anuluj</button>
@@ -1901,6 +1915,16 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
             <div className="col-span-2 md:col-span-4">
               <div className="text-xs text-gray-400 mb-0.5">Uwagi</div>
               <div className="text-sm text-gray-700">{sprawa.uwagi}</div>
+            </div>
+          )}
+          {sprawa.przypisani && sprawa.przypisani.length > 0 && (
+            <div className="col-span-2 md:col-span-4">
+              <div className="text-xs text-gray-400 mb-1">Przypisani</div>
+              <div className="flex gap-2 flex-wrap">
+                {sprawa.przypisani.map(p => (
+                  <span key={p} style={{background:"#eff6ff",color:"#1d4ed8",padding:"3px 10px",borderRadius:99,fontSize:12,fontWeight:600}}>&#128100; {p}</span>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -2026,6 +2050,7 @@ function SprawyTab({ sprawyList, vehicles, currentUser, appUsers, showToast, onA
   const [showNewTyp, setShowNewTyp] = useState(false);
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterTyp, setFilterTyp] = useState("all");
+  const [filterMoje, setFilterMoje] = useState(false);
   const [customTypy, setCustomTypy] = useState([]);
   const [newTypLabel, setNewTypLabel] = useState("");
 
@@ -2038,6 +2063,7 @@ function SprawyTab({ sprawyList, vehicles, currentUser, appUsers, showToast, onA
   const filtered = sprawyList.filter(s => {
     if (filterStatus !== "all" && s.status !== filterStatus) return false;
     if (filterTyp !== "all" && s.typ !== filterTyp) return false;
+    if (filterMoje && !(s.przypisani||[]).includes(currentUser.email)) return false;
     return true;
   }).sort((a,b) => (b.dataUtworzenia||"").localeCompare(a.dataUtworzenia||""));
 
@@ -2106,6 +2132,11 @@ function SprawyTab({ sprawyList, vehicles, currentUser, appUsers, showToast, onA
           className="px-3 py-1.5 rounded-lg text-xs border border-dashed border-gray-300 text-gray-500 hover:bg-gray-50">
           + Nowy typ
         </button>
+        <button onClick={() => setFilterMoje(p => !p)}
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all"
+          style={{background: filterMoje ? "#111827" : "#fff", color: filterMoje ? "#fff" : "#6b7280", borderColor: filterMoje ? "#111827" : "#e5e7eb"}}>
+          Moje sprawy
+        </button>
       </div>
 
       {/* LISTA SPRAW */}
@@ -2159,6 +2190,7 @@ function SprawyTab({ sprawyList, vehicles, currentUser, appUsers, showToast, onA
         <NowaSprawaModal
           allTypy={allTypy}
           vehicles={vehicles}
+          appUsers={appUsers}
           onSave={(data) => {
             onAdd({ ...data, status: "otwarta", zdarzenia: [], dataUtworzenia: new Date().toISOString() });
             setShowNewSprawa(false);
