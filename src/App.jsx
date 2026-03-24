@@ -6527,7 +6527,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                       {r.urlZlecenie
                         ? <a href={r.urlZlecenie} target="_blank" rel="noopener noreferrer"
                             className="text-xs px-2 py-1 rounded-lg font-medium transition-all hover:bg-blue-100"
-                            style={{background:"#eff6ff", color:"#1d4ed8"}}>Otwórz</a>
+                            style={{background:"#f0fdf4", color:"#15803d"}}>📄 Otwórz</a>
                         : <ZlecenieUploadBtn frachtId={r.id}
                             onUploaded={(url, nr) => onUpdate(r.id, { urlZlecenie: url, ...(nr ? {nrZlecenia: nr} : {}) })} />
                       }
@@ -6924,7 +6924,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
                       {r.urlZlecenie
                         ? <a href={r.urlZlecenie} target="_blank" rel="noopener noreferrer"
                             className="text-xs px-2 py-1 rounded-lg font-medium transition-all hover:bg-blue-100"
-                            style={{background:"#eff6ff", color:"#1d4ed8"}}>Otwórz</a>
+                            style={{background:"#f0fdf4", color:"#15803d"}}>📄 Otwórz</a>
                         : <ZlecenieUploadBtn frachtId={r.id}
                             onUploaded={(url, nr) => onUpdate(r.id, { urlZlecenie: url, ...(nr ? {nrZlecenia: nr} : {}) })} />
                       }
