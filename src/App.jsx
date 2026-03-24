@@ -52,7 +52,7 @@ async function dbSet(key, value) {
   }
 }
 
-const SK = { vehicles: "fleetv2_vehicles", costs: "fleetv2_costs", categories: "fleetv2_categories", docs: "fleetv2_docs", imi: "fleetv2_imi", rent: "fleetv2_rent", frachty: "fleetv2_frachty" };
+const SK = { vehicles: "fleetv2_vehicles", costs: "fleetv2_costs", categories: "fleetv2_categories", docs: "fleetv2_docs", imi: "fleetv2_imi", rent: "fleetv2_rent", frachty: "fleetv2_frachty", sprawy: "fleetv2_sprawy" };
 
 // ─── SEED DATA ─────────────────────────────────────────────────────────────────
 const SEED_VEHICLES = [
@@ -458,6 +458,7 @@ function App({ user, role }) {
   const [imiRecords, setImiRecords] = useState([]);
   const [rentRecords, setRentRecords] = useState([]);
   const [frachtyList, setFrachtyList] = useState([]);
+  const [sprawyList, setSprawyList] = useState([]);
   const [loaded, setLoaded]         = useState(false);
   const [toast, setToast]           = useState(null);
   const [eurRate, setEurRate]       = useState(null);
@@ -520,6 +521,7 @@ function App({ user, role }) {
       setImiRecords(im || []);
       setRentRecords(rn || []);
       setFrachtyList(fr || []);
+      setSprawyList(data[SK.sprawy] || []);
       setLoaded(true);
     }, (err) => {
       console.error("onSnapshot error", err);
@@ -536,6 +538,7 @@ function App({ user, role }) {
   useEffect(() => { if (loaded) dbSet(SK.imi, imiRecords); },       [imiRecords, loaded]);
   useEffect(() => { if (loaded && rentRecords.length > 0) dbSet(SK.rent, rentRecords); },     [rentRecords, loaded]);
   useEffect(() => { if (loaded && frachtyList.length > 0) dbSet(SK.frachty, frachtyList); },  [frachtyList, loaded]);
+  useEffect(() => { if (loaded) dbSet(SK.sprawy, sprawyList); }, [sprawyList, loaded]);
 
   // ── CSS INJECTION ──
   useEffect(() => {
@@ -750,6 +753,9 @@ function App({ user, role }) {
               ...(isAdmin ? [
                 { id: "users",   icon: "👥",  label: "Użytkownicy" },
               ] : []),
+              ...((isAdmin || isDyspozytor) ? [
+                { id: "sprawy", icon: "⚡", label: "Sprawy", badge: sprawyList.filter(s => s.status !== "zamknieta" && s.przypomnienie && new Date(s.przypomnienie) <= new Date()).length || null },
+              ] : []),
             ].map((item) => (
               <button key={item.id} onClick={() => setTab(item.id)}
                 className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm text-left transition-all"
@@ -760,6 +766,7 @@ function App({ user, role }) {
                 }}>
                 <span className="text-base w-5 text-center opacity-70">{item.icon}</span>
                 {item.label}
+                {item.badge ? <span className="ml-auto px-1.5 py-0.5 rounded-full text-xs font-bold" style={{background:"#ef4444",color:"#fff"}}>{item.badge}</span> : null}
               </button>
             ))}
           </nav>
@@ -1669,6 +1676,18 @@ function App({ user, role }) {
             <UsersTab currentUid={user.uid} showToast={showToast} />
           )}
 
+          {tab === "sprawy" && (isAdmin || isDyspozytor) && (
+            <SprawyTab
+              sprawyList={sprawyList}
+              vehicles={vehicles}
+              currentUser={user}
+              showToast={showToast}
+              onAdd={(s) => setSprawyList(p => [...p, { ...s, id: uid() }])}
+              onUpdate={(id, data) => setSprawyList(p => p.map(s => s.id === id ? { ...s, ...data } : s))}
+              onDelete={(id) => setSprawyList(p => p.filter(s => s.id !== id))}
+            />
+          )}
+
         </main>
       </div>
 
@@ -1696,6 +1715,432 @@ function App({ user, role }) {
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SPRAWY TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+const SPRAWA_TYPY = [
+  { id: "brak_zaplaty",  label: "Brak zapłaty",       icon: "💸", color: "#ef4444" },
+  { id: "nota",          label: "Nota obciążeniowa",  icon: "📋", color: "#f97316" },
+  { id: "reklamacja",    label: "Reklamacja",          icon: "⚠️", color: "#eab308" },
+  { id: "spor",          label: "Spór",               icon: "⚖️", color: "#8b5cf6" },
+  { id: "inne",          label: "Inne",               icon: "📌", color: "#6b7280" },
+];
+
+const SPRAWA_STATUSY = [
+  { id: "otwarta",    label: "Otwarta",    color: "#ef4444", bg: "#fef2f2" },
+  { id: "w_toku",     label: "W toku",     color: "#f97316", bg: "#fff7ed" },
+  { id: "zamknieta",  label: "Zamknięta",  color: "#10b981", bg: "#f0fdf4" },
+  { id: "wygrana",    label: "Wygrana",    color: "#3b82f6", bg: "#eff6ff" },
+  { id: "przegrana",  label: "Przegrana",  color: "#6b7280", bg: "#f9fafb" },
+];
+
+const ZDARZENIE_TYPY = [
+  { id: "email",    label: "Email",           icon: "📧" },
+  { id: "telefon",  label: "Rozmowa tel.",    icon: "📞" },
+  { id: "notatka",  label: "Notatka wewn.",   icon: "📝" },
+  { id: "dokument", label: "Dokument",        icon: "📄" },
+  { id: "akcja",    label: "Podjęte działanie", icon: "✅" },
+];
+
+function NowaSprawaModal({ allTypy, vehicles, onSave, onClose }) {
+  const [f, setF] = useState({
+    numer:"", typ: allTypy[0]?.id || "brak_zaplaty", klient:"", kwota:"",
+    nrZlecenia:"", nrNoty:"", terminPlatnosci:"", nrNadania:"",
+    telefon:"", vehicleId:"", przypomnienie:"", uwagi:""
+  });
+  const set = (k,v) => setF(p => ({...p,[k]:v}));
+  const inp = "w-full px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none focus:border-gray-400";
+  const lbl = "block text-xs font-semibold text-gray-500 mb-1";
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.35)",backdropFilter:"blur(4px)"}}>
+      <div style={{background:"#fff",borderRadius:16,width:520,maxWidth:"95vw",maxHeight:"90vh",overflow:"hidden",display:"flex",flexDirection:"column",boxShadow:"0 8px 32px rgba(0,0,0,0.12)"}}>
+        <div style={{padding:"20px 24px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <h3 style={{fontWeight:700,fontSize:16,color:"#111827"}}>Nowa sprawa</h3>
+          <button onClick={onClose} style={{background:"#f3f4f6",border:"none",borderRadius:8,width:28,height:28,cursor:"pointer"}}>✕</button>
+        </div>
+        <div style={{padding:"20px 24px",overflowY:"auto",display:"flex",flexDirection:"column",gap:12}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div><label className={lbl}>Numer sprawy</label><input className={inp} placeholder="SP/001/2026" value={f.numer} onChange={e=>set("numer",e.target.value)} /></div>
+            <div><label className={lbl}>Typ</label>
+              <select className={inp} value={f.typ} onChange={e=>set("typ",e.target.value)}>
+                {allTypy.map(t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
+              </select>
+            </div>
+          </div>
+          <div><label className={lbl}>Klient / Firma</label><input className={inp} placeholder="Nazwa firmy" value={f.klient} onChange={e=>set("klient",e.target.value)} /></div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div><label className={lbl}>Kwota (EUR)</label><input className={inp} type="number" placeholder="0.00" value={f.kwota} onChange={e=>set("kwota",e.target.value)} /></div>
+            <div><label className={lbl}>Termin płatności</label><input className={inp} type="date" value={f.terminPlatnosci} onChange={e=>set("terminPlatnosci",e.target.value)} /></div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div><label className={lbl}>Nr zlecenia</label><input className={inp} placeholder="ZL/001" value={f.nrZlecenia} onChange={e=>set("nrZlecenia",e.target.value)} /></div>
+            <div><label className={lbl}>Nr noty</label><input className={inp} placeholder="NT/001" value={f.nrNoty} onChange={e=>set("nrNoty",e.target.value)} /></div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div><label className={lbl}>Nr nadania poczty</label><input className={inp} placeholder="PL000000000" value={f.nrNadania} onChange={e=>set("nrNadania",e.target.value)} /></div>
+            <div><label className={lbl}>Telefon kontaktowy</label><input className={inp} placeholder="+48 000 000 000" value={f.telefon} onChange={e=>set("telefon",e.target.value)} /></div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div><label className={lbl}>Pojazd (opcjonalnie)</label>
+              <select className={inp} value={f.vehicleId} onChange={e=>set("vehicleId",e.target.value)}>
+                <option value="">Brak</option>
+                {vehicles.filter(v=>!v.archived).map(v=><option key={v.id} value={v.id}>{v.plate}</option>)}
+              </select>
+            </div>
+            <div><label className={lbl}>Przypomnienie</label><input className={inp} type="date" value={f.przypomnienie} onChange={e=>set("przypomnienie",e.target.value)} /></div>
+          </div>
+          <div><label className={lbl}>Uwagi</label><textarea className={inp+" resize-none"} rows={2} placeholder="Opis sprawy..." value={f.uwagi} onChange={e=>set("uwagi",e.target.value)} /></div>
+        </div>
+        <div style={{padding:"14px 24px",borderTop:"1px solid #f3f4f6",display:"flex",justifyContent:"flex-end",gap:8}}>
+          <button onClick={onClose} style={{padding:"9px 18px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer",color:"#6b7280"}}>Anuluj</button>
+          <button onClick={() => { if(!f.klient){alert("Podaj klienta");return;} onSave(f); }}
+            style={{padding:"9px 18px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Zapisz sprawę</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, onUpdate, onDelete, onBack, showToast }) {
+  const [showAddZdarzenie, setShowAddZdarzenie] = useState(false);
+  const [zdType, setZdType] = useState("notatka");
+  const [zdTresc, setZdTresc] = useState("");
+  const [zdKtoDoKogo, setZdKtoDoKogo] = useState("");
+  const [editMode, setEditMode] = useState(false);
+  const [editData, setEditData] = useState({...sprawa});
+
+  const typ = allTypy.find(t => t.id === sprawa.typ);
+  const status = SPRAWA_STATUSY.find(s => s.id === sprawa.status) || SPRAWA_STATUSY[0];
+  const vehicle = vehicles.find(v => v.id === sprawa.vehicleId);
+  const zdarzenia = [...(sprawa.zdarzenia || [])].sort((a,b) => b.data.localeCompare(a.data));
+
+  const addZdarzenie = () => {
+    if (!zdTresc.trim()) return;
+    const nowe = {
+      id: Math.random().toString(36).slice(2,10),
+      typ: zdType,
+      tresc: zdTresc,
+      ktoDoKogo: zdKtoDoKogo,
+      data: new Date().toISOString(),
+      autor: currentUser.email,
+    };
+    onUpdate({ zdarzenia: [...(sprawa.zdarzenia||[]), nowe] });
+    setZdTresc(""); setZdKtoDoKogo(""); setShowAddZdarzenie(false);
+    showToast("✅ Zdarzenie dodane");
+  };
+
+  const inp = "w-full px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none focus:border-gray-400";
+  const lbl = "block text-xs font-semibold text-gray-500 mb-1";
+
+  return (
+    <div>
+      {/* BACK + HEADER */}
+      <div className="flex items-center gap-3 mb-5">
+        <button onClick={onBack} className="px-3 py-1.5 rounded-lg text-sm text-gray-500 hover:bg-gray-100 transition-all">← Powrót</button>
+        <div className="flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-lg">{typ?.icon || "📌"}</span>
+            <h2 className="text-lg font-bold text-gray-900">{sprawa.numer || "Sprawa"} · {sprawa.klient}</h2>
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold" style={{background:status.bg,color:status.color}}>{status.label}</span>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <select value={sprawa.status} onChange={e => onUpdate({status: e.target.value})}
+            className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 outline-none bg-white font-semibold"
+            style={{color: status.color}}>
+            {SPRAWA_STATUSY.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+          </select>
+          <button onClick={() => setEditMode(!editMode)} className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 hover:bg-gray-50">✏️ Edytuj</button>
+          <button onClick={() => { if(window.confirm("Usunąć sprawę?")) onDelete(); }}
+            className="px-3 py-1.5 rounded-lg text-xs border border-red-200 text-red-500 hover:bg-red-50">🗑</button>
+        </div>
+      </div>
+
+      {/* DANE SPRAWY */}
+      {!editMode ? (
+        <div className="bg-white rounded-xl border border-gray-100 p-5 mb-5 grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            ["Kwota", sprawa.kwota ? sprawa.kwota+" €" : "—"],
+            ["Termin płatności", sprawa.terminPlatnosci || "—"],
+            ["Nr zlecenia", sprawa.nrZlecenia || "—"],
+            ["Nr noty", sprawa.nrNoty || "—"],
+            ["Nr nadania", sprawa.nrNadania || "—"],
+            ["Telefon", sprawa.telefon || "—"],
+            ["Pojazd", vehicle?.plate || "—"],
+            ["Przypomnienie", sprawa.przypomnienie || "—"],
+          ].map(([label,value]) => (
+            <div key={label}>
+              <div className="text-xs text-gray-400 mb-0.5">{label}</div>
+              <div className="text-sm font-semibold text-gray-800">{value}</div>
+            </div>
+          ))}
+          {sprawa.uwagi && (
+            <div className="col-span-2 md:col-span-4">
+              <div className="text-xs text-gray-400 mb-0.5">Uwagi</div>
+              <div className="text-sm text-gray-700">{sprawa.uwagi}</div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-100 p-5 mb-5">
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div><label className={lbl}>Klient</label><input className={inp} value={editData.klient||""} onChange={e=>setEditData(p=>({...p,klient:e.target.value}))} /></div>
+            <div><label className={lbl}>Kwota (EUR)</label><input className={inp} type="number" value={editData.kwota||""} onChange={e=>setEditData(p=>({...p,kwota:e.target.value}))} /></div>
+            <div><label className={lbl}>Termin płatności</label><input className={inp} type="date" value={editData.terminPlatnosci||""} onChange={e=>setEditData(p=>({...p,terminPlatnosci:e.target.value}))} /></div>
+            <div><label className={lbl}>Przypomnienie</label><input className={inp} type="date" value={editData.przypomnienie||""} onChange={e=>setEditData(p=>({...p,przypomnienie:e.target.value}))} /></div>
+            <div><label className={lbl}>Nr zlecenia</label><input className={inp} value={editData.nrZlecenia||""} onChange={e=>setEditData(p=>({...p,nrZlecenia:e.target.value}))} /></div>
+            <div><label className={lbl}>Nr noty</label><input className={inp} value={editData.nrNoty||""} onChange={e=>setEditData(p=>({...p,nrNoty:e.target.value}))} /></div>
+            <div><label className={lbl}>Nr nadania</label><input className={inp} value={editData.nrNadania||""} onChange={e=>setEditData(p=>({...p,nrNadania:e.target.value}))} /></div>
+            <div><label className={lbl}>Telefon</label><input className={inp} value={editData.telefon||""} onChange={e=>setEditData(p=>({...p,telefon:e.target.value}))} /></div>
+          </div>
+          <div className="mb-3"><label className={lbl}>Uwagi</label><textarea className={inp+" resize-none"} rows={2} value={editData.uwagi||""} onChange={e=>setEditData(p=>({...p,uwagi:e.target.value}))} /></div>
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => setEditMode(false)} style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer"}}>Anuluj</button>
+            <button onClick={() => { onUpdate(editData); setEditMode(false); showToast("✅ Zapisano"); }}
+              style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Zapisz</button>
+          </div>
+        </div>
+      )}
+
+      {/* TIMELINE */}
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-bold text-gray-800">Chronologia</h3>
+        <button onClick={() => setShowAddZdarzenie(!showAddZdarzenie)}
+          className="px-3 py-1.5 rounded-lg text-sm font-semibold text-white hover:opacity-90"
+          style={{background:"#111827"}}>
+          + Dodaj zdarzenie
+        </button>
+      </div>
+
+      {showAddZdarzenie && (
+        <div className="bg-white rounded-xl border border-gray-100 p-4 mb-4">
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <label className={lbl}>Typ zdarzenia</label>
+              <select className={inp} value={zdType} onChange={e=>setZdType(e.target.value)}>
+                {ZDARZENIE_TYPY.map(t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={lbl}>Kto / Do kogo</label>
+              <input className={inp} placeholder="np. Jan → klient" value={zdKtoDoKogo} onChange={e=>setZdKtoDoKogo(e.target.value)} />
+            </div>
+          </div>
+          <div className="mb-3">
+            <label className={lbl}>Treść / Notatka</label>
+            <textarea className={inp+" resize-none"} rows={3} placeholder="Opis zdarzenia, treść emaila, notatka..." value={zdTresc} onChange={e=>setZdTresc(e.target.value)} />
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => setShowAddZdarzenie(false)} style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer"}}>Anuluj</button>
+            <button onClick={addZdarzenie} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Dodaj</button>
+          </div>
+        </div>
+      )}
+
+      {zdarzenia.length === 0 && !showAddZdarzenie && (
+        <div className="text-center py-8 text-gray-400 text-sm">Brak zdarzeń — kliknij "+ Dodaj zdarzenie"</div>
+      )}
+
+      <div className="space-y-3">
+        {zdarzenia.map(z => {
+          const zt = ZDARZENIE_TYPY.find(t => t.id === z.typ) || ZDARZENIE_TYPY[2];
+          const dt = new Date(z.data);
+          return (
+            <div key={z.id} className="bg-white rounded-xl border border-gray-100 p-4">
+              <div className="flex items-start gap-3">
+                <span className="text-xl mt-0.5 flex-shrink-0">{zt.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <span className="text-xs font-semibold text-gray-700">{zt.label}</span>
+                    {z.ktoDoKogo && <span className="text-xs text-gray-400">· {z.ktoDoKogo}</span>}
+                    <span className="ml-auto text-xs text-gray-400">{dt.toLocaleDateString("pl-PL")} {dt.toLocaleTimeString("pl-PL",{hour:"2-digit",minute:"2-digit"})}</span>
+                  </div>
+                  <div className="text-sm text-gray-700 whitespace-pre-wrap">{z.tresc}</div>
+                  <div className="text-xs text-gray-400 mt-1.5">👤 {z.autor}</div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SprawyTab({ sprawyList, vehicles, currentUser, showToast, onAdd, onUpdate, onDelete }) {
+  const [view, setView] = useState("lista");
+  const [selectedId, setSelectedId] = useState(null);
+  const [showNewSprawa, setShowNewSprawa] = useState(false);
+  const [showNewTyp, setShowNewTyp] = useState(false);
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterTyp, setFilterTyp] = useState("all");
+  const [customTypy, setCustomTypy] = useState([]);
+  const [newTypLabel, setNewTypLabel] = useState("");
+
+  const allTypy = [...SPRAWA_TYPY, ...customTypy];
+  const selected = sprawyList.find(s => s.id === selectedId);
+
+  const today = new Date().toISOString().slice(0,10);
+  const dzisiaj = sprawyList.filter(s => s.status !== "zamknieta" && s.status !== "wygrana" && s.status !== "przegrana" && s.przypomnienie && s.przypomnienie <= today);
+
+  const filtered = sprawyList.filter(s => {
+    if (filterStatus !== "all" && s.status !== filterStatus) return false;
+    if (filterTyp !== "all" && s.typ !== filterTyp) return false;
+    return true;
+  }).sort((a,b) => (b.dataUtworzenia||"").localeCompare(a.dataUtworzenia||""));
+
+  if (view === "szczegoly" && selected) {
+    return <SprawaDetail
+      sprawa={selected}
+      vehicles={vehicles}
+      allTypy={allTypy}
+      currentUser={currentUser}
+      onUpdate={(data) => onUpdate(selected.id, data)}
+      onDelete={() => { onDelete(selected.id); setView("lista"); setSelectedId(null); showToast("Sprawa usunięta"); }}
+      onBack={() => setView("lista")}
+      showToast={showToast}
+    />;
+  }
+
+  return (
+    <div>
+      {/* HEADER */}
+      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">Sprawy</h2>
+          <p className="text-sm text-gray-400 mt-0.5">{sprawyList.filter(s=>s.status==="otwarta"||s.status==="w_toku").length} aktywnych · {sprawyList.length} łącznie</p>
+        </div>
+        <button onClick={() => setShowNewSprawa(true)}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white hover:opacity-90 transition-all"
+          style={{background:"#111827"}}>
+          + Nowa sprawa
+        </button>
+      </div>
+
+      {/* PRZYPOMNIENIA DZISIAJ */}
+      {dzisiaj.length > 0 && (
+        <div className="mb-4 p-4 rounded-xl border" style={{background:"#fff7ed",borderColor:"#fed7aa"}}>
+          <div className="text-sm font-bold text-orange-700 mb-2">⏰ Przypomnienia na dziś ({dzisiaj.length})</div>
+          <div className="space-y-1.5">
+            {dzisiaj.map(s => {
+              const typ = allTypy.find(t => t.id === s.typ);
+              return (
+                <div key={s.id} onClick={() => { setSelectedId(s.id); setView("szczegoly"); }}
+                  className="flex items-center gap-3 cursor-pointer hover:bg-orange-100 px-3 py-2 rounded-lg transition-all">
+                  <span>{typ?.icon || "📌"}</span>
+                  <span className="text-sm font-medium text-orange-800">{s.numer} · {s.klient}</span>
+                  <span className="ml-auto text-xs text-orange-500">{s.kwota ? s.kwota+" €" : ""}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* FILTRY */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+          className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 outline-none bg-white text-gray-700">
+          <option value="all">Wszystkie statusy</option>
+          {SPRAWA_STATUSY.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+        </select>
+        <select value={filterTyp} onChange={e => setFilterTyp(e.target.value)}
+          className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 outline-none bg-white text-gray-700">
+          <option value="all">Wszystkie typy</option>
+          {allTypy.map(t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
+        </select>
+        <button onClick={() => setShowNewTyp(true)}
+          className="px-3 py-1.5 rounded-lg text-xs border border-dashed border-gray-300 text-gray-500 hover:bg-gray-50">
+          + Nowy typ
+        </button>
+      </div>
+
+      {/* LISTA SPRAW */}
+      <div className="space-y-2">
+        {filtered.length === 0 && (
+          <div className="text-center py-16 text-gray-400">
+            <div className="text-4xl mb-3">⚡</div>
+            <div className="font-medium">Brak spraw</div>
+            <div className="text-sm mt-1">Kliknij "+ Nowa sprawa" aby dodać</div>
+          </div>
+        )}
+        {filtered.map(s => {
+          const typ = allTypy.find(t => t.id === s.typ);
+          const status = SPRAWA_STATUSY.find(st => st.id === s.status) || SPRAWA_STATUSY[0];
+          const isOverdue = s.terminPlatnosci && s.terminPlatnosci < today && s.status !== "zamknieta" && s.status !== "wygrana";
+          const daysLeft = s.terminPlatnosci ? Math.ceil((new Date(s.terminPlatnosci) - new Date()) / 86400000) : null;
+          return (
+            <div key={s.id} onClick={() => { setSelectedId(s.id); setView("szczegoly"); }}
+              className="bg-white rounded-xl border p-4 cursor-pointer hover:shadow-sm transition-all"
+              style={{borderColor: isOverdue ? "#fca5a5" : "#f3f4f6", background: isOverdue ? "#fff7f7" : "#fff"}}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                  <span className="text-xl flex-shrink-0">{typ?.icon || "📌"}</span>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-sm text-gray-900">{s.numer || "—"}</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{background: status.bg, color: status.color}}>{status.label}</span>
+                      {isOverdue && <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{background:"#fef2f2",color:"#dc2626"}}>⚠ Przeterminowane</span>}
+                    </div>
+                    <div className="text-sm text-gray-600 mt-0.5 truncate">{s.klient || "—"}</div>
+                    {s.uwagi && <div className="text-xs text-gray-400 mt-0.5 truncate">{s.uwagi}</div>}
+                  </div>
+                </div>
+                <div className="text-right flex-shrink-0">
+                  {s.kwota && <div className="font-bold text-sm text-gray-900">{s.kwota} €</div>}
+                  {daysLeft !== null && (
+                    <div className="text-xs mt-0.5" style={{color: daysLeft < 0 ? "#dc2626" : daysLeft <= 7 ? "#f97316" : "#6b7280"}}>
+                      {daysLeft < 0 ? `${Math.abs(daysLeft)}d po terminie` : daysLeft === 0 ? "Dziś!" : `${daysLeft}d do terminu`}
+                    </div>
+                  )}
+                  <div className="text-xs text-gray-400 mt-0.5">{s.zdarzenia?.length || 0} zdarzeń</div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* MODAL NOWA SPRAWA */}
+      {showNewSprawa && (
+        <NowaSprawaModal
+          allTypy={allTypy}
+          vehicles={vehicles}
+          onSave={(data) => {
+            onAdd({ ...data, status: "otwarta", zdarzenia: [], dataUtworzenia: new Date().toISOString() });
+            setShowNewSprawa(false);
+            showToast("✅ Sprawa dodana");
+          }}
+          onClose={() => setShowNewSprawa(false)}
+        />
+      )}
+
+      {/* MODAL NOWY TYP */}
+      {showNewTyp && (
+        <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.35)"}}>
+          <div style={{background:"#fff",borderRadius:16,padding:24,width:320,boxShadow:"0 8px 32px rgba(0,0,0,0.12)"}}>
+            <h3 style={{fontWeight:700,fontSize:15,marginBottom:16}}>Nowy typ sprawy</h3>
+            <input value={newTypLabel} onChange={e => setNewTypLabel(e.target.value)}
+              placeholder="Nazwa typu (np. Windykacja)"
+              style={{width:"100%",padding:"8px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",boxSizing:"border-box",marginBottom:12}} />
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button onClick={() => setShowNewTyp(false)} style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer"}}>Anuluj</button>
+              <button onClick={() => {
+                if (!newTypLabel.trim()) return;
+                const id = newTypLabel.toLowerCase().replace(/\s+/g,"_") + "_" + Math.random().toString(36).slice(2,5);
+                setCustomTypy(p => [...p, { id, label: newTypLabel.trim(), icon: "📌", color: "#6b7280" }]);
+                setNewTypLabel("");
+                setShowNewTyp(false);
+              }} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Dodaj</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
