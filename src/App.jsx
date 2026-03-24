@@ -292,6 +292,56 @@ export default function Root() {
 }
 
 
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EXPORT KOSZTOW DO EXCEL
+// ═══════════════════════════════════════════════════════════════════════════════
+function exportCostsToExcel(costs, vehicles, categories, filterYear, filterMonth) {
+  const XLSX = window.XLSX;
+  if (!XLSX) { alert('Biblioteka Excel nie jest zaladowana, odswiez strone'); return; }
+
+  const CAT_FALLBACKS = {
+    wyplata:'Wynagrodzenie', zus:'ZUS + podatki', paliwo:'Paliwo',
+    leasing:'Leasing', naprawa:'Naprawa', ubezpieczenie:'Ubezpieczenie',
+    oplaty:'Oplaty drogowe', mandaty:'Mandaty', slickshift:'SlickShift',
+    telefon:'Telefon', hotele:'Hotele', przyczepa:'Przyczepa',
+    ocpd:'OCPD', uruchomienie:'Koszt uruchomienia', imi_spisi:'IMI/SIPSI',
+    inne:'Inne', opony:'Opony',
+  };
+  const catLabel = (id) => {
+    const cat = categories.find(c => c.id === id);
+    return cat ? cat.label : (CAT_FALLBACKS[id] || id);
+  };
+  const vLabel = (id) => {
+    const v = vehicles.find(v => v.id === id);
+    return v ? v.plate : id;
+  };
+
+  const headers = ['Data','Pojazd','Kategoria','Kwota EUR','Kwota PLN','Waluta','Opis'];
+  const rows = costs.map(c => [
+    c.date || '',
+    vLabel(c.vehicleId),
+    catLabel(c.category),
+    c.amountEUR ? parseFloat(c.amountEUR).toFixed(2) : '',
+    c.amountPLN ? parseFloat(c.amountPLN).toFixed(2) : '',
+    c.currency || 'EUR',
+    c.note || '',
+  ]);
+
+  const totalEUR = costs.reduce((s,c) => s + (c.amountEUR ? parseFloat(c.amountEUR) : 0), 0);
+  rows.push(['','','SUMA', totalEUR.toFixed(2), '', '', '']);
+
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  ws['!cols'] = [{wch:12},{wch:14},{wch:22},{wch:12},{wch:12},{wch:8},{wch:30}];
+
+  const wb = XLSX.utils.book_new();
+  const sheetName = filterYear === 'all' ? 'Koszty' : filterMonth === 'all' ? 'Koszty_'+filterYear : 'Koszty_'+filterYear+'_'+filterMonth;
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+  const fileName = 'FleetStat_Koszty' + (filterYear !== 'all' ? '_'+filterYear : '') + (filterMonth !== 'all' ? '_'+filterMonth : '') + '.xlsx';
+  XLSX.writeFile(wb, fileName);
+}
+
 function App({ user, role }) {
   const isAdmin      = role === "admin";
   const isDyspozytor = role === "dyspozytor";
@@ -1059,6 +1109,10 @@ function App({ user, role }) {
                   <button onClick={() => setShowCostsImport(true)}
                     className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 flex items-center gap-2">
                     📥 Importuj z Excel
+                  </button>
+                  <button onClick={() => exportCostsToExcel(filteredCosts, vehicles, categories, filterYear, filterMonth)}
+                    className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 flex items-center gap-2">
+                    📊 Exportuj Excel
                   </button>
                   <button onClick={() => setShowAddCost(true)}
                     className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
