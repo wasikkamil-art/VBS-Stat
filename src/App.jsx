@@ -1914,6 +1914,8 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
   const [zdMentions, setZdMentions] = useState([]);
   const [mentionInput, setMentionInput] = useState("");
   const [zdFile, setZdFile] = useState(null);
+  const [editZdarzenieId, setEditZdarzenieId] = useState(null);
+  const [editZdData, setEditZdData] = useState({});
   const [editMode, setEditMode] = useState(false);
   const [editData, setEditData] = useState({...sprawa});
 
@@ -2126,11 +2128,38 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
           const dt = new Date(z.data);
           return (
             <div key={z.id} className="bg-white rounded-xl border border-gray-100 p-4">
+              {editZdarzenieId === z.id ? (
+                <div>
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <select value={editZdData.typ||z.typ} onChange={e=>setEditZdData(p=>({...p,typ:e.target.value}))}
+                      className="px-2 py-1.5 rounded-lg border border-gray-200 text-xs outline-none">
+                      {ZDARZENIE_TYPY.map(t=><option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
+                    </select>
+                    <input value={editZdData.ktoDoKogo ?? z.ktoDoKogo ?? ""} onChange={e=>setEditZdData(p=>({...p,ktoDoKogo:e.target.value}))}
+                      placeholder="Kto / Do kogo" className="px-2 py-1.5 rounded-lg border border-gray-200 text-xs outline-none" />
+                  </div>
+                  <textarea value={editZdData.tresc ?? z.tresc ?? ""} onChange={e=>setEditZdData(p=>({...p,tresc:e.target.value}))}
+                    rows={3} className="w-full px-2 py-1.5 rounded-lg border border-gray-200 text-sm outline-none resize-none mb-2" />
+                  <div className="flex gap-2 justify-end">
+                    <button onClick={() => { setEditZdarzenieId(null); setEditZdData({}); }}
+                      className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 bg-white">Anuluj</button>
+                    <button onClick={() => {
+                      const updated = (sprawa.zdarzenia||[]).map(zd => zd.id === z.id ? {...zd, ...editZdData} : zd);
+                      onUpdate({zdarzenia: updated});
+                      setEditZdarzenieId(null); setEditZdData({});
+                    }} className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white" style={{background:"#111827"}}>Zapisz</button>
+                  </div>
+                </div>
+              ) : (
               <div className="flex items-start gap-3">
                 <span className="text-xl mt-0.5 flex-shrink-0">{zt.icon}</span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap mb-1">
                     <span className="text-xs font-semibold text-gray-700">{zt.label}</span>
+                    <button onClick={() => { setEditZdarzenieId(z.id); setEditZdData({typ:z.typ,tresc:z.tresc,ktoDoKogo:z.ktoDoKogo}); }}
+                      className="px-2 py-0.5 rounded text-xs text-gray-400 hover:bg-gray-100 ml-auto">✏️</button>
+                    <button onClick={() => { if(window.confirm("Usunąć zdarzenie?")) onUpdate({zdarzenia:(sprawa.zdarzenia||[]).filter(zd=>zd.id!==z.id)}); }}
+                      className="px-2 py-0.5 rounded text-xs text-gray-400 hover:bg-red-50 hover:text-red-400">🗑</button>
                     {z.ktoDoKogo && <span className="text-xs text-gray-400">· {z.ktoDoKogo}</span>}
                     <span className="ml-auto text-xs text-gray-400">{dt.toLocaleDateString("pl-PL")} {dt.toLocaleTimeString("pl-PL",{hour:"2-digit",minute:"2-digit"})}</span>
                   </div>
@@ -2152,6 +2181,7 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
                   </div>
                 </div>
               </div>
+              )}
             </div>
           );
         })}
