@@ -2154,14 +2154,20 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
               <div className="flex items-start gap-3">
                 <span className="text-xl mt-0.5 flex-shrink-0">{zt.icon}</span>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap mb-1">
-                    <span className="text-xs font-semibold text-gray-700">{zt.label}</span>
-                    <button onClick={() => { setEditZdarzenieId(z.id); setEditZdData({typ:z.typ,tresc:z.tresc,ktoDoKogo:z.ktoDoKogo}); }}
-                      className="px-2 py-0.5 rounded text-xs text-gray-400 hover:bg-gray-100 ml-auto">✏️</button>
-                    <button onClick={() => { if(window.confirm("Usunąć zdarzenie?")) onUpdate({zdarzenia:(sprawa.zdarzenia||[]).filter(zd=>zd.id!==z.id)}); }}
-                      className="px-2 py-0.5 rounded text-xs text-gray-400 hover:bg-red-50 hover:text-red-400">🗑</button>
-                    {z.ktoDoKogo && <span className="text-xs text-gray-400">· {z.ktoDoKogo}</span>}
-                    <span className="ml-auto text-xs text-gray-400">{dt.toLocaleDateString("pl-PL")} {dt.toLocaleTimeString("pl-PL",{hour:"2-digit",minute:"2-digit"})}</span>
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-semibold text-gray-700">{zt.label}</span>
+                      {z.ktoDoKogo && <span className="text-xs text-gray-400">· {z.ktoDoKogo}</span>}
+                    </div>
+                    <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                      <span className="text-xs text-gray-400">{dt.toLocaleDateString("pl-PL")} {dt.toLocaleTimeString("pl-PL",{hour:"2-digit",minute:"2-digit"})}</span>
+                      <div className="flex gap-1">
+                        <button onClick={() => { setEditZdarzenieId(z.id); setEditZdData({typ:z.typ,tresc:z.tresc,ktoDoKogo:z.ktoDoKogo}); }}
+                          className="px-2 py-0.5 rounded text-xs text-gray-400 hover:bg-gray-100">✏️</button>
+                        <button onClick={() => { if(window.confirm("Usunąć zdarzenie?")) onUpdate({zdarzenia:(sprawa.zdarzenia||[]).filter(zd=>zd.id!==z.id)}); }}
+                          className="px-2 py-0.5 rounded text-xs text-gray-400 hover:bg-red-50 hover:text-red-400">🗑</button>
+                      </div>
+                    </div>
                   </div>
                   <div className="text-sm text-gray-700 whitespace-pre-wrap">{z.tresc}</div>
                   {z.zalacznik && (
