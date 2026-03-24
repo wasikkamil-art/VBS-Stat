@@ -764,31 +764,9 @@ function App({ user, role }) {
             ))}
           </nav>
 
-          {/* EUR BADGE */}
-          <div className="mx-1 mb-4 px-3 py-3 rounded-xl" style={{ background: "#fffbeb", border: "1px solid #fde68a" }}>
-            <div className="text-xs text-amber-600 font-medium mb-0.5">Kurs EUR/PLN · NBP</div>
-            {eurLoading
-              ? <div className="text-xs text-amber-400">Pobieranie…</div>
-              : <>
-                  <div className="font-bold text-amber-800 text-sm" style={{ fontFamily: "'DM Mono', monospace" }}>1 € = {eurRate?.toFixed(4)} zł</div>
-                  <div className="text-xs text-amber-500 mt-0.5">{eurRateDate}</div>
-                </>
-            }
-          </div>
+
 
           <div className="space-y-2 px-1">
-            {canEdit && <>
-            <button onClick={() => setShowAddCost(true)}
-              className="w-full py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
-              style={{ background: "#111827" }}>
-              + Dodaj koszt
-            </button>
-            <button onClick={() => setShowAddVehicle(true)}
-              className="w-full py-2.5 rounded-lg text-sm font-medium transition-all hover:bg-gray-100"
-              style={{ background: "#f3f4f6", color: "#374151" }}>
-              + Dodaj pojazd
-            </button>
-            </>}
             <div style={{ borderTop:"1px solid #f3f4f6", paddingTop:8, marginTop:4 }}>
               <div className="text-xs text-gray-400 px-1 mb-0.5 truncate">{user?.email}</div>
               <div className="px-1 mb-2">
