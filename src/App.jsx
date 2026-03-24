@@ -2140,6 +2140,22 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
                   </div>
                   <textarea value={editZdData.tresc ?? z.tresc ?? ""} onChange={e=>setEditZdData(p=>({...p,tresc:e.target.value}))}
                     rows={3} className="w-full px-2 py-1.5 rounded-lg border border-gray-200 text-sm outline-none resize-none mb-2" />
+                  <div className="mb-2">
+                    {(editZdData.zalacznik || z.zalacznik) ? (
+                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-200 bg-gray-50 text-xs">
+                        <span>{(editZdData.zalacznik||z.zalacznik).type === "application/pdf" ? "📄" : "🖼️"}</span>
+                        <a href={(editZdData.zalacznik||z.zalacznik).url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate max-w-48">{(editZdData.zalacznik||z.zalacznik).name}</a>
+                        <button onClick={() => setEditZdData(p=>({...p,zalacznik:null}))} className="ml-auto text-gray-400 hover:text-red-400">✕</button>
+                      </div>
+                    ) : (
+                      <SprawaFileUpload
+                        sprawaId={sprawa.id}
+                        subfolder="zdarzenia"
+                        label="📎 Dodaj załącznik"
+                        onUploaded={(f) => setEditZdData(p=>({...p,zalacznik:f}))}
+                      />
+                    )}
+                  </div>
                   <div className="flex gap-2 justify-end">
                     <button onClick={() => { setEditZdarzenieId(null); setEditZdData({}); }}
                       className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 bg-white">Anuluj</button>
