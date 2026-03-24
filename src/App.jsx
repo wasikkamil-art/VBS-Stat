@@ -1143,11 +1143,10 @@ function App({ user, role, appUsers = [] }) {
                     docAlerts > 0 && { type: "yellow", text: `${docAlerts} ${docAlerts===1?"dokument wygasa":"dokumenty wygasają"} w ciągu 30 dni` },
                   ].filter(Boolean);
 
-                  const today = new Date().toISOString().slice(0,10);
                   const sprawyAlerts = sprawyList.filter(s =>
                     !["zamknieta","wygrana","przegrana"].includes(s.status) &&
                     (s.przypisani||[]).includes(user?.email) &&
-                    s.przypomnienie && s.przypomnienie <= today
+                    s.przypomnienie && s.przypomnienie <= todayStr
                   ).map(s => ({ type: "orange", text: `⚡ Sprawa: ${s.numer ? s.numer+" · " : ""}${s.klient}${s.przypomnienie ? " ("+s.przypomnienie+")" : ""}` }));
 
                   const allAlerts = [...alerts, ...sprawyAlerts];
