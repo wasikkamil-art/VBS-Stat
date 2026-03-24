@@ -1206,9 +1206,8 @@ function App({ user, role, appUsers = [] }) {
 
                   const sprawyAlerts = sprawyList.filter(s =>
                     !["zamknieta","wygrana","przegrana"].includes(s.status) &&
-                    (s.przypisani||[]).includes(user?.email) &&
-                    s.przypomnienie && s.przypomnienie <= todayStr
-                  ).map(s => ({ type: "orange", text: `⚡ Sprawa: ${s.numer ? s.numer+" · " : ""}${s.klient}${s.przypomnienie ? " ("+s.przypomnienie+")" : ""}` }));
+                    (s.przypisani||[]).includes(user?.email)
+                  ).map(s => ({ type: "orange", text: `⚡ Sprawa: ${s.numer ? s.numer+" · " : ""}${s.klient}${s.przypomnienie && s.przypomnienie <= todayStr ? " ⏰ dziś!" : s.przypomnienie ? " ("+s.przypomnienie+")" : ""}` }));
 
                   const allAlerts = [...alerts, ...sprawyAlerts];
 
