@@ -1786,6 +1786,9 @@ function NowaSprawaModal({ allTypy, vehicles, appUsers = [], onSave, onClose }) 
               </select>
             </div>
           </div>
+          {f.typ === "inne" && (
+            <div><label className={lbl}>Opisz typ sprawy</label><input className={inp} placeholder="np. Windykacja, Reklamacja celna..." value={f.podtyp||""} onChange={e=>set("podtyp",e.target.value)} /></div>
+          )}
           <div><label className={lbl}>Klient / Firma</label><input className={inp} placeholder="Nazwa firmy" value={f.klient} onChange={e=>set("klient",e.target.value)} /></div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
             <div><label className={lbl}>Kwota (EUR)</label><input className={inp} type="number" placeholder="0.00" value={f.kwota} onChange={e=>set("kwota",e.target.value)} /></div>
@@ -1878,6 +1881,7 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-lg">{typ?.icon || "📌"}</span>
             <h2 className="text-lg font-bold text-gray-900">{sprawa.numer || "Sprawa"} · {sprawa.klient}</h2>
+            {sprawa.podtyp && <span className="text-sm text-gray-500">({sprawa.podtyp})</span>}
             <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold" style={{background:status.bg,color:status.color}}>{status.label}</span>
           </div>
         </div>
@@ -2166,7 +2170,7 @@ function SprawyTab({ sprawyList, vehicles, currentUser, appUsers, showToast, onA
                       <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{background: status.bg, color: status.color}}>{status.label}</span>
                       {isOverdue && <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{background:"#fef2f2",color:"#dc2626"}}>⚠ Przeterminowane</span>}
                     </div>
-                    <div className="text-sm text-gray-600 mt-0.5 truncate">{s.klient || "—"}</div>
+                    <div className="text-sm text-gray-600 mt-0.5 truncate">{s.klient || "—"}{s.podtyp ? <span className="text-xs text-gray-400 ml-1">· {s.podtyp}</span> : null}</div>
                     {s.uwagi && <div className="text-xs text-gray-400 mt-0.5 truncate">{s.uwagi}</div>}
                   </div>
                 </div>
