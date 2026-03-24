@@ -759,7 +759,7 @@ function App({ user, role, appUsers = [] }) {
                 { id: "users",   icon: "👥",  label: "Użytkownicy" },
               ] : []),
               ...((isAdmin || isDyspozytor) ? [
-                { id: "sprawy", icon: "⚡", label: "Sprawy", badge: sprawyList.filter(s => s.status !== "zamknieta" && s.przypomnienie && new Date(s.przypomnienie) <= new Date()).length || null },
+                { id: "sprawy", icon: "⚡", label: "Sprawy", badge: sprawyList.filter(s => !['zamknieta','wygrana','przegrana'].includes(s.status) && (s.przypisani||[]).includes(user?.email)).length || null },
               ] : []),
             ].map((item) => (
               <button key={item.id} onClick={() => setTab(item.id)}
@@ -2064,7 +2064,9 @@ function SprawyTab({ sprawyList, vehicles, currentUser, appUsers, showToast, onA
   const today = new Date().toISOString().slice(0,10);
   const dzisiaj = sprawyList.filter(s => s.status !== "zamknieta" && s.status !== "wygrana" && s.status !== "przegrana" && s.przypomnienie && s.przypomnienie <= today);
 
+  const isAdminUser = appUsers.find(u => u.email === currentUser.email)?.role === "admin";
   const filtered = sprawyList.filter(s => {
+    if (!isAdminUser && !(s.przypisani||[]).includes(currentUser.email)) return false;
     if (filterStatus !== "all" && s.status !== filterStatus) return false;
     if (filterTyp !== "all" && s.typ !== filterTyp) return false;
     if (filterMoje && !(s.przypisani||[]).includes(currentUser.email)) return false;
