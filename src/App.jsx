@@ -293,6 +293,107 @@ export default function Root() {
 
 
 
+function ExportCostsModal({ costs, vehicles, categories, onClose }) {
+  const MONTHS = ["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paz","Lis","Gru"];
+  const [year, setYear] = useState("2026");
+  const [monthFrom, setMonthFrom] = useState("all");
+  const [monthTo, setMonthTo] = useState("all");
+  const [vehicle, setVehicle] = useState("all");
+  const [category, setCategory] = useState("all");
+
+  const filtered = costs.filter(c => {
+    const d = c.date || "";
+    if (year !== "all" && !d.startsWith(year)) return false;
+    if (monthFrom !== "all" && d.slice(5,7) < monthFrom) return false;
+    if (monthTo !== "all" && d.slice(5,7) > monthTo) return false;
+    if (vehicle !== "all" && c.vehicleId !== vehicle) return false;
+    if (category !== "all" && c.category !== category) return false;
+    return true;
+  });
+
+  const totalEUR = filtered.reduce((s,c) => s + (c.amountEUR ? parseFloat(c.amountEUR) : 0), 0);
+
+  const handleExport = () => {
+    exportCostsToExcel(filtered, vehicles, categories, year, monthFrom === monthTo ? monthFrom : "all");
+    onClose();
+  };
+
+  const selStyle = {width:"100%", padding:"8px 10px", borderRadius:8, border:"1.5px solid #e5e7eb", fontSize:13, outline:"none", background:"#fff"};
+  const lbl = {display:"block", fontSize:12, fontWeight:600, color:"#6b7280", marginBottom:4};
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.35)",backdropFilter:"blur(4px)"}}>
+      <div style={{background:"#fff",borderRadius:16,padding:28,width:440,maxWidth:"95vw",boxShadow:"0 8px 32px rgba(0,0,0,0.12)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+          <h3 style={{fontWeight:700,fontSize:16,color:"#111827"}}>📊 Export kosztów</h3>
+          <button onClick={onClose} style={{background:"#f3f4f6",border:"none",borderRadius:8,width:28,height:28,cursor:"pointer",fontSize:14}}>✕</button>
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+          <div style={{gridColumn:"1/-1"}}>
+            <label style={lbl}>Rok</label>
+            <div style={{display:"flex",gap:6}}>
+              {["2025","2026","all"].map(y => (
+                <button key={y} onClick={() => setYear(y)}
+                  style={{flex:1,padding:"7px",borderRadius:8,border:"1.5px solid",fontSize:13,fontWeight:600,cursor:"pointer",
+                    borderColor: year===y ? "#111827" : "#e5e7eb",
+                    background: year===y ? "#111827" : "#fff",
+                    color: year===y ? "#fff" : "#6b7280"}}>
+                  {y === "all" ? "Wszystkie" : y}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label style={lbl}>Miesiąc od</label>
+            <select value={monthFrom} onChange={e => setMonthFrom(e.target.value)} style={selStyle}>
+              <option value="all">Wszystkie</option>
+              {MONTHS.map((m,i) => <option key={i} value={String(i+1).padStart(2,"0")}>{m}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={lbl}>Miesiąc do</label>
+            <select value={monthTo} onChange={e => setMonthTo(e.target.value)} style={selStyle}>
+              <option value="all">Wszystkie</option>
+              {MONTHS.map((m,i) => <option key={i} value={String(i+1).padStart(2,"0")}>{m}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label style={lbl}>Pojazd</label>
+            <select value={vehicle} onChange={e => setVehicle(e.target.value)} style={selStyle}>
+              <option value="all">Wszystkie</option>
+              {vehicles.filter(v => !v.archived).map(v => <option key={v.id} value={v.id}>{v.plate}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={lbl}>Kategoria</label>
+            <select value={category} onChange={e => setCategory(e.target.value)} style={selStyle}>
+              <option value="all">Wszystkie</option>
+              {categories.map(c => <option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div style={{background:"#f9fafb",borderRadius:10,padding:"10px 14px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontSize:13,color:"#6b7280"}}>{filtered.length} wpisów</span>
+          <span style={{fontSize:14,fontWeight:700,color:"#111827"}}>{totalEUR.toLocaleString("pl-PL",{minimumFractionDigits:2,maximumFractionDigits:2})} €</span>
+        </div>
+
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+          <button onClick={onClose} style={{padding:"9px 18px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer",color:"#6b7280"}}>Anuluj</button>
+          <button onClick={handleExport} disabled={filtered.length === 0}
+            style={{padding:"9px 18px",borderRadius:8,border:"none",background:filtered.length===0?"#d1d5db":"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:filtered.length===0?"not-allowed":"pointer"}}>
+            📊 Pobierz Excel ({filtered.length})
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // EXPORT KOSZTOW DO EXCEL
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -344,9 +445,7 @@ function exportCostsToExcel(costs, vehicles, categories, filterYear, filterMonth
 
 function App({ user, role }) {
   const isAdmin      = role === "admin";
-  const [selectedCosts, setSelectedCosts] = useState([]);
-  const toggleCostSelect = (id) => setSelectedCosts(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
-  const toggleAllCosts = () => setSelectedCosts(p => p.length === filteredCosts.length ? [] : filteredCosts.map(c => c.id));
+  const [showExportModal, setShowExportModal] = useState(false);
   const isDyspozytor = role === "dyspozytor";
   const isPodglad    = role === "podglad";
   const canEdit      = isAdmin || isDyspozytor;  // może edytować
@@ -604,6 +703,14 @@ function App({ user, role }) {
         />
       )}
       {showAddVehicle && <AddVehicleModal onSave={addVehicle} onClose={() => setShowAddVehicle(false)} />}
+      {showExportModal && (
+        <ExportCostsModal
+          costs={costs}
+          vehicles={vehicles}
+          categories={categories}
+          onClose={() => setShowExportModal(false)}
+        />
+      )}
       {deleteVehicleModal && <DeleteVehicleModal
         plate={deleteVehicleModal.plate}
         onConfirm={(reason) => {
@@ -1113,7 +1220,7 @@ function App({ user, role }) {
                     className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 flex items-center gap-2">
                     📥 Importuj z Excel
                   </button>
-                  <button onClick={() => exportCostsToExcel(selectedCosts.length > 0 ? filteredCosts.filter(c => selectedCosts.includes(c.id)) : filteredCosts, vehicles, categories, filterYear, filterMonth)}
+                  <button onClick={() => setShowExportModal(true)}
                     className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 flex items-center gap-2">
                     📊 Exportuj Excel
                   </button>
@@ -1252,7 +1359,7 @@ function App({ user, role }) {
 
               <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
                 <div className="hidden md:grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-medium text-gray-400 uppercase tracking-wider">
-                  <span><input type="checkbox" onChange={toggleAllCosts} checked={selectedCosts.length === filteredCosts.length && filteredCosts.length > 0} style={{width:"14px",height:"14px",cursor:"pointer"}} /></span><span className="col-span-2">Data</span>
+                  <span className="col-span-2">Data</span>
                   <span className="col-span-2">Pojazd</span>
                   <span className="col-span-2">Kategoria</span>
                   <span className="col-span-3">Opis</span>
@@ -1265,9 +1372,8 @@ function App({ user, role }) {
                   const amtEUR = c.currency === "EUR" ? c.amountEUR : toEUR(c.amountPLN);
                   return (
                     <div key={c.id}
-                      className="md:grid md:grid-cols-12 flex flex-wrap gap-y-1 px-5 py-3.5 items-center border-b border-gray-50 transition-colors text-sm" style={{background: selectedCosts.includes(c.id) ? "#eff6ff" : undefined}}
+                      className="md:grid md:grid-cols-12 flex flex-wrap gap-y-1 px-5 py-3.5 items-center border-b border-gray-50 hover:bg-gray-50 transition-colors text-sm"
                       style={{ borderBottomColor: i === filteredCosts.length - 1 ? "transparent" : undefined }}>
-                      <span className="hidden md:flex items-center"><input type="checkbox" checked={selectedCosts.includes(c.id)} onChange={() => toggleCostSelect(c.id)} style={{width:"14px",height:"14px",cursor:"pointer"}} /></span>
                       <span className="col-span-2 text-gray-400 text-xs w-full md:w-auto" style={{ fontFamily: "'DM Mono', monospace" }}>{fmtDate(c.date)}</span>
                       <span className="col-span-2 font-medium text-gray-800 text-xs">{v?.plate || "?"}</span>
                       <div className="col-span-2">
