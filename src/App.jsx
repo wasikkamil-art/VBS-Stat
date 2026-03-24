@@ -344,6 +344,9 @@ function exportCostsToExcel(costs, vehicles, categories, filterYear, filterMonth
 
 function App({ user, role }) {
   const isAdmin      = role === "admin";
+  const [selectedCosts, setSelectedCosts] = useState([]);
+  const toggleCostSelect = (id) => setSelectedCosts(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
+  const toggleAllCosts = () => setSelectedCosts(p => p.length === filteredCosts.length ? [] : filteredCosts.map(c => c.id));
   const isDyspozytor = role === "dyspozytor";
   const isPodglad    = role === "podglad";
   const canEdit      = isAdmin || isDyspozytor;  // może edytować
@@ -1110,7 +1113,7 @@ function App({ user, role }) {
                     className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 flex items-center gap-2">
                     📥 Importuj z Excel
                   </button>
-                  <button onClick={() => exportCostsToExcel(filteredCosts, vehicles, categories, filterYear, filterMonth)}
+                  <button onClick={() => exportCostsToExcel(selectedCosts.length > 0 ? filteredCosts.filter(c => selectedCosts.includes(c.id)) : filteredCosts, vehicles, categories, filterYear, filterMonth)}
                     className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 flex items-center gap-2">
                     📊 Exportuj Excel
                   </button>
@@ -1249,7 +1252,7 @@ function App({ user, role }) {
 
               <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
                 <div className="hidden md:grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-medium text-gray-400 uppercase tracking-wider">
-                  <span className="col-span-2">Data</span>
+                  <span><input type="checkbox" onChange={toggleAllCosts} checked={selectedCosts.length === filteredCosts.length && filteredCosts.length > 0} style={{width:"14px",height:"14px",cursor:"pointer"}} /></span><span className="col-span-2">Data</span>
                   <span className="col-span-2">Pojazd</span>
                   <span className="col-span-2">Kategoria</span>
                   <span className="col-span-3">Opis</span>
@@ -1262,8 +1265,9 @@ function App({ user, role }) {
                   const amtEUR = c.currency === "EUR" ? c.amountEUR : toEUR(c.amountPLN);
                   return (
                     <div key={c.id}
-                      className="md:grid md:grid-cols-12 flex flex-wrap gap-y-1 px-5 py-3.5 items-center border-b border-gray-50 hover:bg-gray-50 transition-colors text-sm"
+                      className="md:grid md:grid-cols-12 flex flex-wrap gap-y-1 px-5 py-3.5 items-center border-b border-gray-50 transition-colors text-sm" style={{background: selectedCosts.includes(c.id) ? "#eff6ff" : undefined}}
                       style={{ borderBottomColor: i === filteredCosts.length - 1 ? "transparent" : undefined }}>
+                      <span className="hidden md:flex items-center"><input type="checkbox" checked={selectedCosts.includes(c.id)} onChange={() => toggleCostSelect(c.id)} style={{width:"14px",height:"14px",cursor:"pointer"}} /></span>
                       <span className="col-span-2 text-gray-400 text-xs w-full md:w-auto" style={{ fontFamily: "'DM Mono', monospace" }}>{fmtDate(c.date)}</span>
                       <span className="col-span-2 font-medium text-gray-800 text-xs">{v?.plate || "?"}</span>
                       <div className="col-span-2">
