@@ -1143,20 +1143,29 @@ function App({ user, role, appUsers = [] }) {
                     docAlerts > 0 && { type: "yellow", text: `${docAlerts} ${docAlerts===1?"dokument wygasa":"dokumenty wygasają"} w ciągu 30 dni` },
                   ].filter(Boolean);
 
+                  const today = new Date().toISOString().slice(0,10);
+                  const sprawyAlerts = sprawyList.filter(s =>
+                    !["zamknieta","wygrana","przegrana"].includes(s.status) &&
+                    (s.przypisani||[]).includes(user?.email) &&
+                    s.przypomnienie && s.przypomnienie <= today
+                  ).map(s => ({ type: "orange", text: `⚡ Sprawa: ${s.numer ? s.numer+" · " : ""}${s.klient}${s.przypomnienie ? " ("+s.przypomnienie+")" : ""}` }));
+
+                  const allAlerts = [...alerts, ...sprawyAlerts];
+
                   return (
                     <div className="bg-white rounded-2xl border border-gray-100 p-4">
                       <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Wymaga uwagi</div>
-                      {alerts.length === 0 ? (
+                      {allAlerts.length === 0 ? (
                         <div className="flex items-center gap-2 text-sm text-green-600">
                           <span>✅</span> Wszystko w porządku
                         </div>
                       ) : (
                         <div className="space-y-2">
-                          {alerts.map((a,i) => (
+                          {allAlerts.map((a,i) => (
                             <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium"
                               style={{
-                                background: a.type==="red" ? "#fef2f2" : "#fffbeb",
-                                color: a.type==="red" ? "#b91c1c" : "#92400e"
+                                background: a.type==="red" ? "#fef2f2" : a.type==="orange" ? "#fff7ed" : "#fffbeb",
+                                color: a.type==="red" ? "#b91c1c" : a.type==="orange" ? "#c2410c" : "#92400e"
                               }}>
                               <span>{a.type==="red" ? "🔴" : "🟡"}</span>
                               {a.text}
