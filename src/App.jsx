@@ -1957,15 +1957,15 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
             <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold" style={{background:status.bg,color:status.color}}>{status.label}</span>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <select value={sprawa.status} onChange={e => onUpdate({status: e.target.value})}
             className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 outline-none bg-white font-semibold"
             style={{color: status.color}}>
             {SPRAWA_STATUSY.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
           </select>
-          <button onClick={() => setEditMode(!editMode)} className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 hover:bg-gray-50">✏️ Edytuj</button>
+          <button onClick={() => setEditMode(!editMode)} className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 hover:bg-gray-50 whitespace-nowrap">✏️ Edytuj</button>
           <button onClick={() => { if(window.confirm("Usunąć sprawę?")) onDelete(); }}
-            className="px-3 py-1.5 rounded-lg text-xs border border-red-200 text-red-500 hover:bg-red-50">🗑</button>
+            className="w-8 h-8 flex items-center justify-center rounded-lg border border-red-200 text-red-500 hover:bg-red-50 flex-shrink-0">🗑</button>
         </div>
       </div>
 
