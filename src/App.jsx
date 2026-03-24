@@ -1764,6 +1764,7 @@ function App({ user, role, appUsers = [] }) {
               currentUser={user}
               appUsers={appUsers}
               eurRate={eurRate}
+              eurRateDate={eurRateDate}
               showToast={showToast}
               onAdd={(s) => setSprawyList(p => [...p, { ...s, id: uid() }])}
               onUpdate={(id, data) => setSprawyList(p => p.map(s => s.id === id ? { ...s, ...data } : s))}
@@ -2265,7 +2266,7 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
   );
 }
 
-function SprawyTab({ sprawyList, vehicles, currentUser, appUsers, eurRate, showToast, onAdd, onUpdate, onDelete }) {
+function SprawyTab({ sprawyList, vehicles, currentUser, appUsers, eurRate, eurRateDate, showToast, onAdd, onUpdate, onDelete }) {
   const [view, setView] = useState("lista");
   const [selectedId, setSelectedId] = useState(null);
   const [showNewSprawa, setShowNewSprawa] = useState(false);
@@ -2318,6 +2319,7 @@ function SprawyTab({ sprawyList, vehicles, currentUser, appUsers, eurRate, showT
             style={{background:"#fffbeb",border:"1px solid #fde68a",color:"#92400e"}}>
             <span>💱</span>
             <span className="font-semibold text-xs">1 € = {eurRate ? eurRate.toFixed(4) : "4.27"} zł</span>
+            <span className="text-xs opacity-60">· NBP {eurRateDate || ""}</span>
           </div>
           <button onClick={() => setShowNewSprawa(true)}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white hover:opacity-90 transition-all"
