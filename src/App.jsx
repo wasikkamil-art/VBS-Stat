@@ -1830,7 +1830,7 @@ const ZDARZENIE_TYPY = [
 
 function NowaSprawaModal({ allTypy, vehicles, appUsers = [], onSave, onClose }) {
   const [f, setF] = useState({
-    numer:"", typ: allTypy[0]?.id || "brak_zaplaty", klient:"", kwota:"",
+    numer:"", typ: allTypy[0]?.id || "brak_zaplaty", klient:"", kwota:"", waluta:"EUR",
     nrZlecenia:"", nrNoty:"", terminPlatnosci:"", nrNadania:"",
     telefon:"", vehicleId:"", przypomnienie:"", uwagi:"", przypisani:[]
   });
@@ -1859,7 +1859,31 @@ function NowaSprawaModal({ allTypy, vehicles, appUsers = [], onSave, onClose }) 
           )}
           <div><label className={lbl}>Klient / Firma</label><input className={inp} placeholder="Nazwa firmy" value={f.klient} onChange={e=>set("klient",e.target.value)} /></div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-            <div><label className={lbl}>Kwota (EUR)</label><input className={inp} type="number" placeholder="0.00" value={f.kwota} onChange={e=>set("kwota",e.target.value)} /></div>
+            <div>
+              <label className={lbl}>Kwota</label>
+              <div style={{display:"flex",gap:4}}>
+                <input className={inp} type="number" placeholder="0.00" value={f.kwota} style={{flex:1}}
+                  onChange={e => { set("kwota", e.target.value); }} />
+                <div style={{display:"flex",borderRadius:8,border:"1.5px solid #e5e7eb",overflow:"hidden",flexShrink:0}}>
+                  {["EUR","PLN"].map(w => (
+                    <button key={w} type="button" onClick={() => set("waluta", w)}
+                      style={{padding:"0 10px",fontSize:12,fontWeight:600,border:"none",cursor:"pointer",
+                        background: f.waluta===w ? "#111827" : "#fff",
+                        color: f.waluta===w ? "#fff" : "#6b7280"}}>
+                      {w}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {f.kwota && (
+                <div style={{fontSize:11,color:"#9ca3af",marginTop:3}}>
+                  {f.waluta==="EUR"
+                    ? `≈ ${(parseFloat(f.kwota)*4.27).toFixed(2)} zł`
+                    : `≈ ${(parseFloat(f.kwota)/4.27).toFixed(2)} €`}
+                  <span style={{marginLeft:4,color:"#d1d5db"}}>· kurs ~4.27</span>
+                </div>
+              )}
+            </div>
             <div><label className={lbl}>Termin płatności</label><input className={inp} type="date" value={f.terminPlatnosci} onChange={e=>set("terminPlatnosci",e.target.value)} /></div>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
@@ -1978,7 +2002,7 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
       {!editMode ? (
         <div className="bg-white rounded-xl border border-gray-100 p-5 mb-5 grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            ["Kwota", sprawa.kwota ? sprawa.kwota+" €" : "—"],
+            ["Kwota", sprawa.kwota ? `${sprawa.kwota} ${sprawa.waluta||"EUR"}${sprawa.waluta==="PLN" && sprawa.kwota ? " (≈ "+(parseFloat(sprawa.kwota)/4.27).toFixed(0)+" €)" : ""}` : "—"],
             ["Termin płatności", sprawa.terminPlatnosci || "—"],
             ["Nr zlecenia", sprawa.nrZlecenia || "—"],
             ["Nr noty", sprawa.nrNoty || "—"],
@@ -2346,7 +2370,7 @@ function SprawyTab({ sprawyList, vehicles, currentUser, appUsers, showToast, onA
                   </div>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  {s.kwota && <div className="font-bold text-sm text-gray-900">{s.kwota} €</div>}
+                  {s.kwota && <div className="font-bold text-sm text-gray-900">{s.kwota} {s.waluta||"EUR"}</div>}
                   {daysLeft !== null && (
                     <div className="text-xs mt-0.5" style={{color: daysLeft < 0 ? "#dc2626" : daysLeft <= 7 ? "#f97316" : "#6b7280"}}>
                       {daysLeft < 0 ? `${Math.abs(daysLeft)}d po terminie` : daysLeft === 0 ? "Dziś!" : `${daysLeft}d do terminu`}
