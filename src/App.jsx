@@ -4,7 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 // ─── FIREBASE CONFIG ────────────────────────────────────────────────────────
 // 👇 WKLEJ TUTAJ SWÓJ firebaseConfig z Firebase Console
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs } from "firebase/firestore";
+import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, orderBy } from "firebase/firestore";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 
@@ -52,7 +52,7 @@ async function dbSet(key, value) {
   }
 }
 
-const SK = { vehicles: "fleetv2_vehicles", costs: "fleetv2_costs", categories: "fleetv2_categories", docs: "fleetv2_docs", imi: "fleetv2_imi", rent: "fleetv2_rent", frachty: "fleetv2_frachty", sprawy: "fleetv2_sprawy" };
+const SK = { vehicles: "fleetv2_vehicles", costs: "fleetv2_costs", categories: "fleetv2_categories", docs: "fleetv2_docs", imi: "fleetv2_imi", rent: "fleetv2_rent", frachty: "fleetv2_frachty" };
 
 // ─── SEED DATA ─────────────────────────────────────────────────────────────────
 const SEED_VEHICLES = [
@@ -587,13 +587,21 @@ function App({ user, role, appUsers = [] }) {
       setImiRecords(im || []);
       setRentRecords(rn || []);
       setFrachtyList(fr || []);
-      setSprawyList(data[SK.sprawy] || []);
       setLoaded(true);
     }, (err) => {
       console.error("onSnapshot error", err);
       setLoaded(true);
     });
     return () => unsub(); // cleanup przy odmontowaniu
+  }, []);
+
+  // ── SPRAWY — osobna kolekcja ──
+  useEffect(() => {
+    const q = query(collection(db, "sprawy"), orderBy("dataUtworzenia", "desc"));
+    const unsub = onSnapshot(q, (snap) => {
+      setSprawyList(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error("sprawy onSnapshot error", err));
+    return () => unsub();
   }, []);
 
   // ── PERSIST ──
@@ -604,7 +612,7 @@ function App({ user, role, appUsers = [] }) {
   useEffect(() => { if (loaded) dbSet(SK.imi, imiRecords); },       [imiRecords, loaded]);
   useEffect(() => { if (loaded && rentRecords.length > 0) dbSet(SK.rent, rentRecords); },     [rentRecords, loaded]);
   useEffect(() => { if (loaded && frachtyList.length > 0) dbSet(SK.frachty, frachtyList); },  [frachtyList, loaded]);
-  useEffect(() => { if (loaded) dbSet(SK.sprawy, sprawyList); }, [sprawyList, loaded]);
+
 
   // ── CSS INJECTION ──
   useEffect(() => {
