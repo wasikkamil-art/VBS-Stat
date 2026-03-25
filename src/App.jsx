@@ -4,7 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 // ─── FIREBASE CONFIG ────────────────────────────────────────────────────────
 // 👇 WKLEJ TUTAJ SWÓJ firebaseConfig z Firebase Console
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, orderBy } from "firebase/firestore";
+import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, orderBy, arrayUnion } from "firebase/firestore";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 
@@ -1775,7 +1775,18 @@ function App({ user, role, appUsers = [] }) {
               eurRateDate={eurRateDate}
               showToast={showToast}
               onAdd={(s) => setSprawyList(p => [...p, { ...s, id: uid() }])}
-              onUpdate={(id, data) => setSprawyList(p => p.map(s => s.id === id ? { ...s, ...data } : s))}
+              onUpdate={async (id, data) => {
+                try {
+                  if (data._addZdarzenie) {
+                    const { _addZdarzenie, ...rest } = data;
+                    const updates = { ...rest };
+                    if (Object.keys(updates).length > 0) await updateDoc(doc(db, "sprawy", id), updates);
+                    await updateDoc(doc(db, "sprawy", id), { zdarzenia: arrayUnion(_addZdarzenie) });
+                  } else {
+                    await updateDoc(doc(db, "sprawy", id), data);
+                  }
+                } catch(e) { console.error("onUpdate sprawa", e); }
+              }}
               onDelete={(id) => setSprawyList(p => p.filter(s => s.id !== id))}
             />
           )}
@@ -1970,7 +1981,7 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
       autor: currentUser.email,
       seenBy: [currentUser.email],
     };
-    onUpdate({ zdarzenia: [...(sprawa.zdarzenia||[]), nowe] });
+    onUpdate({ _addZdarzenie: nowe });
     setZdTresc(""); setZdKtoDoKogo(""); setZdMentions([]); setMentionInput(""); setZdFile(null); setShowAddZdarzenie(false);
     showToast("✅ Zdarzenie dodane");
   };
