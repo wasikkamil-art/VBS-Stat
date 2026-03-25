@@ -532,6 +532,7 @@ function App({ user, role, appUsers = [] }) {
   const [eurLoading, setEurLoading] = useState(true);
 
   const [showAddCost, setShowAddCost]         = useState(false);
+  const [editCostId, setEditCostId]           = useState(null);
   const [showCostsImport, setShowCostsImport]   = useState(false);
   const [showAddVehicle, setShowAddVehicle]   = useState(false);
   const [editVehicleId, setEditVehicleId]     = useState(null);
@@ -654,6 +655,7 @@ function App({ user, role, appUsers = [] }) {
 
   const addCost      = (entry) => { setCosts((p) => [...p, { ...entry, id: uid() }]); showToast("✅ Koszt zapisany"); setShowAddCost(false); };
   const deleteCost   = (id)    => { setCosts((p) => p.filter((c) => c.id !== id)); showToast("Usunięto wpis"); };
+  const updateCost   = (updated) => { setCosts((p) => p.map((c) => c.id === updated.id ? updated : c)); showToast("✅ Koszt zaktualizowany"); setEditCostId(null); };
   const addVehicle   = (v)     => { setVehicles((p) => [...p, { ...v, id: uid(), driverHistory: v.driverHistory || [] }]); showToast("🚛 Pojazd dodany"); setShowAddVehicle(false); };
   const delVehicle   = (id, reason) => {
     setVehicles((p) => p.map((v) => v.id !== id ? v : {
@@ -780,6 +782,17 @@ function App({ user, role, appUsers = [] }) {
         />
       )}
       {showAddVehicle && <AddVehicleModal onSave={addVehicle} onClose={() => setShowAddVehicle(false)} />}
+      {editCostId && (
+        <AddCostModal
+          vehicles={vehicles} categories={categories}
+          eurRate={eurRate} eurRateDate={eurRateDate} eurLoading={eurLoading}
+          toPLN={toPLN} toEUR={toEUR}
+          editRecord={costs.find(c => c.id === editCostId)}
+          onSave={(entry) => updateCost({ ...entry, id: editCostId })}
+          onClose={() => setEditCostId(null)}
+          onAddCategory={addCategory}
+        />
+      )}
       {showExportModal && (
         <ExportCostsModal
           costs={costs}
@@ -1461,10 +1474,14 @@ function App({ user, role, appUsers = [] }) {
                         <div className="font-semibold text-gray-900 text-sm">{fmtEUR(getEUR(c))}</div>
                         {amtEUR != null && <div className="text-xs text-gray-400">{fmtPLN(amtPLN)}</div>}
                       </div>
-                      <div className="col-span-1 flex justify-end">
+                      <div className="col-span-1 flex justify-end gap-1">
                         {canEdit && (
+                        <>
+                        <button onClick={() => setEditCostId(c.id)}
+                          className="w-6 h-6 rounded flex items-center justify-center text-gray-300 hover:text-blue-400 hover:bg-blue-50 transition-all text-xs">✏️</button>
                         <button onClick={() => deleteCost(c.id)}
                           className="w-6 h-6 rounded flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-all text-xs">✕</button>
+                        </>
                         )}
                       </div>
                     </div>
@@ -3936,9 +3953,18 @@ function AddDocModal({ vehicles, doc, onSave, onClose }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // MODAL: ADD COST
 // ═══════════════════════════════════════════════════════════════════════════════
-function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, toPLN, toEUR, onSave, onClose, onAddCategory }) {
+function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, toPLN, toEUR, onSave, onClose, onAddCategory, editRecord }) {
   const today = new Date().toISOString().split("T")[0];
-  const [form, setForm] = useState({
+  const [form, setForm] = useState(editRecord ? {
+    vehicleId: editRecord.vehicleId || vehicles[0]?.id || "",
+    category:  editRecord.category || categories[0]?.id || "",
+    currency:  editRecord.currency || "EUR",
+    amountPLN: editRecord.amountPLN || "",
+    amountEUR: editRecord.amountEUR || "",
+    date:      editRecord.date || today,
+    note:      editRecord.note || "",
+    liters:    editRecord.liters || "",
+  } : {
     vehicleId: vehicles[0]?.id || "",
     category:  categories[0]?.id || "",
     currency:  "EUR",
@@ -3995,7 +4021,7 @@ function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, 
         style={{ fontFamily: "'DM Sans', sans-serif", maxHeight: "95vh" }}>
 
         <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100 sticky top-0 bg-white z-10">
-          <h3 className="text-base font-bold text-gray-900">Nowy koszt</h3>
+          <h3 className="text-base font-bold text-gray-900">{editRecord ? "Edytuj koszt" : "Nowy koszt"}</h3>
           <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 transition-all text-xs">✕</button>
         </div>
 
@@ -4116,7 +4142,7 @@ function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, 
             disabled={!form.vehicleId || (!form.amountPLN && !form.amountEUR)}
             className="w-full py-3 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-95 disabled:opacity-30"
             style={{ background: "#111827" }}>
-            Zapisz koszt
+            {editRecord ? "Zapisz zmiany" : "Zapisz koszt"}
           </button>
         </div>
       </div>
