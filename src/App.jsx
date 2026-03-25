@@ -2260,7 +2260,9 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
                           className="px-2 py-0.5 rounded text-xs hover:bg-orange-50 transition-all"
                           style={{color: z.przypomnienie ? "#f97316" : "#d1d5db"}} title="Ustaw przypomnienie">⏰</button>
                         <button onClick={() => { if(window.confirm("Usunąć zdarzenie?")) onUpdate({zdarzenia:(sprawa.zdarzenia||[]).filter(zd=>zd.id!==z.id)}); }}
-                          className="px-2 py-0.5 rounded text-xs text-gray-400 hover:bg-red-50 hover:text-red-400">🗑</button>
+                          className="px-2 py-0.5 rounded text-xs text-gray-400 hover:bg-red-50 hover:text-red-400">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                        </button>
                       </div>
                     </div>
                   </div>
