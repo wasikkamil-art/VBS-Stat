@@ -6911,6 +6911,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
   const rows = monthFreights(selectedVehicle);
   const totalCena = rows.reduce((s,r) => s + (parseFloat(r.cenaEur)||0), 0);
   const totalKmWszAll = rows.reduce((s,r) => s + (parseInt(r.kmWszystkie)||parseInt(r.kmLadowne)||0), 0);
+  const totalKmPodj = rows.reduce((s,r) => s + (parseInt(r.kmPodjazd)||0), 0);
   const totalKmLad = rows.reduce((s,r) => s + (parseInt(r.kmLadowne)||0), 0);
   const totalKmWsz = rows.reduce((s,r) => s + (parseInt(r.kmWszystkie)||0), 0);
   const avgEurKm = totalKmWszAll > 0 ? (totalCena/totalKmWszAll).toFixed(2) : (totalKmLad > 0 ? (totalCena/totalKmLad).toFixed(2) : "-");
@@ -7070,9 +7071,10 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
             })}
             {rows.length > 0 && (
               <tr className="bg-gray-50 font-bold border-t-2 border-gray-200">
-                <td colSpan={8} className="px-2 py-2.5 text-gray-700 text-xs uppercase">SUMA</td>
+                <td colSpan={7} className="px-2 py-2.5 text-gray-700 text-xs uppercase">SUMA</td>
                 <td className="px-2 py-2.5 text-right text-green-700">{fmt(totalCena)}</td>
                 <td></td>
+                <td className="px-2 py-2.5 text-right text-blue-700">{totalKmPodj.toLocaleString("pl-PL")}</td>
                 <td className="px-2 py-2.5 text-right text-blue-700">{totalKmLad.toLocaleString("pl-PL")}</td>
                 <td className="px-2 py-2.5 text-right text-blue-700">{totalKmWsz.toLocaleString("pl-PL")}</td>
                 <td className="px-2 py-2.5 text-right text-amber-600">{avgEurKm}</td>
