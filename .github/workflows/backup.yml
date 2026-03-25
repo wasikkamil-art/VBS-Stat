@@ -46,7 +46,12 @@ jobs:
             const date = new Date().toISOString().slice(0,10);
             fs.mkdirSync('backup-repo/backups', { recursive: true });
             fs.writeFileSync('backup-repo/backups/' + date + '.json', JSON.stringify(data, null, 2));
-            const stats = { date, vehicles: (data.fleetv2_vehicles||[]).length, costs: (data.fleetv2_costs||[]).length, frachty: (data.fleetv2_frachty||[]).length };
+            // Backup kolekcji sprawy
+            const sprawySnap = await db.collection('sprawy').get();
+            const sprawyData = sprawySnap.docs.map(d => ({ id: d.id, ...d.data() }));
+            fs.writeFileSync('backup-repo/backups/sprawy_' + date + '.json', JSON.stringify(sprawyData, null, 2));
+
+            const stats = { date, vehicles: (data.fleetv2_vehicles||[]).length, costs: (data.fleetv2_costs||[]).length, frachty: (data.fleetv2_frachty||[]).length, sprawy: sprawyData.length };
             console.log('Backup OK:', JSON.stringify(stats));
             fs.writeFileSync('backup-repo/latest.json', JSON.stringify(stats, null, 2));
           }
