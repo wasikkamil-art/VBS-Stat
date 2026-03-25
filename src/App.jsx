@@ -1960,6 +1960,9 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
   const [zdFile, setZdFile] = useState(null);
   const [editZdarzenieId, setEditZdarzenieId] = useState(null);
   const [editZdData, setEditZdData] = useState({});
+  const [przypomnienieZdId, setPoprzypomnienieZdId] = useState(null);
+  const [przypomnienieData, setRzypomnienieData] = useState("");
+  const [przypomnienieOpis, setRzypomnienieOpis] = useState("");
   const [editMode, setEditMode] = useState(false);
   const [editData, setEditData] = useState({...sprawa});
 
@@ -2253,6 +2256,9 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
                       <div className="flex gap-1">
                         <button onClick={() => { setEditZdarzenieId(z.id); setEditZdData({typ:z.typ,tresc:z.tresc,ktoDoKogo:z.ktoDoKogo}); }}
                           className="px-2 py-0.5 rounded text-xs text-gray-400 hover:bg-gray-100">✏️</button>
+                        <button onClick={() => { setPoprzypomnienieZdId(z.id); setRzypomnienieData(z.przypomnienie||""); setRzypomnienieOpis(z.przypomnienieOpis||""); }}
+                          className="px-2 py-0.5 rounded text-xs hover:bg-orange-50 transition-all"
+                          style={{color: z.przypomnienie ? "#f97316" : "#d1d5db"}} title="Ustaw przypomnienie">⏰</button>
                         <button onClick={() => { if(window.confirm("Usunąć zdarzenie?")) onUpdate({zdarzenia:(sprawa.zdarzenia||[]).filter(zd=>zd.id!==z.id)}); }}
                           className="px-2 py-0.5 rounded text-xs text-gray-400 hover:bg-red-50 hover:text-red-400">🗑</button>
                       </div>
@@ -2281,6 +2287,42 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
           );
         })}
       </div>
+
+      {przypomnienieZdId && (
+        <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.35)"}}>
+          <div style={{background:"#fff",borderRadius:16,padding:24,width:360,boxShadow:"0 8px 32px rgba(0,0,0,0.12)"}}>
+            <h3 style={{fontWeight:700,fontSize:15,marginBottom:16,color:"#111827"}}>Ustaw przypomnienie</h3>
+            <div style={{marginBottom:12}}>
+              <label style={{display:"block",fontSize:12,fontWeight:600,color:"#6b7280",marginBottom:4}}>Data i godzina</label>
+              <input type="datetime-local" value={przypomnienieData} onChange={e => setRzypomnienieData(e.target.value)}
+                style={{width:"100%",padding:"8px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",boxSizing:"border-box"}} />
+            </div>
+            <div style={{marginBottom:16}}>
+              <label style={{display:"block",fontSize:12,fontWeight:600,color:"#6b7280",marginBottom:4}}>Krotki opis</label>
+              <input value={przypomnienieOpis} onChange={e => setRzypomnienieOpis(e.target.value)}
+                placeholder="np. Zadzwon do klienta..."
+                style={{width:"100%",padding:"8px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",boxSizing:"border-box"}} />
+            </div>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              {przypomnienieData && (
+                <button onClick={() => {
+                  const updated = (sprawa.zdarzenia||[]).map(zd => zd.id === przypomnienieZdId ? {...zd, przypomnienie:null, przypomnienieOpis:null} : zd);
+                  onUpdate({zdarzenia: updated});
+                  setPoprzypomnienieZdId(null);
+                }} style={{padding:"8px 14px",borderRadius:8,border:"1.5px solid #fecaca",background:"#fff",fontSize:12,cursor:"pointer",color:"#ef4444"}}>Usun</button>
+              )}
+              <button onClick={() => setPoprzypomnienieZdId(null)}
+                style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer"}}>Anuluj</button>
+              <button onClick={() => {
+                const updated = (sprawa.zdarzenia||[]).map(zd => zd.id === przypomnienieZdId ? {...zd, przypomnienie: przypomnienieData, przypomnienieOpis: przypomnienieOpis} : zd);
+                onUpdate({zdarzenia: updated});
+                setPoprzypomnienieZdId(null);
+                showToast("Przypomnienie ustawione");
+              }} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Zapisz</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
