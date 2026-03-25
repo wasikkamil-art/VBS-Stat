@@ -57,10 +57,13 @@ jobs:
         run: node run_backup.js
 
       - name: Commit backup
+        env:
+          BACKUP_TOKEN: ${{ secrets.BACKUP_TOKEN }}
         run: |
           cd backup-repo
           git config user.name "VBS-Stat Backup Bot"
           git config user.email "backup@vbs-stat.app"
+          git remote set-url origin https://wasikkamil-art:${BACKUP_TOKEN}@github.com/wasikkamil-art/vbs-stat-backups.git
           git add .
           DATE=$(date +%Y-%m-%d)
           git diff --staged --quiet || git commit -m "Backup $DATE"
