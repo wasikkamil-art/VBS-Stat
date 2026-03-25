@@ -1805,7 +1805,7 @@ function App({ user, role, appUsers = [] }) {
               eurRate={eurRate}
               eurRateDate={eurRateDate}
               showToast={showToast}
-              onAdd={(s) => setSprawyList(p => [...p, { ...s, id: uid() }])}
+              onAdd={async (s) => { try { await addDoc(collection(db, "sprawy"), { ...s, dataUtworzenia: new Date().toISOString() }); } catch(e) { console.error("onAdd sprawa", e); } }}
               onUpdate={async (id, data) => {
                 try {
                   if (data._addZdarzenie) {
