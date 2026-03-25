@@ -4299,48 +4299,6 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], onAdd,
             ))}
           </div>
 
-          {/* Per-vehicle table */}
-          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-            <div className="grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-semibold text-gray-400 uppercase tracking-wider">
-              <span className="col-span-3">Pojazd</span>
-              <span className="col-span-2 text-right">Frachty</span>
-              <span className="col-span-2 text-right">Koszty</span>
-              <span className="col-span-2 text-right">Zysk</span>
-              <span className="col-span-2 text-right">Marża</span>
-              <span className="col-span-1"></span>
-            </div>
-            {vehicles.map(v => {
-              const f = totalFrachty(v.id, selYear);
-              const k = totalKoszt(v.id, selYear);
-              const z = f - k;
-              const marza = f > 0 ? (z / f * 100) : 0;
-              const hasData = records.some(r => r.vehicleId === v.id && r.year === selYear);
-              return (
-                <div key={v.id} className="grid grid-cols-12 px-5 py-3.5 border-b border-gray-50 items-center hover:bg-gray-50 transition-colors">
-                  <div className="col-span-3">
-                    <div className="font-semibold text-sm text-gray-900" style={{ fontFamily:"'DM Mono',monospace" }}>{v.plate}</div>
-                    <div className="text-xs text-gray-400">{v.brand}</div>
-                  </div>
-                  <div className="col-span-2 text-right text-sm font-medium text-gray-700">{f > 0 ? fmt(f) : <span className="text-gray-300">—</span>}</div>
-                  <div className="col-span-2 text-right text-sm font-medium text-gray-700">{k > 0 ? fmt(k) : <span className="text-gray-300">—</span>}</div>
-                  <div className="col-span-2 text-right text-sm font-bold" style={{ color: zyskColor(z) }}>{hasData ? fmtS(z) : <span className="text-gray-300">—</span>}</div>
-                  <div className="col-span-2 text-right">
-                    {f > 0 ? (
-                      <span className="px-2 py-0.5 rounded-full text-xs font-bold"
-                        style={{ background: zyskBg(z), color: zyskColor(z) }}>
-                        {marza.toFixed(1)}%
-                      </span>
-                    ) : <span className="text-gray-300 text-xs">—</span>}
-                  </div>
-                  <div className="col-span-1 flex justify-end gap-1">
-                    <button onClick={() => { setSelVehicle(v.id); setView("pojazd"); }}
-                      className="w-6 h-6 rounded flex items-center justify-center text-gray-300 hover:text-blue-500 hover:bg-blue-50 transition-all text-xs" title="Szczegół">▶</button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
           {/* Month grid for current year */}
           <div className="mt-6">
             <div className="text-sm font-semibold text-gray-700 mb-3">Zysk miesięczny per pojazd — {selYear}</div>
@@ -4399,6 +4357,48 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], onAdd,
           </div>
         </div>
       )}
+
+          {/* Per-vehicle table */}
+          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+            <div className="grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+              <span className="col-span-3">Pojazd</span>
+              <span className="col-span-2 text-right">Frachty</span>
+              <span className="col-span-2 text-right">Koszty</span>
+              <span className="col-span-2 text-right">Zysk</span>
+              <span className="col-span-2 text-right">Marża</span>
+              <span className="col-span-1"></span>
+            </div>
+            {vehicles.map(v => {
+              const f = totalFrachty(v.id, selYear);
+              const k = totalKoszt(v.id, selYear);
+              const z = f - k;
+              const marza = f > 0 ? (z / f * 100) : 0;
+              const hasData = records.some(r => r.vehicleId === v.id && r.year === selYear);
+              return (
+                <div key={v.id} className="grid grid-cols-12 px-5 py-3.5 border-b border-gray-50 items-center hover:bg-gray-50 transition-colors">
+                  <div className="col-span-3">
+                    <div className="font-semibold text-sm text-gray-900" style={{ fontFamily:"'DM Mono',monospace" }}>{v.plate}</div>
+                    <div className="text-xs text-gray-400">{v.brand}</div>
+                  </div>
+                  <div className="col-span-2 text-right text-sm font-medium text-gray-700">{f > 0 ? fmt(f) : <span className="text-gray-300">—</span>}</div>
+                  <div className="col-span-2 text-right text-sm font-medium text-gray-700">{k > 0 ? fmt(k) : <span className="text-gray-300">—</span>}</div>
+                  <div className="col-span-2 text-right text-sm font-bold" style={{ color: zyskColor(z) }}>{hasData ? fmtS(z) : <span className="text-gray-300">—</span>}</div>
+                  <div className="col-span-2 text-right">
+                    {f > 0 ? (
+                      <span className="px-2 py-0.5 rounded-full text-xs font-bold"
+                        style={{ background: zyskBg(z), color: zyskColor(z) }}>
+                        {marza.toFixed(1)}%
+                      </span>
+                    ) : <span className="text-gray-300 text-xs">—</span>}
+                  </div>
+                  <div className="col-span-1 flex justify-end gap-1">
+                    <button onClick={() => { setSelVehicle(v.id); setView("pojazd"); }}
+                      className="w-6 h-6 rounded flex items-center justify-center text-gray-300 hover:text-blue-500 hover:bg-blue-50 transition-all text-xs" title="Szczegół">▶</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
 
       {/* ── VIEW 2: POJAZD SZCZEGÓŁ ── */}
       {view === "pojazd" && (
