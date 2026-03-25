@@ -6878,8 +6878,9 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
 
         {/* KARTY POJAZDÓW */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {vehicles.map(v => {
+          {vehicles.filter(v => !v.archived).map(v => {
             const vf = visibleList.filter(r => r.vehicleId === v.id);
+            if (vf.length === 0) return null;
             const suma = vf.reduce((s,r) => s + (parseFloat(r.cenaEur)||0), 0);
             const km = vf.reduce((s,r) => s + (parseInt(r.kmWszystkie)||parseInt(r.kmLadowne)||0), 0);
             return (
