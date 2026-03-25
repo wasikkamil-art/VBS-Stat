@@ -6773,7 +6773,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
   const [showImport, setShowImport] = useState(false);
   const [overviewYear, setOverviewYear] = useState("all");
   const [overviewMonth, setOverviewMonth] = useState("all");
-  const [filterMonth, setFilterMonth] = useState(new Date().getMonth());
+  const [filterMonth, setFilterMonth] = useState(null);
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
   const fmt = (n) => n && parseFloat(n) > 0 ? parseFloat(n).toLocaleString("pl-PL",{minimumFractionDigits:2,maximumFractionDigits:2}) : "—";
   const monthFreights = (vid) => frachtyList.filter(r => {
@@ -6781,7 +6781,8 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
     const dateStr = r.dataZaladunku || r.dataZlecenia;
     if (!dateStr) return false;
     const d = new Date(dateStr);
-    return d.getFullYear() === filterYear && d.getMonth() === filterMonth;
+    if (filterMonth !== null && d.getMonth() !== filterMonth) return false;
+    return d.getFullYear() === filterYear;
   }).sort((a,b) => (a.dataZaladunku||a.dataZlecenia||"").localeCompare(b.dataZaladunku||b.dataZlecenia||""));
   const editRecord = editId ? frachtyList.find(r => r.id === editId) : null;
 
@@ -6933,6 +6934,11 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
           ))}
         </div>
         <div className="flex gap-1 flex-wrap">
+          <button onClick={() => setFilterMonth(null)}
+            className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
+            style={{ background: filterMonth===null ? "#111827" : "#f3f4f6", color: filterMonth===null ? "#fff" : "#6b7280" }}>
+            Wszystkie
+          </button>
           {["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paz","Lis","Gru"].map((m,i) => (
             <button key={i} onClick={() => setFilterMonth(i)} className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all" style={{background:filterMonth===i?"#111827":"#f3f4f6",color:filterMonth===i?"#fff":"#6b7280"}}>{m}</button>
           ))}
