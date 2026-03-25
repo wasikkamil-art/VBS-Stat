@@ -525,6 +525,7 @@ function App({ user, role, appUsers = [] }) {
   const [rentRecords, setRentRecords] = useState([]);
   const [frachtyList, setFrachtyList] = useState([]);
   const [sprawyList, setSprawyList] = useState([]);
+  const [operacyjne, setOperacyjne] = useState([]);
   const [loaded, setLoaded]         = useState(false);
   const [toast, setToast]           = useState(null);
   const [eurRate, setEurRate]       = useState(null);
@@ -594,6 +595,14 @@ function App({ user, role, appUsers = [] }) {
       setLoaded(true);
     });
     return () => unsub(); // cleanup przy odmontowaniu
+  }, []);
+
+  // ── OPERACYJNE — osobna kolekcja ──
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "operacyjne"), (snap) => {
+      setOperacyjne(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error("operacyjne onSnapshot error", err));
+    return () => unsub();
   }, []);
 
   // ── SPRAWY — osobna kolekcja ──
@@ -1738,6 +1747,11 @@ function App({ user, role, appUsers = [] }) {
               records={rentRecords}
               frachtyList={frachtyList}
               costs={costs}
+              operacyjne={operacyjne}
+              onSaveOperacyjne={async (id, data) => {
+                try { await updateDoc(doc(db, "operacyjne", id), data); }
+                catch { await addDoc(collection(db, "operacyjne"), {...data, id}); }
+              }}
               onAdd={(r) => setRentRecords(p => [...p, { ...r, id: uid() }])}
               onUpdate={(id, data) => setRentRecords(p => p.map(r => r.id === id ? { ...r, ...data } : r))}
               onDelete={(id) => setRentRecords(p => p.filter(r => r.id !== id))}
@@ -4184,7 +4198,7 @@ const MONTHS_PL = ["Styczeń","Luty","Marzec","Kwiecień","Maj","Czerwiec","Lipi
 
 function rentKey(vehicleId, year, month) { return `${vehicleId}_${year}_${month}`; }
 
-function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], onAdd, onUpdate, onDelete }) {
+function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operacyjne = [], onSaveOperacyjne, onAdd, onUpdate, onDelete }) {
   const [view, setView]           = useState("flota");
   const [selVehicle, setSelVehicle] = useState(null);
   const [selYear, setSelYear]     = useState(new Date().getFullYear());
@@ -4299,7 +4313,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], onAdd,
 
       {/* SUB-NAV */}
       <div className="flex gap-1 mb-5 p-1 rounded-xl" style={{ background:"#f3f4f6" }}>
-        {[["flota","🚛 Flota — przegląd"],["pojazd","📋 Pojazd — szczegół"],["trendy","📈 Trendy"]].map(([id,label]) => (
+        {[["flota","🚛 Flota — przegląd"],["pojazd","📋 Pojazd — dane operacyjne"],["trendy","📈 Trendy"]].map(([id,label]) => (
           <button key={id} onClick={() => setView(id)}
             className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all"
             style={{ background: view===id ? "#fff" : "transparent", color: view===id ? "#111827" : "#9ca3af",
@@ -4561,6 +4575,18 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], onAdd,
                             <td className="text-right px-3 py-2.5 font-bold" style={{ color: r ? zyskColor(z) : "#d1d5db" }}>{r ? fmtS(z) : "—"}</td>
                             <td className="text-right px-3 py-2.5 text-gray-400">{r?.kmLicznik ? r.kmLicznik.toLocaleString("pl-PL") : <span className="text-gray-200">—</span>}</td>
                             <td className="text-right px-3 py-2.5 text-gray-400">{r?.dni || <span className="text-gray-200">—</span>}</td>
+                            {(() => {
+                              const op = operacyjne.find(o => o.vehicleId === selVehicle && o.year === selYear && o.month === mi+1);
+                              const koszt_km = op?.kmLicznik && r?.costs ? (Object.values(r.costs||{}).reduce((s,v)=>s+v,0) / op.kmLicznik).toFixed(2) : null;
+                              const sr_waga = frachtyList.filter(f => f.vehicleId === selVehicle && (f.dataZaladunku||'').startsWith(`${selYear}-${String(mi+1).padStart(2,'0')}`)).reduce((s,f,_,arr) => s + (parseFloat(f.wagaLadunku)||0)/arr.length, 0);
+                              return (<>
+                                <td className="text-right px-3 py-2.5 text-gray-400">{op?.paliwoL ? op.paliwoL.toLocaleString("pl-PL",{maximumFractionDigits:0})+" L" : <span className="text-gray-200">—</span>}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-400">{op?.spalanie ? op.spalanie.toFixed(1)+" L/100" : <span className="text-gray-200">—</span>}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-400">{op?.cenaPaliwa ? op.cenaPaliwa.toFixed(2)+" €/L" : <span className="text-gray-200">—</span>}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-400">{koszt_km ? koszt_km+" €/km" : <span className="text-gray-200">—</span>}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-400">{sr_waga > 0 ? Math.round(sr_waga)+" kg" : <span className="text-gray-200">—</span>}</td>
+                              </>);
+                            })()}
                             <td className="px-3 py-2.5">
                               {r && <button onClick={e=>{e.stopPropagation();onDelete(r.id);}} className="w-5 h-5 flex items-center justify-center text-gray-200 hover:text-red-400 rounded transition-all">✕</button>}
                             </td>
