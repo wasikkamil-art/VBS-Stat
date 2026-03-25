@@ -4,7 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 // ─── FIREBASE CONFIG ────────────────────────────────────────────────────────
 // 👇 WKLEJ TUTAJ SWÓJ firebaseConfig z Firebase Console
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs } from "firebase/firestore";
+import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, orderBy, arrayUnion } from "firebase/firestore";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 
@@ -253,6 +253,7 @@ export default function Root() {
   const [user, setUser]         = useState(undefined);
   const [role, setRole]         = useState(null);
   const [roleLoaded, setRoleLoaded] = useState(false);
+  const [appUsers, setAppUsers] = useState([]);
 
   useEffect(() => {
     return onAuthStateChanged(auth, async (u) => {
@@ -278,6 +279,10 @@ export default function Root() {
           setRole("podglad");
         }
         setRoleLoaded(true);
+        // Wczytaj wszystkich użytkowników
+        getDocs(collection(db, "users")).then(snap => {
+          setAppUsers(snap.docs.map(d => ({ uid: d.id, ...d.data() })));
+        }).catch(() => {});
       } else {
         setRole(null);
         setRoleLoaded(false);
@@ -288,12 +293,225 @@ export default function Root() {
   if (user === undefined) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f8f9fb",fontSize:32}}>🚛</div>;
   if (!user) return <LoginScreen />;
   if (!roleLoaded) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f8f9fb",fontSize:32}}>🚛</div>;
-  return <App user={user} role={role} />;
+  return <App user={user} role={role} appUsers={appUsers} />;
 }
 
 
-function App({ user, role }) {
+
+function ExportCostsModal({ costs, vehicles, categories, onClose }) {
+  const MONTHS = ["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paz","Lis","Gru"];
+  const [year, setYear] = useState("2026");
+  const [monthFrom, setMonthFrom] = useState("all");
+  const [monthTo, setMonthTo] = useState("all");
+  const [vehicle, setVehicle] = useState("all");
+  const [category, setCategory] = useState("all");
+
+  const filtered = costs.filter(c => {
+    const d = c.date || "";
+    if (year !== "all" && !d.startsWith(year)) return false;
+    if (monthFrom !== "all" && d.slice(5,7) < monthFrom) return false;
+    if (monthTo !== "all" && d.slice(5,7) > monthTo) return false;
+    if (vehicle !== "all" && c.vehicleId !== vehicle) return false;
+    if (category !== "all" && c.category !== category) return false;
+    return true;
+  });
+
+  const totalEUR = filtered.reduce((s,c) => s + (c.amountEUR ? parseFloat(c.amountEUR) : 0), 0);
+
+  const handleExport = () => {
+    exportCostsToExcel(filtered, vehicles, categories, year, monthFrom === monthTo ? monthFrom : "all");
+    onClose();
+  };
+
+  const selStyle = {width:"100%", padding:"8px 10px", borderRadius:8, border:"1.5px solid #e5e7eb", fontSize:13, outline:"none", background:"#fff"};
+  const lbl = {display:"block", fontSize:12, fontWeight:600, color:"#6b7280", marginBottom:4};
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.35)",backdropFilter:"blur(4px)"}}>
+      <div style={{background:"#fff",borderRadius:16,padding:28,width:440,maxWidth:"95vw",boxShadow:"0 8px 32px rgba(0,0,0,0.12)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+          <h3 style={{fontWeight:700,fontSize:16,color:"#111827"}}>📊 Export kosztów</h3>
+          <button onClick={onClose} style={{background:"#f3f4f6",border:"none",borderRadius:8,width:28,height:28,cursor:"pointer",fontSize:14}}>✕</button>
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+          <div style={{gridColumn:"1/-1"}}>
+            <label style={lbl}>Rok</label>
+            <div style={{display:"flex",gap:6}}>
+              {["2025","2026","all"].map(y => (
+                <button key={y} onClick={() => setYear(y)}
+                  style={{flex:1,padding:"7px",borderRadius:8,border:"1.5px solid",fontSize:13,fontWeight:600,cursor:"pointer",
+                    borderColor: year===y ? "#111827" : "#e5e7eb",
+                    background: year===y ? "#111827" : "#fff",
+                    color: year===y ? "#fff" : "#6b7280"}}>
+                  {y === "all" ? "Wszystkie" : y}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label style={lbl}>Miesiąc od</label>
+            <select value={monthFrom} onChange={e => setMonthFrom(e.target.value)} style={selStyle}>
+              <option value="all">Wszystkie</option>
+              {MONTHS.map((m,i) => <option key={i} value={String(i+1).padStart(2,"0")}>{m}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={lbl}>Miesiąc do</label>
+            <select value={monthTo} onChange={e => setMonthTo(e.target.value)} style={selStyle}>
+              <option value="all">Wszystkie</option>
+              {MONTHS.map((m,i) => <option key={i} value={String(i+1).padStart(2,"0")}>{m}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label style={lbl}>Pojazd</label>
+            <select value={vehicle} onChange={e => setVehicle(e.target.value)} style={selStyle}>
+              <option value="all">Wszystkie</option>
+              {vehicles.filter(v => !v.archived).map(v => <option key={v.id} value={v.id}>{v.plate}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={lbl}>Kategoria</label>
+            <select value={category} onChange={e => setCategory(e.target.value)} style={selStyle}>
+              <option value="all">Wszystkie</option>
+              {categories.map(c => <option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div style={{background:"#f9fafb",borderRadius:10,padding:"10px 14px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontSize:13,color:"#6b7280"}}>{filtered.length} wpisów</span>
+          <span style={{fontSize:14,fontWeight:700,color:"#111827"}}>{totalEUR.toLocaleString("pl-PL",{minimumFractionDigits:2,maximumFractionDigits:2})} €</span>
+        </div>
+
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+          <button onClick={onClose} style={{padding:"9px 18px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer",color:"#6b7280"}}>Anuluj</button>
+          <button onClick={handleExport} disabled={filtered.length === 0}
+            style={{padding:"9px 18px",borderRadius:8,border:"none",background:filtered.length===0?"#d1d5db":"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:filtered.length===0?"not-allowed":"pointer"}}>
+            📊 Pobierz Excel ({filtered.length})
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// UPLOAD ZAŁĄCZNIKA DO FIREBASE STORAGE
+// ═══════════════════════════════════════════════════════════════════════════════
+async function uploadSprawaFile(file, sprawaId, subfolder) {
+  const ext = file.name.split(".").pop();
+  const name = `sprawy/${sprawaId}/${subfolder}/${Date.now()}_${file.name}`;
+  const ref = storageRef(storage, name);
+  await uploadBytes(ref, file);
+  const url = await getDownloadURL(ref);
+  return { url, name: file.name, type: file.type, size: file.size };
+}
+
+function SprawaFileUpload({ sprawaId, subfolder, onUploaded, label = "📎 Dodaj załącznik" }) {
+  const [uploading, setUploading] = useState(false);
+  const inputRef = useRef(null);
+
+  const handleFile = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const allowed = ["application/pdf","image/jpeg","image/png","image/jpg"];
+    if (!allowed.includes(file.type)) { alert("Dozwolone: PDF, JPG, PNG"); return; }
+    if (file.size > 10 * 1024 * 1024) { alert("Maks. 10 MB"); return; }
+    setUploading(true);
+    try {
+      const result = await uploadSprawaFile(file, sprawaId, subfolder);
+      onUploaded(result);
+    } catch(e) {
+      alert("Błąd uploadu: " + e.message);
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  };
+
+  return (
+    <>
+      <input ref={inputRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={handleFile} />
+      <button onClick={() => inputRef.current?.click()} disabled={uploading}
+        className="px-3 py-1.5 rounded-lg text-xs font-medium border border-dashed border-gray-300 text-gray-500 hover:bg-gray-50 transition-all disabled:opacity-50">
+        {uploading ? "Uploading..." : label}
+      </button>
+    </>
+  );
+}
+
+function AttachmentList({ files, onDelete }) {
+  if (!files || files.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-2 mt-2">
+      {files.map((f, i) => (
+        <div key={i} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-xs">
+          <span>{f.type === "application/pdf" ? "📄" : "🖼️"}</span>
+          <a href={f.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline max-w-32 truncate">{f.name}</a>
+          {onDelete && <button onClick={() => onDelete(i)} className="text-gray-300 hover:text-red-400 ml-1">✕</button>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EXPORT KOSZTOW DO EXCEL
+// ═══════════════════════════════════════════════════════════════════════════════
+function exportCostsToExcel(costs, vehicles, categories, filterYear, filterMonth) {
+  const XLSX = window.XLSX;
+  if (!XLSX) { alert('Biblioteka Excel nie jest zaladowana, odswiez strone'); return; }
+
+  const CAT_FALLBACKS = {
+    wyplata:'Wynagrodzenie', zus:'ZUS + podatki', paliwo:'Paliwo',
+    leasing:'Leasing', naprawa:'Naprawa', ubezpieczenie:'Ubezpieczenie',
+    oplaty:'Oplaty drogowe', mandaty:'Mandaty', slickshift:'SlickShift',
+    telefon:'Telefon', hotele:'Hotele', przyczepa:'Przyczepa',
+    ocpd:'OCPD', uruchomienie:'Koszt uruchomienia', imi_spisi:'IMI/SIPSI',
+    inne:'Inne', opony:'Opony',
+  };
+  const catLabel = (id) => {
+    const cat = categories.find(c => c.id === id);
+    return cat ? cat.label : (CAT_FALLBACKS[id] || id);
+  };
+  const vLabel = (id) => {
+    const v = vehicles.find(v => v.id === id);
+    return v ? v.plate : id;
+  };
+
+  const headers = ['Data','Pojazd','Kategoria','Kwota EUR','Kwota PLN','Waluta','Opis'];
+  const rows = costs.map(c => [
+    c.date || '',
+    vLabel(c.vehicleId),
+    catLabel(c.category),
+    c.amountEUR ? parseFloat(c.amountEUR).toFixed(2) : '',
+    c.amountPLN ? parseFloat(c.amountPLN).toFixed(2) : '',
+    c.currency || 'EUR',
+    c.note || '',
+  ]);
+
+  const totalEUR = costs.reduce((s,c) => s + (c.amountEUR ? parseFloat(c.amountEUR) : 0), 0);
+  rows.push(['','','SUMA', totalEUR.toFixed(2), '', '', '']);
+
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  ws['!cols'] = [{wch:12},{wch:14},{wch:22},{wch:12},{wch:12},{wch:8},{wch:30}];
+
+  const wb = XLSX.utils.book_new();
+  const sheetName = filterYear === 'all' ? 'Koszty' : filterMonth === 'all' ? 'Koszty_'+filterYear : 'Koszty_'+filterYear+'_'+filterMonth;
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+  const fileName = 'FleetStat_Koszty' + (filterYear !== 'all' ? '_'+filterYear : '') + (filterMonth !== 'all' ? '_'+filterMonth : '') + '.xlsx';
+  XLSX.writeFile(wb, fileName);
+}
+
+function App({ user, role, appUsers = [] }) {
   const isAdmin      = role === "admin";
+  const [showExportModal, setShowExportModal] = useState(false);
   const isDyspozytor = role === "dyspozytor";
   const isPodglad    = role === "podglad";
   const canEdit      = isAdmin || isDyspozytor;  // może edytować
@@ -306,6 +524,8 @@ function App({ user, role }) {
   const [imiRecords, setImiRecords] = useState([]);
   const [rentRecords, setRentRecords] = useState([]);
   const [frachtyList, setFrachtyList] = useState([]);
+  const [sprawyList, setSprawyList] = useState([]);
+  const [operacyjne, setOperacyjne] = useState([]);
   const [loaded, setLoaded]         = useState(false);
   const [toast, setToast]           = useState(null);
   const [eurRate, setEurRate]       = useState(null);
@@ -313,6 +533,7 @@ function App({ user, role }) {
   const [eurLoading, setEurLoading] = useState(true);
 
   const [showAddCost, setShowAddCost]         = useState(false);
+  const [editCostId, setEditCostId]           = useState(null);
   const [showCostsImport, setShowCostsImport]   = useState(false);
   const [showAddVehicle, setShowAddVehicle]   = useState(false);
   const [editVehicleId, setEditVehicleId]     = useState(null);
@@ -376,6 +597,23 @@ function App({ user, role }) {
     return () => unsub(); // cleanup przy odmontowaniu
   }, []);
 
+  // ── OPERACYJNE — osobna kolekcja ──
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "operacyjne"), (snap) => {
+      setOperacyjne(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error("operacyjne onSnapshot error", err));
+    return () => unsub();
+  }, []);
+
+  // ── SPRAWY — osobna kolekcja ──
+  useEffect(() => {
+    const q = query(collection(db, "sprawy"), orderBy("dataUtworzenia", "desc"));
+    const unsub = onSnapshot(q, (snap) => {
+      setSprawyList(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error("sprawy onSnapshot error", err));
+    return () => unsub();
+  }, []);
+
   // ── PERSIST ──
   useEffect(() => { if (loaded) dbSet(SK.vehicles, vehicles); },    [vehicles, loaded]);
   useEffect(() => { if (loaded) dbSet(SK.costs, costs); },          [costs, loaded]);
@@ -384,6 +622,7 @@ function App({ user, role }) {
   useEffect(() => { if (loaded) dbSet(SK.imi, imiRecords); },       [imiRecords, loaded]);
   useEffect(() => { if (loaded && rentRecords.length > 0) dbSet(SK.rent, rentRecords); },     [rentRecords, loaded]);
   useEffect(() => { if (loaded && frachtyList.length > 0) dbSet(SK.frachty, frachtyList); },  [frachtyList, loaded]);
+
 
   // ── CSS INJECTION ──
   useEffect(() => {
@@ -425,6 +664,7 @@ function App({ user, role }) {
 
   const addCost      = (entry) => { setCosts((p) => [...p, { ...entry, id: uid() }]); showToast("✅ Koszt zapisany"); setShowAddCost(false); };
   const deleteCost   = (id)    => { setCosts((p) => p.filter((c) => c.id !== id)); showToast("Usunięto wpis"); };
+  const updateCost   = (updated) => { setCosts((p) => p.map((c) => c.id === updated.id ? updated : c)); showToast("✅ Koszt zaktualizowany"); setEditCostId(null); };
   const addVehicle   = (v)     => { setVehicles((p) => [...p, { ...v, id: uid(), driverHistory: v.driverHistory || [] }]); showToast("🚛 Pojazd dodany"); setShowAddVehicle(false); };
   const delVehicle   = (id, reason) => {
     setVehicles((p) => p.map((v) => v.id !== id ? v : {
@@ -551,6 +791,25 @@ function App({ user, role }) {
         />
       )}
       {showAddVehicle && <AddVehicleModal onSave={addVehicle} onClose={() => setShowAddVehicle(false)} />}
+      {editCostId && (
+        <AddCostModal
+          vehicles={vehicles} categories={categories}
+          eurRate={eurRate} eurRateDate={eurRateDate} eurLoading={eurLoading}
+          toPLN={toPLN} toEUR={toEUR}
+          editRecord={costs.find(c => c.id === editCostId)}
+          onSave={(entry) => updateCost({ ...entry, id: editCostId })}
+          onClose={() => setEditCostId(null)}
+          onAddCategory={addCategory}
+        />
+      )}
+      {showExportModal && (
+        <ExportCostsModal
+          costs={costs}
+          vehicles={vehicles}
+          categories={categories}
+          onClose={() => setShowExportModal(false)}
+        />
+      )}
       {deleteVehicleModal && <DeleteVehicleModal
         plate={deleteVehicleModal.plate}
         onConfirm={(reason) => {
@@ -590,6 +849,9 @@ function App({ user, role }) {
               ...(isAdmin ? [
                 { id: "users",   icon: "👥",  label: "Użytkownicy" },
               ] : []),
+              ...((isAdmin || isDyspozytor) ? [
+                { id: "sprawy", icon: "⚡", label: "Sprawy", badge: sprawyList.filter(s => !['zamknieta','wygrana','przegrana'].includes(s.status) && (s.przypisani||[]).includes(user?.email)).length || null },
+              ] : []),
             ].map((item) => (
               <button key={item.id} onClick={() => setTab(item.id)}
                 className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm text-left transition-all"
@@ -600,37 +862,24 @@ function App({ user, role }) {
                 }}>
                 <span className="text-base w-5 text-center opacity-70">{item.icon}</span>
                 {item.label}
+                {item.badge ? <span className="ml-auto px-1.5 py-0.5 rounded-full text-xs font-bold" style={{background:"#ef4444",color:"#fff"}}>{item.badge}</span> : null}
               </button>
             ))}
           </nav>
 
-          {/* EUR BADGE */}
-          <div className="mx-1 mb-4 px-3 py-3 rounded-xl" style={{ background: "#fffbeb", border: "1px solid #fde68a" }}>
-            <div className="text-xs text-amber-600 font-medium mb-0.5">Kurs EUR/PLN · NBP</div>
-            {eurLoading
-              ? <div className="text-xs text-amber-400">Pobieranie…</div>
-              : <>
-                  <div className="font-bold text-amber-800 text-sm" style={{ fontFamily: "'DM Mono', monospace" }}>1 € = {eurRate?.toFixed(4)} zł</div>
-                  <div className="text-xs text-amber-500 mt-0.5">{eurRateDate}</div>
-                </>
-            }
-          </div>
+
 
           <div className="space-y-2 px-1">
-            {canEdit && <>
-            <button onClick={() => setShowAddCost(true)}
-              className="w-full py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
-              style={{ background: "#111827" }}>
-              + Dodaj koszt
-            </button>
-            <button onClick={() => setShowAddVehicle(true)}
-              className="w-full py-2.5 rounded-lg text-sm font-medium transition-all hover:bg-gray-100"
-              style={{ background: "#f3f4f6", color: "#374151" }}>
-              + Dodaj pojazd
-            </button>
-            </>}
             <div style={{ borderTop:"1px solid #f3f4f6", paddingTop:8, marginTop:4 }}>
-              <div className="text-xs text-gray-400 px-1 mb-0.5 truncate">{user?.email}</div>
+              <div className="text-xs text-gray-400 px-1 mb-0.5 truncate flex items-center gap-1">
+                {user?.email}
+                {(() => {
+                  const mentions = sprawyList.reduce((acc, s) => {
+                    return acc + (s.zdarzenia||[]).filter(z => z.mentions && z.mentions.includes(user?.email) && !z.seenBy?.includes(user?.email)).length;
+                  }, 0);
+                  return mentions > 0 ? <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs font-bold" style={{background:"#ef4444",color:"#fff"}}>{mentions}</span> : null;
+                })()}
+              </div>
               <div className="px-1 mb-2">
                 <span className="inline-block px-2 py-0.5 rounded-full text-xs font-semibold"
                   style={{
@@ -736,13 +985,13 @@ function App({ user, role }) {
                         .filter(r => r.dataZaladunku && new Date(r.dataZaladunku) > todayMidnight)
                         .sort((a,b) => a.dataZaladunku.localeCompare(b.dataZaladunku))[0] || null;
 
-                      // Ostatni rozładowany (rozł < dziś)
-                      const lastDoneF = vFrachty.find(r => {
+                      // Ostatni rozładowany (rozł < dziś) - bierzemy najnowszy
+                      const lastDoneF = vFrachty.filter(r => {
                         const rozl = r.dataRozladunku ? new Date(r.dataRozladunku) : null;
                         if (!rozl) return false;
                         rozl.setHours(0,0,0,0);
                         return rozl < todayMidnight;
-                      });
+                      }).sort((a,b) => (b.dataRozladunku||"").localeCompare(a.dataRozladunku||""))[0] || null;
 
                       if (activeF) {
                         status = "trasa";
@@ -985,20 +1234,27 @@ function App({ user, role }) {
                     docAlerts > 0 && { type: "yellow", text: `${docAlerts} ${docAlerts===1?"dokument wygasa":"dokumenty wygasają"} w ciągu 30 dni` },
                   ].filter(Boolean);
 
+                  const sprawyAlerts = sprawyList.filter(s =>
+                    !["zamknieta","wygrana","przegrana"].includes(s.status) &&
+                    (s.przypisani||[]).includes(user?.email)
+                  ).map(s => ({ type: "orange", text: `⚡ Sprawa: ${s.numer ? s.numer+" · " : ""}${s.klient}${s.przypomnienie && s.przypomnienie <= todayStr ? " ⏰ dziś!" : s.przypomnienie ? " ("+s.przypomnienie+")" : ""}` }));
+
+                  const allAlerts = [...alerts, ...sprawyAlerts];
+
                   return (
                     <div className="bg-white rounded-2xl border border-gray-100 p-4">
                       <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Wymaga uwagi</div>
-                      {alerts.length === 0 ? (
+                      {allAlerts.length === 0 ? (
                         <div className="flex items-center gap-2 text-sm text-green-600">
                           <span>✅</span> Wszystko w porządku
                         </div>
                       ) : (
                         <div className="space-y-2">
-                          {alerts.map((a,i) => (
+                          {allAlerts.map((a,i) => (
                             <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium"
                               style={{
-                                background: a.type==="red" ? "#fef2f2" : "#fffbeb",
-                                color: a.type==="red" ? "#b91c1c" : "#92400e"
+                                background: a.type==="red" ? "#fef2f2" : a.type==="orange" ? "#fff7ed" : "#fffbeb",
+                                color: a.type==="red" ? "#b91c1c" : a.type==="orange" ? "#c2410c" : "#92400e"
                               }}>
                               <span>{a.type==="red" ? "🔴" : "🟡"}</span>
                               {a.text}
@@ -1059,6 +1315,10 @@ function App({ user, role }) {
                   <button onClick={() => setShowCostsImport(true)}
                     className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 flex items-center gap-2">
                     📥 Importuj z Excel
+                  </button>
+                  <button onClick={() => setShowExportModal(true)}
+                    className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 flex items-center gap-2">
+                    📊 Exportuj Excel
                   </button>
                   <button onClick={() => setShowAddCost(true)}
                     className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
@@ -1223,10 +1483,14 @@ function App({ user, role }) {
                         <div className="font-semibold text-gray-900 text-sm">{fmtEUR(getEUR(c))}</div>
                         {amtEUR != null && <div className="text-xs text-gray-400">{fmtPLN(amtPLN)}</div>}
                       </div>
-                      <div className="col-span-1 flex justify-end">
+                      <div className="col-span-1 flex justify-end gap-1">
                         {canEdit && (
+                        <>
+                        <button onClick={() => setEditCostId(c.id)}
+                          className="w-6 h-6 rounded flex items-center justify-center text-gray-300 hover:text-blue-400 hover:bg-blue-50 transition-all text-xs">✏️</button>
                         <button onClick={() => deleteCost(c.id)}
                           className="w-6 h-6 rounded flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-all text-xs">✕</button>
+                        </>
                         )}
                       </div>
                     </div>
@@ -1483,6 +1747,11 @@ function App({ user, role }) {
               records={rentRecords}
               frachtyList={frachtyList}
               costs={costs}
+              operacyjne={operacyjne}
+              onSaveOperacyjne={async (id, data) => {
+                try { await updateDoc(doc(db, "operacyjne", id), data); }
+                catch { await addDoc(collection(db, "operacyjne"), {...data, id}); }
+              }}
               onAdd={(r) => setRentRecords(p => [...p, { ...r, id: uid() }])}
               onUpdate={(id, data) => setRentRecords(p => p.map(r => r.id === id ? { ...r, ...data } : r))}
               onDelete={(id) => setRentRecords(p => p.filter(r => r.id !== id))}
@@ -1527,6 +1796,32 @@ function App({ user, role }) {
             <UsersTab currentUid={user.uid} showToast={showToast} />
           )}
 
+          {tab === "sprawy" && (isAdmin || isDyspozytor) && (
+            <SprawyTab
+              sprawyList={sprawyList}
+              vehicles={vehicles}
+              currentUser={user}
+              appUsers={appUsers}
+              eurRate={eurRate}
+              eurRateDate={eurRateDate}
+              showToast={showToast}
+              onAdd={(s) => setSprawyList(p => [...p, { ...s, id: uid() }])}
+              onUpdate={async (id, data) => {
+                try {
+                  if (data._addZdarzenie) {
+                    const { _addZdarzenie, ...rest } = data;
+                    const updates = { ...rest };
+                    if (Object.keys(updates).length > 0) await updateDoc(doc(db, "sprawy", id), updates);
+                    await updateDoc(doc(db, "sprawy", id), { zdarzenia: arrayUnion(_addZdarzenie) });
+                  } else {
+                    await updateDoc(doc(db, "sprawy", id), data);
+                  }
+                } catch(e) { console.error("onUpdate sprawa", e); }
+              }}
+              onDelete={(id) => setSprawyList(p => p.filter(s => s.id !== id))}
+            />
+          )}
+
         </main>
       </div>
 
@@ -1554,6 +1849,705 @@ function App({ user, role }) {
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SPRAWY TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+const SPRAWA_TYPY = [
+  { id: "brak_zaplaty",  label: "Brak zapłaty",       icon: "💸", color: "#ef4444" },
+  { id: "nota",          label: "Nota obciążeniowa",  icon: "📋", color: "#f97316" },
+  { id: "reklamacja",    label: "Reklamacja",          icon: "⚠️", color: "#eab308" },
+  { id: "spor",          label: "Spór",               icon: "⚖️", color: "#8b5cf6" },
+  { id: "inne",          label: "Inne",               icon: "📌", color: "#6b7280" },
+];
+
+const SPRAWA_STATUSY = [
+  { id: "otwarta",    label: "Otwarta",    color: "#ef4444", bg: "#fef2f2" },
+  { id: "w_toku",     label: "W toku",     color: "#f97316", bg: "#fff7ed" },
+  { id: "zamknieta",  label: "Zamknięta",  color: "#10b981", bg: "#f0fdf4" },
+  { id: "wygrana",    label: "Wygrana",    color: "#3b82f6", bg: "#eff6ff" },
+  { id: "przegrana",  label: "Przegrana",  color: "#6b7280", bg: "#f9fafb" },
+];
+
+const ZDARZENIE_TYPY = [
+  { id: "email",    label: "Email",           icon: "📧" },
+  { id: "telefon",  label: "Rozmowa tel.",    icon: "📞" },
+  { id: "notatka",  label: "Notatka wewn.",   icon: "📝" },
+  { id: "dokument", label: "Dokument",        icon: "📄" },
+  { id: "akcja",    label: "Podjęte działanie", icon: "✅" },
+];
+
+function NowaSprawaModal({ allTypy, vehicles, appUsers = [], onSave, onClose }) {
+  const [f, setF] = useState({
+    numer:"", typ: allTypy[0]?.id || "brak_zaplaty", klient:"", kwota:"", waluta:"EUR",
+    nrZlecenia:"", nrNoty:"", terminPlatnosci:"", nrNadania:"",
+    telefon:"", vehicleId:"", przypomnienie:"", uwagi:"", przypisani:[]
+  });
+  const set = (k,v) => setF(p => ({...p,[k]:v}));
+  const inp = "w-full px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none focus:border-gray-400";
+  const lbl = "block text-xs font-semibold text-gray-500 mb-1";
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.35)",backdropFilter:"blur(4px)"}}>
+      <div style={{background:"#fff",borderRadius:16,width:520,maxWidth:"95vw",maxHeight:"90vh",overflow:"hidden",display:"flex",flexDirection:"column",boxShadow:"0 8px 32px rgba(0,0,0,0.12)"}}>
+        <div style={{padding:"20px 24px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <h3 style={{fontWeight:700,fontSize:16,color:"#111827"}}>Nowa sprawa</h3>
+          <button onClick={onClose} style={{background:"#f3f4f6",border:"none",borderRadius:8,width:28,height:28,cursor:"pointer"}}>✕</button>
+        </div>
+        <div style={{padding:"20px 24px",overflowY:"auto",display:"flex",flexDirection:"column",gap:12}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div><label className={lbl}>Numer sprawy</label><input className={inp} placeholder="SP/001/2026" value={f.numer} onChange={e=>set("numer",e.target.value)} /></div>
+            <div><label className={lbl}>Typ</label>
+              <select className={inp} value={f.typ} onChange={e=>set("typ",e.target.value)}>
+                {allTypy.map(t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
+              </select>
+            </div>
+          </div>
+          {f.typ === "inne" && (
+            <div><label className={lbl}>Opisz typ sprawy</label><input className={inp} placeholder="np. Windykacja, Reklamacja celna..." value={f.podtyp||""} onChange={e=>set("podtyp",e.target.value)} /></div>
+          )}
+          <div><label className={lbl}>Klient / Firma</label><input className={inp} placeholder="Nazwa firmy" value={f.klient} onChange={e=>set("klient",e.target.value)} /></div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div>
+              <label className={lbl}>Kwota</label>
+              <div style={{display:"flex",gap:4}}>
+                <input className={inp} type="number" placeholder="0.00" value={f.kwota} style={{flex:1}}
+                  onChange={e => { set("kwota", e.target.value); }} />
+                <div style={{display:"flex",borderRadius:8,border:"1.5px solid #e5e7eb",overflow:"hidden",flexShrink:0}}>
+                  {["EUR","PLN"].map(w => (
+                    <button key={w} type="button" onClick={() => set("waluta", w)}
+                      style={{padding:"0 10px",fontSize:12,fontWeight:600,border:"none",cursor:"pointer",
+                        background: f.waluta===w ? "#111827" : "#fff",
+                        color: f.waluta===w ? "#fff" : "#6b7280"}}>
+                      {w}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {f.kwota && (
+                <div style={{fontSize:11,color:"#9ca3af",marginTop:3}}>
+                  {f.waluta==="EUR"
+                    ? `≈ ${(parseFloat(f.kwota)*4.27).toFixed(2)} zł`
+                    : `≈ ${(parseFloat(f.kwota)/4.27).toFixed(2)} €`}
+                  <span style={{marginLeft:4,color:"#d1d5db"}}>· kurs ~4.27</span>
+                </div>
+              )}
+            </div>
+            <div><label className={lbl}>Termin płatności</label><input className={inp} type="date" value={f.terminPlatnosci} onChange={e=>set("terminPlatnosci",e.target.value)} /></div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div><label className={lbl}>Nr zlecenia</label><input className={inp} placeholder="ZL/001" value={f.nrZlecenia} onChange={e=>set("nrZlecenia",e.target.value)} /></div>
+            <div><label className={lbl}>Nr noty</label><input className={inp} placeholder="NT/001" value={f.nrNoty} onChange={e=>set("nrNoty",e.target.value)} /></div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div><label className={lbl}>Nr nadania poczty</label><input className={inp} placeholder="PL000000000" value={f.nrNadania} onChange={e=>set("nrNadania",e.target.value)} /></div>
+            <div><label className={lbl}>Telefon kontaktowy</label><input className={inp} placeholder="+48 000 000 000" value={f.telefon} onChange={e=>set("telefon",e.target.value)} /></div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div><label className={lbl}>Pojazd (opcjonalnie)</label>
+              <select className={inp} value={f.vehicleId} onChange={e=>set("vehicleId",e.target.value)}>
+                <option value="">Brak</option>
+                {vehicles.filter(v=>!v.archived).map(v=><option key={v.id} value={v.id}>{v.plate}</option>)}
+              </select>
+            </div>
+            <div><label className={lbl}>Przypomnienie</label><input className={inp} type="date" value={f.przypomnienie} onChange={e=>set("przypomnienie",e.target.value)} /></div>
+          </div>
+          <div><label className={lbl}>Uwagi</label><textarea className={inp+" resize-none"} rows={2} placeholder="Opis sprawy..." value={f.uwagi} onChange={e=>set("uwagi",e.target.value)} /></div>
+          <div>
+            <label className={lbl}>Przypisani</label>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
+              {(f.przypisani||[]).map(m => (
+                <span key={m} style={{background:"#eff6ff",color:"#1d4ed8",padding:"2px 10px",borderRadius:99,fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:4}}>
+                  {m} <button type="button" onClick={() => set("przypisani",(f.przypisani||[]).filter(x=>x!==m))} style={{background:"none",border:"none",cursor:"pointer",color:"#6b7280",fontSize:11}}>x</button>
+                </span>
+              ))}
+            </div>
+            <select value="" onChange={e => { if(e.target.value && !(f.przypisani||[]).includes(e.target.value)) set("przypisani",[...(f.przypisani||[]),e.target.value]); }} className={inp}>
+              <option value="">+ Dodaj osobę...</option>
+              {appUsers.map(u => <option key={u.uid} value={u.email}>{u.email}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{padding:"14px 24px",borderTop:"1px solid #f3f4f6",display:"flex",justifyContent:"flex-end",gap:8}}>
+          <button onClick={onClose} style={{padding:"9px 18px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer",color:"#6b7280"}}>Anuluj</button>
+          <button onClick={() => { if(!f.klient){alert("Podaj klienta");return;} onSave(f); }}
+            style={{padding:"9px 18px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Zapisz sprawę</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpdate, onDelete, onBack, showToast }) {
+  const [showAddZdarzenie, setShowAddZdarzenie] = useState(false);
+  const [zdType, setZdType] = useState("notatka");
+  const [zdTresc, setZdTresc] = useState("");
+  const [zdKtoDoKogo, setZdKtoDoKogo] = useState("");
+  const [zdMentions, setZdMentions] = useState([]);
+  const [mentionInput, setMentionInput] = useState("");
+  const [zdFile, setZdFile] = useState(null);
+  const [editZdarzenieId, setEditZdarzenieId] = useState(null);
+  const [editZdData, setEditZdData] = useState({});
+  const [przypomnienieZdId, setPoprzypomnienieZdId] = useState(null);
+  const [przypomnienieData, setRzypomnienieData] = useState("");
+  const [przypomnienieOpis, setRzypomnienieOpis] = useState("");
+  const [editMode, setEditMode] = useState(false);
+  const [editData, setEditData] = useState({...sprawa});
+
+  const typ = allTypy.find(t => t.id === sprawa.typ);
+  const status = SPRAWA_STATUSY.find(s => s.id === sprawa.status) || SPRAWA_STATUSY[0];
+  const vehicle = vehicles.find(v => v.id === sprawa.vehicleId);
+  const zdarzenia = [...(sprawa.zdarzenia || [])].sort((a,b) => b.data.localeCompare(a.data));
+
+  const addZdarzenie = () => {
+    if (!zdTresc.trim()) return;
+    const nowe = {
+      id: Math.random().toString(36).slice(2,10),
+      typ: zdType,
+      tresc: zdTresc,
+      ktoDoKogo: zdKtoDoKogo,
+      mentions: zdMentions,
+      zalacznik: zdFile || null,
+      data: new Date().toISOString(),
+      autor: currentUser.email,
+      seenBy: [currentUser.email],
+    };
+    onUpdate({ _addZdarzenie: nowe });
+    setZdTresc(""); setZdKtoDoKogo(""); setZdMentions([]); setMentionInput(""); setZdFile(null); setShowAddZdarzenie(false);
+    showToast("✅ Zdarzenie dodane");
+  };
+
+  const inp = "w-full px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none focus:border-gray-400";
+  const lbl = "block text-xs font-semibold text-gray-500 mb-1";
+
+  return (
+    <div>
+      {/* BACK + HEADER */}
+      <div className="flex items-center gap-3 mb-5">
+        <button onClick={onBack} className="px-3 py-1.5 rounded-lg text-sm text-gray-500 hover:bg-gray-100 transition-all">← Powrót</button>
+        <div className="flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-lg">{typ?.icon || "📌"}</span>
+            <h2 className="text-lg font-bold text-gray-900">{sprawa.numer || "Sprawa"} · {sprawa.klient}</h2>
+            {sprawa.podtyp && <span className="text-sm text-gray-500">({sprawa.podtyp})</span>}
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold" style={{background:status.bg,color:status.color}}>{status.label}</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <select value={sprawa.status} onChange={e => onUpdate({status: e.target.value})}
+            className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 outline-none bg-white font-semibold"
+            style={{color: status.color}}>
+            {SPRAWA_STATUSY.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+          </select>
+          <button onClick={() => setEditMode(!editMode)} className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 hover:bg-gray-50 whitespace-nowrap">✏️ Edytuj</button>
+          <button onClick={() => { if(window.confirm("Usunąć sprawę?")) onDelete(); }}
+            className="w-8 h-8 flex items-center justify-center rounded-lg border border-red-200 text-red-500 hover:bg-red-50 flex-shrink-0"
+            title="Usuń sprawę">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* DANE SPRAWY */}
+      {!editMode ? (
+        <div className="bg-white rounded-xl border border-gray-100 p-5 mb-5 grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            ["Kwota", sprawa.kwota ? `${sprawa.kwota} ${sprawa.waluta||"EUR"}${sprawa.waluta==="PLN" && sprawa.kwota ? " (≈ "+(parseFloat(sprawa.kwota)/4.27).toFixed(0)+" €)" : ""}` : "—"],
+            ["Termin płatności", sprawa.terminPlatnosci || "—"],
+            ["Nr zlecenia", sprawa.nrZlecenia || "—"],
+            ["Nr noty", sprawa.nrNoty || "—"],
+            ["Nr nadania", sprawa.nrNadania || "—"],
+            ["Telefon", sprawa.telefon || "—"],
+            ["Pojazd", vehicle?.plate || "—"],
+            ["Przypomnienie", sprawa.przypomnienie || "—"],
+          ].map(([label,value]) => (
+            <div key={label}>
+              <div className="text-xs text-gray-400 mb-0.5">{label}</div>
+              <div className="text-sm font-semibold text-gray-800">{value}</div>
+            </div>
+          ))}
+          {sprawa.uwagi && (
+            <div className="col-span-2 md:col-span-4">
+              <div className="text-xs text-gray-400 mb-0.5">Uwagi</div>
+              <div className="text-sm text-gray-700">{sprawa.uwagi}</div>
+            </div>
+          )}
+          {sprawa.przypisani && sprawa.przypisani.length > 0 && (
+            <div className="col-span-2 md:col-span-4">
+              <div className="text-xs text-gray-400 mb-1">Przypisani</div>
+              <div className="flex gap-2 flex-wrap">
+                {sprawa.przypisani.map(p => (
+                  <span key={p} style={{background:"#eff6ff",color:"#1d4ed8",padding:"3px 10px",borderRadius:99,fontSize:12,fontWeight:600}}>&#128100; {p}</span>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="col-span-2 md:col-span-4">
+            <div className="text-xs text-gray-400 mb-2">Załączniki sprawy</div>
+            <AttachmentList files={sprawa.zalaczniki || []} onDelete={(i) => {
+              const nowe = [...(sprawa.zalaczniki||[])];
+              nowe.splice(i,1);
+              onUpdate({zalaczniki: nowe});
+            }} />
+            <div className="mt-2">
+              <SprawaFileUpload
+                sprawaId={sprawa.id}
+                subfolder="glowne"
+                label="📎 Dodaj załącznik (PDF/JPG/PNG)"
+                onUploaded={(f) => onUpdate({zalaczniki: [...(sprawa.zalaczniki||[]), f]})}
+              />
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-100 p-5 mb-5">
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div><label className={lbl}>Klient</label><input className={inp} value={editData.klient||""} onChange={e=>setEditData(p=>({...p,klient:e.target.value}))} /></div>
+            <div>
+              <label className={lbl}>Kwota</label>
+              <div style={{display:"flex",gap:4}}>
+                <input className={inp} type="number" value={editData.kwota||""} style={{flex:1}}
+                  onChange={e=>setEditData(p=>({...p,kwota:e.target.value}))} />
+                <div style={{display:"flex",borderRadius:8,border:"1.5px solid #e5e7eb",overflow:"hidden",flexShrink:0}}>
+                  {["EUR","PLN"].map(w => (
+                    <button key={w} type="button" onClick={() => setEditData(p=>({...p,waluta:w}))}
+                      style={{padding:"0 10px",fontSize:12,fontWeight:600,border:"none",cursor:"pointer",
+                        background:(editData.waluta||sprawa.waluta||"EUR")===w?"#111827":"#fff",
+                        color:(editData.waluta||sprawa.waluta||"EUR")===w?"#fff":"#6b7280"}}>
+                      {w}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {(editData.kwota||sprawa.kwota) && (
+                <div style={{fontSize:11,color:"#9ca3af",marginTop:3}}>
+                  {(editData.waluta||sprawa.waluta||"EUR")==="EUR"
+                    ? `≈ ${(parseFloat(editData.kwota||sprawa.kwota)*4.27).toFixed(2)} zł`
+                    : `≈ ${(parseFloat(editData.kwota||sprawa.kwota)/4.27).toFixed(2)} €`}
+                  <span style={{marginLeft:4,color:"#d1d5db"}}>· kurs ~4.27</span>
+                </div>
+              )}
+            </div>
+            <div><label className={lbl}>Termin płatności</label><input className={inp} type="date" value={editData.terminPlatnosci||""} onChange={e=>setEditData(p=>({...p,terminPlatnosci:e.target.value}))} /></div>
+            <div><label className={lbl}>Przypomnienie</label><input className={inp} type="date" value={editData.przypomnienie||""} onChange={e=>setEditData(p=>({...p,przypomnienie:e.target.value}))} /></div>
+            <div><label className={lbl}>Nr zlecenia</label><input className={inp} value={editData.nrZlecenia||""} onChange={e=>setEditData(p=>({...p,nrZlecenia:e.target.value}))} /></div>
+            <div><label className={lbl}>Nr noty</label><input className={inp} value={editData.nrNoty||""} onChange={e=>setEditData(p=>({...p,nrNoty:e.target.value}))} /></div>
+            <div><label className={lbl}>Nr nadania</label><input className={inp} value={editData.nrNadania||""} onChange={e=>setEditData(p=>({...p,nrNadania:e.target.value}))} /></div>
+            <div><label className={lbl}>Telefon</label><input className={inp} value={editData.telefon||""} onChange={e=>setEditData(p=>({...p,telefon:e.target.value}))} /></div>
+          </div>
+          <div className="mb-3"><label className={lbl}>Uwagi</label><textarea className={inp+" resize-none"} rows={2} value={editData.uwagi||""} onChange={e=>setEditData(p=>({...p,uwagi:e.target.value}))} /></div>
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => setEditMode(false)} style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer"}}>Anuluj</button>
+            <button onClick={() => { onUpdate(editData); setEditMode(false); showToast("✅ Zapisano"); }}
+              style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Zapisz</button>
+          </div>
+        </div>
+      )}
+
+      {/* TIMELINE */}
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-bold text-gray-800">Chronologia</h3>
+        <button onClick={() => setShowAddZdarzenie(!showAddZdarzenie)}
+          className="px-3 py-1.5 rounded-lg text-sm font-semibold text-white hover:opacity-90"
+          style={{background:"#111827"}}>
+          + Dodaj zdarzenie
+        </button>
+      </div>
+
+      {showAddZdarzenie && (
+        <div className="bg-white rounded-xl border border-gray-100 p-4 mb-4">
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <label className={lbl}>Typ zdarzenia</label>
+              <select className={inp} value={zdType} onChange={e=>setZdType(e.target.value)}>
+                {ZDARZENIE_TYPY.map(t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={lbl}>Kto / Do kogo</label>
+              <input className={inp} placeholder="np. Jan → klient" value={zdKtoDoKogo} onChange={e=>setZdKtoDoKogo(e.target.value)} />
+            </div>
+          </div>
+          <div className="mb-3">
+            <label className={lbl}>Treść / Notatka</label>
+            <textarea className={inp+" resize-none"} rows={3} placeholder="Opis zdarzenia, treść emaila, notatka..." value={zdTresc} onChange={e=>setZdTresc(e.target.value)} />
+          </div>
+          <div className="mb-3">
+            <label className={lbl}>@ Oznacz osobę (przypomnienie)</label>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:6}}>
+              {zdMentions.map(m => (
+                <span key={m} style={{background:"#eff6ff",color:"#1d4ed8",padding:"2px 10px",borderRadius:99,fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:4}}>
+                  @{m} <button onClick={() => setZdMentions(p=>p.filter(x=>x!==m))} style={{background:"none",border:"none",cursor:"pointer",color:"#6b7280",fontSize:11}}>✕</button>
+                </span>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:6}}>
+              <select value="" onChange={e => { if(e.target.value && !zdMentions.includes(e.target.value)) setZdMentions(p=>[...p,e.target.value]); }}
+                style={{flex:1,padding:"7px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",background:"#fff"}}>
+                <option value="">Wybierz z listy...</option>
+                {appUsers.map(u => <option key={u.uid} value={u.email}>{u.email}</option>)}
+              </select>
+              <input value={mentionInput} onChange={e=>setMentionInput(e.target.value)}
+                placeholder="lub wpisz email..."
+                style={{flex:1,padding:"7px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none"}}
+                onKeyDown={e => { if(e.key==="Enter" && mentionInput.trim()) { setZdMentions(p=>[...p,mentionInput.trim()]); setMentionInput(""); }}}
+              />
+              <button onClick={() => { if(mentionInput.trim() && !zdMentions.includes(mentionInput.trim())) { setZdMentions(p=>[...p,mentionInput.trim()]); setMentionInput(""); }}}
+                style={{padding:"7px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontSize:13}}>+</button>
+            </div>
+          </div>
+          <div className="mb-3">
+            <label className={lbl}>Załącznik (opcjonalnie)</label>
+            {zdFile ? (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-xs">
+                <span>{zdFile.type === "application/pdf" ? "📄" : "🖼️"}</span>
+                <span className="text-gray-700 truncate max-w-48">{zdFile.name}</span>
+                <button onClick={() => setZdFile(null)} className="ml-auto text-gray-400 hover:text-red-400">✕</button>
+              </div>
+            ) : (
+              <SprawaFileUpload
+                sprawaId={sprawa.id}
+                subfolder="zdarzenia"
+                label="📎 Dodaj plik (PDF/JPG/PNG)"
+                onUploaded={(f) => setZdFile(f)}
+              />
+            )}
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => setShowAddZdarzenie(false)} style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer"}}>Anuluj</button>
+            <button onClick={addZdarzenie} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Dodaj</button>
+          </div>
+        </div>
+      )}
+
+      {zdarzenia.length === 0 && !showAddZdarzenie && (
+        <div className="text-center py-8 text-gray-400 text-sm">Brak zdarzeń — kliknij "+ Dodaj zdarzenie"</div>
+      )}
+
+      <div className="space-y-3">
+        {zdarzenia.map(z => {
+          const zt = ZDARZENIE_TYPY.find(t => t.id === z.typ) || ZDARZENIE_TYPY[2];
+          const dt = new Date(z.data);
+          return (
+            <div key={z.id} className="bg-white rounded-xl border border-gray-100 p-4">
+              {editZdarzenieId === z.id ? (
+                <div>
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <select value={editZdData.typ||z.typ} onChange={e=>setEditZdData(p=>({...p,typ:e.target.value}))}
+                      className="px-2 py-1.5 rounded-lg border border-gray-200 text-xs outline-none">
+                      {ZDARZENIE_TYPY.map(t=><option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
+                    </select>
+                    <input value={editZdData.ktoDoKogo ?? z.ktoDoKogo ?? ""} onChange={e=>setEditZdData(p=>({...p,ktoDoKogo:e.target.value}))}
+                      placeholder="Kto / Do kogo" className="px-2 py-1.5 rounded-lg border border-gray-200 text-xs outline-none" />
+                  </div>
+                  <textarea value={editZdData.tresc ?? z.tresc ?? ""} onChange={e=>setEditZdData(p=>({...p,tresc:e.target.value}))}
+                    rows={3} className="w-full px-2 py-1.5 rounded-lg border border-gray-200 text-sm outline-none resize-none mb-2" />
+                  <div className="mb-2">
+                    {(editZdData.zalacznik || z.zalacznik) ? (
+                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-200 bg-gray-50 text-xs">
+                        <span>{(editZdData.zalacznik||z.zalacznik).type === "application/pdf" ? "📄" : "🖼️"}</span>
+                        <a href={(editZdData.zalacznik||z.zalacznik).url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate max-w-48">{(editZdData.zalacznik||z.zalacznik).name}</a>
+                        <button onClick={() => setEditZdData(p=>({...p,zalacznik:null}))} className="ml-auto text-gray-400 hover:text-red-400">✕</button>
+                      </div>
+                    ) : (
+                      <SprawaFileUpload
+                        sprawaId={sprawa.id}
+                        subfolder="zdarzenia"
+                        label="📎 Dodaj załącznik"
+                        onUploaded={(f) => setEditZdData(p=>({...p,zalacznik:f}))}
+                      />
+                    )}
+                  </div>
+                  <div className="flex gap-2 justify-end">
+                    <button onClick={() => { setEditZdarzenieId(null); setEditZdData({}); }}
+                      className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 bg-white">Anuluj</button>
+                    <button onClick={() => {
+                      const updated = (sprawa.zdarzenia||[]).map(zd => zd.id === z.id ? {...zd, ...editZdData} : zd);
+                      onUpdate({zdarzenia: updated});
+                      setEditZdarzenieId(null); setEditZdData({});
+                    }} className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white" style={{background:"#111827"}}>Zapisz</button>
+                  </div>
+                </div>
+              ) : (
+              <div className="flex items-start gap-3">
+                <span className="text-xl mt-0.5 flex-shrink-0">{zt.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-semibold text-gray-700">{zt.label}</span>
+                      {z.ktoDoKogo && <span className="text-xs text-gray-400">· {z.ktoDoKogo}</span>}
+                    </div>
+                    <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                      <span className="text-xs text-gray-400">{dt.toLocaleDateString("pl-PL")} {dt.toLocaleTimeString("pl-PL",{hour:"2-digit",minute:"2-digit"})}</span>
+                      <div className="flex gap-1">
+                        <button onClick={() => { setEditZdarzenieId(z.id); setEditZdData({typ:z.typ,tresc:z.tresc,ktoDoKogo:z.ktoDoKogo}); }}
+                          className="px-2 py-0.5 rounded text-xs text-gray-400 hover:bg-gray-100">✏️</button>
+                        <button onClick={() => { setPoprzypomnienieZdId(z.id); setRzypomnienieData(z.przypomnienie||""); setRzypomnienieOpis(z.przypomnienieOpis||""); }}
+                          className="px-2 py-0.5 rounded text-xs hover:bg-orange-50 transition-all"
+                          style={{color: z.przypomnienie ? "#f97316" : "#d1d5db"}} title="Ustaw przypomnienie">⏰</button>
+                        <button onClick={() => { if(window.confirm("Usunąć zdarzenie?")) onUpdate({zdarzenia:(sprawa.zdarzenia||[]).filter(zd=>zd.id!==z.id)}); }}
+                          className="px-2 py-0.5 rounded text-xs hover:bg-red-50 transition-all" style={{color:"#ef4444"}}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-sm text-gray-700 whitespace-pre-wrap">{z.tresc}</div>
+                  {z.zalacznik && (
+                    <div className="mt-2">
+                      <a href={z.zalacznik.url} target="_blank" rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-gray-50 text-xs text-blue-600 hover:bg-blue-50 transition-all">
+                        <span>{z.zalacznik.type === "application/pdf" ? "📄" : "🖼️"}</span>
+                        <span className="max-w-48 truncate">{z.zalacznik.name}</span>
+                      </a>
+                    </div>
+                  )}
+                  <div className="text-xs text-gray-400 mt-1.5 flex items-center gap-2 flex-wrap">
+                    <span>👤 {z.autor}</span>
+                    {z.mentions && z.mentions.length > 0 && z.mentions.map(m => (
+                      <span key={m} style={{background:"#eff6ff",color:"#1d4ed8",padding:"1px 8px",borderRadius:99,fontSize:11,fontWeight:600}}>@{m}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {przypomnienieZdId && (
+        <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.35)"}}>
+          <div style={{background:"#fff",borderRadius:16,padding:24,width:360,boxShadow:"0 8px 32px rgba(0,0,0,0.12)"}}>
+            <h3 style={{fontWeight:700,fontSize:15,marginBottom:16,color:"#111827"}}>Ustaw przypomnienie</h3>
+            <div style={{marginBottom:12}}>
+              <label style={{display:"block",fontSize:12,fontWeight:600,color:"#6b7280",marginBottom:4}}>Data i godzina</label>
+              <input type="datetime-local" value={przypomnienieData} onChange={e => setRzypomnienieData(e.target.value)}
+                style={{width:"100%",padding:"8px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",boxSizing:"border-box"}} />
+            </div>
+            <div style={{marginBottom:16}}>
+              <label style={{display:"block",fontSize:12,fontWeight:600,color:"#6b7280",marginBottom:4}}>Krotki opis</label>
+              <input value={przypomnienieOpis} onChange={e => setRzypomnienieOpis(e.target.value)}
+                placeholder="np. Zadzwon do klienta..."
+                style={{width:"100%",padding:"8px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",boxSizing:"border-box"}} />
+            </div>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              {przypomnienieData && (
+                <button onClick={() => {
+                  const updated = (sprawa.zdarzenia||[]).map(zd => zd.id === przypomnienieZdId ? {...zd, przypomnienie:null, przypomnienieOpis:null} : zd);
+                  onUpdate({zdarzenia: updated});
+                  setPoprzypomnienieZdId(null);
+                }} style={{padding:"8px 14px",borderRadius:8,border:"1.5px solid #fecaca",background:"#fff",fontSize:12,cursor:"pointer",color:"#ef4444"}}>Usun</button>
+              )}
+              <button onClick={() => setPoprzypomnienieZdId(null)}
+                style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer"}}>Anuluj</button>
+              <button onClick={() => {
+                const updated = (sprawa.zdarzenia||[]).map(zd => zd.id === przypomnienieZdId ? {...zd, przypomnienie: przypomnienieData, przypomnienieOpis: przypomnienieOpis} : zd);
+                onUpdate({zdarzenia: updated});
+                setPoprzypomnienieZdId(null);
+                showToast("Przypomnienie ustawione");
+              }} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Zapisz</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SprawyTab({ sprawyList, vehicles, currentUser, appUsers, eurRate, eurRateDate, showToast, onAdd, onUpdate, onDelete }) {
+  const [view, setView] = useState("lista");
+  const [selectedId, setSelectedId] = useState(null);
+  const [showNewSprawa, setShowNewSprawa] = useState(false);
+  const [showNewTyp, setShowNewTyp] = useState(false);
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterTyp, setFilterTyp] = useState("all");
+  const [filterMoje, setFilterMoje] = useState(false);
+  const [customTypy, setCustomTypy] = useState([]);
+  const [newTypLabel, setNewTypLabel] = useState("");
+
+  const allTypy = [...SPRAWA_TYPY, ...customTypy];
+  const selected = sprawyList.find(s => s.id === selectedId);
+
+  const today = new Date().toISOString().slice(0,10);
+  const dzisiaj = sprawyList.filter(s => s.status !== "zamknieta" && s.status !== "wygrana" && s.status !== "przegrana" && s.przypomnienie && s.przypomnienie <= today);
+
+  const isAdminUser = appUsers.find(u => u.email === currentUser.email)?.role === "admin";
+  const filtered = sprawyList.filter(s => {
+    if (!isAdminUser && !(s.przypisani||[]).includes(currentUser.email)) return false;
+    if (filterStatus !== "all" && s.status !== filterStatus) return false;
+    if (filterTyp !== "all" && s.typ !== filterTyp) return false;
+    if (filterMoje && !(s.przypisani||[]).includes(currentUser.email)) return false;
+    return true;
+  }).sort((a,b) => (b.dataUtworzenia||"").localeCompare(a.dataUtworzenia||""));
+
+  if (view === "szczegoly" && selected) {
+    return <SprawaDetail
+      sprawa={selected}
+      vehicles={vehicles}
+      allTypy={allTypy}
+      currentUser={currentUser}
+      appUsers={appUsers}
+      onUpdate={(data) => onUpdate(selected.id, data)}
+      onDelete={() => { onDelete(selected.id); setView("lista"); setSelectedId(null); showToast("Sprawa usunięta"); }}
+      onBack={() => setView("lista")}
+      showToast={showToast}
+    />;
+  }
+
+  return (
+    <div>
+      {/* HEADER */}
+      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">Sprawy</h2>
+          <p className="text-sm text-gray-400 mt-0.5">{sprawyList.filter(s=>s.status==="otwarta"||s.status==="w_toku").length} aktywnych · {sprawyList.length} łącznie</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="px-3 py-2 rounded-xl text-sm flex items-center gap-1.5"
+            style={{background:"#fffbeb",border:"1px solid #fde68a",color:"#92400e"}}>
+            <span>💱</span>
+            <span className="font-semibold text-xs">1 € = {eurRate ? eurRate.toFixed(4) : "4.27"} zł</span>
+            <span className="text-xs opacity-60">· NBP {eurRateDate || ""}</span>
+          </div>
+          <button onClick={() => setShowNewSprawa(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white hover:opacity-90 transition-all"
+            style={{background:"#111827"}}>
+            + Nowa sprawa
+          </button>
+        </div>
+      </div>
+
+      {/* PRZYPOMNIENIA DZISIAJ */}
+      {dzisiaj.length > 0 && (
+        <div className="mb-4 p-4 rounded-xl border" style={{background:"#fff7ed",borderColor:"#fed7aa"}}>
+          <div className="text-sm font-bold text-orange-700 mb-2">⏰ Przypomnienia na dziś ({dzisiaj.length})</div>
+          <div className="space-y-1.5">
+            {dzisiaj.map(s => {
+              const typ = allTypy.find(t => t.id === s.typ);
+              return (
+                <div key={s.id} onClick={() => { setSelectedId(s.id); setView("szczegoly"); }}
+                  className="flex items-center gap-3 cursor-pointer hover:bg-orange-100 px-3 py-2 rounded-lg transition-all">
+                  <span>{typ?.icon || "📌"}</span>
+                  <span className="text-sm font-medium text-orange-800">{s.numer} · {s.klient}</span>
+                  <span className="ml-auto text-xs text-orange-500">{s.kwota ? s.kwota+" €" : ""}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* FILTRY */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+          className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 outline-none bg-white text-gray-700">
+          <option value="all">Wszystkie statusy</option>
+          {SPRAWA_STATUSY.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+        </select>
+        <select value={filterTyp} onChange={e => setFilterTyp(e.target.value)}
+          className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 outline-none bg-white text-gray-700">
+          <option value="all">Wszystkie typy</option>
+          {allTypy.map(t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
+        </select>
+        <button onClick={() => setShowNewTyp(true)}
+          className="px-3 py-1.5 rounded-lg text-xs border border-dashed border-gray-300 text-gray-500 hover:bg-gray-50">
+          + Nowy typ
+        </button>
+        <button onClick={() => setFilterMoje(p => !p)}
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all"
+          style={{background: filterMoje ? "#111827" : "#fff", color: filterMoje ? "#fff" : "#6b7280", borderColor: filterMoje ? "#111827" : "#e5e7eb"}}>
+          Moje sprawy
+        </button>
+      </div>
+
+      {/* LISTA SPRAW */}
+      <div className="space-y-2">
+        {filtered.length === 0 && (
+          <div className="text-center py-16 text-gray-400">
+            <div className="text-4xl mb-3">⚡</div>
+            <div className="font-medium">Brak spraw</div>
+            <div className="text-sm mt-1">Kliknij "+ Nowa sprawa" aby dodać</div>
+          </div>
+        )}
+        {filtered.map(s => {
+          const typ = allTypy.find(t => t.id === s.typ);
+          const status = SPRAWA_STATUSY.find(st => st.id === s.status) || SPRAWA_STATUSY[0];
+          const isOverdue = s.terminPlatnosci && s.terminPlatnosci < today && s.status !== "zamknieta" && s.status !== "wygrana";
+          const daysLeft = s.terminPlatnosci ? Math.ceil((new Date(s.terminPlatnosci) - new Date()) / 86400000) : null;
+          return (
+            <div key={s.id} onClick={() => { setSelectedId(s.id); setView("szczegoly"); }}
+              className="bg-white rounded-xl border p-4 cursor-pointer hover:shadow-sm transition-all"
+              style={{borderColor: isOverdue ? "#fca5a5" : "#f3f4f6", background: isOverdue ? "#fff7f7" : "#fff"}}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                  <span className="text-xl flex-shrink-0">{typ?.icon || "📌"}</span>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-sm text-gray-900">{s.numer || "—"}</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{background: status.bg, color: status.color}}>{status.label}</span>
+                      {isOverdue && <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{background:"#fef2f2",color:"#dc2626"}}>⚠ Przeterminowane</span>}
+                    </div>
+                    <div className="text-sm text-gray-600 mt-0.5 truncate">{s.klient || "—"}{s.podtyp ? <span className="text-xs text-gray-400 ml-1">· {s.podtyp}</span> : null}</div>
+                    {s.uwagi && <div className="text-xs text-gray-400 mt-0.5 truncate">{s.uwagi}</div>}
+                  </div>
+                </div>
+                <div className="text-right flex-shrink-0">
+                  {s.kwota && <div className="font-bold text-sm text-gray-900">{s.kwota} {s.waluta||"EUR"}</div>}
+                  {daysLeft !== null && (
+                    <div className="text-xs mt-0.5" style={{color: daysLeft < 0 ? "#dc2626" : daysLeft <= 7 ? "#f97316" : "#6b7280"}}>
+                      {daysLeft < 0 ? `${Math.abs(daysLeft)}d po terminie` : daysLeft === 0 ? "Dziś!" : `${daysLeft}d do terminu`}
+                    </div>
+                  )}
+                  <div className="text-xs text-gray-400 mt-0.5">{s.zdarzenia?.length || 0} zdarzeń</div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* MODAL NOWA SPRAWA */}
+      {showNewSprawa && (
+        <NowaSprawaModal
+          allTypy={allTypy}
+          vehicles={vehicles}
+          appUsers={appUsers}
+          onSave={(data) => {
+            onAdd({ ...data, status: "otwarta", zdarzenia: [], dataUtworzenia: new Date().toISOString() });
+            setShowNewSprawa(false);
+            showToast("✅ Sprawa dodana");
+          }}
+          onClose={() => setShowNewSprawa(false)}
+        />
+      )}
+
+      {/* MODAL NOWY TYP */}
+      {showNewTyp && (
+        <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.35)"}}>
+          <div style={{background:"#fff",borderRadius:16,padding:24,width:320,boxShadow:"0 8px 32px rgba(0,0,0,0.12)"}}>
+            <h3 style={{fontWeight:700,fontSize:15,marginBottom:16}}>Nowy typ sprawy</h3>
+            <input value={newTypLabel} onChange={e => setNewTypLabel(e.target.value)}
+              placeholder="Nazwa typu (np. Windykacja)"
+              style={{width:"100%",padding:"8px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",boxSizing:"border-box",marginBottom:12}} />
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button onClick={() => setShowNewTyp(false)} style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer"}}>Anuluj</button>
+              <button onClick={() => {
+                if (!newTypLabel.trim()) return;
+                const id = newTypLabel.toLowerCase().replace(/\s+/g,"_") + "_" + Math.random().toString(36).slice(2,5);
+                setCustomTypy(p => [...p, { id, label: newTypLabel.trim(), icon: "📌", color: "#6b7280" }]);
+                setNewTypLabel("");
+                setShowNewTyp(false);
+              }} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Dodaj</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2973,9 +3967,18 @@ function AddDocModal({ vehicles, doc, onSave, onClose }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // MODAL: ADD COST
 // ═══════════════════════════════════════════════════════════════════════════════
-function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, toPLN, toEUR, onSave, onClose, onAddCategory }) {
+function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, toPLN, toEUR, onSave, onClose, onAddCategory, editRecord }) {
   const today = new Date().toISOString().split("T")[0];
-  const [form, setForm] = useState({
+  const [form, setForm] = useState(editRecord ? {
+    vehicleId: editRecord.vehicleId || vehicles[0]?.id || "",
+    category:  editRecord.category || categories[0]?.id || "",
+    currency:  editRecord.currency || "EUR",
+    amountPLN: editRecord.amountPLN || "",
+    amountEUR: editRecord.amountEUR || "",
+    date:      editRecord.date || today,
+    note:      editRecord.note || "",
+    liters:    editRecord.liters || "",
+  } : {
     vehicleId: vehicles[0]?.id || "",
     category:  categories[0]?.id || "",
     currency:  "EUR",
@@ -3032,7 +4035,7 @@ function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, 
         style={{ fontFamily: "'DM Sans', sans-serif", maxHeight: "95vh" }}>
 
         <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100 sticky top-0 bg-white z-10">
-          <h3 className="text-base font-bold text-gray-900">Nowy koszt</h3>
+          <h3 className="text-base font-bold text-gray-900">{editRecord ? "Edytuj koszt" : "Nowy koszt"}</h3>
           <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 transition-all text-xs">✕</button>
         </div>
 
@@ -3153,7 +4156,7 @@ function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, 
             disabled={!form.vehicleId || (!form.amountPLN && !form.amountEUR)}
             className="w-full py-3 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-95 disabled:opacity-30"
             style={{ background: "#111827" }}>
-            Zapisz koszt
+            {editRecord ? "Zapisz zmiany" : "Zapisz koszt"}
           </button>
         </div>
       </div>
@@ -3195,7 +4198,7 @@ const MONTHS_PL = ["Styczeń","Luty","Marzec","Kwiecień","Maj","Czerwiec","Lipi
 
 function rentKey(vehicleId, year, month) { return `${vehicleId}_${year}_${month}`; }
 
-function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], onAdd, onUpdate, onDelete }) {
+function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operacyjne = [], onSaveOperacyjne, onAdd, onUpdate, onDelete }) {
   const [view, setView]           = useState("flota");
   const [selVehicle, setSelVehicle] = useState(null);
   const [selYear, setSelYear]     = useState(new Date().getFullYear());
@@ -3310,7 +4313,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], onAdd,
 
       {/* SUB-NAV */}
       <div className="flex gap-1 mb-5 p-1 rounded-xl" style={{ background:"#f3f4f6" }}>
-        {[["flota","🚛 Flota — przegląd"],["pojazd","📋 Pojazd — szczegół"],["trendy","📈 Trendy"]].map(([id,label]) => (
+        {[["flota","🚛 Flota — przegląd"],["pojazd","📋 Pojazd — dane operacyjne"],["trendy","📈 Trendy"]].map(([id,label]) => (
           <button key={id} onClick={() => setView(id)}
             className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all"
             style={{ background: view===id ? "#fff" : "transparent", color: view===id ? "#111827" : "#9ca3af",
@@ -3334,48 +4337,6 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], onAdd,
                 <div className="text-lg font-bold" style={{ color }}>{fmt(val)}</div>
               </div>
             ))}
-          </div>
-
-          {/* Per-vehicle table */}
-          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-            <div className="grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-semibold text-gray-400 uppercase tracking-wider">
-              <span className="col-span-3">Pojazd</span>
-              <span className="col-span-2 text-right">Frachty</span>
-              <span className="col-span-2 text-right">Koszty</span>
-              <span className="col-span-2 text-right">Zysk</span>
-              <span className="col-span-2 text-right">Marża</span>
-              <span className="col-span-1"></span>
-            </div>
-            {vehicles.map(v => {
-              const f = totalFrachty(v.id, selYear);
-              const k = totalKoszt(v.id, selYear);
-              const z = f - k;
-              const marza = f > 0 ? (z / f * 100) : 0;
-              const hasData = records.some(r => r.vehicleId === v.id && r.year === selYear);
-              return (
-                <div key={v.id} className="grid grid-cols-12 px-5 py-3.5 border-b border-gray-50 items-center hover:bg-gray-50 transition-colors">
-                  <div className="col-span-3">
-                    <div className="font-semibold text-sm text-gray-900" style={{ fontFamily:"'DM Mono',monospace" }}>{v.plate}</div>
-                    <div className="text-xs text-gray-400">{v.brand}</div>
-                  </div>
-                  <div className="col-span-2 text-right text-sm font-medium text-gray-700">{f > 0 ? fmt(f) : <span className="text-gray-300">—</span>}</div>
-                  <div className="col-span-2 text-right text-sm font-medium text-gray-700">{k > 0 ? fmt(k) : <span className="text-gray-300">—</span>}</div>
-                  <div className="col-span-2 text-right text-sm font-bold" style={{ color: zyskColor(z) }}>{hasData ? fmtS(z) : <span className="text-gray-300">—</span>}</div>
-                  <div className="col-span-2 text-right">
-                    {f > 0 ? (
-                      <span className="px-2 py-0.5 rounded-full text-xs font-bold"
-                        style={{ background: zyskBg(z), color: zyskColor(z) }}>
-                        {marza.toFixed(1)}%
-                      </span>
-                    ) : <span className="text-gray-300 text-xs">—</span>}
-                  </div>
-                  <div className="col-span-1 flex justify-end gap-1">
-                    <button onClick={() => { setSelVehicle(v.id); setView("pojazd"); }}
-                      className="w-6 h-6 rounded flex items-center justify-center text-gray-300 hover:text-blue-500 hover:bg-blue-50 transition-all text-xs" title="Szczegół">▶</button>
-                  </div>
-                </div>
-              );
-            })}
           </div>
 
           {/* Month grid for current year */}
@@ -3436,6 +4397,48 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], onAdd,
           </div>
         </div>
       )}
+
+          {/* Per-vehicle table */}
+          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+            <div className="grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+              <span className="col-span-3">Pojazd</span>
+              <span className="col-span-2 text-right">Frachty</span>
+              <span className="col-span-2 text-right">Koszty</span>
+              <span className="col-span-2 text-right">Zysk</span>
+              <span className="col-span-2 text-right">Marża</span>
+              <span className="col-span-1"></span>
+            </div>
+            {vehicles.map(v => {
+              const f = totalFrachty(v.id, selYear);
+              const k = totalKoszt(v.id, selYear);
+              const z = f - k;
+              const marza = f > 0 ? (z / f * 100) : 0;
+              const hasData = records.some(r => r.vehicleId === v.id && r.year === selYear);
+              return (
+                <div key={v.id} className="grid grid-cols-12 px-5 py-3.5 border-b border-gray-50 items-center hover:bg-gray-50 transition-colors">
+                  <div className="col-span-3">
+                    <div className="font-semibold text-sm text-gray-900" style={{ fontFamily:"'DM Mono',monospace" }}>{v.plate}</div>
+                    <div className="text-xs text-gray-400">{v.brand}</div>
+                  </div>
+                  <div className="col-span-2 text-right text-sm font-medium text-gray-700">{f > 0 ? fmt(f) : <span className="text-gray-300">—</span>}</div>
+                  <div className="col-span-2 text-right text-sm font-medium text-gray-700">{k > 0 ? fmt(k) : <span className="text-gray-300">—</span>}</div>
+                  <div className="col-span-2 text-right text-sm font-bold" style={{ color: zyskColor(z) }}>{hasData ? fmtS(z) : <span className="text-gray-300">—</span>}</div>
+                  <div className="col-span-2 text-right">
+                    {f > 0 ? (
+                      <span className="px-2 py-0.5 rounded-full text-xs font-bold"
+                        style={{ background: zyskBg(z), color: zyskColor(z) }}>
+                        {marza.toFixed(1)}%
+                      </span>
+                    ) : <span className="text-gray-300 text-xs">—</span>}
+                  </div>
+                  <div className="col-span-1 flex justify-end gap-1">
+                    <button onClick={() => { setSelVehicle(v.id); setView("pojazd"); }}
+                      className="w-6 h-6 rounded flex items-center justify-center text-gray-300 hover:text-blue-500 hover:bg-blue-50 transition-all text-xs" title="Szczegół">▶</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
 
       {/* ── VIEW 2: POJAZD SZCZEGÓŁ ── */}
       {view === "pojazd" && (
@@ -3572,6 +4575,18 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], onAdd,
                             <td className="text-right px-3 py-2.5 font-bold" style={{ color: r ? zyskColor(z) : "#d1d5db" }}>{r ? fmtS(z) : "—"}</td>
                             <td className="text-right px-3 py-2.5 text-gray-400">{r?.kmLicznik ? r.kmLicznik.toLocaleString("pl-PL") : <span className="text-gray-200">—</span>}</td>
                             <td className="text-right px-3 py-2.5 text-gray-400">{r?.dni || <span className="text-gray-200">—</span>}</td>
+                            {(() => {
+                              const op = operacyjne.find(o => o.vehicleId === selVehicle && o.year === selYear && o.month === mi+1);
+                              const koszt_km = op?.kmLicznik && r?.costs ? (Object.values(r.costs||{}).reduce((s,v)=>s+v,0) / op.kmLicznik).toFixed(2) : null;
+                              const sr_waga = frachtyList.filter(f => f.vehicleId === selVehicle && (f.dataZaladunku||'').startsWith(`${selYear}-${String(mi+1).padStart(2,'0')}`)).reduce((s,f,_,arr) => s + (parseFloat(f.wagaLadunku)||0)/arr.length, 0);
+                              return (<>
+                                <td className="text-right px-3 py-2.5 text-gray-400">{op?.paliwoL ? op.paliwoL.toLocaleString("pl-PL",{maximumFractionDigits:0})+" L" : <span className="text-gray-200">—</span>}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-400">{op?.spalanie ? op.spalanie.toFixed(1)+" L/100" : <span className="text-gray-200">—</span>}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-400">{op?.cenaPaliwa ? op.cenaPaliwa.toFixed(2)+" €/L" : <span className="text-gray-200">—</span>}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-400">{koszt_km ? koszt_km+" €/km" : <span className="text-gray-200">—</span>}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-400">{sr_waga > 0 ? Math.round(sr_waga)+" kg" : <span className="text-gray-200">—</span>}</td>
+                              </>);
+                            })()}
                             <td className="px-3 py-2.5">
                               {r && <button onClick={e=>{e.stopPropagation();onDelete(r.id);}} className="w-5 h-5 flex items-center justify-center text-gray-200 hover:text-red-400 rounded transition-all">✕</button>}
                             </td>
@@ -5690,7 +6705,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                       {r.urlZlecenie
                         ? <a href={r.urlZlecenie} target="_blank" rel="noopener noreferrer"
                             className="text-xs px-2 py-1 rounded-lg font-medium transition-all hover:bg-blue-100"
-                            style={{background:"#eff6ff", color:"#1d4ed8"}}>Otwórz</a>
+                            style={{background:"#f0fdf4", color:"#15803d"}}>📄 Otwórz</a>
                         : <ZlecenieUploadBtn frachtId={r.id}
                             onUploaded={(url, nr) => onUpdate(r.id, { urlZlecenie: url, ...(nr ? {nrZlecenia: nr} : {}) })} />
                       }
@@ -5810,7 +6825,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
   const [showImport, setShowImport] = useState(false);
   const [overviewYear, setOverviewYear] = useState("all");
   const [overviewMonth, setOverviewMonth] = useState("all");
-  const [filterMonth, setFilterMonth] = useState(new Date().getMonth());
+  const [filterMonth, setFilterMonth] = useState(null);
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
   const fmt = (n) => n && parseFloat(n) > 0 ? parseFloat(n).toLocaleString("pl-PL",{minimumFractionDigits:2,maximumFractionDigits:2}) : "—";
   const monthFreights = (vid) => frachtyList.filter(r => {
@@ -5818,7 +6833,8 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
     const dateStr = r.dataZaladunku || r.dataZlecenia;
     if (!dateStr) return false;
     const d = new Date(dateStr);
-    return d.getFullYear() === filterYear && d.getMonth() === filterMonth;
+    if (filterMonth !== null && d.getMonth() !== filterMonth) return false;
+    return d.getFullYear() === filterYear;
   }).sort((a,b) => (a.dataZaladunku||a.dataZlecenia||"").localeCompare(b.dataZaladunku||b.dataZlecenia||""));
   const editRecord = editId ? frachtyList.find(r => r.id === editId) : null;
 
@@ -5915,8 +6931,9 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
 
         {/* KARTY POJAZDÓW */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {vehicles.map(v => {
+          {vehicles.filter(v => !v.archived).map(v => {
             const vf = visibleList.filter(r => r.vehicleId === v.id);
+            if (vf.length === 0) return null;
             const suma = vf.reduce((s,r) => s + (parseFloat(r.cenaEur)||0), 0);
             const km = vf.reduce((s,r) => s + (parseInt(r.kmWszystkie)||parseInt(r.kmLadowne)||0), 0);
             return (
@@ -5946,6 +6963,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
   const rows = monthFreights(selectedVehicle);
   const totalCena = rows.reduce((s,r) => s + (parseFloat(r.cenaEur)||0), 0);
   const totalKmWszAll = rows.reduce((s,r) => s + (parseInt(r.kmWszystkie)||parseInt(r.kmLadowne)||0), 0);
+  const totalKmPodj = rows.reduce((s,r) => s + (parseInt(r.kmPodjazd)||0), 0);
   const totalKmLad = rows.reduce((s,r) => s + (parseInt(r.kmLadowne)||0), 0);
   const totalKmWsz = rows.reduce((s,r) => s + (parseInt(r.kmWszystkie)||0), 0);
   const avgEurKm = totalKmWszAll > 0 ? (totalCena/totalKmWszAll).toFixed(2) : (totalKmLad > 0 ? (totalCena/totalKmLad).toFixed(2) : "-");
@@ -5969,6 +6987,11 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
           ))}
         </div>
         <div className="flex gap-1 flex-wrap">
+          <button onClick={() => setFilterMonth(null)}
+            className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
+            style={{ background: filterMonth===null ? "#111827" : "#f3f4f6", color: filterMonth===null ? "#fff" : "#6b7280" }}>
+            Wszystkie
+          </button>
           {["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paz","Lis","Gru"].map((m,i) => (
             <button key={i} onClick={() => setFilterMonth(i)} className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all" style={{background:filterMonth===i?"#111827":"#f3f4f6",color:filterMonth===i?"#fff":"#6b7280"}}>{m}</button>
           ))}
@@ -6087,7 +7110,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
                       {r.urlZlecenie
                         ? <a href={r.urlZlecenie} target="_blank" rel="noopener noreferrer"
                             className="text-xs px-2 py-1 rounded-lg font-medium transition-all hover:bg-blue-100"
-                            style={{background:"#eff6ff", color:"#1d4ed8"}}>Otwórz</a>
+                            style={{background:"#f0fdf4", color:"#15803d"}}>📄 Otwórz</a>
                         : <ZlecenieUploadBtn frachtId={r.id}
                             onUploaded={(url, nr) => onUpdate(r.id, { urlZlecenie: url, ...(nr ? {nrZlecenia: nr} : {}) })} />
                       }
@@ -6100,9 +7123,10 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
             })}
             {rows.length > 0 && (
               <tr className="bg-gray-50 font-bold border-t-2 border-gray-200">
-                <td colSpan={8} className="px-2 py-2.5 text-gray-700 text-xs uppercase">SUMA</td>
+                <td colSpan={7} className="px-2 py-2.5 text-gray-700 text-xs uppercase">SUMA</td>
                 <td className="px-2 py-2.5 text-right text-green-700">{fmt(totalCena)}</td>
                 <td></td>
+                <td className="px-2 py-2.5 text-right text-blue-700">{totalKmPodj.toLocaleString("pl-PL")}</td>
                 <td className="px-2 py-2.5 text-right text-blue-700">{totalKmLad.toLocaleString("pl-PL")}</td>
                 <td className="px-2 py-2.5 text-right text-blue-700">{totalKmWsz.toLocaleString("pl-PL")}</td>
                 <td className="px-2 py-2.5 text-right text-amber-600">{avgEurKm}</td>
@@ -6421,7 +7445,7 @@ function FVEditModal({ record, onSave, onClose }) {
 }
 
 // ─── ZLECENIE UPLOAD BTN ─────────────────────────────────────────────────────
-function ZlecenieUploadBtn({ frachtId, onUploaded, label = "📎 zlecenie", fullWidth = false }) {
+function ZlecenieUploadBtn({ frachtId, onUploaded, label = "+ Dodaj zlecenie", fullWidth = false }) {
   // onUploaded(url, nrZlecenia)
   const [status, setStatus] = useState("idle");
   const fileRef = useRef(null);
@@ -6478,8 +7502,8 @@ function ZlecenieUploadBtn({ frachtId, onUploaded, label = "📎 zlecenie", full
     <div className={fullWidth ? "w-full" : ""}>
       {status === "idle" && (
         <button onClick={() => fileRef.current?.click()}
-          className={`text-xs px-2 py-1 rounded-lg border border-dashed font-medium transition-all hover:bg-blue-50 ${fullWidth ? "w-full text-center" : ""}`}
-          style={{ borderColor: "#93c5fd", color: "#2563eb" }}>
+          className={`text-xs px-2 py-1 rounded-lg border border-dashed font-medium transition-all hover:bg-gray-50 ${fullWidth ? "w-full text-center" : ""}`}
+          style={{ borderColor: "#d1d5db", color: "#6b7280" }}>
           {label}
         </button>
       )}
