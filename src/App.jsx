@@ -963,13 +963,13 @@ function App({ user, role, appUsers = [] }) {
                         .filter(r => r.dataZaladunku && new Date(r.dataZaladunku) > todayMidnight)
                         .sort((a,b) => a.dataZaladunku.localeCompare(b.dataZaladunku))[0] || null;
 
-                      // Ostatni rozładowany (rozł < dziś)
-                      const lastDoneF = vFrachty.find(r => {
+                      // Ostatni rozładowany (rozł < dziś) - bierzemy najnowszy
+                      const lastDoneF = vFrachty.filter(r => {
                         const rozl = r.dataRozladunku ? new Date(r.dataRozladunku) : null;
                         if (!rozl) return false;
                         rozl.setHours(0,0,0,0);
                         return rozl < todayMidnight;
-                      });
+                      }).sort((a,b) => (b.dataRozladunku||"").localeCompare(a.dataRozladunku||""))[0] || null;
 
                       if (activeF) {
                         status = "trasa";
