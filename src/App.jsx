@@ -4673,190 +4673,16 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
       )}
 
       {/* ── VIEW 3: TRENDY ── */}
-      {view === "trendy" && (() => {
-        const METRYKI = [
-          { id: "frachty",  label: "Frachty €",     color: "#3b82f6" },
-          { id: "koszty",   label: "Koszty €",      color: "#ef4444" },
-          { id: "zysk",     label: "Zysk €",        color: "#16a34a" },
-          { id: "kmLicznik",label: "KM licznik",    color: "#8b5cf6" },
-          { id: "paliwoL",  label: "Paliwo L",      color: "#f59e0b" },
-          { id: "spalanie", label: "Spalanie L/100",color: "#06b6d4" },
-          { id: "eurKm",    label: "€/km",           color: "#ec4899" },
-          { id: "dni",      label: "Dni w trasie",  color: "#64748b" },
-        ];
-        const [tVehicles, setTVehicles] = useState([vehicles[0]?.id].filter(Boolean));
-        const [tYears,    setTYears]    = useState([selYear]);
-        const [tMetryki,  setTMetryki]  = useState(["frachty","zysk"]);
-        const [tMode,     setTMode]     = useState("vehicle");
+      {view === "trendy" && (
+        <TrendyTab
+          vehicles={vehicles}
+          records={records}
+          operacyjne={operacyjne}
+          selYear={selYear}
+          getRecord={getRecord}
+        />
+      )}
 
-        const toggleArr = (arr, setArr, val) => setArr(p => p.includes(val) ? p.filter(x=>x!==val) : [...p, val]);
-
-        const getVal = (vid, year, mi, metId) => {
-          const r = getRecord(vid, year, mi);
-          const op = operacyjne.find(o => o.vehicleId===vid && o.year===year && o.month===mi+1);
-          if (metId==="frachty")   return r?.frachty || 0;
-          if (metId==="koszty")    return r ? RENT_COSTS.reduce((s,c)=>s+(r.costs?.[c.id]||0),0) : 0;
-          if (metId==="zysk")      { const f=r?.frachty||0; const k=r?RENT_COSTS.reduce((s,c)=>s+(r.costs?.[c.id]||0),0):0; return f-k; }
-          if (metId==="kmLicznik") return op?.kmLicznik || 0;
-          if (metId==="paliwoL")   return op?.paliwoL || 0;
-          if (metId==="spalanie")  return op?.spalanie || 0;
-          if (metId==="eurKm")     { const k=r?RENT_COSTS.reduce((s,c)=>s+(r.costs?.[c.id]||0),0):0; return op?.kmLicznik&&k ? parseFloat((k/op.kmLicznik).toFixed(2)) : 0; }
-          if (metId==="dni")       return op?.dni || 0;
-          return 0;
-        };
-
-        const COLORS = ["#3b82f6","#ef4444","#16a34a","#8b5cf6","#f59e0b","#06b6d4","#ec4899","#64748b","#f97316","#0ea5e9"];
-        let series = [];
-        if (tMode === "vehicle") {
-          const met = tMetryki[0] || "frachty";
-          tVehicles.forEach((vid, i) => {
-            const veh = vehicles.find(v=>v.id===vid);
-            tYears.forEach((year, j) => {
-              const pts = MONTHS_PL.map((_, mi) => getVal(vid, year, mi, met));
-              series.push({ label: `${veh?.plate||vid} ${year}`, color: COLORS[(i*tYears.length+j)%COLORS.length], pts });
-            });
-          });
-        } else {
-          const vid = tVehicles[0] || vehicles[0]?.id;
-          const veh = vehicles.find(v=>v.id===vid);
-          tYears.forEach((year, j) => {
-            tMetryki.forEach((met, i) => {
-              const metDef = METRYKI.find(m=>m.id===met);
-              const pts = MONTHS_PL.map((_, mi) => getVal(vid, year, mi, met));
-              series.push({ label: `${metDef?.label} ${year}`, color: COLORS[(i*tYears.length+j)%COLORS.length], pts });
-            });
-          });
-        }
-
-        const allVals = series.flatMap(s=>s.pts).filter(v=>v!==0);
-        const minVal = allVals.length ? Math.min(...allVals) : 0;
-        const maxVal = allVals.length ? Math.max(...allVals) : 1;
-        const range = maxVal - minVal || 1;
-        const H = 220, W_PT = 52;
-        const chartW = MONTHS_PL.length * W_PT;
-        const toY = v => H - ((v - minVal) / range * (H - 20)) - 10;
-
-        return (
-          <div className="space-y-4">
-            <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4 space-y-4">
-              <div className="flex gap-2 items-center flex-wrap">
-                <span className="text-xs text-gray-500 w-20">Tryb:</span>
-                {[["vehicle","Porównaj pojazdy"],["metric","Porównaj metryki"]].map(([m,l])=>(
-                  <button key={m} onClick={()=>setTMode(m)}
-                    className={"px-3 py-1 rounded-lg text-xs font-medium transition-all "+(tMode===m?"bg-blue-500 text-white":"bg-gray-100 text-gray-500 hover:bg-gray-200")}>{l}</button>
-                ))}
-              </div>
-              <div className="flex gap-2 items-center flex-wrap">
-                <span className="text-xs text-gray-500 w-20">Rok:</span>
-                {[2024,2025,2026].map(y=>(
-                  <button key={y} onClick={()=>toggleArr(tYears,setTYears,y)}
-                    className={"px-3 py-1 rounded-lg text-xs font-medium transition-all "+(tYears.includes(y)?"bg-blue-500 text-white":"bg-gray-100 text-gray-500 hover:bg-gray-200")}>{y}</button>
-                ))}
-              </div>
-              <div className="flex gap-2 items-center flex-wrap">
-                <span className="text-xs text-gray-500 w-20">Pojazd:</span>
-                {vehicles.filter(v=>!v.archived).map(v=>(
-                  <button key={v.id} onClick={()=>tMode==="vehicle"?toggleArr(tVehicles,setTVehicles,v.id):setTVehicles([v.id])}
-                    className={"px-3 py-1 rounded-lg text-xs font-medium transition-all "+(tVehicles.includes(v.id)?"bg-indigo-500 text-white":"bg-gray-100 text-gray-500 hover:bg-gray-200")}>{v.plate}</button>
-                ))}
-              </div>
-              <div className="flex gap-2 items-center flex-wrap">
-                <span className="text-xs text-gray-500 w-20">Metryka:</span>
-                {METRYKI.map(m=>(
-                  <button key={m.id} onClick={()=>tMode==="metric"?toggleArr(tMetryki,setTMetryki,m.id):setTMetryki([m.id])}
-                    className={"px-3 py-1 rounded-lg text-xs font-medium transition-all "+(tMetryki.includes(m.id)?"text-white":"bg-gray-100 text-gray-500 hover:bg-gray-200")}
-                    style={tMetryki.includes(m.id)?{background:m.color}:{}}>{m.label}</button>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
-              <div className="flex gap-3 flex-wrap mb-3">
-                {series.map((s,i)=>(
-                  <div key={i} className="flex items-center gap-1.5">
-                    <div className="w-3 h-3 rounded-full" style={{background:s.color}}/>
-                    <span className="text-xs text-gray-600">{s.label}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="overflow-x-auto">
-                <svg width={chartW+40} height={H+40} style={{display:"block"}}>
-                  {[0,0.25,0.5,0.75,1].map(t=>{
-                    const y = H-(t*(H-20))-10;
-                    const v = minVal+t*range;
-                    return (
-                      <g key={t}>
-                        <line x1={30} y1={y} x2={chartW+30} y2={y} stroke="#f1f5f9" strokeWidth={1}/>
-                        <text x={28} y={y+4} textAnchor="end" fontSize={9} fill="#94a3b8">{v>=1000?(v/1000).toFixed(1)+"k":v.toFixed(v<10?1:0)}</text>
-                      </g>
-                    );
-                  })}
-                  {minVal<0&&maxVal>0&&(
-                    <line x1={30} y1={toY(0)} x2={chartW+30} y2={toY(0)} stroke="#e2e8f0" strokeWidth={1.5} strokeDasharray="4,2"/>
-                  )}
-                  {series.map((s,si)=>{
-                    const pts = s.pts.map((v,mi)=>({x:30+mi*W_PT+W_PT/2,y:toY(v),v}));
-                    const path = pts.map((p,i)=>(i===0?`M${p.x},${p.y}`:`L${p.x},${p.y}`)).join(" ");
-                    return (
-                      <g key={si}>
-                        <path d={path} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" opacity={0.85}/>
-                        {pts.map((p,mi)=>p.v!==0&&(
-                          <g key={mi}>
-                            <circle cx={p.x} cy={p.y} r={4} fill={s.color} stroke="white" strokeWidth={1.5}/>
-                            <title>{MONTHS_PL[mi]}: {p.v>=1000?(p.v/1000).toFixed(1)+"k":p.v.toFixed(p.v<10?2:0)}</title>
-                          </g>
-                        ))}
-                      </g>
-                    );
-                  })}
-                  {MONTHS_PL.map((lbl,mi)=>(
-                    <text key={mi} x={30+mi*W_PT+W_PT/2} y={H+28} textAnchor="middle" fontSize={10} fill="#94a3b8">{lbl.slice(0,3)}</text>
-                  ))}
-                </svg>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
-              <div className="text-sm font-semibold text-gray-700 mb-3">Tabela danych</div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-gray-50">
-                      <th className="text-left px-2 py-2 text-gray-400 font-semibold">Seria</th>
-                      {MONTHS_PL.map(m=><th key={m} className="text-right px-2 py-2 text-gray-400 font-semibold">{m.slice(0,3)}</th>)}
-                      <th className="text-right px-2 py-2 text-gray-400 font-semibold">Suma</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {series.map((s,si)=>{
-                      const nonZero = s.pts.filter(v=>v!==0);
-                      const sum = nonZero.reduce((a,b)=>a+b,0);
-                      return (
-                        <tr key={si} className="border-b border-gray-50 hover:bg-gray-50">
-                          <td className="px-2 py-2 font-medium text-gray-700">
-                            <div className="flex items-center gap-1.5">
-                              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{background:s.color}}/>
-                              {s.label}
-                            </div>
-                          </td>
-                          {s.pts.map((v,mi)=>(
-                            <td key={mi} className="text-right px-2 py-2 text-gray-600">
-                              {v!==0?(v>=1000?(v/1000).toFixed(1)+"k":v.toFixed(v<10?1:0)):<span className="text-gray-200">—</span>}
-                            </td>
-                          ))}
-                          <td className="text-right px-2 py-2 font-semibold text-gray-700">
-                            {sum>=1000?(sum/1000).toFixed(1)+"k":sum.toFixed(0)}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
       {/* FORM MODAL */}
       {showForm && (
         <RentFormModal
@@ -4873,6 +4699,186 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
           onClose={() => { setShowForm(false); setEditRecord(null); }}
         />
       )}
+    </div>
+  );
+}
+
+function TrendyTab({ vehicles, records, operacyjne, selYear, getRecord }) {
+  const METRYKI = [
+    { id: "frachty",  label: "Frachty €",      color: "#3b82f6" },
+    { id: "koszty",   label: "Koszty €",       color: "#ef4444" },
+    { id: "zysk",     label: "Zysk €",         color: "#16a34a" },
+    { id: "kmLicznik",label: "KM licznik",     color: "#8b5cf6" },
+    { id: "paliwoL",  label: "Paliwo L",       color: "#f59e0b" },
+    { id: "spalanie", label: "Spalanie L/100", color: "#06b6d4" },
+    { id: "eurKm",    label: "€/km",            color: "#ec4899" },
+    { id: "dni",      label: "Dni w trasie",   color: "#64748b" },
+  ];
+  const [tVehicles, setTVehicles] = useState([]);
+  const [tYears,    setTYears]    = useState([selYear]);
+  const [tMetryki,  setTMetryki]  = useState(["frachty","zysk"]);
+  const [tMode,     setTMode]     = useState("vehicle");
+
+  useEffect(() => {
+    if (vehicles.length && tVehicles.length === 0) setTVehicles([vehicles[0].id]);
+  }, [vehicles]);
+
+  const toggleArr = (arr, setArr, val) =>
+    setArr(p => p.includes(val) ? p.filter(x => x !== val) : [...p, val]);
+
+  const getKoszty = (r) => r ? Object.values(r.costs||{}).reduce((s,v)=>s+v,0) : 0;
+
+  const getVal = (vid, year, mi, metId) => {
+    const r = getRecord(vid, year, mi);
+    const op = operacyjne.find(o => o.vehicleId===vid && o.year===year && o.month===mi+1);
+    if (metId==="frachty")   return r?.frachty || 0;
+    if (metId==="koszty")    return getKoszty(r);
+    if (metId==="zysk")      return (r?.frachty||0) - getKoszty(r);
+    if (metId==="kmLicznik") return op?.kmLicznik || 0;
+    if (metId==="paliwoL")   return op?.paliwoL || 0;
+    if (metId==="spalanie")  return op?.spalanie || 0;
+    if (metId==="eurKm")     { const k=getKoszty(r); return (op?.kmLicznik&&k)?parseFloat((k/op.kmLicznik).toFixed(2)):0; }
+    if (metId==="dni")       return op?.dni || 0;
+    return 0;
+  };
+
+  const COLORS = ["#3b82f6","#ef4444","#16a34a","#8b5cf6","#f59e0b","#06b6d4","#ec4899","#64748b","#f97316","#0ea5e9"];
+  const series = [];
+  if (tMode === "vehicle") {
+    const met = tMetryki[0] || "frachty";
+    tVehicles.forEach((vid, i) => {
+      const veh = vehicles.find(v=>v.id===vid);
+      tYears.forEach((year, j) => {
+        const pts = Array.from({length:12}, (_,mi) => getVal(vid, year, mi, met));
+        series.push({ label: `${veh?.plate||vid} ${year}`, color: COLORS[(i*tYears.length+j)%COLORS.length], pts });
+      });
+    });
+  } else {
+    const vid = tVehicles[0] || vehicles[0]?.id;
+    tYears.forEach((year, j) => {
+      tMetryki.forEach((met, i) => {
+        const metDef = METRYKI.find(m=>m.id===met);
+        const pts = Array.from({length:12}, (_,mi) => getVal(vid, year, mi, met));
+        series.push({ label: `${metDef?.label} ${year}`, color: COLORS[(i*tYears.length+j)%COLORS.length], pts });
+      });
+    });
+  }
+
+  const allVals = series.flatMap(s=>s.pts).filter(v=>v!==0);
+  const minVal = allVals.length ? Math.min(...allVals) : 0;
+  const maxVal = allVals.length ? Math.max(...allVals) : 1;
+  const range = maxVal - minVal || 1;
+  const H = 220, W_PT = 52, chartW = 12 * W_PT;
+  const toY = v => H - ((v - minVal) / range * (H - 20)) - 10;
+  const MS = ["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paź","Lis","Gru"];
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4 space-y-3">
+        <div className="flex gap-2 items-center flex-wrap">
+          <span className="text-xs text-gray-500 w-20">Tryb:</span>
+          {[["vehicle","Porównaj pojazdy"],["metric","Porównaj metryki"]].map(([m,l])=>(
+            <button key={m} onClick={()=>setTMode(m)}
+              className={"px-3 py-1 rounded-lg text-xs font-medium transition-all "+(tMode===m?"bg-blue-500 text-white":"bg-gray-100 text-gray-500 hover:bg-gray-200")}>{l}</button>
+          ))}
+        </div>
+        <div className="flex gap-2 items-center flex-wrap">
+          <span className="text-xs text-gray-500 w-20">Rok:</span>
+          {[2024,2025,2026].map(y=>(
+            <button key={y} onClick={()=>toggleArr(tYears,setTYears,y)}
+              className={"px-3 py-1 rounded-lg text-xs font-medium transition-all "+(tYears.includes(y)?"bg-blue-500 text-white":"bg-gray-100 text-gray-500 hover:bg-gray-200")}>{y}</button>
+          ))}
+        </div>
+        <div className="flex gap-2 items-center flex-wrap">
+          <span className="text-xs text-gray-500 w-20">Pojazd:</span>
+          {vehicles.filter(v=>!v.archived).map(v=>(
+            <button key={v.id} onClick={()=>tMode==="vehicle"?toggleArr(tVehicles,setTVehicles,v.id):setTVehicles([v.id])}
+              className={"px-3 py-1 rounded-lg text-xs font-medium transition-all "+(tVehicles.includes(v.id)?"bg-indigo-500 text-white":"bg-gray-100 text-gray-500 hover:bg-gray-200")}>{v.plate}</button>
+          ))}
+        </div>
+        <div className="flex gap-2 items-center flex-wrap">
+          <span className="text-xs text-gray-500 w-20">Metryka:</span>
+          {METRYKI.map(m=>(
+            <button key={m.id} onClick={()=>tMode==="metric"?toggleArr(tMetryki,setTMetryki,m.id):setTMetryki([m.id])}
+              className={"px-3 py-1 rounded-lg text-xs font-medium transition-all "+(tMetryki.includes(m.id)?"text-white":"bg-gray-100 text-gray-500 hover:bg-gray-200")}
+              style={tMetryki.includes(m.id)?{background:m.color}:{}}>{m.label}</button>
+          ))}
+        </div>
+      </div>
+      <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
+        <div className="flex gap-3 flex-wrap mb-3">
+          {series.map((s,i)=>(
+            <div key={i} className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded-full flex-shrink-0" style={{background:s.color}}/>
+              <span className="text-xs text-gray-600">{s.label}</span>
+            </div>
+          ))}
+        </div>
+        <div className="overflow-x-auto">
+          <svg width={chartW+50} height={H+40} style={{display:"block"}}>
+            {[0,0.25,0.5,0.75,1].map(t=>{
+              const y=H-(t*(H-20))-10, v=minVal+t*range;
+              return (<g key={t}>
+                <line x1={40} y1={y} x2={chartW+40} y2={y} stroke="#f1f5f9" strokeWidth={1}/>
+                <text x={38} y={y+4} textAnchor="end" fontSize={9} fill="#94a3b8">{v>=1000?(v/1000).toFixed(1)+"k":v.toFixed(v<10&&v>-10?1:0)}</text>
+              </g>);
+            })}
+            {minVal<0&&maxVal>0&&<line x1={40} y1={toY(0)} x2={chartW+40} y2={toY(0)} stroke="#cbd5e1" strokeWidth={1} strokeDasharray="4,2"/>}
+            {series.map((s,si)=>{
+              if(!s.pts.some(v=>v!==0)) return null;
+              const pts=s.pts.map((v,mi)=>({x:40+mi*W_PT+W_PT/2,y:toY(v),v}));
+              const path=pts.map((p,i)=>(i===0?`M${p.x},${p.y}`:`L${p.x},${p.y}`)).join(" ");
+              return (<g key={si}>
+                <path d={path} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" opacity={0.85}/>
+                {pts.map((p,mi)=>p.v!==0&&(<g key={mi}>
+                  <circle cx={p.x} cy={p.y} r={3.5} fill={s.color} stroke="white" strokeWidth={1.5}/>
+                  <title>{MS[mi]}: {p.v>=1000?(p.v/1000).toFixed(1)+"k":p.v.toFixed(p.v<10&&p.v>-10?2:0)}</title>
+                </g>))}
+              </g>);
+            })}
+            {MS.map((lbl,mi)=>(
+              <text key={mi} x={40+mi*W_PT+W_PT/2} y={H+28} textAnchor="middle" fontSize={10} fill="#94a3b8">{lbl}</text>
+            ))}
+          </svg>
+        </div>
+      </div>
+      <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
+        <div className="text-sm font-semibold text-gray-700 mb-3">Tabela danych</div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-gray-50">
+                <th className="text-left px-2 py-2 text-gray-400 font-semibold w-32">Seria</th>
+                {MS.map(m=><th key={m} className="text-right px-2 py-2 text-gray-400 font-semibold">{m}</th>)}
+                <th className="text-right px-2 py-2 text-gray-400 font-semibold">Suma</th>
+              </tr>
+            </thead>
+            <tbody>
+              {series.map((s,si)=>{
+                const nz=s.pts.filter(v=>v!==0), sum=nz.reduce((a,b)=>a+b,0);
+                return (
+                  <tr key={si} className="border-b border-gray-50 hover:bg-gray-50">
+                    <td className="px-2 py-2 font-medium text-gray-700">
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-2 h-2 rounded-full flex-shrink-0" style={{background:s.color}}/>
+                        <span>{s.label}</span>
+                      </div>
+                    </td>
+                    {s.pts.map((v,mi)=>(
+                      <td key={mi} className="text-right px-2 py-2 text-gray-600">
+                        {v!==0?(v>=1000?(v/1000).toFixed(1)+"k":v.toFixed(v<10&&v>-10?1:0)):<span className="text-gray-200">—</span>}
+                      </td>
+                    ))}
+                    <td className="text-right px-2 py-2 font-semibold text-gray-700">
+                      {sum>=1000?(sum/1000).toFixed(1)+"k":sum.toFixed(0)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
