@@ -4578,13 +4578,13 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
                             <td className="text-right px-3 py-2.5 text-blue-600 font-medium">{f > 0 ? fmt(f) : <span className="text-gray-200">—</span>}</td>
                             <td className="text-right px-3 py-2.5 text-gray-600">{k > 0 ? fmt(k) : <span className="text-gray-200">—</span>}</td>
                             <td className="text-right px-3 py-2.5 font-bold" style={{ color: r ? zyskColor(z) : "#d1d5db" }}>{r ? fmtS(z) : "—"}</td>
-                            <td className="text-right px-3 py-2.5 text-gray-400">{r?.kmLicznik ? r.kmLicznik.toLocaleString("pl-PL") : <span className="text-gray-200">—</span>}</td>
-                            <td className="text-right px-3 py-2.5 text-gray-400">{r?.dni || <span className="text-gray-200">—</span>}</td>
                             {(() => {
                               const op = operacyjne.find(o => o.vehicleId === selVehicle && o.year === selYear && o.month === mi+1);
                               const koszt_km = op?.kmLicznik && r?.costs ? (Object.values(r.costs||{}).reduce((s,v)=>s+v,0) / op.kmLicznik).toFixed(2) : null;
-                              const sr_waga = frachtyList.filter(f => f.vehicleId === selVehicle && (f.dataZaladunku||'').startsWith(`${selYear}-${String(mi+1).padStart(2,'0')}`)).reduce((s,f,_,arr) => s + (parseFloat(f.wagaLadunku)||0)/arr.length, 0);
+                              const sr_waga = frachtyList.filter(f => f.vehicleId === selVehicle && f.year === selYear && (f.dataZaladunku||'').startsWith(`${selYear}-${String(mi+1).padStart(2,'0')}`)).reduce((s,f,_,arr) => s + (parseFloat(f.wagaLadunku)||0)/arr.length, 0);
                               return (<>
+                                <td className="text-right px-3 py-2.5 text-gray-400">{op?.kmLicznik ? op.kmLicznik.toLocaleString("pl-PL") : <span className="text-gray-200">—</span>}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-400">{op?.dni ? op.dni : <span className="text-gray-200">—</span>}</td>
                                 <td className="text-right px-3 py-2.5 text-gray-400">{op?.paliwoL ? op.paliwoL.toLocaleString("pl-PL",{maximumFractionDigits:0})+" L" : <span className="text-gray-200">—</span>}</td>
                                 <td className="text-right px-3 py-2.5 text-gray-400">{op?.spalanie ? op.spalanie.toFixed(1)+" L/100" : <span className="text-gray-200">—</span>}</td>
                                 <td className="text-right px-3 py-2.5 text-gray-400">{op?.cenaPaliwa ? op.cenaPaliwa.toFixed(2)+" €/L" : <span className="text-gray-200">—</span>}</td>
