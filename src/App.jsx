@@ -4674,13 +4674,82 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
 
       {/* ── VIEW 3: TRENDY ── */}
       {view === "trendy" && (
-        <TrendyTab
-          vehicles={vehicles}
-          records={records}
-          operacyjne={operacyjne}
-          selYear={selYear}
-          getRecord={getRecord}
-        />
+        <div className="space-y-4">
+          {/* YoY comparison */}
+          <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
+            <div className="text-sm font-semibold text-gray-700 mb-4">Frachty floty — rok do roku</div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs" style={{ minWidth: 600 }}>
+                <thead>
+                  <tr className="border-b border-gray-50">
+                    <th className="text-left px-2 py-2 text-gray-400 font-semibold">Miesiąc</th>
+                    {years.map(y => <th key={y} className="text-right px-2 py-2 text-gray-400 font-semibold">{y}</th>)}
+                    <th className="text-right px-2 py-2 text-gray-400 font-semibold">Zmiana 25→26</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {MONTHS_PL.map((lbl, mi) => {
+                    const vals = years.map(y => vehicles.reduce((s,v) => { const r=getRecord(v.id,y,mi); return s+(r?.frachty||0); }, 0));
+                    const diff = vals[1] > 0 && vals[2] > 0 ? ((vals[2]-vals[1])/vals[1]*100) : null;
+                    return (
+                      <tr key={mi} className="border-b border-gray-50 hover:bg-gray-50">
+                        <td className="px-2 py-2.5 font-medium text-gray-700">{lbl}</td>
+                        {vals.map((val,i) => <td key={i} className="text-right px-2 py-2.5 font-medium text-gray-700">{val > 0 ? fmt(val) : <span className="text-gray-300">—</span>}</td>)}
+                        <td className="text-right px-2 py-2.5 font-bold" style={{ color: diff===null?"#d1d5db":diff>=0?"#16a34a":"#dc2626" }}>
+                          {diff !== null ? (diff>=0?"+":"")+diff.toFixed(1)+"%" : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  <tr style={{ background:"#f9fafb" }}>
+                    <td className="px-2 py-2.5 font-bold text-gray-700">ROK</td>
+                    {years.map(y => <td key={y} className="text-right px-2 py-2.5 font-bold text-blue-600">{fmt(fleetFrachty(y))}</td>)}
+                    <td className="text-right px-2 py-2.5 font-bold">
+                      {fleetFrachty(2025) > 0 && fleetFrachty(2026) > 0 ? (
+                        <span style={{ color: fleetFrachty(2026)>=fleetFrachty(2025)?"#16a34a":"#dc2626" }}>
+                          {((fleetFrachty(2026)-fleetFrachty(2025))/fleetFrachty(2025)*100).toFixed(1)}%
+                        </span>
+                      ) : "—"}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Per-vehicle YoY */}
+          <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
+            <div className="text-sm font-semibold text-gray-700 mb-4">Zysk roczny per pojazd</div>
+            <div className="space-y-3">
+              {vehicles.map(v => {
+                const zyski = years.map(y => ({ y, z: totalZysk(v.id,y), f: totalFrachty(v.id,y) }));
+                const maxF = Math.max(...zyski.map(x=>x.f), 1);
+                return (
+                  <div key={v.id} className="flex items-center gap-3">
+                    <span className="text-xs font-semibold text-gray-700 w-24 flex-shrink-0" style={{ fontFamily:"'DM Mono',monospace", fontSize:11 }}>{v.plate}</span>
+                    <div className="flex-1 flex gap-1 items-end" style={{ height:28 }}>
+                      {zyski.map(({y,z,f}) => (
+                        <div key={y} className="flex-1 flex flex-col justify-end" style={{ height:28 }} title={`${y}: frachty ${fmt(f)}, zysk ${fmtS(z)}`}>
+                          {f > 0 && <div className="rounded transition-all" style={{ height: Math.max(4,f/maxF*24)+'px', background: z>=0?"#3b82f6":"#ef4444", opacity:0.8 }} />}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex gap-2">
+                      {zyski.map(({y,z,f}) => (
+                        <span key={y} className="text-xs font-semibold w-20 text-right" style={{ color: f>0 ? zyskColor(z) : "#d1d5db" }}>
+                          {f > 0 ? fmtS(z) : "—"}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex gap-4 mt-3">
+              {years.map((y,i) => <span key={y} className="text-xs text-gray-400">{y}</span>)}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* FORM MODAL */}
@@ -4718,16 +4787,11 @@ function TrendyTab({ vehicles, records, operacyjne, selYear, getRecord }) {
   const [tYears,    setTYears]    = useState([selYear]);
   const [tMetryki,  setTMetryki]  = useState(["frachty","zysk"]);
   const [tMode,     setTMode]     = useState("vehicle");
-
   useEffect(() => {
     if (vehicles.length && tVehicles.length === 0) setTVehicles([vehicles[0].id]);
   }, [vehicles]);
-
-  const toggleArr = (arr, setArr, val) =>
-    setArr(p => p.includes(val) ? p.filter(x => x !== val) : [...p, val]);
-
+  const toggleArr = (arr, setArr, val) => setArr(p => p.includes(val) ? p.filter(x=>x!==val) : [...p, val]);
   const getKoszty = (r) => r ? Object.values(r.costs||{}).reduce((s,v)=>s+v,0) : 0;
-
   const getVal = (vid, year, mi, metId) => {
     const r = getRecord(vid, year, mi);
     const op = operacyjne.find(o => o.vehicleId===vid && o.year===year && o.month===mi+1);
@@ -4741,7 +4805,6 @@ function TrendyTab({ vehicles, records, operacyjne, selYear, getRecord }) {
     if (metId==="dni")       return op?.dni || 0;
     return 0;
   };
-
   const COLORS = ["#3b82f6","#ef4444","#16a34a","#8b5cf6","#f59e0b","#06b6d4","#ec4899","#64748b","#f97316","#0ea5e9"];
   const series = [];
   if (tMode === "vehicle") {
@@ -4763,15 +4826,14 @@ function TrendyTab({ vehicles, records, operacyjne, selYear, getRecord }) {
       });
     });
   }
-
   const allVals = series.flatMap(s=>s.pts).filter(v=>v!==0);
   const minVal = allVals.length ? Math.min(...allVals) : 0;
   const maxVal = allVals.length ? Math.max(...allVals) : 1;
   const range = maxVal - minVal || 1;
-  const H = 220, W_PT = 52, chartW = 12 * W_PT;
-  const toY = v => H - ((v - minVal) / range * (H - 20)) - 10;
+  const H = 240, W_PT = 52, chartW = 12 * W_PT;
+  const PAD = 15;
+  const toY = v => H - ((v - minVal) / range * (H - 2*PAD)) - PAD;
   const MS = ["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paź","Lis","Gru"];
-
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4 space-y-3">
@@ -4817,7 +4879,7 @@ function TrendyTab({ vehicles, records, operacyjne, selYear, getRecord }) {
         <div className="overflow-x-auto">
           <svg width={chartW+50} height={H+40} style={{display:"block"}}>
             {[0,0.25,0.5,0.75,1].map(t=>{
-              const y=H-(t*(H-20))-10, v=minVal+t*range;
+              const y=H-(t*(H-2*PAD))-PAD, v=minVal+t*range;
               return (<g key={t}>
                 <line x1={40} y1={y} x2={chartW+40} y2={y} stroke="#f1f5f9" strokeWidth={1}/>
                 <text x={38} y={y+4} textAnchor="end" fontSize={9} fill="#94a3b8">{v>=1000?(v/1000).toFixed(1)+"k":v.toFixed(v<10&&v>-10?1:0)}</text>
@@ -4827,11 +4889,16 @@ function TrendyTab({ vehicles, records, operacyjne, selYear, getRecord }) {
             {series.map((s,si)=>{
               if(!s.pts.some(v=>v!==0)) return null;
               const pts=s.pts.map((v,mi)=>({x:40+mi*W_PT+W_PT/2,y:toY(v),v}));
-              const path=pts.map((p,i)=>(i===0?`M${p.x},${p.y}`:`L${p.x},${p.y}`)).join(" ");
+              const path=pts.reduce((acc,p,i)=>{
+                if(i===0) return `M${p.x},${p.y}`;
+                const prev=pts[i-1];
+                const cpx=(prev.x+p.x)/2;
+                return acc+` C${cpx},${prev.y} ${cpx},${p.y} ${p.x},${p.y}`;
+              },"");
               return (<g key={si}>
-                <path d={path} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" opacity={0.85}/>
+                <path d={path} fill="none" stroke={s.color} strokeWidth={2.5} strokeLinejoin="round" opacity={0.9}/>
                 {pts.map((p,mi)=>p.v!==0&&(<g key={mi}>
-                  <circle cx={p.x} cy={p.y} r={3.5} fill={s.color} stroke="white" strokeWidth={1.5}/>
+                  <circle cx={p.x} cy={p.y} r={4} fill={s.color} stroke="white" strokeWidth={2}/>
                   <title>{MS[mi]}: {p.v>=1000?(p.v/1000).toFixed(1)+"k":p.v.toFixed(p.v<10&&p.v>-10?2:0)}</title>
                 </g>))}
               </g>);
@@ -4840,43 +4907,6 @@ function TrendyTab({ vehicles, records, operacyjne, selYear, getRecord }) {
               <text key={mi} x={40+mi*W_PT+W_PT/2} y={H+28} textAnchor="middle" fontSize={10} fill="#94a3b8">{lbl}</text>
             ))}
           </svg>
-        </div>
-      </div>
-      <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
-        <div className="text-sm font-semibold text-gray-700 mb-3">Tabela danych</div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-gray-50">
-                <th className="text-left px-2 py-2 text-gray-400 font-semibold w-32">Seria</th>
-                {MS.map(m=><th key={m} className="text-right px-2 py-2 text-gray-400 font-semibold">{m}</th>)}
-                <th className="text-right px-2 py-2 text-gray-400 font-semibold">Suma</th>
-              </tr>
-            </thead>
-            <tbody>
-              {series.map((s,si)=>{
-                const nz=s.pts.filter(v=>v!==0), sum=nz.reduce((a,b)=>a+b,0);
-                return (
-                  <tr key={si} className="border-b border-gray-50 hover:bg-gray-50">
-                    <td className="px-2 py-2 font-medium text-gray-700">
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-2 h-2 rounded-full flex-shrink-0" style={{background:s.color}}/>
-                        <span>{s.label}</span>
-                      </div>
-                    </td>
-                    {s.pts.map((v,mi)=>(
-                      <td key={mi} className="text-right px-2 py-2 text-gray-600">
-                        {v!==0?(v>=1000?(v/1000).toFixed(1)+"k":v.toFixed(v<10&&v>-10?1:0)):<span className="text-gray-200">—</span>}
-                      </td>
-                    ))}
-                    <td className="text-right px-2 py-2 font-semibold text-gray-700">
-                      {sum>=1000?(sum/1000).toFixed(1)+"k":sum.toFixed(0)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
         </div>
       </div>
     </div>
