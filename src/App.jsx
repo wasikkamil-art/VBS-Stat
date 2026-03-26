@@ -4202,6 +4202,8 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
   const [view, setView]           = useState("flota");
   const [selVehicle, setSelVehicle] = useState(null);
   const [selYear, setSelYear]     = useState(new Date().getFullYear());
+  const [editOp, setEditOp] = useState(null);
+  const [editOp, setEditOp] = useState(null);
   const [showForm, setShowForm]   = useState(false);
   const [editRecord, setEditRecord] = useState(null);
   const [formVehicle, setFormVehicle] = useState("");
@@ -4592,7 +4594,8 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
                                 <td className="text-right px-3 py-2.5 text-gray-400">{sr_waga > 0 ? Math.round(sr_waga)+" kg" : <span className="text-gray-200">—</span>}</td>
                               </>);
                             })()}
-                            <td className="px-3 py-2.5">
+                            <td className="px-3 py-2.5 flex gap-1 items-center justify-end">
+                              <button onClick={e=>{e.stopPropagation();const _op=operacyjne.find(o=>o.vehicleId===selVehicle&&o.year===selYear&&o.month===mi+1);setEditOp({vehicleId:selVehicle,year:selYear,month:mi+1,kmLicznik:_op?.kmLicznik||"",dni:_op?.dni||"",paliwoL:_op?.paliwoL||"",spalanie:_op?.spalanie||"",cenaPaliwa:_op?.cenaPaliwa||"",srWaga:_op?.srWaga||""});}} className="w-5 h-5 flex items-center justify-center text-gray-200 hover:text-blue-400 rounded transition-all">✏</button>
                               {r && <button onClick={e=>{e.stopPropagation();onDelete(r.id);}} className="w-5 h-5 flex items-center justify-center text-gray-200 hover:text-red-400 rounded transition-all">✕</button>}
                             </td>
                           </tr>
@@ -4604,6 +4607,64 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
               </div>
             );
           })()}
+          {editOp && (
+            <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center" onClick={()=>setEditOp(null)}>
+              <div className="bg-white rounded-2xl shadow-2xl p-6 w-80" onClick={e=>e.stopPropagation()}>
+                <div className="text-sm font-semibold text-gray-700 mb-4">Dane operacyjne — {["Styczeń","Luty","Marzec","Kwiecień","Maj","Czerwiec","Lipiec","Sierpień","Wrzesień","Październik","Listopad","Grudzień"][editOp.month-1]} {editOp.year}</div>
+                {[["kmLicznik","KM licznik"],["dni","Dni w trasie"],["paliwoL","Paliwo L"],["spalanie","Spalanie L/100"],["cenaPaliwa","Cena paliwa €/L"],["srWaga","Śr. waga kg"]].map(([field,label])=>(
+                  <div key={field} className="mb-3">
+                    <label className="text-xs text-gray-500 mb-1 block">{label}</label>
+                    <input type="number" value={editOp[field]} onChange={e=>setEditOp(p=>({...p,[field]:e.target.value}))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" />
+                  </div>
+                ))}
+                <div className="flex gap-2 mt-4">
+                  <button onClick={()=>setEditOp(null)} className="flex-1 px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50">Anuluj</button>
+                  <button onClick={async()=>{
+                    const id=`${editOp.vehicleId}_${editOp.year}_${editOp.month}`;
+                    const d={vehicleId:editOp.vehicleId,year:editOp.year,month:editOp.month};
+                    if(editOp.kmLicznik!=="") d.kmLicznik=parseFloat(editOp.kmLicznik);
+                    if(editOp.dni!=="") d.dni=parseFloat(editOp.dni);
+                    if(editOp.paliwoL!=="") d.paliwoL=parseFloat(editOp.paliwoL);
+                    if(editOp.spalanie!=="") d.spalanie=parseFloat(editOp.spalanie);
+                    if(editOp.cenaPaliwa!=="") d.cenaPaliwa=parseFloat(editOp.cenaPaliwa);
+                    if(editOp.srWaga!=="") d.srWaga=parseFloat(editOp.srWaga);
+                    await onSaveOperacyjne(id,d);
+                    setEditOp(null);
+                  }} className="flex-1 px-4 py-2 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600">Zapisz</button>
+                </div>
+              </div>
+            </div>
+          )}
+          {editOp && (
+            <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center" onClick={()=>setEditOp(null)}>
+              <div className="bg-white rounded-2xl shadow-2xl p-6 w-80" onClick={e=>e.stopPropagation()}>
+                <div className="text-sm font-semibold text-gray-700 mb-4">Dane operacyjne — {["Styczeń","Luty","Marzec","Kwiecień","Maj","Czerwiec","Lipiec","Sierpień","Wrzesień","Październik","Listopad","Grudzień"][editOp.month-1]} {editOp.year}</div>
+                {[["kmLicznik","KM licznik"],["dni","Dni w trasie"],["paliwoL","Paliwo L"],["spalanie","Spalanie L/100"],["cenaPaliwa","Cena paliwa €/L"],["srWaga","Śr. waga kg"]].map(([field,label])=>(
+                  <div key={field} className="mb-3">
+                    <label className="text-xs text-gray-500 mb-1 block">{label}</label>
+                    <input type="number" value={editOp[field]} onChange={e=>setEditOp(p=>({...p,[field]:e.target.value}))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" />
+                  </div>
+                ))}
+                <div className="flex gap-2 mt-4">
+                  <button onClick={()=>setEditOp(null)} className="flex-1 px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50">Anuluj</button>
+                  <button onClick={async()=>{
+                    const id=`${editOp.vehicleId}_${editOp.year}_${editOp.month}`;
+                    const d={vehicleId:editOp.vehicleId,year:editOp.year,month:editOp.month};
+                    if(editOp.kmLicznik!=="") d.kmLicznik=parseFloat(editOp.kmLicznik);
+                    if(editOp.dni!=="") d.dni=parseFloat(editOp.dni);
+                    if(editOp.paliwoL!=="") d.paliwoL=parseFloat(editOp.paliwoL);
+                    if(editOp.spalanie!=="") d.spalanie=parseFloat(editOp.spalanie);
+                    if(editOp.cenaPaliwa!=="") d.cenaPaliwa=parseFloat(editOp.cenaPaliwa);
+                    if(editOp.srWaga!=="") d.srWaga=parseFloat(editOp.srWaga);
+                    await onSaveOperacyjne(id,d);
+                    setEditOp(null);
+                  }} className="flex-1 px-4 py-2 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600">Zapisz</button>
+                </div>
+              </div>
+            </div>
+          )}
           {!selVehicle && (
             <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center text-gray-400 text-sm">
               Wybierz pojazd powyżej
