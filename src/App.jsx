@@ -4808,8 +4808,8 @@ function TrendyTab({ vehicles, records, operacyjne, selYear, getRecord }) {
             </div>
           ))}
         </div>
-        <div className="overflow-x-auto">
-          <svg width={chartW+50} height={H+40} style={{display:"block"}}>
+        <div>
+          <svg viewBox={"0 0 "+(chartW+50)+" "+(H+40)} width="100%" height={H+40} style={{display:"block"}}>
             {[0,0.25,0.5,0.75,1].map(t=>{
               const y=H-(t*(H-2*PAD))-PAD, v=minVal+t*range;
               return (<g key={t}>
