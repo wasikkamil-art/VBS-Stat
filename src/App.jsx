@@ -4684,10 +4684,10 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
           { id: "eurKm",    label: "€/km",           color: "#ec4899" },
           { id: "dni",      label: "Dni w trasie",  color: "#64748b" },
         ];
-        const [tVehicles, setTVehicles] = React.useState([vehicles[0]?.id].filter(Boolean));
-        const [tYears,    setTYears]    = React.useState([selYear]);
-        const [tMetryki,  setTMetryki]  = React.useState(["frachty","zysk"]);
-        const [tMode,     setTMode]     = React.useState("vehicle");
+        const [tVehicles, setTVehicles] = useState([vehicles[0]?.id].filter(Boolean));
+        const [tYears,    setTYears]    = useState([selYear]);
+        const [tMetryki,  setTMetryki]  = useState(["frachty","zysk"]);
+        const [tMode,     setTMode]     = useState("vehicle");
 
         const toggleArr = (arr, setArr, val) => setArr(p => p.includes(val) ? p.filter(x=>x!==val) : [...p, val]);
 
