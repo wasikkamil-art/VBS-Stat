@@ -4674,82 +4674,13 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
 
       {/* ── VIEW 3: TRENDY ── */}
       {view === "trendy" && (
-        <div className="space-y-4">
-          {/* YoY comparison */}
-          <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
-            <div className="text-sm font-semibold text-gray-700 mb-4">Frachty floty — rok do roku</div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs" style={{ minWidth: 600 }}>
-                <thead>
-                  <tr className="border-b border-gray-50">
-                    <th className="text-left px-2 py-2 text-gray-400 font-semibold">Miesiąc</th>
-                    {years.map(y => <th key={y} className="text-right px-2 py-2 text-gray-400 font-semibold">{y}</th>)}
-                    <th className="text-right px-2 py-2 text-gray-400 font-semibold">Zmiana 25→26</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {MONTHS_PL.map((lbl, mi) => {
-                    const vals = years.map(y => vehicles.reduce((s,v) => { const r=getRecord(v.id,y,mi); return s+(r?.frachty||0); }, 0));
-                    const diff = vals[1] > 0 && vals[2] > 0 ? ((vals[2]-vals[1])/vals[1]*100) : null;
-                    return (
-                      <tr key={mi} className="border-b border-gray-50 hover:bg-gray-50">
-                        <td className="px-2 py-2.5 font-medium text-gray-700">{lbl}</td>
-                        {vals.map((val,i) => <td key={i} className="text-right px-2 py-2.5 font-medium text-gray-700">{val > 0 ? fmt(val) : <span className="text-gray-300">—</span>}</td>)}
-                        <td className="text-right px-2 py-2.5 font-bold" style={{ color: diff===null?"#d1d5db":diff>=0?"#16a34a":"#dc2626" }}>
-                          {diff !== null ? (diff>=0?"+":"")+diff.toFixed(1)+"%" : "—"}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  <tr style={{ background:"#f9fafb" }}>
-                    <td className="px-2 py-2.5 font-bold text-gray-700">ROK</td>
-                    {years.map(y => <td key={y} className="text-right px-2 py-2.5 font-bold text-blue-600">{fmt(fleetFrachty(y))}</td>)}
-                    <td className="text-right px-2 py-2.5 font-bold">
-                      {fleetFrachty(2025) > 0 && fleetFrachty(2026) > 0 ? (
-                        <span style={{ color: fleetFrachty(2026)>=fleetFrachty(2025)?"#16a34a":"#dc2626" }}>
-                          {((fleetFrachty(2026)-fleetFrachty(2025))/fleetFrachty(2025)*100).toFixed(1)}%
-                        </span>
-                      ) : "—"}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Per-vehicle YoY */}
-          <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
-            <div className="text-sm font-semibold text-gray-700 mb-4">Zysk roczny per pojazd</div>
-            <div className="space-y-3">
-              {vehicles.map(v => {
-                const zyski = years.map(y => ({ y, z: totalZysk(v.id,y), f: totalFrachty(v.id,y) }));
-                const maxF = Math.max(...zyski.map(x=>x.f), 1);
-                return (
-                  <div key={v.id} className="flex items-center gap-3">
-                    <span className="text-xs font-semibold text-gray-700 w-24 flex-shrink-0" style={{ fontFamily:"'DM Mono',monospace", fontSize:11 }}>{v.plate}</span>
-                    <div className="flex-1 flex gap-1 items-end" style={{ height:28 }}>
-                      {zyski.map(({y,z,f}) => (
-                        <div key={y} className="flex-1 flex flex-col justify-end" style={{ height:28 }} title={`${y}: frachty ${fmt(f)}, zysk ${fmtS(z)}`}>
-                          {f > 0 && <div className="rounded transition-all" style={{ height: Math.max(4,f/maxF*24)+'px', background: z>=0?"#3b82f6":"#ef4444", opacity:0.8 }} />}
-                        </div>
-                      ))}
-                    </div>
-                    <div className="flex gap-2">
-                      {zyski.map(({y,z,f}) => (
-                        <span key={y} className="text-xs font-semibold w-20 text-right" style={{ color: f>0 ? zyskColor(z) : "#d1d5db" }}>
-                          {f > 0 ? fmtS(z) : "—"}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="flex gap-4 mt-3">
-              {years.map((y,i) => <span key={y} className="text-xs text-gray-400">{y}</span>)}
-            </div>
-          </div>
-        </div>
+        <TrendyTab
+          vehicles={vehicles}
+          records={records}
+          operacyjne={operacyjne}
+          selYear={selYear}
+          getRecord={getRecord}
+        />
       )}
 
       {/* FORM MODAL */}
