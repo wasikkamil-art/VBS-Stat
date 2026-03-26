@@ -2141,6 +2141,20 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
             <div><label className={lbl}>Telefon</label><input className={inp} value={editData.telefon||""} onChange={e=>setEditData(p=>({...p,telefon:e.target.value}))} /></div>
           </div>
           <div className="mb-3"><label className={lbl}>Uwagi</label><textarea className={inp+" resize-none"} rows={2} value={editData.uwagi||""} onChange={e=>setEditData(p=>({...p,uwagi:e.target.value}))} /></div>
+          <div className="mb-3">
+            <label className={lbl}>Przypisani</label>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
+              {(editData.przypisani||sprawa.przypisani||[]).map(m => (
+                <span key={m} style={{background:"#eff6ff",color:"#1d4ed8",padding:"2px 10px",borderRadius:99,fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:4}}>
+                  {m} <button type="button" onClick={() => setEditData(p=>({...p,przypisani:(p.przypisani||sprawa.przypisani||[]).filter(x=>x!==m)}))} style={{background:"none",border:"none",cursor:"pointer",color:"#6b7280",fontSize:11}}>✕</button>
+                </span>
+              ))}
+            </div>
+            <select value="" onChange={e => { if(e.target.value) { const curr=editData.przypisani||sprawa.przypisani||[]; if(!curr.includes(e.target.value)) setEditData(p=>({...p,przypisani:[...(p.przypisani||sprawa.przypisani||[]),e.target.value]})); }}} className={inp}>
+              <option value="">+ Dodaj osobę...</option>
+              {appUsers.map(u => <option key={u.uid} value={u.email}>{u.email}</option>)}
+            </select>
+          </div>
           <div className="flex gap-2 justify-end">
             <button onClick={() => setEditMode(false)} style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer"}}>Anuluj</button>
             <button onClick={() => { onUpdate(editData); setEditMode(false); showToast("✅ Zapisano"); }}
