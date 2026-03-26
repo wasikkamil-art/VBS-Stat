@@ -4810,7 +4810,7 @@ function TrendyTab({ vehicles, records, operacyjne, selYear, getRecord }) {
           ))}
         </div>
         <div style={{width:"100%"}}>
-          <svg viewBox={"0 0 "+(chartW+50)+" "+(H+40)} preserveAspectRatio="none" style={{display:"block",width:"100%",height:H+40}}>
+          <svg viewBox={"0 0 "+(chartW+50)+" "+(H+40)} preserveAspectRatio="xMidYMid meet" style={{display:"block",width:"100%",height:H+40}}>
             {[0,0.25,0.5,0.75,1].map(t=>{
               const y=H-(t*(H-2*PAD))-PAD, v=minVal+t*range;
               return (<g key={t}>
