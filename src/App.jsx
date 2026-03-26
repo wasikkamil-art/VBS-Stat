@@ -4809,38 +4809,23 @@ function TrendyTab({ vehicles, records, operacyjne, selYear, getRecord }) {
             </div>
           ))}
         </div>
-        <div style={{width:"100%"}}>
-          <svg viewBox={"0 0 "+(chartW+50)+" "+(H+40)} preserveAspectRatio="xMidYMid meet" style={{display:"block",width:"100%",height:H+40}}>
-            {[0,0.25,0.5,0.75,1].map(t=>{
-              const y=H-(t*(H-2*PAD))-PAD, v=minVal+t*range;
-              return (<g key={t}>
-                <line x1={40} y1={y} x2={chartW+40} y2={y} stroke="#f1f5f9" strokeWidth={1}/>
-                <text x={38} y={y+4} textAnchor="end" fontSize={9} fill="#94a3b8">{v>=1000?(v/1000).toFixed(1)+"k":v.toFixed(v<10&&v>-10?1:0)}</text>
-              </g>);
-            })}
-            {minVal<0&&maxVal>0&&<line x1={40} y1={toY(0)} x2={chartW+40} y2={toY(0)} stroke="#cbd5e1" strokeWidth={1} strokeDasharray="4,2"/>}
-            {series.map((s,si)=>{
-              if(!s.pts.some(v=>v!==0)) return null;
-              const pts=s.pts.map((v,mi)=>({x:40+mi*W_PT+W_PT/2,y:toY(v),v}));
-              const path=pts.reduce((acc,p,i)=>{
-                if(i===0) return `M${p.x},${p.y}`;
-                const prev=pts[i-1];
-                const cpx=(prev.x+p.x)/2;
-                return acc+` C${cpx},${prev.y} ${cpx},${p.y} ${p.x},${p.y}`;
-              },"");
-              return (<g key={si}>
-                <path d={path} fill="none" stroke={s.color} strokeWidth={2.5} strokeLinejoin="round" opacity={0.9}/>
-                {pts.map((p,mi)=>p.v!==0&&(<g key={mi}>
-                  <circle cx={p.x} cy={p.y} r={4} fill={s.color} stroke="white" strokeWidth={2}/>
-                  <title>{MS[mi]}: {p.v>=1000?(p.v/1000).toFixed(1)+"k":p.v.toFixed(p.v<10&&p.v>-10?2:0)}</title>
-                </g>))}
-              </g>);
-            })}
-            {MS.map((lbl,mi)=>(
-              <text key={mi} x={40+mi*W_PT+W_PT/2} y={H+28} textAnchor="middle" fontSize={10} fill="#94a3b8">{lbl}</text>
+        <ResponsiveContainer width="100%" height={260}>
+          <LineChart margin={{top:10,right:20,left:10,bottom:5}}
+            data={MS.map((m,mi)=>({name:m,...Object.fromEntries(series.map((s,si)=>[si,s.pts[mi]||null]))}))}
+          >
+            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false}/>
+            <XAxis dataKey="name" tick={{fontSize:11,fill:"#94a3b8"}} axisLine={false} tickLine={false}/>
+            <YAxis tick={{fontSize:10,fill:"#94a3b8"}} axisLine={false} tickLine={false} width={45}
+              tickFormatter={v=>v>=1000?(v/1000).toFixed(1)+"k":v}/>
+            <Tooltip formatter={(v,n)=>[v>=1000?(v/1000).toFixed(1)+"k":v?.toFixed(0), series[n]?.label||n]}
+              contentStyle={{fontSize:12,borderRadius:8,border:"1px solid #e2e8f0"}}/>
+            {series.map((s,si)=>(
+              <Line key={si} type="monotone" dataKey={si} stroke={s.color} strokeWidth={2.5}
+                dot={{r:3.5,fill:s.color,strokeWidth:2,stroke:"white"}}
+                activeDot={{r:5}} connectNulls={false}/>
             ))}
-          </svg>
-        </div>
+          </LineChart>
+        </ResponsiveContainer>
       </div>
     </div>
   );
