@@ -3461,8 +3461,7 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
             <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2.5">Inne / bez pojazdu</div>
             <div className="space-y-2">{orphans.map(doc => <DocRow key={doc.id} doc={doc} />)}</div>
           </div>
-        );
-      })()}
+      )}
 
       {docs.length === 0 && (
         <div className="text-center py-20 text-gray-400">
@@ -4203,6 +4202,11 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
   const [selVehicle, setSelVehicle] = useState(null);
   const [selYear, setSelYear]     = useState(new Date().getFullYear());
   const [editOp, setEditOp] = useState(null);
+  const [tVehicles, setTVehicles] = useState([]);
+  const [tYears,    setTYears]    = useState([new Date().getFullYear()]);
+  const [tMetryki,  setTMetryki]  = useState(["frachty","zysk"]);
+  const [tMode,     setTMode]     = useState("vehicle");
+  useEffect(() => { if(vehicles.length && tVehicles.length===0) setTVehicles([vehicles[0].id]); }, [vehicles]);
   const [showForm, setShowForm]   = useState(false);
   const [editRecord, setEditRecord] = useState(null);
   const [formVehicle, setFormVehicle] = useState("");
@@ -4673,7 +4677,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
       )}
 
       {/* ── VIEW 3: TRENDY ── */}
-      {view === "trendy" && (() => {
+      {view === "trendy" && (
         const METRYKI = [
           { id: "frachty",  label: "Frachty €",     color: "#3b82f6" },
           { id: "koszty",   label: "Koszty €",      color: "#ef4444" },
@@ -4684,10 +4688,6 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
           { id: "eurKm",    label: "€/km",           color: "#ec4899" },
           { id: "dni",      label: "Dni w trasie",  color: "#64748b" },
         ];
-        const [tVehicles, setTVehicles] = useState([vehicles[0]?.id].filter(Boolean));
-        const [tYears,    setTYears]    = useState([selYear]);
-        const [tMetryki,  setTMetryki]  = useState(["frachty","zysk"]);
-        const [tMode,     setTMode]     = useState("vehicle");
 
         const toggleArr = (arr, setArr, val) => setArr(p => p.includes(val) ? p.filter(x=>x!==val) : [...p, val]);
 
@@ -4736,8 +4736,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
         const chartW = MONTHS_PL.length * W_PT;
         const toY = v => H - ((v - minVal) / range * (H - 20)) - 10;
 
-        return (
-          <div className="space-y-4">
+        <div className="space-y-4">
             <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4 space-y-4">
               <div className="flex gap-2 items-center flex-wrap">
                 <span className="text-xs text-gray-500 w-20">Tryb:</span>
@@ -4855,8 +4854,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
               </div>
             </div>
           </div>
-        );
-      })()}
+      )}
       {/* FORM MODAL */}
       {showForm && (
         <RentFormModal
