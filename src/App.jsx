@@ -4759,7 +4759,8 @@ function TrendyTab({ vehicles, records, operacyjne, selYear, getRecord }) {
     });
   }
   const allVals = series.flatMap(s=>s.pts).filter(v=>v!==0);
-  const minVal = allVals.length ? Math.min(...allVals) : 0;
+  const _min = allVals.length ? Math.min(...allVals) : 0;
+  const minVal = _min >= 0 ? 0 : _min;
   const maxVal = allVals.length ? Math.max(...allVals) : 1;
   const range = maxVal - minVal || 1;
   const H = 240, W_PT = 52, chartW = 12 * W_PT;
@@ -4808,8 +4809,8 @@ function TrendyTab({ vehicles, records, operacyjne, selYear, getRecord }) {
             </div>
           ))}
         </div>
-        <div>
-          <svg viewBox={"0 0 "+(chartW+50)+" "+(H+40)} width="100%" height={H+40} style={{display:"block"}}>
+        <div style={{width:"100%"}}>
+          <svg viewBox={"0 0 "+(chartW+50)+" "+(H+40)} preserveAspectRatio="none" style={{display:"block",width:"100%",height:H+40}}>
             {[0,0.25,0.5,0.75,1].map(t=>{
               const y=H-(t*(H-2*PAD))-PAD, v=minVal+t*range;
               return (<g key={t}>
