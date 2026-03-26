@@ -4203,7 +4203,6 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
   const [selVehicle, setSelVehicle] = useState(null);
   const [selYear, setSelYear]     = useState(new Date().getFullYear());
   const [editOp, setEditOp] = useState(null);
-  const [editOp, setEditOp] = useState(null);
   const [showForm, setShowForm]   = useState(false);
   const [editRecord, setEditRecord] = useState(null);
   const [formVehicle, setFormVehicle] = useState("");
