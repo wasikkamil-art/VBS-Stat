@@ -4396,8 +4396,6 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
               </table>
             </div>
           </div>
-        </div>
-      )}
 
           {/* Per-vehicle table */}
           <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
@@ -4440,6 +4438,9 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
               );
             })}
           </div>
+
+        </div>
+      )}
 
       {/* ── VIEW 2: POJAZD SZCZEGÓŁ ── */}
       {view === "pojazd" && (
