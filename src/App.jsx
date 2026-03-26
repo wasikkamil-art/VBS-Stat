@@ -4556,8 +4556,13 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
                         <th className="text-right px-3 py-2 font-semibold text-gray-400">Frachty</th>
                         <th className="text-right px-3 py-2 font-semibold text-gray-400">Koszty</th>
                         <th className="text-right px-3 py-2 font-semibold text-gray-400">Zysk</th>
-                        <th className="text-right px-3 py-2 font-semibold text-gray-400">KM</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-400">KM licznik</th>
                         <th className="text-right px-3 py-2 font-semibold text-gray-400">Dni</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-400">Paliwo L</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-400">Spalanie</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-400">€/L</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-400">€/km</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-400">Śr. waga</th>
                         <th className="px-3 py-2 w-8"></th>
                       </tr>
                     </thead>
