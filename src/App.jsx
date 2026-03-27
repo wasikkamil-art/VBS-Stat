@@ -4887,7 +4887,7 @@ function TrendyTab({ vehicles, records, operacyjne, selYear, getRecord }) {
         return (
           <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
             <div className="flex gap-3 items-center flex-wrap mb-4">
-              <span className="text-sm font-semibold text-gray-700">Porównanie YoY 2025 vs 2026</span>
+              <span className="text-sm font-semibold text-gray-700">Porównanie Y2Y</span>
               <div className="flex gap-1 ml-2">
                 {[["flota","Flota total"],["pojazd","Per pojazd"]].map(([m,l])=>(
                   <button key={m} onClick={()=>setYoyMode(m)}
@@ -4917,7 +4917,7 @@ function TrendyTab({ vehicles, records, operacyjne, selYear, getRecord }) {
                   {rows.map((row,ri)=>{
                     const sum25=row.vals25.reduce((a,b)=>a+b,0);
                     const sum26=row.vals26.reduce((a,b)=>a+b,0);
-                    const pill=(v25,v26)=>{ if(!v25||!v26) return <span style={{color:"#d1d5db"}}>-</span>; const p=((v26-v25)/Math.abs(v25)*100); return <span className={p>=0?"ppos":"pneg"}>{(p>=0?"+":"")+p.toFixed(0)+"%"}</span>; };
+                    const pill=(v25,v26)=>{ if(!v25||!v26) return <span style={{color:"#d1d5db"}}>-</span>; const d=v26-v25; const fmt=Math.abs(d)>=1000?(d/1000).toFixed(1)+"k":d.toFixed(d<10&&d>-10?1:0); return <span className={d>=0?"ppos":"pneg"}>{(d>=0?"+":"")+fmt}</span>; };
                     return (
                       <>
                         <tr className="yrow26">
@@ -4946,7 +4946,7 @@ function TrendyTab({ vehicles, records, operacyjne, selYear, getRecord }) {
                     const tot25=MS.map((_,mi)=>activeVehs.reduce((s,v)=>s+met.fn(v.id,2025,mi),0));
                     const tot26=MS.map((_,mi)=>activeVehs.reduce((s,v)=>s+met.fn(v.id,2026,mi),0));
                     const s25=tot25.reduce((a,b)=>a+b,0),s26=tot26.reduce((a,b)=>a+b,0);
-                    const pill=(v25,v26)=>{ if(!v25||!v26) return <span style={{color:"#d1d5db"}}>-</span>; const p=((v26-v25)/Math.abs(v25)*100); return <span className={p>=0?"ppos":"pneg"}>{(p>=0?"+":"")+p.toFixed(0)+"%"}</span>; };
+                    const pill=(v25,v26)=>{ if(!v25||!v26) return <span style={{color:"#d1d5db"}}>-</span>; const d=v26-v25; const fmt=Math.abs(d)>=1000?(d/1000).toFixed(1)+"k":d.toFixed(d<10&&d>-10?1:0); return <span className={d>=0?"ppos":"pneg"}>{(d>=0?"+":"")+fmt}</span>; };
                     return (<>
                       <tr className="ytot26">
                         <td style={{fontSize:11,fontWeight:700,color:"#1d4ed8",padding:"6px 8px"}} colSpan={2}>FLOTA 2026</td>
