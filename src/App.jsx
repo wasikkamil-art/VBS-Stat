@@ -4901,45 +4901,71 @@ function TrendyTab({ vehicles, records, operacyjne, selYear, getRecord }) {
                 ))}
               </div>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs" style={{minWidth:900}}>
+            <div className="overflow-x-auto" style={{fontFamily:"inherit"}}>
+              <style>{`.yrow26{background:#f0f9ff;border-top:2px solid #3b82f6}.yrow25{background:#fafafa}.yrowdiff{background:#fff;border-bottom:3px solid #e2e8f0}.ytot26{background:#dbeafe;border-top:2px solid #2563eb}.ytot25{background:#f1f5f9}.ytotd{background:#f8fafc;border-bottom:3px solid #2563eb}.ysum{border-left:2px solid #e2e8f0}.ppos{color:#15803d;font-size:11px;font-weight:700;background:#f0fdf4;border-radius:4px;padding:1px 5px}.pneg{color:#b91c1c;font-size:11px;font-weight:700;background:#fef2f2;border-radius:4px;padding:1px 5px}`}</style>
+              <table className="w-full text-xs" style={{minWidth:900,borderCollapse:"collapse"}}>
                 <thead>
-                  <tr className="border-b border-gray-100">
-                    <th className="text-left px-2 py-2 text-gray-400 font-semibold w-24">Auto / Rok</th>
+                  <tr style={{borderBottom:"2px solid #e2e8f0"}}>
+                    <th className="text-left px-2 py-2 text-gray-400 font-semibold" style={{width:90}}>Pojazd</th>
+                    <th className="text-left px-2 py-2" style={{width:44}}></th>
                     {MS.map(m=><th key={m} className="text-right px-2 py-2 text-gray-400 font-semibold">{m}</th>)}
-                    <th className="text-right px-2 py-2 text-gray-400 font-semibold">SUMA</th>
-                    <th className="text-right px-2 py-2 text-gray-400 font-semibold">ZMIANA</th>
+                    <th className="text-right px-2 py-2 text-gray-400 font-semibold ysum">SUMA</th>
+                    <th className="text-right px-2 py-2 text-gray-400 font-semibold">∆%</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((row,ri)=>{
                     const sum25=row.vals25.reduce((a,b)=>a+b,0);
                     const sum26=row.vals26.reduce((a,b)=>a+b,0);
+                    const pill=(v25,v26)=>{ if(!v25||!v26) return <span style={{color:"#d1d5db"}}>-</span>; const p=((v26-v25)/Math.abs(v25)*100); return <span className={p>=0?"ppos":"pneg"}>{(p>=0?"+":"")+p.toFixed(0)+"%"}</span>; };
                     return (
                       <>
-                        <tr className="border-b border-gray-50 bg-gray-50">
-                          <td className="px-2 py-1.5 font-semibold text-gray-700" style={{fontFamily:"'DM Mono',monospace",fontSize:11}} rowSpan={3}>{row.label}</td>
-                          {row.vals25.map((v,mi)=><td key={mi} className="text-right px-2 py-1.5 text-gray-500">{fmtV(v)}</td>)}
-                          <td className="text-right px-2 py-1.5 font-semibold text-gray-600">{fmtV(sum25)}</td>
-                          <td className="text-right px-2 py-1.5 text-gray-300 text-xs">2025</td>
+                        <tr className="yrow26">
+                          <td style={{fontWeight:700,fontSize:11,color:"#1e293b",fontFamily:"monospace",padding:"6px 8px"}} rowSpan={3}>{row.label}</td>
+                          <td style={{color:"#2563eb",fontSize:11,fontWeight:700,padding:"6px 8px"}}>2026</td>
+                          {row.vals26.map((v,mi)=><td key={mi} style={{textAlign:"right",padding:"6px 8px",color:"#1e293b",fontWeight:600}}>{fmtV(v)}</td>)}
+                          <td className="ysum" style={{textAlign:"right",padding:"6px 8px",fontWeight:700,color:"#1e293b"}}>{fmtV(sum26)}</td>
+                          <td></td>
                         </tr>
-                        <tr className="border-b border-gray-50">
-                          {row.vals26.map((v,mi)=><td key={mi} className="text-right px-2 py-1.5 font-medium text-gray-800">{fmtV(v)}</td>)}
-                          <td className="text-right px-2 py-1.5 font-bold text-gray-800">{fmtV(sum26)}</td>
-                          <td className="text-right px-2 py-1.5 text-gray-300 text-xs">2026</td>
+                        <tr className="yrow25">
+                          <td style={{color:"#94a3b8",fontSize:11,padding:"6px 8px"}}>2025</td>
+                          {row.vals25.map((v,mi)=><td key={mi} style={{textAlign:"right",padding:"6px 8px",color:"#94a3b8"}}>{fmtV(v)}</td>)}
+                          <td className="ysum" style={{textAlign:"right",padding:"6px 8px",color:"#94a3b8",fontWeight:600}}>{fmtV(sum25)}</td>
+                          <td></td>
                         </tr>
-                        <tr className="border-b-2 border-gray-100">
-                          {row.vals25.map((v25,mi)=>{
-                            const v26=row.vals26[mi];
-                            const p = v25&&v26 ? ((v26-v25)/Math.abs(v25)*100) : null;
-                            return <td key={mi} className="text-right px-2 py-1 text-xs font-semibold" style={{color:p===null?"#d1d5db":p>=0?"#16a34a":"#dc2626"}}>{p===null?"—":(p>=0?"+":"")+p.toFixed(0)+"%"}</td>;
-                          })}
-                          <td className="text-right px-2 py-1 text-xs font-bold" style={{color:diffColor(sum25,sum26)}}>{diffPct(sum25,sum26)}</td>
-                          <td className="text-right px-2 py-1 text-xs text-gray-300">diff</td>
+                        <tr className="yrowdiff">
+                          <td style={{fontSize:10,color:"#cbd5e1",padding:"4px 8px"}}>diff</td>
+                          {row.vals25.map((v25,mi)=><td key={mi} style={{textAlign:"right",padding:"4px 8px"}}>{pill(v25,row.vals26[mi])}</td>)}
+                          <td className="ysum" style={{textAlign:"right",padding:"4px 8px"}}>{pill(sum25,sum26)}</td>
+                          <td style={{textAlign:"right",padding:"4px 8px"}}>{pill(sum25,sum26)}</td>
                         </tr>
                       </>
                     );
                   })}
+                  {(()=>{
+                    const tot25=MS.map((_,mi)=>activeVehs.reduce((s,v)=>s+met.fn(v.id,2025,mi),0));
+                    const tot26=MS.map((_,mi)=>activeVehs.reduce((s,v)=>s+met.fn(v.id,2026,mi),0));
+                    const s25=tot25.reduce((a,b)=>a+b,0),s26=tot26.reduce((a,b)=>a+b,0);
+                    const pill=(v25,v26)=>{ if(!v25||!v26) return <span style={{color:"#d1d5db"}}>-</span>; const p=((v26-v25)/Math.abs(v25)*100); return <span className={p>=0?"ppos":"pneg"}>{(p>=0?"+":"")+p.toFixed(0)+"%"}</span>; };
+                    return (<>
+                      <tr className="ytot26">
+                        <td style={{fontSize:11,fontWeight:700,color:"#1d4ed8",padding:"6px 8px"}} colSpan={2}>FLOTA 2026</td>
+                        {tot26.map((v,mi)=><td key={mi} style={{textAlign:"right",padding:"6px 8px",color:"#1d4ed8",fontWeight:700}}>{fmtV(v)}</td>)}
+                        <td className="ysum" style={{textAlign:"right",padding:"6px 8px",color:"#1d4ed8",fontWeight:700}}>{fmtV(s26)}</td><td></td>
+                      </tr>
+                      <tr className="ytot25">
+                        <td style={{fontSize:11,color:"#94a3b8",padding:"6px 8px"}} colSpan={2}>FLOTA 2025</td>
+                        {tot25.map((v,mi)=><td key={mi} style={{textAlign:"right",padding:"6px 8px",color:"#94a3b8"}}>{fmtV(v)}</td>)}
+                        <td className="ysum" style={{textAlign:"right",padding:"6px 8px",color:"#94a3b8",fontWeight:600}}>{fmtV(s25)}</td><td></td>
+                      </tr>
+                      <tr className="ytotd">
+                        <td style={{fontSize:10,color:"#94a3b8",padding:"4px 8px"}} colSpan={2}>diff</td>
+                        {tot25.map((v25,mi)=><td key={mi} style={{textAlign:"right",padding:"4px 8px"}}>{pill(v25,tot26[mi])}</td>)}
+                        <td className="ysum" style={{textAlign:"right",padding:"4px 8px"}}>{pill(s25,s26)}</td>
+                        <td style={{textAlign:"right",padding:"4px 8px"}}>{pill(s25,s26)}</td>
+                      </tr>
+                    </>);
+                  })()}
                 </tbody>
               </table>
             </div>
