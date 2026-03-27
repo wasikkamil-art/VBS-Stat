@@ -1854,6 +1854,8 @@ function App({ user, role, appUsers = [] }) {
             ["docs","🛡️","Dok."],
             ["imi","🌍","IMI"],
             ["serwis","🔧","Serwis"],
+            ...((isAdmin||isDyspozytor)?[["sprawy","⚡","Sprawy"]]:[] ),
+            ...(isAdmin?[["users","👥","Osoby"]]:[] ),
           ].map(([id,icon,label]) => (
             <button key={id} onClick={() => setTab(id)}
               className="flex-shrink-0 flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all min-w-14"
