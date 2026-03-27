@@ -433,8 +433,8 @@ function SprawaFileUpload({ sprawaId, subfolder, onUploaded, label = "📎 Dodaj
   const handleFile = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const allowed = ["application/pdf","image/jpeg","image/png","image/jpg"];
-    if (!allowed.includes(file.type)) { alert("Dozwolone: PDF, JPG, PNG"); return; }
+    const allowed = ["application/pdf","image/jpeg","image/png","image/jpg","application/msword","application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
+    if (!allowed.includes(file.type)) { alert("Dozwolone: PDF, JPG, PNG, DOC, DOCX"); return; }
     if (file.size > 10 * 1024 * 1024) { alert("Maks. 10 MB"); return; }
     setUploading(true);
     try {
