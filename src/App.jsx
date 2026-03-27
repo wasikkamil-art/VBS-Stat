@@ -7184,7 +7184,15 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
               </div>
               <div className="flex items-center justify-between pt-2 border-t border-gray-50">
                 <div className="text-xs text-gray-400">{r.dyspozytor || "—"} · {r.nrFV || "brak FV"}</div>
-                <div className="flex gap-1">
+                <div className="flex gap-1 flex-wrap">
+                  {r.urlZlecenie && (
+                    <a href={r.urlZlecenie} target="_blank" rel="noopener noreferrer"
+                      className="h-8 px-2 rounded-lg flex items-center justify-center bg-blue-50 text-blue-600 text-xs font-semibold hover:bg-blue-100">📄 Zlecenie</a>
+                  )}
+                  {r.urlFV && (
+                    <a href={r.urlFV} target="_blank" rel="noopener noreferrer"
+                      className="h-8 px-2 rounded-lg flex items-center justify-center bg-green-50 text-green-600 text-xs font-semibold hover:bg-green-100">🧾 FV</a>
+                  )}
                   <button onClick={() => { setEditId(r.id); setShowForm(true); }}
                     className="w-8 h-8 rounded-lg flex items-center justify-center bg-gray-100 hover:bg-gray-200">✏️</button>
                   <button onClick={() => { if(window.confirm("Usunąć?")) onDelete(r.id); }}
