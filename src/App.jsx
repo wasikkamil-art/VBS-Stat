@@ -4284,7 +4284,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
   const getRecord = (vid, y, m) => records.find(r => r.vehicleId === vid && r.year === y && r.month === m) || null;
 
   const totalFrachty = (vid, y) => MONTHS_PL.reduce((s,_,m) => { const r = getRecord(vid,y,m); return s + (r?.frachty||0); }, 0);
-  const totalKoszt   = (vid, y) => MONTHS_PL.reduce((s,_,m) => { const r = getRecord(vid,y,m); return s + RENT_COSTS.reduce((cs,c) => cs + (r?.costs?.[c.id]||0), 0); }, 0);
+  const totalKoszt   = (vid, y) => MONTHS_PL.reduce((s,_,m) => { const r = getRecord(vid,y,m); return s + Object.values(r?.costs||{}).reduce((s,v)=>s+(v||0),0); }, 0);
   const totalZysk    = (vid, y) => totalFrachty(vid,y) - totalKoszt(vid,y);
 
   const fleetFrachty = (y) => vehicles.reduce((s,v) => s + totalFrachty(v.id,y), 0);
@@ -4396,7 +4396,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
                           </td>
                         );
                         const f = r.frachty || 0;
-                        const k = RENT_COSTS.reduce((s,c) => s + (r.costs?.[c.id]||0), 0);
+                        const k = Object.values(r?.costs||{}).reduce((s,v)=>s+(v||0),0);
                         const z = f - k;
                         return (
                           <td key={mi} className="text-center py-2 px-1">
@@ -4417,7 +4417,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
                   <tr style={{ background:"#f9fafb" }}>
                     <td className="px-4 py-2.5 font-bold text-gray-700 text-xs">SUMA</td>
                     {MONTHS_PL.map((_,mi) => {
-                      const z = vehicles.reduce((s,v) => { const r=getRecord(v.id,selYear,mi); if(!r) return s; const f=r.frachty||0; const k=RENT_COSTS.reduce((cs,c)=>cs+(r.costs?.[c.id]||0),0); return s+f-k; }, 0);
+                      const z = vehicles.reduce((s,v) => { const r=getRecord(v.id,selYear,mi); if(!r) return s; const f=r.frachty||0; const k=Object.values(r?.costs||{}).reduce((s,v)=>s+(v||0),0); return s+f-k; }, 0);
                       const hasAny = vehicles.some(v => getRecord(v.id,selYear,mi));
                       return <td key={mi} className="text-center py-2.5 px-1 font-bold text-xs" style={{ color: hasAny ? zyskColor(z) : "#d1d5db" }}>{hasAny ? (z>=0?"+":"")+Math.round(z).toLocaleString("pl-PL") : "—"}</td>;
                     })}
@@ -4494,7 +4494,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
             const yearData = MONTHS_PL.map((lbl, mi) => {
               const r = getRecord(selVehicle, selYear, mi);
               const f = r?.frachty || 0;
-              const k = r ? RENT_COSTS.reduce((s,c) => s + (r.costs?.[c.id]||0), 0) : 0;
+              const k = r ? Object.values(r?.costs||{}).reduce((s,v)=>s+(v||0),0) : 0;
               return { lbl: lbl.slice(0,3), frachty: f, koszty: k, zysk: f-k, hasData: !!r };
             });
             const annualF = yearData.reduce((s,d)=>s+d.frachty,0);
