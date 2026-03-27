@@ -4858,6 +4858,94 @@ function TrendyTab({ vehicles, records, operacyjne, selYear, getRecord }) {
           </LineChart>
         </ResponsiveContainer>
       </div>
+
+      {/* YoY TABELA */}
+      {(() => {
+        const METRICS = [
+          { id:"frachty",  label:"Frachty €",      fn:(vid,y,mi)=>{ const r=getRecord(vid,y,mi); return r?.frachty||0; } },
+          { id:"koszty",   label:"Koszty €",       fn:(vid,y,mi)=>{ const r=getRecord(vid,y,mi); return r?Object.values(r.costs||{}).reduce((s,v)=>s+v,0):0; } },
+          { id:"zysk",     label:"Zysk €",         fn:(vid,y,mi)=>{ const r=getRecord(vid,y,mi); const f=r?.frachty||0; const k=r?Object.values(r.costs||{}).reduce((s,v)=>s+v,0):0; return f-k; } },
+          { id:"km",       label:"KM licznik",     fn:(vid,y,mi)=>{ const op=operacyjne.find(o=>o.vehicleId===vid&&o.year===y&&o.month===mi+1); return op?.kmLicznik||0; } },
+          { id:"paliwo",   label:"Paliwo L",       fn:(vid,y,mi)=>{ const op=operacyjne.find(o=>o.vehicleId===vid&&o.year===y&&o.month===mi+1); return op?.paliwoL||0; } },
+          { id:"spalanie", label:"Spalanie L/100", fn:(vid,y,mi)=>{ const op=operacyjne.find(o=>o.vehicleId===vid&&o.year===y&&o.month===mi+1); return op?.spalanie||0; } },
+          { id:"eurkm",    label:"€/km",            fn:(vid,y,mi)=>{ const r=getRecord(vid,y,mi); const op=operacyjne.find(o=>o.vehicleId===vid&&o.year===y&&o.month===mi+1); const k=r?Object.values(r.costs||{}).reduce((s,v)=>s+v,0):0; return (op?.kmLicznik&&k)?parseFloat((k/op.kmLicznik).toFixed(2)):0; } },
+          { id:"dni",      label:"Dni w trasie",   fn:(vid,y,mi)=>{ const op=operacyjne.find(o=>o.vehicleId===vid&&o.year===y&&o.month===mi+1); return op?.dni||0; } },
+        ];
+        const [yoyMode, setYoyMode] = useState("flota");
+        const [yoyMet, setYoyMet] = useState("frachty");
+        const met = METRICS.find(m=>m.id===yoyMet);
+        const MS = ["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paź","Lis","Gru"];
+        const activeVehs = vehicles.filter(v=>!v.archived);
+        const getFlotaVal = (y, mi) => activeVehs.reduce((s,v)=>s+met.fn(v.id,y,mi),0);
+        const getVehVal   = (vid, y, mi) => met.fn(vid, y, mi);
+        const fmtV = (v) => v===0 ? "—" : v>=1000?(v/1000).toFixed(1)+"k" : v.toFixed(v<10&&v>-10?1:0);
+        const diffColor = (a,b) => { if(!a||!b) return "#d1d5db"; return b>=a?"#16a34a":"#dc2626"; };
+        const diffPct = (a,b) => { if(!a||!b) return "—"; const p=((b-a)/Math.abs(a)*100); return (p>=0?"+":"")+p.toFixed(1)+"%"; };
+        const rows = yoyMode==="flota"
+          ? [{ label:"Flota total", vals25: MS.map((_,mi)=>getFlotaVal(2025,mi)), vals26: MS.map((_,mi)=>getFlotaVal(2026,mi)) }]
+          : activeVehs.map(v=>({ label:v.plate, vals25: MS.map((_,mi)=>getVehVal(v.id,2025,mi)), vals26: MS.map((_,mi)=>getVehVal(v.id,2026,mi)) }));
+        return (
+          <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
+            <div className="flex gap-3 items-center flex-wrap mb-4">
+              <span className="text-sm font-semibold text-gray-700">Porównanie YoY 2025 vs 2026</span>
+              <div className="flex gap-1 ml-2">
+                {[["flota","Flota total"],["pojazd","Per pojazd"]].map(([m,l])=>(
+                  <button key={m} onClick={()=>setYoyMode(m)}
+                    className={"px-3 py-1 rounded-lg text-xs font-medium transition-all "+(yoyMode===m?"bg-blue-500 text-white":"bg-gray-100 text-gray-500 hover:bg-gray-200")}>{l}</button>
+                ))}
+              </div>
+              <div className="flex gap-1 flex-wrap">
+                {METRICS.map(m=>(
+                  <button key={m.id} onClick={()=>setYoyMet(m.id)}
+                    className={"px-3 py-1 rounded-lg text-xs font-medium transition-all "+(yoyMet===m.id?"bg-indigo-500 text-white":"bg-gray-100 text-gray-500 hover:bg-gray-200")}>{m.label}</button>
+                ))}
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs" style={{minWidth:900}}>
+                <thead>
+                  <tr className="border-b border-gray-100">
+                    <th className="text-left px-2 py-2 text-gray-400 font-semibold w-24">Auto / Rok</th>
+                    {MS.map(m=><th key={m} className="text-right px-2 py-2 text-gray-400 font-semibold">{m}</th>)}
+                    <th className="text-right px-2 py-2 text-gray-400 font-semibold">SUMA</th>
+                    <th className="text-right px-2 py-2 text-gray-400 font-semibold">ZMIANA</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row,ri)=>{
+                    const sum25=row.vals25.reduce((a,b)=>a+b,0);
+                    const sum26=row.vals26.reduce((a,b)=>a+b,0);
+                    return (
+                      <React.Fragment key={ri}>
+                        <tr className="border-b border-gray-50 bg-gray-50">
+                          <td className="px-2 py-1.5 font-semibold text-gray-700" style={{fontFamily:"'DM Mono',monospace",fontSize:11}} rowSpan={3}>{row.label}</td>
+                          {row.vals25.map((v,mi)=><td key={mi} className="text-right px-2 py-1.5 text-gray-500">{fmtV(v)}</td>)}
+                          <td className="text-right px-2 py-1.5 font-semibold text-gray-600">{fmtV(sum25)}</td>
+                          <td className="text-right px-2 py-1.5 text-gray-300 text-xs">2025</td>
+                        </tr>
+                        <tr className="border-b border-gray-50">
+                          {row.vals26.map((v,mi)=><td key={mi} className="text-right px-2 py-1.5 font-medium text-gray-800">{fmtV(v)}</td>)}
+                          <td className="text-right px-2 py-1.5 font-bold text-gray-800">{fmtV(sum26)}</td>
+                          <td className="text-right px-2 py-1.5 text-gray-300 text-xs">2026</td>
+                        </tr>
+                        <tr className="border-b-2 border-gray-100">
+                          {row.vals25.map((v25,mi)=>{
+                            const v26=row.vals26[mi];
+                            const p = v25&&v26 ? ((v26-v25)/Math.abs(v25)*100) : null;
+                            return <td key={mi} className="text-right px-2 py-1 text-xs font-semibold" style={{color:p===null?"#d1d5db":p>=0?"#16a34a":"#dc2626"}}>{p===null?"—":(p>=0?"+":"")+p.toFixed(0)+"%"}</td>;
+                          })}
+                          <td className="text-right px-2 py-1 text-xs font-bold" style={{color:diffColor(sum25,sum26)}}>{diffPct(sum25,sum26)}</td>
+                          <td className="text-right px-2 py-1 text-xs text-gray-300">diff</td>
+                        </tr>
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
