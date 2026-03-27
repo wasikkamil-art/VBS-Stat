@@ -254,6 +254,21 @@ export default function Root() {
   const [role, setRole]         = useState(null);
   const [roleLoaded, setRoleLoaded] = useState(false);
   const [appUsers, setAppUsers] = useState([]);
+  const autoLogoutTimer = useRef(null);
+  const resetAutoLogout = useRef(() => {
+    if (autoLogoutTimer.current) clearTimeout(autoLogoutTimer.current);
+    autoLogoutTimer.current = setTimeout(() => { signOut(auth); }, 10 * 60 * 1000);
+  });
+  useEffect(() => {
+    const events = ["mousemove","keydown","click","scroll","touchstart"];
+    const handler = () => resetAutoLogout.current();
+    events.forEach(e => window.addEventListener(e, handler));
+    resetAutoLogout.current();
+    return () => {
+      events.forEach(e => window.removeEventListener(e, handler));
+      if (autoLogoutTimer.current) clearTimeout(autoLogoutTimer.current);
+    };
+  }, []);
 
   useEffect(() => {
     return onAuthStateChanged(auth, async (u) => {
