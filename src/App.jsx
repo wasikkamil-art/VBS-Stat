@@ -450,7 +450,7 @@ function SprawaFileUpload({ sprawaId, subfolder, onUploaded, label = "📎 Dodaj
 
   return (
     <>
-      <input ref={inputRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={handleFile} />
+      <input ref={inputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" className="hidden" onChange={handleFile} />
       <button onClick={() => inputRef.current?.click()} disabled={uploading}
         className="px-3 py-1.5 rounded-lg text-xs font-medium border border-dashed border-gray-300 text-gray-500 hover:bg-gray-50 transition-all disabled:opacity-50">
         {uploading ? "Uploading..." : label}
@@ -461,11 +461,21 @@ function SprawaFileUpload({ sprawaId, subfolder, onUploaded, label = "📎 Dodaj
 
 function AttachmentList({ files, onDelete }) {
   if (!files || files.length === 0) return null;
+  const fileIcon = (url) => {
+    if (!url) return '📄';
+    const ext = url.split('?')[0].split('.').pop().toLowerCase();
+    if (ext==='pdf') return '📄';
+    if (ext==='docx'||ext==='doc') return '📝';
+    return '🖼️';
+  };
+  const fileName = (url) => {
+    try { const p=url.split('?')[0].split('%2F').pop(); return decodeURIComponent(p).substring(0,30); } catch { return 'plik'; }
+  };
   return (
     <div className="flex flex-wrap gap-2 mt-2">
       {files.map((f, i) => (
         <div key={i} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-xs">
-          <span>{f.type === "application/pdf" ? "📄" : "🖼️"}</span>
+          <span>{f.type === "application/pdf" ? "📄" : (f.name?.endsWith(".docx")||f.name?.endsWith(".doc")) ? "📝" : "🖼️"}</span>
           <a href={f.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline max-w-32 truncate">{f.name}</a>
           {onDelete && <button onClick={() => onDelete(i)} className="text-gray-300 hover:text-red-400 ml-1">✕</button>}
         </div>
@@ -6428,7 +6438,7 @@ Jeśli nie możesz odczytać danego pola, wpisz null.`,
         </a>
         <button onClick={() => fileRef.current?.click()} title="Zastąp plik"
           className="text-gray-300 hover:text-gray-500 text-xs">↺</button>
-        <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={handleFile} />
+        <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" className="hidden" onChange={handleFile} />
       </div>
     );
   }
@@ -6449,7 +6459,7 @@ Jeśli nie możesz odczytać danego pola, wpisz null.`,
         <button onClick={() => setStatus("idle")} title={errorMsg}
           className="text-xs text-red-500 hover:underline">⚠️ błąd</button>
       )}
-      <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={handleFile} />
+      <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" className="hidden" onChange={handleFile} />
     </div>
   );
 }
@@ -7792,7 +7802,7 @@ function ZlecenieUploadBtn({ frachtId, onUploaded, label = "+ Dodaj zlecenie", f
       {status === "uploading" && <span className="text-xs text-gray-400 animate-pulse">⬆️ wysyłam…</span>}
       {status === "done"      && <span className="text-xs text-green-600">✅ wgrane!</span>}
       {status === "error"     && <button onClick={() => setStatus("idle")} className="text-xs text-red-500">⚠️ błąd — spróbuj ponownie</button>}
-      <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={handleFile} />
+      <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" className="hidden" onChange={handleFile} />
     </div>
   );
 }
