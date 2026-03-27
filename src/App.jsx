@@ -6386,7 +6386,7 @@ Jeśli nie możesz odczytać danego pola, wpisz null.`,
           }]
         };
 
-        const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        const resp = await fetch("/api/claude", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
@@ -7763,7 +7763,7 @@ function ZlecenieUploadBtn({ frachtId, onUploaded, label = "+ Dodaj zlecenie", f
         }]
       };
       try {
-        const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        const resp = await fetch("/api/claude", {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
         });
         const data = await resp.json();
