@@ -4916,7 +4916,7 @@ function TrendyTab({ vehicles, records, operacyjne, selYear, getRecord }) {
                     const sum25=row.vals25.reduce((a,b)=>a+b,0);
                     const sum26=row.vals26.reduce((a,b)=>a+b,0);
                     return (
-                      <React.Fragment key={ri}>
+                      <>
                         <tr className="border-b border-gray-50 bg-gray-50">
                           <td className="px-2 py-1.5 font-semibold text-gray-700" style={{fontFamily:"'DM Mono',monospace",fontSize:11}} rowSpan={3}>{row.label}</td>
                           {row.vals25.map((v,mi)=><td key={mi} className="text-right px-2 py-1.5 text-gray-500">{fmtV(v)}</td>)}
@@ -4937,7 +4937,7 @@ function TrendyTab({ vehicles, records, operacyjne, selYear, getRecord }) {
                           <td className="text-right px-2 py-1 text-xs font-bold" style={{color:diffColor(sum25,sum26)}}>{diffPct(sum25,sum26)}</td>
                           <td className="text-right px-2 py-1 text-xs text-gray-300">diff</td>
                         </tr>
-                      </React.Fragment>
+                      </>
                     );
                   })}
                 </tbody>
