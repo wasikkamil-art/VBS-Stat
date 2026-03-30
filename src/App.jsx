@@ -4836,7 +4836,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
         </div>
         <div className="flex gap-2 items-center flex-wrap">
           <span className="text-xs text-gray-500 w-20">Pojazd:</span>
-          {vehicles.filter(v=>!v.archived).map(v=>(
+          {vehicles.map(v=>(
             <button key={v.id} onClick={()=>tMode==="vehicle"?toggleArr(tVehicles,setTVehicles,v.id):setTVehicles([v.id])}
               className={"px-3 py-1 rounded-lg text-xs font-medium transition-all "+(tVehicles.includes(v.id)?"bg-indigo-500 text-white":"bg-gray-100 text-gray-500 hover:bg-gray-200")}>{v.plate}</button>
           ))}
@@ -4894,7 +4894,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
         const [yoyMet, setYoyMet] = useState("frachty");
         const met = METRICS.find(m=>m.id===yoyMet);
         const MS = ["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paź","Lis","Gru"];
-        const activeVehs = vehicles.filter(v=>!v.archived);
+        const activeVehs = vehicles;
         const getFlotaVal = (y, mi) => activeVehs.reduce((s,v)=>s+met.fn(v.id,y,mi),0);
         const getVehVal   = (vid, y, mi) => met.fn(vid, y, mi);
         const fmtV = (v) => v===0 ? "—" : v>=1000?(v/1000).toFixed(1)+"k" : v.toFixed(v<10&&v>-10?1:0);
@@ -4902,7 +4902,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
         const diffPct = (a,b) => { if(!a||!b) return "—"; const p=((b-a)/Math.abs(a)*100); return (p>=0?"+":"")+p.toFixed(1)+"%"; };
         const rows = yoyMode==="flota"
           ? [{ label:"Flota total", vals25: MS.map((_,mi)=>getFlotaVal(2025,mi)), vals26: MS.map((_,mi)=>getFlotaVal(2026,mi)) }]
-          : activeVehs.map(v=>({ label:v.plate, vals25: MS.map((_,mi)=>getVehVal(v.id,2025,mi)), vals26: MS.map((_,mi)=>getVehVal(v.id,2026,mi)) }));
+          : vehicles.map(v=>({ label:v.plate, vals25: MS.map((_,mi)=>getVehVal(v.id,2025,mi)), vals26: MS.map((_,mi)=>getVehVal(v.id,2026,mi)) }));
         return (
           <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
             <div className="flex gap-3 items-center flex-wrap mb-4">
