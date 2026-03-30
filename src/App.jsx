@@ -4771,8 +4771,12 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
     const r = getRecord(vid, year, mi);
     const op = operacyjne.find(o => o.vehicleId===vid && o.year===year && o.month===mi+1);
     const monthStr = `${year}-${String(mi+1).padStart(2,"0")}`;
-    const frachtyVal = frachtyList.filter(f => f.vehicleId===vid && (f.dataZaladunku||"").startsWith(monthStr)).reduce((s,f)=>s+(parseFloat(f.cenaEur)||0),0);
-    const kostyVal = costs.filter(c => c.vehicleId===vid && (c.date||"").startsWith(monthStr)).reduce((s,c)=>s+(parseFloat(c.amountEUR)||0),0);
+    const frachtyVal = year >= 2026
+      ? frachtyList.filter(f => f.vehicleId===vid && (f.dataZaladunku||"").startsWith(monthStr)).reduce((s,f)=>s+(parseFloat(f.cenaEur)||0),0)
+      : (r?.frachty||0);
+    const kostyVal = year >= 2026
+      ? costs.filter(c => c.vehicleId===vid && (c.date||"").startsWith(monthStr)).reduce((s,c)=>s+(parseFloat(c.amountEUR)||0),0)
+      : (r ? Object.values(r.costs||{}).reduce((s,v)=>s+(v||0),0) : 0);
     if (metId==="frachty")   return frachtyVal;
     if (metId==="koszty")    return kostyVal;
     if (metId==="zysk")      return frachtyVal - kostyVal;
@@ -4877,9 +4881,9 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
       {/* YoY TABELA */}
       {(() => {
         const METRICS = [
-          { id:"frachty",  label:"Frachty €",      fn:(vid,y,mi)=>{ const ms=`${y}-${String(mi+1).padStart(2,"0")}`; return frachtyList.filter(f=>f.vehicleId===vid&&(f.dataZaladunku||"").startsWith(ms)).reduce((s,f)=>s+(parseFloat(f.cenaEur)||0),0); } },
-          { id:"koszty",   label:"Koszty €",       fn:(vid,y,mi)=>{ const ms=`${y}-${String(mi+1).padStart(2,"0")}`; return costs.filter(c=>c.vehicleId===vid&&(c.date||"").startsWith(ms)).reduce((s,c)=>s+(parseFloat(c.amountEUR)||0),0); } },
-          { id:"zysk",     label:"Zysk €",         fn:(vid,y,mi)=>{ const ms=`${y}-${String(mi+1).padStart(2,"0")}`; const f=frachtyList.filter(fr=>fr.vehicleId===vid&&(fr.dataZaladunku||"").startsWith(ms)).reduce((s,fr)=>s+(parseFloat(fr.cenaEur)||0),0); const k=costs.filter(c=>c.vehicleId===vid&&(c.date||"").startsWith(ms)).reduce((s,c)=>s+(parseFloat(c.amountEUR)||0),0); return f-k; } },
+          { id:"frachty",  label:"Frachty €",      fn:(vid,y,mi)=>{ const ms=`${y}-${String(mi+1).padStart(2,"0")}`; if(y>=2026) return frachtyList.filter(f=>f.vehicleId===vid&&(f.dataZaladunku||"").startsWith(ms)).reduce((s,f)=>s+(parseFloat(f.cenaEur)||0),0); const r=getRecord(vid,y,mi); return r?.frachty||0; } },
+          { id:"koszty",   label:"Koszty €",       fn:(vid,y,mi)=>{ const ms=`${y}-${String(mi+1).padStart(2,"0")}`; if(y>=2026) return costs.filter(c=>c.vehicleId===vid&&(c.date||"").startsWith(ms)).reduce((s,c)=>s+(parseFloat(c.amountEUR)||0),0); const r=getRecord(vid,y,mi); return r?Object.values(r.costs||{}).reduce((s,v)=>s+(v||0),0):0; } },
+          { id:"zysk",     label:"Zysk €",         fn:(vid,y,mi)=>{ const ms=`${y}-${String(mi+1).padStart(2,"0")}`; if(y>=2026){ const f=frachtyList.filter(fr=>fr.vehicleId===vid&&(fr.dataZaladunku||"").startsWith(ms)).reduce((s,fr)=>s+(parseFloat(fr.cenaEur)||0),0); const k=costs.filter(c=>c.vehicleId===vid&&(c.date||"").startsWith(ms)).reduce((s,c)=>s+(parseFloat(c.amountEUR)||0),0); return f-k; } const r=getRecord(vid,y,mi); const f=r?.frachty||0; const k=r?Object.values(r.costs||{}).reduce((s,v)=>s+(v||0),0):0; return f-k; } },
           { id:"km",       label:"KM licznik",     fn:(vid,y,mi)=>{ const op=operacyjne.find(o=>o.vehicleId===vid&&o.year===y&&o.month===mi+1); return op?.kmLicznik||0; } },
           { id:"paliwo",   label:"Paliwo L",       fn:(vid,y,mi)=>{ const op=operacyjne.find(o=>o.vehicleId===vid&&o.year===y&&o.month===mi+1); return op?.paliwoL||0; } },
           { id:"spalanie", label:"Spalanie L/100", fn:(vid,y,mi)=>{ const op=operacyjne.find(o=>o.vehicleId===vid&&o.year===y&&o.month===mi+1); return op?.spalanie||0; } },
