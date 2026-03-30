@@ -6414,7 +6414,7 @@ Jeśli nie możesz odczytać danego pola, wpisz null.`,
           // Tylko niepuste pola
           if (parsed.nrFV)             fields.nrFV = parsed.nrFV;
           if (parsed.klient)            fields.klient = parsed.klient;
-          if (parsed.cenaEur != null)   fields.cenaEur = String(parsed.cenaEur);
+          // cenaEur nie jest nadpisywana - wartosc wpisana przez dyspozytora jest wiazaca
           if (parsed.dataWyslania)      fields.dataWyslania = parsed.dataWyslania;
           if (parsed.terminPlatnosci)   fields.terminPlatnosci = parsed.terminPlatnosci;
         } catch {}
