@@ -1295,19 +1295,19 @@ function App({ user, role, appUsers = [] }) {
                     <button onClick={() => setTab("frachty")}
                       className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90"
                       style={{ background: "#111827" }}>
-                      <span>🚚</span> Dodaj fracht
+                      <span className="w-5 flex items-center justify-center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 17V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a1 1 0 0 0 1 1h1.5"/><path d="M13 8h4l4 4v4h-1.5"/><circle cx="7.5" cy="17.5" r="2.5"/><circle cx="17" cy="17.5" r="2.5"/><path d="M10 17.5h4.5"/></svg></span> Dodaj fracht
                     </button>
                     <button onClick={() => setShowAddCost(true)}
                       className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-gray-700 border border-gray-200 bg-white hover:bg-gray-50 transition-all">
-                      <span>💰</span> Dodaj koszt
+                      <span className="w-5 flex items-center justify-center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="13" rx="2.5"/><path d="M2 10h20"/><path d="M6 15h4"/></svg></span> Dodaj koszt
                     </button>
                     <button onClick={() => setTab("fv")}
                       className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-gray-700 border border-gray-200 bg-white hover:bg-gray-50 transition-all">
-                      <span>🧾</span> FV / Płatności
+                      <span className="w-5 flex items-center justify-center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 8h6"/><path d="M14 12c0-1.5-3-1.5-3 0s3 1.5 3 0"/><path d="M9 17h3"/></svg></span> FV / Płatności
                     </button>
                     <button onClick={() => setTab("docs")}
                       className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-gray-700 border border-gray-200 bg-white hover:bg-gray-50 transition-all">
-                      <span>🛡️</span> Dokumenty
+                      <span className="w-5 flex items-center justify-center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-7l-2-2H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/></svg></span> Dokumenty
                     </button>
                   </div>
                 </div>
