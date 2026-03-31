@@ -1362,19 +1362,19 @@ function App({ user, role, appUsers = [] }) {
                 const now = new Date();
                 const todayStr = now.toISOString().slice(0,10);
                 const getStatusLabel = (s) => {
-                  const map = { jazda: "Jazda", pauza9: "Pauza 9h", pauza11: "Pauza 11h", pauza24: "Pauza 24h", pauza45: "Pauza 45h", baza: "Baza" };
-                  return map[s] || s || (s && s.hours ? `Pauza ${s.hours}h` : "—");
+                  const map = { jazda: "Jazda", pauza9: "Pauza 9h", pauza11: "Pauza 11h", pauza24: "Pauza 24h", pauza45: "Pauza 45h", pauzaInne: "Pauza inne", baza: "Baza" };
+                  return map[s] || s || "—";
                 };
                 const getStatusColor = (s) => {
-                  const map = { jazda: "#15803d", pauza9: "#b45309", pauza11: "#c2410c", pauza24: "#dc2626", pauza45: "#9333ea", baza: "#6b7280" };
+                  const map = { jazda: "#15803d", pauza9: "#b45309", pauza11: "#c2410c", pauza24: "#dc2626", pauza45: "#9333ea", pauzaInne: "#0369a1", baza: "#6b7280" };
                   return map[s] || "#6b7280";
                 };
                 const getStatusBg = (s) => {
-                  const map = { jazda: "#f0fdf4", pauza9: "#fffbeb", pauza11: "#fff7ed", pauza24: "#fef2f2", pauza45: "#faf5ff", baza: "#f3f4f6" };
+                  const map = { jazda: "#f0fdf4", pauza9: "#fffbeb", pauza11: "#fff7ed", pauza24: "#fef2f2", pauza45: "#faf5ff", pauzaInne: "#f0f9ff", baza: "#f3f4f6" };
                   return map[s] || "#f9fafb";
                 };
                 const getStatusBorder = (s) => {
-                  const map = { jazda: "#bbf7d0", pauza9: "#fde68a", pauza11: "#fed7aa", pauza24: "#fecaca", pauza45: "#e9d5ff", baza: "#d1d5db" };
+                  const map = { jazda: "#bbf7d0", pauza9: "#fde68a", pauza11: "#fed7aa", pauza24: "#fecaca", pauza45: "#e9d5ff", pauzaInne: "#bae6fd", baza: "#d1d5db" };
                   return map[s] || "#e5e7eb";
                 };
 
@@ -5799,6 +5799,7 @@ const CZAS_STATUSY = [
   { id: "pauza11",  label: "Pauza 11h",   color: "#c2410c", bg: "#fff7ed", border: "#fed7aa", hours: 11 },
   { id: "pauza24",  label: "Pauza 24h",   color: "#dc2626", bg: "#fef2f2", border: "#fecaca", hours: 24 },
   { id: "pauza45",  label: "Pauza 45h",   color: "#9333ea", bg: "#faf5ff", border: "#e9d5ff", hours: 45 },
+  { id: "pauzaInne", label: "Pauza inne", color: "#0369a1", bg: "#f0f9ff", border: "#bae6fd", hours: 0, custom: true },
   { id: "baza",     label: "Baza",        color: "#6b7280", bg: "#f3f4f6", border: "#d1d5db", hours: 0 },
 ];
 
@@ -5808,6 +5809,8 @@ function CzasPracyModal({ vehicle, entries, onSave, onDelete, onClose }) {
   const [rangeStart, setRangeStart] = useState(null);
   const [rangeEnd, setRangeEnd] = useState(null);
   const [startTime, setStartTime] = useState("06:00");
+  const [customHours, setCustomHours] = useState("");
+  const [note, setNote] = useState("");
 
   const driverName = (vehicle.driverHistory || []).find(d => !d.to)?.name || "—";
 
@@ -5865,7 +5868,8 @@ function CzasPracyModal({ vehicle, entries, onSave, onDelete, onClose }) {
     const from = rangeStart < end ? rangeStart : end;
     const to = rangeStart < end ? end : rangeStart;
     const st = CZAS_STATUSY.find(s => s.id === selectedStatus);
-    const endCalc = st?.hours ? calcEndTime(startTime, st.hours) : null;
+    const effectiveHours = st?.custom ? (parseInt(customHours) || 0) : (st?.hours || 0);
+    const endCalc = effectiveHours ? calcEndTime(startTime, effectiveHours) : null;
     onSave({
       vehicleId: vehicle.id,
       plate: vehicle.plate,
@@ -5875,11 +5879,13 @@ function CzasPracyModal({ vehicle, entries, onSave, onDelete, onClose }) {
       end: to,
       startTime: startTime || null,
       endTime: endCalc?.time || null,
-      hours: st?.hours || 0,
+      hours: effectiveHours,
+      note: note.trim() || "",
       created: new Date().toISOString(),
     });
     setRangeStart(null);
     setRangeEnd(null);
+    setNote("");
   };
 
   const prevMonth = () => setMonth(p => p.m === 0 ? { y: p.y - 1, m: 11 } : { y: p.y, m: p.m - 1 });
@@ -6002,16 +6008,34 @@ function CzasPracyModal({ vehicle, entries, onSave, onDelete, onClose }) {
                     Anuluj
                   </button>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
                   <label className="text-xs text-gray-500 font-medium">Start:</label>
                   <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)}
                     className="px-2.5 py-1.5 rounded-lg text-sm border border-gray-200 bg-white outline-none w-28"
                     style={{ fontFamily: "'DM Sans', sans-serif" }} />
-                  {endCalc && (
-                    <span className="text-xs font-semibold" style={{ color: selSt?.color }}>
-                      → Koniec: {endCalc.time}{endCalc.overflowDays > 0 ? ` (+${endCalc.overflowDays} ${endCalc.overflowDays === 1 ? "dzień" : "dni"})` : ""}
-                    </span>
+                  {selSt?.custom && (
+                    <>
+                      <label className="text-xs text-gray-500 font-medium">Godziny:</label>
+                      <input type="number" value={customHours} onChange={e => setCustomHours(e.target.value)}
+                        placeholder="np. 34" min="1" max="168"
+                        className="px-2.5 py-1.5 rounded-lg text-sm border border-gray-200 bg-white outline-none w-20" />
+                    </>
                   )}
+                  {(selSt?.hours || (selSt?.custom && parseInt(customHours))) ? (() => {
+                    const h = selSt?.custom ? (parseInt(customHours) || 0) : selSt.hours;
+                    const ec = h ? calcEndTime(startTime, h) : null;
+                    return ec ? (
+                      <span className="text-xs font-semibold" style={{ color: selSt?.color }}>
+                        → Koniec: {ec.time}{ec.overflowDays > 0 ? ` (+${ec.overflowDays} ${ec.overflowDays === 1 ? "dzień" : "dni"})` : ""}
+                      </span>
+                    ) : null;
+                  })() : null}
+                </div>
+                <div className="mt-2">
+                  <input type="text" value={note} onChange={e => setNote(e.target.value)}
+                    placeholder="Notatka (opcjonalnie, np. serwis, załadunek...)"
+                    className="w-full px-2.5 py-1.5 rounded-lg text-sm border border-gray-200 bg-white outline-none"
+                    style={{ fontFamily: "'DM Sans', sans-serif" }} />
                 </div>
               </div>
             );
@@ -6047,19 +6071,20 @@ function CzasPracyModal({ vehicle, entries, onSave, onDelete, onClose }) {
                 return (
                   <div key={e.id} className="flex items-center justify-between px-3 py-2 rounded-xl text-xs"
                     style={{ background: st?.bg || "#f9fafb", border: `1px solid ${st?.border || "#e5e7eb"}` }}>
-                    <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full" style={{ background: st?.color }} />
-                      <span className="font-semibold" style={{ color: st?.color }}>{st?.label}</span>
-                      <span className="text-gray-500">
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: st?.color }} />
+                      <span className="font-semibold flex-shrink-0" style={{ color: st?.color }}>{e.status === "pauzaInne" && e.hours ? `Pauza ${e.hours}h` : st?.label}</span>
+                      <span className="text-gray-500 flex-shrink-0">
                         {startD.toLocaleDateString("pl-PL", { day:"numeric", month:"short" })}
                         {e.startTime ? ` ${e.startTime}` : ""}
                         {days > 1 ? ` → ${endD.toLocaleDateString("pl-PL", { day:"numeric", month:"short" })}` : ""}
                         {e.endTime ? ` ${e.endTime}` : ""}
                         {days > 1 ? ` (${days} dni)` : " (1 dzień)"}
                       </span>
+                      {e.note && <span className="text-gray-400 italic truncate" title={e.note}>· {e.note}</span>}
                     </div>
                     <button onClick={() => onDelete(e.id)}
-                      className="w-5 h-5 rounded flex items-center justify-center text-gray-300 hover:text-red-400 transition-all">✕</button>
+                      className="w-5 h-5 rounded flex items-center justify-center text-gray-300 hover:text-red-400 transition-all flex-shrink-0">✕</button>
                   </div>
                 );
               })}
