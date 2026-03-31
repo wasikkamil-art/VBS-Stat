@@ -851,7 +851,7 @@ function App({ user, role, appUsers = [] }) {
         <aside className="hidden md:flex flex-col w-56 bg-white border-r border-gray-100 py-7 px-4 sticky top-0 h-screen">
           <div className="px-2 mb-8">
             <div className="flex items-center gap-2 mb-0.5">
-              <div className="w-7 h-7 rounded-lg bg-gray-900 flex items-center justify-center text-white text-xs font-bold">F</div>
+              <img src="/icon-192.png" alt="FS" className="w-7 h-7 rounded-lg" />
               <span className="font-bold text-base text-gray-900">FleetStat</span>
             </div>
             <div className="text-xs text-gray-400 pl-9">Zarządzanie flotą</div>
@@ -949,7 +949,7 @@ function App({ user, role, appUsers = [] }) {
                 <div className="flex items-center gap-3">
                   <img src="/icon-192.png" alt="FS" className="w-9 h-9 rounded-xl flex-shrink-0" />
                   <div>
-                    <div className="font-bold text-gray-900 text-lg leading-tight">FleetStat</div>
+                    <div className="font-bold text-gray-900 text-lg leading-tight">Przegląd</div>
                     <div className="text-xs text-gray-400">{new Date().toLocaleDateString("pl-PL",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>
                   </div>
                 </div>
