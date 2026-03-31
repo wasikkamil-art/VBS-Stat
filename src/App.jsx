@@ -215,7 +215,8 @@ function LoginScreen() {
     <div style={{ minHeight:"100vh", background:"#f8f9fb", display:"flex", alignItems:"center", justifyContent:"center" }}>
       <div style={{ background:"#fff", borderRadius:16, padding:40, width:360, boxShadow:"0 4px 24px rgba(0,0,0,0.08)" }}>
         <div style={{ textAlign:"center", marginBottom:32 }}>
-          <img src="/logodologowania.png" alt="FleetStat" style={{ height:48, margin:"0 auto" }} />
+          <img src="/logodologowania.png" alt="FleetStat" style={{ width:280, margin:"0 auto" }} />
+          <p style={{ color:"#6b7280", fontSize:13, marginTop:8 }}>Zarządzanie flotą</p>
         </div>
         <form onSubmit={handleLogin}>
           <div style={{ marginBottom:16 }}>
