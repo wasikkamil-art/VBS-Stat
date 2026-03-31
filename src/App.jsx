@@ -192,7 +192,7 @@ const DOC_TYPES = [
 // Vehicle icons (SVG)
 const IconTruck = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="6" width="11" height="10" rx="2"/><path d="M14 10h3.5l3 3v3a1 1 0 0 1-1 1h-1"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M9 17h6"/><path d="M3 16h1.5"/></svg>;
 
-const IconTruckTrailer = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="7" width="7" height="7" rx="1.5"/><circle cx="4" cy="15.5" r="1.5"/><path d="M8 11h2.5"/><path d="M10.5 7h5a2 2 0 0 1 2 2v5h-7z"/><path d="M17.5 10h3l2 2v2h-5"/><circle cx="13" cy="15.5" r="1.5"/><circle cx="20.5" cy="15.5" r="1.5"/></svg>;
+const IconTruckTrailer = ({size=20}) => <svg width={size*1.4} height={size} viewBox="0 0 28 18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="4" width="9" height="7" rx="1.5"/><circle cx="3.5" cy="12.5" r="1.5"/><circle cx="8" cy="12.5" r="1.5"/><line x1="10" y1="8.5" x2="12" y2="8.5"/><rect x="12" y="4" width="5.5" height="7" rx="1.5"/><path d="M17.5 6.5h4l3 3v1.5h-7"/><circle cx="14.5" cy="12.5" r="1.5"/><circle cx="22" cy="12.5" r="1.5"/></svg>;
 
 const VehicleIcon = ({v, size=20, className=""}) => <span className={className}>{v?.plate2 ? <IconTruckTrailer size={size}/> : <IconTruck size={size}/>}</span>;
 
