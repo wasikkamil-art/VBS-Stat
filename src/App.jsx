@@ -576,6 +576,7 @@ function App({ user, role, appUsers = [] }) {
   const [showAddVehicle, setShowAddVehicle]   = useState(false);
   const [editVehicleId, setEditVehicleId]     = useState(null);
   const [deleteVehicleModal, setDeleteVehicleModal] = useState(null); // { id, plate }
+  const [czasPracyVehicleId, setCzasPracyVehicleId] = useState(null); // otwarty panel czasu pracy na dashboardzie
   const [filterVehicle, setFilterVehicle]     = useState("all");
   const [filterCat, setFilterCat]             = useState("all");
   const [filterMonth, setFilterMonth]         = useState("all");
@@ -1228,6 +1229,131 @@ function App({ user, role, appUsers = [] }) {
                               Brak zleceń w systemie
                             </div>
                           )}
+
+                          {/* PRZYCISK CZAS PRACY */}
+                          <div className="px-4 pb-3">
+                            <button onClick={() => setCzasPracyVehicleId(czasPracyVehicleId === v.id ? null : v.id)}
+                              className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all"
+                              style={{
+                                background: czasPracyVehicleId === v.id ? "#111827" : "#f3f4f6",
+                                color: czasPracyVehicleId === v.id ? "#fff" : "#6b7280"
+                              }}>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                              Czas pracy
+                            </button>
+                          </div>
+
+                          {/* PANEL CZASU PRACY */}
+                          {czasPracyVehicleId === v.id && (() => {
+                            const vPauzy = pauzy.filter(p => p.vehicleId === v.id).sort((a,b) => b.start.localeCompare(a.start));
+                            const now = new Date();
+                            return (
+                              <div className="border-t border-gray-100 px-4 py-3">
+                                <div className="flex items-center justify-between mb-3">
+                                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Czas pracy · {v.plate}</span>
+                                </div>
+
+                                {/* FORMULARZ DODAWANIA */}
+                                <div className="rounded-xl p-3 mb-3" style={{ background: "#f0f9ff", border: "1px solid #bfdbfe" }}>
+                                  <div className="text-xs font-semibold text-blue-700 mb-2">Nowa pauza</div>
+                                  <div className="grid grid-cols-2 gap-2 mb-2">
+                                    <div>
+                                      <label className="text-xs text-gray-500 block mb-1">Data rozpoczęcia</label>
+                                      <input type="date" id={`pauza-start-${v.id}`}
+                                        defaultValue={new Date().toISOString().slice(0,10)}
+                                        className="w-full px-2.5 py-1.5 rounded-lg text-sm border border-gray-200 bg-white outline-none" />
+                                    </div>
+                                    <div>
+                                      <label className="text-xs text-gray-500 block mb-1">Typ pauzy</label>
+                                      <select id={`pauza-typ-${v.id}`} defaultValue="45"
+                                        className="w-full px-2.5 py-1.5 rounded-lg text-sm border border-gray-200 bg-white outline-none"
+                                        onChange={e => {
+                                          const customDiv = document.getElementById(`pauza-custom-${v.id}`);
+                                          if (customDiv) customDiv.style.display = e.target.value === "custom" ? "block" : "none";
+                                        }}>
+                                        <option value="9">9h (dzienny skrócony)</option>
+                                        <option value="11">11h (dzienny)</option>
+                                        <option value="24">24h (tygodniowy skrócony)</option>
+                                        <option value="45">45h (tygodniowy)</option>
+                                        <option value="custom">Inne...</option>
+                                      </select>
+                                    </div>
+                                  </div>
+                                  <div id={`pauza-custom-${v.id}`} style={{ display: "none" }} className="mb-2">
+                                    <label className="text-xs text-gray-500 block mb-1">Liczba godzin</label>
+                                    <input type="number" id={`pauza-hours-${v.id}`} placeholder="np. 36"
+                                      className="w-full px-2.5 py-1.5 rounded-lg text-sm border border-gray-200 bg-white outline-none" />
+                                  </div>
+                                  <button onClick={async () => {
+                                    const startEl = document.getElementById(`pauza-start-${v.id}`);
+                                    const typEl = document.getElementById(`pauza-typ-${v.id}`);
+                                    const hoursEl = document.getElementById(`pauza-hours-${v.id}`);
+                                    const startVal = startEl?.value;
+                                    const typVal = typEl?.value;
+                                    const hours = typVal === "custom" ? parseInt(hoursEl?.value) || 0 : parseInt(typVal);
+                                    if (!hours || !startVal) return;
+                                    const startDate = new Date(startVal + "T00:00:00");
+                                    const endDate = new Date(startDate.getTime() + hours * 3600000);
+                                    try {
+                                      await addDoc(collection(db, "pauzy"), {
+                                        vehicleId: v.id,
+                                        plate: v.plate,
+                                        driver: driverName,
+                                        start: startVal,
+                                        end: endDate.toISOString().slice(0, 16),
+                                        hours,
+                                        created: new Date().toISOString(),
+                                      });
+                                      showToast("Pauza dodana");
+                                    } catch(e) { console.error("addPauza", e); }
+                                  }}
+                                    className="w-full py-2 rounded-lg text-xs font-semibold text-white transition-all hover:opacity-90"
+                                    style={{ background: "#1d4ed8" }}>
+                                    Zapisz pauzę
+                                  </button>
+                                </div>
+
+                                {/* LISTA PAUZ */}
+                                {vPauzy.length === 0 ? (
+                                  <div className="text-xs text-gray-400 italic text-center py-2">Brak pauz</div>
+                                ) : (
+                                  <div className="space-y-1.5">
+                                    {vPauzy.map(p => {
+                                      const startD = new Date(p.start + "T00:00:00");
+                                      const endD = new Date(p.end);
+                                      const isActive = now >= startD && now <= endD;
+                                      const isPast = now > endD;
+                                      const isFuture = now < startD;
+                                      const startStr = startD.toLocaleDateString("pl-PL", { day:"numeric", month:"short" });
+                                      const endStr = endD.toLocaleString("pl-PL", { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" });
+                                      const hoursLeft = isActive ? Math.max(0, Math.round((endD - now) / 3600000)) : null;
+                                      return (
+                                        <div key={p.id} className="flex items-center justify-between px-3 py-2 rounded-xl text-xs"
+                                          style={{
+                                            background: isActive ? "#fef2f2" : isFuture ? "#f0f9ff" : "#f9fafb",
+                                            border: `1px solid ${isActive ? "#fecaca" : isFuture ? "#bfdbfe" : "#e5e7eb"}`
+                                          }}>
+                                          <div className="flex items-center gap-2">
+                                            <span className={`w-2 h-2 rounded-full ${isActive ? "bg-red-500 animate-pulse" : isFuture ? "bg-blue-500" : "bg-green-500"}`} />
+                                            <span className="font-semibold" style={{ color: isActive ? "#b91c1c" : isFuture ? "#1d4ed8" : "#6b7280" }}>{p.hours}h</span>
+                                            <span style={{ color: isActive ? "#dc2626" : isFuture ? "#2563eb" : "#9ca3af" }}>
+                                              {isActive ? `Trwa · ${hoursLeft}h do końca` : isFuture ? "Zaplanowana" : "Zakończona"}
+                                            </span>
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-gray-400">{startStr} → {endStr}</span>
+                                            <button onClick={async () => {
+                                              try { await deleteDoc(doc(db, "pauzy", p.id)); } catch(e) { console.error("delPauza", e); }
+                                            }} className="w-4 h-4 rounded flex items-center justify-center text-gray-300 hover:text-red-400 transition-all">✕</button>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       );
                     })}
