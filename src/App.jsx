@@ -189,6 +189,13 @@ const DOC_TYPES = [
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// Vehicle icons (SVG)
+const IconTruck = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="6" width="11" height="10" rx="2"/><path d="M14 10h3.5l3 3v3a1 1 0 0 1-1 1h-1"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M9 17h6"/><path d="M3 16h1.5"/></svg>;
+
+const IconTruckTrailer = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="7" width="7" height="7" rx="1.5"/><circle cx="4" cy="15.5" r="1.5"/><path d="M8 11h2.5"/><path d="M10.5 7h5a2 2 0 0 1 2 2v5h-7z"/><path d="M17.5 10h3l2 2v2h-5"/><circle cx="13" cy="15.5" r="1.5"/><circle cx="20.5" cy="15.5" r="1.5"/></svg>;
+
+const VehicleIcon = ({v, size=20, className=""}) => <span className={className}>{v?.plate2 ? <IconTruckTrailer size={size}/> : <IconTruck size={size}/>}</span>;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // LOGIN SCREEN
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -310,9 +317,9 @@ export default function Root() {
     });
   }, []);
 
-  if (user === undefined) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f8f9fb",fontSize:32}}>🚛</div>;
+  if (user === undefined) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f8f9fb",fontSize:32}}><IconTruck size={32}/></div>;
   if (!user) return <LoginScreen />;
-  if (!roleLoaded) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f8f9fb",fontSize:32}}>🚛</div>;
+  if (!roleLoaded) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f8f9fb",fontSize:32}}><IconTruck size={32}/></div>;
   return <App user={user} role={role} appUsers={appUsers} />;
 }
 
@@ -695,7 +702,7 @@ function App({ user, role, appUsers = [] }) {
   const addCost      = (entry) => { setCosts((p) => [...p, { ...entry, id: uid() }]); showToast("✅ Koszt zapisany"); setShowAddCost(false); };
   const deleteCost   = (id)    => { setCosts((p) => p.filter((c) => c.id !== id)); showToast("Usunięto wpis"); };
   const updateCost   = (updated) => { setCosts((p) => p.map((c) => c.id === updated.id ? updated : c)); showToast("✅ Koszt zaktualizowany"); setEditCostId(null); };
-  const addVehicle   = (v)     => { setVehicles((p) => [...p, { ...v, id: uid(), driverHistory: v.driverHistory || [] }]); showToast("🚛 Pojazd dodany"); setShowAddVehicle(false); };
+  const addVehicle   = (v)     => { setVehicles((p) => [...p, { ...v, id: uid(), driverHistory: v.driverHistory || [] }]); showToast("Pojazd dodany"); setShowAddVehicle(false); };
   const delVehicle   = (id, reason) => {
     setVehicles((p) => p.map((v) => v.id !== id ? v : {
       ...v,
@@ -1016,7 +1023,7 @@ function App({ user, role, appUsers = [] }) {
                       if (activeF) {
                         status = "trasa";
                         statusLabel = "W trasie";
-                        statusIcon = "🚛";
+                        statusIcon = <IconTruck size={14}/>;
                         statusColor = "#15803d";
                         statusBg = "#f0fdf4";
                       } else if (nextF) {
@@ -1076,7 +1083,7 @@ function App({ user, role, appUsers = [] }) {
                             <div className="flex items-center gap-2.5">
                               <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0"
                                 style={{ background: "#f3f4f6" }}>
-                                {v.plate2 ? "🚌" : "🚛"}
+                                <VehicleIcon v={v} size={20}/>
                               </div>
                               <div>
                                 <div className="font-semibold text-gray-900 text-sm">{v.plate}</div>
@@ -1552,7 +1559,7 @@ function App({ user, role, appUsers = [] }) {
                       <div className="flex items-center justify-between px-5 py-4 border-b border-gray-50">
                         <div className="flex items-center gap-3">
                           <div className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center text-lg">
-                            {v.plate2 ? "🚌" : "🚛"}
+                            <VehicleIcon v={v} size={20}/>
                           </div>
                           <div>
                             <div className="flex items-center gap-1.5">
@@ -1728,7 +1735,7 @@ function App({ user, role, appUsers = [] }) {
                     {vehicles.filter(v => v.archived).map(v => (
                       <div key={v.id} className="flex items-center justify-between px-4 py-3 rounded-xl border border-dashed border-gray-200 bg-gray-50">
                         <div className="flex items-center gap-3">
-                          <span className="text-xl opacity-30">{v.plate2 ? "🚌" : "🚛"}</span>
+                          <span className="text-xl opacity-30"><VehicleIcon v={v} size={20}/></span>
                           <div>
                             <div className="text-sm font-semibold text-gray-400">{v.plate}{v.plate2 ? ` / ${v.plate2}` : ""}</div>
                             <div className="text-xs text-gray-400">{v.brand} · {v.year}</div>
@@ -4357,7 +4364,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
 
       {/* SUB-NAV */}
       <div className="flex gap-1 mb-5 p-1 rounded-xl" style={{ background:"#f3f4f6" }}>
-        {[["flota","🚛 Flota — przegląd"],["pojazd","📋 Pojazd — dane operacyjne"],["trendy","📈 Trendy"]].map(([id,label]) => (
+        {[["flota","Flota — przegląd"],["pojazd","Pojazd — dane operacyjne"],["trendy","Trendy"]].map(([id,label]) => (
           <button key={id} onClick={() => setView(id)}
             className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all"
             style={{ background: view===id ? "#fff" : "transparent", color: view===id ? "#111827" : "#9ca3af",
@@ -5270,7 +5277,7 @@ function ServisTab({ vehicles, onUpdateVehicle }) {
               <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-50"
                 style={{ background: urgent > 0 ? "#fef9f9" : "#fafafa" }}>
                 <div className="flex items-center gap-3">
-                  <span className="text-xl">{v.plate2 ? "🚌" : "🚛"}</span>
+                  <span className="text-xl"><VehicleIcon v={v} size={20}/></span>
                   <div>
                     <span className="font-bold text-sm text-gray-900" style={{ fontFamily:"'DM Mono',monospace" }}>
                       {v.plate}{v.plate2 ? ` / ${v.plate2}` : ""}
@@ -5568,7 +5575,7 @@ function DriverCopyRow({ vehicle: v, active }) {
       ? `${v.maxWeight || "—"} kg (${v.plate}) / ${v.maxWeight2 || "—"} kg (${v.plate2})`
       : `${v.maxWeight || "—"} kg`;
     return [
-      `🚛 ${v.brand} ${v.year}`,
+      `${v.brand} ${v.year}`,
       `📋 Rejestracja: ${plate}`,
       `👤 Kierowca: ${active.name}`,
       active.phone ? `📞 Tel: ${active.phone}` : null,
@@ -6875,7 +6882,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0"
                       style={{ background: hasPrzet ? "#fef2f2" : "#f0fdf4", color: hasPrzet ? "#dc2626" : "#15803d" }}>
-                      {initials || (v.plate2 ? "🚌" : "🚛")}
+                      {initials || <VehicleIcon v={v} size={16}/>}
                     </div>
                     <div>
                       <div className="text-sm font-semibold text-gray-900">{driver !== "—" ? driver : v.plate} · {v.plate}</div>
@@ -7281,7 +7288,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
               <div key={v.id} onClick={() => setSelectedVehicle(v.id)} className="bg-white rounded-2xl border border-gray-100 p-4 cursor-pointer hover:border-gray-300 hover:shadow-sm transition-all">
                 <div className="flex items-center justify-between mb-3">
                   <div><div className="font-bold text-gray-900 text-base">{v.plate}</div><div className="text-xs text-gray-400">{v.brand} · {v.year}</div></div>
-                  <div className="text-2xl">{v.plate2 ? "🚌" : "🚛"}</div>
+                  <div className="text-2xl"><VehicleIcon v={v} size={20}/></div>
                 </div>
                 <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-gray-50">
                   <div><div className="text-xs text-gray-400">Frachtów</div><div className="font-bold text-gray-900">{vf.length}</div></div>
@@ -7349,7 +7356,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
         {rows.map((r, idx) => {
           const eurKmLad = (r.kmWszystkie||r.kmLadowne) && r.cenaEur ? (parseFloat(r.cenaEur)/(parseInt(r.kmWszystkie)||parseInt(r.kmLadowne))).toFixed(2) : null;
           const stRozl = r.statusRozladunku || "w_trasie";
-          const stColors = { rozladowano: ["#f0fdf4","#166534","✅"], w_trasie: ["#f0f9ff","#0369a1","🚛"], problem: ["#fef2f2","#991b1b","⚠️"] };
+          const stColors = { rozladowano: ["#f0fdf4","#166534","✅"], w_trasie: ["#f0f9ff","#0369a1","→"], problem: ["#fef2f2","#991b1b","⚠️"] };
           const [stBg, stColor, stEmoji] = stColors[stRozl] || stColors.w_trasie;
           return (
             <div key={r.id} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
@@ -7422,7 +7429,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
                       const s = r.statusRozladunku || "w_trasie";
                       const cfg = {
                         rozladowano: { emoji:"✅", label:"Rozładowano", bg:"#f0fdf4", color:"#166534" },
-                        w_trasie:    { emoji:"🚛", label:"W trasie",    bg:"#f0f9ff", color:"#0369a1" },
+                        w_trasie:    { emoji:"→", label:"W trasie",    bg:"#f0f9ff", color:"#0369a1" },
                         problem:     { emoji:"⚠️", label:"Problem",     bg:"#fef2f2", color:"#991b1b" },
                       };
                       const c = cfg[s] || cfg.w_trasie;
@@ -7435,7 +7442,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
                             className="text-xs font-semibold rounded-lg px-2 py-1 cursor-pointer outline-none border-0"
                             style={{ background: c.bg, color: c.color, minWidth: 118 }}
                           >
-                            <option value="w_trasie">🚛 W trasie</option>
+                            <option value="w_trasie">→ W trasie</option>
                             <option value="rozladowano">✅ Rozładowano</option>
                             <option value="problem">⚠️ Problem</option>
                           </select>
