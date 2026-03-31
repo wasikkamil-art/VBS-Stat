@@ -267,14 +267,18 @@ export default function Root() {
   const [roleLoaded, setRoleLoaded] = useState(false);
   const [appUsers, setAppUsers] = useState([]);
   const autoLogoutTimer = useRef(null);
+  const lastActivity = useRef(Date.now());
   const resetAutoLogout = useRef(() => {
+    lastActivity.current = Date.now();
     if (autoLogoutTimer.current) clearTimeout(autoLogoutTimer.current);
-    autoLogoutTimer.current = setTimeout(() => { signOut(auth); }, 10 * 60 * 1000);
+    autoLogoutTimer.current = setTimeout(() => {
+      if (Date.now() - lastActivity.current >= 30 * 60 * 1000) signOut(auth);
+    }, 30 * 60 * 1000);
   });
   useEffect(() => {
-    const events = ["mousemove","keydown","click","scroll","touchstart"];
+    const events = ["mousemove","mousedown","keydown","keyup","click","scroll","touchstart","touchmove","input","change","focus"];
     const handler = () => resetAutoLogout.current();
-    events.forEach(e => window.addEventListener(e, handler));
+    events.forEach(e => window.addEventListener(e, handler, { passive: true }));
     resetAutoLogout.current();
     return () => {
       events.forEach(e => window.removeEventListener(e, handler));
