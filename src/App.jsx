@@ -4878,7 +4878,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
         </ResponsiveContainer>
       </div>
 
-      {/* YoY TABELA */}
+      {/* YoY TABELA — Scorecard */}
       {(() => {
         const METRICS = [
           { id:"frachty",  label:"Frachty €",      fn:(vid,y,mi)=>{ const ms=`${y}-${String(mi+1).padStart(2,"0")}`; if(y>=2026) return frachtyList.filter(f=>f.vehicleId===vid&&(f.dataZaladunku||"").startsWith(ms)).reduce((s,f)=>s+(parseFloat(f.cenaEur)||0),0); const r=getRecord(vid,y,mi); return r?.frachty||0; } },
@@ -4897,14 +4897,16 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
         const activeVehs = vehicles;
         const getFlotaVal = (y, mi) => activeVehs.reduce((s,v)=>s+met.fn(v.id,y,mi),0);
         const getVehVal   = (vid, y, mi) => met.fn(vid, y, mi);
-        const fmtV = (v) => v===0 ? "—" : v>=1000?(v/1000).toFixed(1)+"k" : v.toFixed(v<10&&v>-10?1:0);
-        const diffColor = (a,b) => { if(!a||!b) return "#d1d5db"; return b>=a?"#16a34a":"#dc2626"; };
-        const diffPct = (a,b) => { if(!a||!b) return "—"; const p=((b-a)/Math.abs(a)*100); return (p>=0?"+":"")+p.toFixed(1)+"%"; };
+        const fmtV = (v) => v===0 ? "—" : Math.abs(v)>=1000?(v/1000).toFixed(1)+"k" : v.toFixed(v<10&&v>-10?1:0);
+        const fmtFull = (v) => !v ? "—" : v.toLocaleString("pl-PL",{maximumFractionDigits:0});
+        const qSum = (vals,q) => vals.slice(q*3,q*3+3).reduce((a,b)=>a+b,0);
         const rows = yoyMode==="flota"
           ? [{ label:"Flota total", vals25: MS.map((_,mi)=>getFlotaVal(2025,mi)), vals26: MS.map((_,mi)=>getFlotaVal(2026,mi)) }]
           : vehicles.map(v=>({ label:v.plate, vals25: MS.map((_,mi)=>getVehVal(v.id,2025,mi)), vals26: MS.map((_,mi)=>getVehVal(v.id,2026,mi)) }));
+        const maxAll = Math.max(...rows.flatMap(r=>[...r.vals25,...r.vals26]));
         return (
           <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
+            {/* Header + toggles */}
             <div className="flex gap-3 items-center flex-wrap mb-4">
               <span className="text-sm font-semibold text-gray-700">Porównanie Y2Y</span>
               <div className="flex gap-1 ml-2">
@@ -4920,122 +4922,123 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                 ))}
               </div>
             </div>
-            <div style={{fontFamily:"inherit"}}>
-              <style>{`
-                .ymc{background:#f8fafc;border-radius:8px;padding:8px 7px;min-width:0}
-                .ymc.good{background:#f0fdf4;border:0.5px solid #bbf7d0}
-                .ymc.future{opacity:.42}
-                .ymc .yr{font-size:10px;font-weight:500}
-                .ymc .val{font-size:12px;font-weight:600;text-align:right}
-                .ymc .val.c26{color:#1d4ed8}
-                .ymc .val.c25{color:#94a3b8}
-                .ymc .drow{border-top:0.5px solid #e2e8f0;margin-top:4px;padding-top:3px;text-align:right}
-                .ymc.good .drow{border-color:#bbf7d0}
-                .ppos{color:#15803d;font-size:10px;font-weight:700;background:#f0fdf4;border-radius:3px;padding:1px 4px}
-                .pneg{color:#b91c1c;font-size:10px;font-weight:700;background:#fef2f2;border-radius:3px;padding:1px 4px}
-                .qcard{background:#f8fafc;border-radius:8px;padding:8px 10px}
-                .hcard{background:#f1f5f9;border-radius:8px;padding:8px 12px}
-                .brace{height:7px;border-left:1.5px solid #cbd5e1;border-right:1.5px solid #cbd5e1;border-bottom:1.5px solid #cbd5e1;border-radius:0 0 4px 4px;margin:0 8px}
-              `}</style>
-              {(()=>{
-                const MNAMES=["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paż","Lis","Gru"];
-                const pill=(v25,v26)=>{
-                  if(!v26) return <span style={{color:"#d1d5db"}}>—</span>;
-                  const d=v26-v25;
-                  const fmt=Math.abs(d)>=1000?(Math.abs(d)/1000).toFixed(1)+"k":Math.round(Math.abs(d))+"";
-                  return <span className={d>=0?"ppos":"pneg"}>{(d>=0?"+":"-")+fmt}</span>;
-                };
-                const fmtV=v=>!v?<span style={{color:"#cbd5e1"}}>—</span>:(Math.abs(v)>=1000?(v/1000).toFixed(1)+"k":Math.round(v)+"");
-                const rows = yoyMode==="flota"
-                  ? [{label:"Flota total", vals25:MS.map((_,mi)=>activeVehs.reduce((s,v)=>s+met.fn(v.id,2025,mi),0)), vals26:MS.map((_,mi)=>activeVehs.reduce((s,v)=>s+met.fn(v.id,2026,mi),0))}]
-                  : vehicles.map(v=>({ label:v.plate, vals25: MS.map((_,mi)=>getVehVal(v.id,2025,mi)), vals26: MS.map((_,mi)=>getVehVal(v.id,2026,mi)) }));
-                const qSum=(vals,q)=>vals.slice(q*3,q*3+3).reduce((a,b)=>a+b,0);
-                const hSum=(vals,h)=>vals.slice(h*6,h*6+6).reduce((a,b)=>a+b,0);
-                return rows.map((row,ri)=>{
-                  return (
-                    <div key={ri} style={{marginBottom: rows.length>1?"28px":0}}>
-                      {rows.length>1&&<div style={{fontSize:11,fontWeight:600,color:"#475569",marginBottom:8}}>{row.label}</div>}
-                      <div style={{display:"grid",gridTemplateColumns:"repeat(12,minmax(0,1fr))",gap:5}}>
-                        {MNAMES.map((mn,mi)=>{
-                          const v26=row.vals26[mi], v25=row.vals25[mi];
-                          const hasCur=v26>0;
-                          const isGood=hasCur&&v26>=v25;
-                          const isFut=!hasCur;
-                          return (
-                            <div key={mi} className={"ymc"+(isGood?" good":isFut?" future":"")}>
-                              <div style={{textAlign:"center",fontSize:10,color:isGood?"#166534":"#94a3b8",marginBottom:6}}>{mn}</div>
-                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                                <span className="yr" style={{color:"#1d4ed8"}}>26</span>
-                                <span className="val c26">{fmtV(v26)}</span>
-                              </div>
-                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:2}}>
-                                <span className="yr" style={{color:"#94a3b8"}}>25</span>
-                                <span className="val c25">{fmtV(v25)}</span>
-                              </div>
-                              <div className="drow">{pill(v25,v26)}</div>
-                            </div>
-                          );
-                        })}
+
+            {/* Per-row rendering */}
+            {rows.map((row,ri)=>{
+              const activeMonths = row.vals26.filter(v=>v>0).length;
+              const ytd26 = row.vals26.slice(0,activeMonths).reduce((a,b)=>a+b,0);
+              const ytd25 = row.vals25.slice(0,activeMonths).reduce((a,b)=>a+b,0);
+              const full25 = row.vals25.reduce((a,b)=>a+b,0);
+              const pctYtd = ytd25 ? ((ytd26-ytd25)/Math.abs(ytd25)*100) : 0;
+              const projection = activeMonths>0 ? Math.round(ytd26/activeMonths*12) : 0;
+              const rowMax = Math.max(...row.vals25,...row.vals26);
+
+              return (
+                <div key={ri} style={{marginBottom: rows.length>1?24:0}}>
+                  {rows.length>1&&<div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:8,paddingBottom:4,borderBottom:"1px solid #f1f5f9"}}>{row.label}</div>}
+
+                  {/* KPI Strip */}
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
+                    {[
+                      {label:"YTD 2026",value:fmtFull(ytd26)+" €",sub:activeMonths+" mies. · "+(full25?(ytd26/full25*100).toFixed(0):0)+"% rocznego 2025",vc:"#1d4ed8",bg:"#eff6ff",bc:"#bfdbfe"},
+                      {label:"YTD 2025",value:fmtFull(ytd25)+" €",sub:"okres porównywalny",vc:"#64748b",bg:"#f8fafc",bc:"#e5e7eb"},
+                      {label:"ZMIANA YTD",value:(pctYtd>=0?"+":"")+pctYtd.toFixed(1)+"%",sub:(pctYtd>=0?"+":"")+fmtFull(ytd26-ytd25)+" €",vc:pctYtd>=0?"#15803d":"#dc2626",bg:pctYtd>=0?"#f0fdf4":"#fef2f2",bc:pctYtd>=0?"#bbf7d0":"#fecaca"},
+                      {label:"PROJEKCJA ROCZNA",value:fmtFull(projection)+" €",sub:"vs "+fmtFull(full25)+" € w 2025",vc:"#6366f1",bg:"#f5f3ff",bc:"#ddd6fe"},
+                    ].map((c,i)=>(
+                      <div key={i} style={{background:c.bg,borderRadius:10,padding:"10px 14px",border:"1px solid "+c.bc}}>
+                        <div style={{fontSize:9,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4}}>{c.label}</div>
+                        <div style={{fontSize:20,fontWeight:800,color:c.vc,lineHeight:1.2}}>{c.value}</div>
+                        <div style={{fontSize:10,color:"#94a3b8",marginTop:3}}>{c.sub}</div>
                       </div>
-                      <div style={{display:"grid",gridTemplateColumns:"repeat(12,minmax(0,1fr))",gap:5,marginTop:3}}>
-                        {[0,1,2,3].map(q=>(
-                          <div key={q} style={{gridColumn:"span 3",display:"flex",flexDirection:"column",alignItems:"center"}}>
-                            <div className="brace" style={{width:"calc(100% - 12px)"}}></div>
+                    ))}
+                  </div>
+
+                  {/* Table header */}
+                  <div style={{display:"grid",gridTemplateColumns:"44px 1fr 68px 68px 52px",gap:8,padding:"7px 12px",borderBottom:"1px solid #e5e7eb",background:"#f8fafc",borderRadius:"8px 8px 0 0"}}>
+                    {["","PORÓWNANIE","2026","2025","YoY"].map((h,i)=>(
+                      <div key={i} style={{fontSize:9,fontWeight:600,color:i===2?"#1d4ed8":"#94a3b8",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:i>=2?"right":"left"}}>{h}</div>
+                    ))}
+                  </div>
+
+                  {/* Monthly rows */}
+                  {MS.map((m,mi)=>{
+                    const v25=row.vals25[mi], v26=row.vals26[mi];
+                    const isFut=!v26;
+                    const pct=v25&&v26?((v26-v25)/Math.abs(v25)*100):null;
+                    const bW25=rowMax?(v25/rowMax*100):0;
+                    const bW26=rowMax?(v26/rowMax*100):0;
+                    const isQEnd=mi===2||mi===5||mi===8||mi===11;
+                    return (
+                      <div key={mi}>
+                        <div style={{display:"grid",gridTemplateColumns:"44px 1fr 68px 68px 52px",gap:8,padding:"5px 12px",alignItems:"center",opacity:isFut?0.28:1,background:mi%2===0?"#fff":"#fafbfc",borderBottom:isQEnd?"none":"1px solid #f3f4f6",transition:"background 0.15s"}}>
+                          <div style={{fontSize:11,fontWeight:600,color:"#334155"}}>{m}</div>
+                          <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                            <div style={{width:bW26+"%",height:8,background:!isFut&&v26>=v25?"linear-gradient(90deg,#3b82f6,#2563eb)":!isFut?"linear-gradient(90deg,#f97316,#ea580c)":"#e5e7eb",borderRadius:4,transition:"width 0.4s ease",minWidth:v26?3:0}}/>
+                            <div style={{width:bW25+"%",height:5,background:"#e2e8f0",borderRadius:3}}/>
                           </div>
-                        ))}
-                      </div>
-                      <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:5,marginTop:3}}>
-                        {[0,1,2,3].map(q=>{
+                          <div style={{fontSize:12,fontWeight:700,color:"#1d4ed8",textAlign:"right"}}>{fmtV(v26)}</div>
+                          <div style={{fontSize:11,color:"#94a3b8",textAlign:"right"}}>{fmtV(v25)}</div>
+                          <div style={{textAlign:"right"}}>
+                            {pct!==null?<span style={{fontSize:10,fontWeight:700,color:pct>=0?"#15803d":"#dc2626"}}>{pct>=0?"▲":"▼"}{Math.abs(pct).toFixed(0)}%</span>:<span style={{color:"#d1d5db",fontSize:10}}>—</span>}
+                          </div>
+                        </div>
+                        {isQEnd&&(()=>{
+                          const q=Math.floor(mi/3);
                           const q25=qSum(row.vals25,q), q26=qSum(row.vals26,q);
                           const hasQ=q26>0;
+                          const qPct=q25&&q26?((q26-q25)/Math.abs(q25)*100):null;
                           return (
-                            <div key={q} className="qcard" style={{opacity:hasQ?1:.42}}>
-                              <div style={{fontSize:10,fontWeight:600,color:"#64748b",marginBottom:5}}>Q{q+1}</div>
-                              <div style={{display:"flex",justifyContent:"space-between"}}>
-                                <span style={{fontSize:10,color:"#1d4ed8",fontWeight:500}}>2026</span>
-                                <span style={{fontSize:12,fontWeight:600,color:"#1d4ed8"}}>{fmtV(q26)}</span>
+                            <div style={{display:"grid",gridTemplateColumns:"44px 1fr 68px 68px 52px",gap:8,padding:"5px 12px",background:"#f0f4ff",borderTop:"1px solid #e0e7ff",borderBottom:"1px solid #e0e7ff",alignItems:"center",opacity:hasQ?1:0.3,marginBottom:2}}>
+                              <div style={{fontSize:11,fontWeight:800,color:"#4338ca"}}>Q{q+1}</div>
+                              <div/>
+                              <div style={{fontSize:12,fontWeight:700,color:"#1d4ed8",textAlign:"right"}}>{fmtV(q26)}</div>
+                              <div style={{fontSize:11,fontWeight:500,color:"#94a3b8",textAlign:"right"}}>{fmtV(q25)}</div>
+                              <div style={{textAlign:"right"}}>
+                                {qPct!==null?<span style={{fontSize:10,fontWeight:800,color:qPct>=0?"#15803d":"#dc2626"}}>{qPct>=0?"+":""}{qPct.toFixed(1)}%</span>:<span style={{color:"#d1d5db",fontSize:10}}>—</span>}
                               </div>
-                              <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}>
-                                <span style={{fontSize:10,color:"#94a3b8"}}>2025</span>
-                                <span style={{fontSize:12,color:"#94a3b8"}}>{fmtV(q25)}</span>
-                              </div>
-                              <div style={{borderTop:"0.5px solid #e2e8f0",marginTop:4,paddingTop:3,textAlign:"right"}}>{pill(q25,q26)}</div>
                             </div>
                           );
-                        })}
+                        })()}
                       </div>
-                      <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:5,marginTop:3}}>
-                        {[0,1].map(h=>(
-                          <div key={h} style={{gridColumn:"span 2",display:"flex",flexDirection:"column",alignItems:"center"}}>
-                            <div className="brace" style={{width:"calc(100% - 12px)"}}></div>
+                    );
+                  })}
+
+                  {/* Half-year cards */}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:10}}>
+                    {[0,1].map(h=>{
+                      const h25=row.vals25.slice(h*6,h*6+6).reduce((a,b)=>a+b,0);
+                      const h26=row.vals26.slice(h*6,h*6+6).reduce((a,b)=>a+b,0);
+                      const hasH=h26>0;
+                      const hPct=h25&&h26?((h26-h25)/Math.abs(h25)*100):null;
+                      return (
+                        <div key={h} style={{background:"#f8fafc",borderRadius:10,padding:"10px 14px",border:"1px solid #e5e7eb",opacity:hasH?1:0.3,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <div>
+                            <div style={{fontSize:10,fontWeight:700,color:"#64748b",marginBottom:2}}>H{h+1}</div>
+                            <div style={{display:"flex",gap:12}}>
+                              <span style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{fmtV(h26)}</span>
+                              <span style={{fontSize:13,color:"#94a3b8"}}>vs {fmtV(h25)}</span>
+                            </div>
                           </div>
-                        ))}
-                      </div>
-                      <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:5,marginTop:3}}>
-                        {[0,1].map(h=>{
-                          const h25=hSum(row.vals25,h), h26=hSum(row.vals26,h);
-                          const hasH=h26>0;
-                          return (
-                            <div key={h} className="hcard" style={{opacity:hasH?1:.42}}>
-                              <div style={{fontSize:11,fontWeight:600,color:"#64748b",marginBottom:5}}>H{h+1}</div>
-                              <div style={{display:"flex",justifyContent:"space-between"}}>
-                                <span style={{fontSize:10,color:"#1d4ed8",fontWeight:500}}>2026</span>
-                                <span style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{fmtV(h26)}</span>
-                              </div>
-                              <div style={{display:"flex",justifyContent:"space-between",marginTop:3}}>
-                                <span style={{fontSize:10,color:"#94a3b8"}}>2025</span>
-                                <span style={{fontSize:14,color:"#94a3b8"}}>{fmtV(h25)}</span>
-                              </div>
-                              <div style={{borderTop:"0.5px solid #e2e8f0",marginTop:5,paddingTop:4,textAlign:"right"}}>{pill(h25,h26)}</div>
-                            </div>
-                          );
-                        })}
+                          {hPct!==null?<span style={{fontSize:13,fontWeight:800,padding:"3px 10px",borderRadius:8,background:hPct>=0?"#f0fdf4":"#fef2f2",color:hPct>=0?"#15803d":"#dc2626",border:"1px solid "+(hPct>=0?"#bbf7d0":"#fecaca")}}>{hPct>=0?"+":""}{hPct.toFixed(1)}%</span>:<span style={{color:"#d1d5db"}}>—</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Year total */}
+                  <div style={{marginTop:8,background:"#f8fafc",borderRadius:10,padding:"10px 14px",border:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div>
+                      <div style={{fontSize:10,fontWeight:700,color:"#64748b",marginBottom:2}}>ROK TOTAL</div>
+                      <div style={{display:"flex",gap:12,alignItems:"baseline"}}>
+                        <span style={{fontSize:16,fontWeight:800,color:"#1d4ed8"}}>{fmtV(row.vals26.reduce((a,b)=>a+b,0))} <span style={{fontSize:10,fontWeight:500}}>({activeMonths} mies.)</span></span>
+                        <span style={{fontSize:14,color:"#94a3b8"}}>vs {fmtV(full25)}</span>
                       </div>
                     </div>
-                  );
-                });
-              })()}
-            </div>
+                    {pctYtd?<span style={{fontSize:14,fontWeight:800,padding:"4px 12px",borderRadius:8,background:pctYtd>=0?"#f0fdf4":"#fef2f2",color:pctYtd>=0?"#15803d":"#dc2626",border:"1px solid "+(pctYtd>=0?"#bbf7d0":"#fecaca")}}>{pctYtd>=0?"+":""}{pctYtd.toFixed(1)}% YTD</span>:<span style={{color:"#d1d5db"}}>—</span>}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         );
       })()}
