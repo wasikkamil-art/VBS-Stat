@@ -212,32 +212,38 @@ function LoginScreen() {
   }
 
   return (
-    <div style={{ minHeight:"100vh", background:"#f8f9fb", display:"flex", alignItems:"center", justifyContent:"center" }}>
-      <div style={{ background:"#fff", borderRadius:16, padding:40, width:360, boxShadow:"0 4px 24px rgba(0,0,0,0.08)" }}>
-        <div style={{ textAlign:"center", marginBottom:32 }}>
-          <img src="/logodologowania.png" alt="FleetStat" style={{ width:280, margin:"0 auto" }} />
-          <p style={{ color:"#6b7280", fontSize:13, marginTop:8 }}>Zarządzanie flotą</p>
+    <div style={{ minHeight:"100vh", background:"#f8f9fb", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
+      <div style={{ background:"#fff", borderRadius:20, padding:"36px 32px 32px", width:380, maxWidth:"100%", boxShadow:"0 8px 32px rgba(0,0,0,0.08)" }}>
+        <div style={{ textAlign:"center", marginBottom:24 }}>
+          <img src="/logodologowania.png" alt="FleetStat" style={{ width:200, margin:"0 auto 6px" }} />
+          <p style={{ color:"#9ca3af", fontSize:13, margin:0 }}>Zarządzanie flotą</p>
         </div>
         <form onSubmit={handleLogin}>
-          <div style={{ marginBottom:16 }}>
-            <label style={{ display:"block", fontSize:13, fontWeight:600, color:"#374151", marginBottom:6 }}>Email</label>
+          <div style={{ marginBottom:14 }}>
+            <label style={{ display:"block", fontSize:12, fontWeight:600, color:"#6b7280", marginBottom:5, textTransform:"uppercase", letterSpacing:"0.5px" }}>Email</label>
             <input
               type="email" value={email} onChange={e => setEmail(e.target.value)} required
-              style={{ width:"100%", padding:"10px 14px", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, outline:"none", boxSizing:"border-box" }}
+              style={{ width:"100%", padding:"11px 14px", border:"1.5px solid #e5e7eb", borderRadius:10, fontSize:14, outline:"none", boxSizing:"border-box", background:"#f9fafb", transition:"border 0.2s" }}
               placeholder="twoj@email.com"
+              onFocus={e => e.target.style.borderColor="#1d4ed8"}
+              onBlur={e => e.target.style.borderColor="#e5e7eb"}
             />
           </div>
-          <div style={{ marginBottom:24 }}>
-            <label style={{ display:"block", fontSize:13, fontWeight:600, color:"#374151", marginBottom:6 }}>Hasło</label>
+          <div style={{ marginBottom:20 }}>
+            <label style={{ display:"block", fontSize:12, fontWeight:600, color:"#6b7280", marginBottom:5, textTransform:"uppercase", letterSpacing:"0.5px" }}>Hasło</label>
             <input
               type="password" value={password} onChange={e => setPassword(e.target.value)} required
-              style={{ width:"100%", padding:"10px 14px", border:"1.5px solid #e5e7eb", borderRadius:8, fontSize:14, outline:"none", boxSizing:"border-box" }}
+              style={{ width:"100%", padding:"11px 14px", border:"1.5px solid #e5e7eb", borderRadius:10, fontSize:14, outline:"none", boxSizing:"border-box", background:"#f9fafb", transition:"border 0.2s" }}
               placeholder="••••••••"
+              onFocus={e => e.target.style.borderColor="#1d4ed8"}
+              onBlur={e => e.target.style.borderColor="#e5e7eb"}
             />
           </div>
-          {error && <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:8, padding:"10px 14px", color:"#dc2626", fontSize:13, marginBottom:16 }}>{error}</div>}
+          {error && <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:10, padding:"10px 14px", color:"#dc2626", fontSize:13, marginBottom:14 }}>{error}</div>}
           <button type="submit" disabled={loading}
-            style={{ width:"100%", padding:"12px", background:"#f59e0b", border:"none", borderRadius:8, fontWeight:700, fontSize:15, color:"#fff", cursor:"pointer" }}>
+            style={{ width:"100%", padding:"12px", background:"#111827", border:"none", borderRadius:10, fontWeight:700, fontSize:15, color:"#fff", cursor:"pointer", transition:"opacity 0.2s" }}
+            onMouseOver={e => e.target.style.opacity="0.9"}
+            onMouseOut={e => e.target.style.opacity="1"}>
             {loading ? "Logowanie..." : "Zaloguj się"}
           </button>
         </form>
