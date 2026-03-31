@@ -947,8 +947,7 @@ function App({ user, role, appUsers = [] }) {
               {/* NAGŁÓWEK */}
               <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-                    style={{ background: "#111827" }}>FS</div>
+                  <img src="/icon-192.png" alt="FS" className="w-9 h-9 rounded-xl flex-shrink-0" />
                   <div>
                     <div className="font-bold text-gray-900 text-lg leading-tight">FleetStat</div>
                     <div className="text-xs text-gray-400">{new Date().toLocaleDateString("pl-PL",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>
