@@ -213,10 +213,10 @@ function LoginScreen() {
 
   return (
     <div style={{ minHeight:"100vh", background:"#f8f9fb", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
-      <div style={{ background:"#fff", borderRadius:20, padding:"36px 32px 32px", width:380, maxWidth:"100%", boxShadow:"0 8px 32px rgba(0,0,0,0.08)" }}>
-        <div style={{ textAlign:"center", marginBottom:24 }}>
-          <img src="/logodologowania.png" alt="FleetStat" style={{ width:200, margin:"0 auto 6px" }} />
-          <p style={{ color:"#9ca3af", fontSize:13, margin:0 }}>Zarządzanie flotą</p>
+      <div style={{ background:"#fff", borderRadius:20, padding:"32px", width:360, maxWidth:"100%", boxShadow:"0 8px 32px rgba(0,0,0,0.08)" }}>
+        <div style={{ display:"flex", flexDirection:"column", alignItems:"center", marginBottom:28 }}>
+          <img src="/logodologowania.png" alt="FleetStat" style={{ width:200 }} />
+          <p style={{ color:"#9ca3af", fontSize:13, margin:"4px 0 0" }}>Zarządzanie flotą</p>
         </div>
         <form onSubmit={handleLogin}>
           <div style={{ marginBottom:14 }}>
