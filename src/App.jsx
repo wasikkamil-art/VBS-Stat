@@ -850,11 +850,13 @@ function App({ user, role, appUsers = [] }) {
         {/* ── SIDEBAR ───────────────────────────────────────────────────── */}
         <aside className="hidden md:flex flex-col w-56 bg-white border-r border-gray-100 py-7 px-4 sticky top-0 h-screen">
           <div className="px-2 mb-8">
-            <div className="flex items-center gap-2 mb-0.5">
-              <img src="/icon-192.png" alt="FS" className="w-7 h-7 rounded-lg" />
-              <span className="font-bold text-base text-gray-900">FleetStat</span>
+            <div className="flex items-center gap-2.5">
+              <img src="/icon-192.png" alt="FS" className="w-10 h-10 rounded-xl" />
+              <div>
+                <div className="font-bold text-base text-gray-900 leading-tight">FleetStat</div>
+                <div className="text-xs text-gray-400">Zarządzanie flotą</div>
+              </div>
             </div>
-            <div className="text-xs text-gray-400 pl-9">Zarządzanie flotą</div>
           </div>
 
           <nav className="space-y-0.5 flex-1">
