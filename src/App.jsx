@@ -1929,9 +1929,6 @@ function App({ user, role, appUsers = [] }) {
                           vehicle={v}
                           onSave={updateVehicle}
                           onClose={() => setEditVehicleId(null)}
-                          pauzy={pauzy.filter(p => p.vehicleId === v.id)}
-                          onAddPauza={async (data) => { try { await addDoc(collection(db, "pauzy"), data); } catch(e) { console.error("addPauza", e); } }}
-                          onDeletePauza={async (id) => { try { await deleteDoc(doc(db, "pauzy", id)); } catch(e) { console.error("delPauza", e); } }}
                         />
                       )}
                     </div>
@@ -5896,33 +5893,7 @@ function DriverCopyRow({ vehicle: v, active }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // VEHICLE EDIT PANEL (inline, inside vehicle card)
 // ═══════════════════════════════════════════════════════════════════════════════
-function VehicleEditPanel({ vehicle, onSave, onClose, pauzy = [], onAddPauza, onDeletePauza }) {
-  const [showPauzaForm, setShowPauzaForm] = useState(false);
-  const [pauzaData, setPauzaData] = useState({ start: new Date().toISOString().slice(0,10), typ: "45", customH: "" });
-  const PAUZA_TYPES = [
-    { val: "9", label: "9h (dzienny skrócony)" },
-    { val: "11", label: "11h (dzienny)" },
-    { val: "24", label: "24h (tygodniowy skrócony)" },
-    { val: "45", label: "45h (tygodniowy)" },
-    { val: "custom", label: "Inne..." },
-  ];
-  const addPauza = () => {
-    const hours = pauzaData.typ === "custom" ? parseInt(pauzaData.customH) || 0 : parseInt(pauzaData.typ);
-    if (!hours || !pauzaData.start) return;
-    const startDate = new Date(pauzaData.start + "T00:00:00");
-    const endDate = new Date(startDate.getTime() + hours * 3600000);
-    onAddPauza({
-      vehicleId: vehicle.id,
-      plate: vehicle.plate,
-      driver: (vehicle.driverHistory || []).find(d => !d.to)?.name || "—",
-      start: pauzaData.start,
-      end: endDate.toISOString().slice(0, 16),
-      hours,
-      created: new Date().toISOString(),
-    });
-    setShowPauzaForm(false);
-    setPauzaData({ start: new Date().toISOString().slice(0,10), typ: "45", customH: "" });
-  };
+function VehicleEditPanel({ vehicle, onSave, onClose }) {
   const [v, setV] = useState({
     ...vehicle,
     plate2:          vehicle.plate2          || "",
@@ -6206,80 +6177,6 @@ function VehicleEditPanel({ vehicle, onSave, onClose, pauzy = [], onAddPauza, on
             style={{ background: "#e5e7eb", color: "#374151" }}>
             Anuluj
           </button>
-        </div>
-      </div>
-
-      {/* ── CZAS PRACY / PAUZY ── */}
-      <div className="px-5 py-4 border-t border-gray-100">
-        <div className="flex items-center justify-between mb-3">
-          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Czas pracy — pauzy</div>
-          <button onClick={() => setShowPauzaForm(!showPauzaForm)}
-            className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all hover:opacity-90"
-            style={{ background: "#111827", color: "#fff" }}>
-            {showPauzaForm ? "Anuluj" : "+ Dodaj pauzę"}
-          </button>
-        </div>
-
-        {/* Formularz dodawania pauzy */}
-        {showPauzaForm && (
-          <div className="rounded-xl p-3 mb-3" style={{ background: "#f0f9ff", border: "1px solid #bfdbfe" }}>
-            <div className="grid grid-cols-2 gap-2 mb-2">
-              <MF label="Data rozpoczęcia">
-                <MInput type="date" value={pauzaData.start} onChange={val => setPauzaData(p => ({...p, start: val}))} />
-              </MF>
-              <MF label="Typ pauzy">
-                <select value={pauzaData.typ} onChange={e => setPauzaData(p => ({...p, typ: e.target.value}))}
-                  className="w-full px-2.5 py-1.5 rounded-lg text-sm border border-gray-200 bg-white outline-none">
-                  {PAUZA_TYPES.map(t => <option key={t.val} value={t.val}>{t.label}</option>)}
-                </select>
-              </MF>
-            </div>
-            {pauzaData.typ === "custom" && (
-              <div className="mb-2">
-                <MF label="Liczba godzin">
-                  <MInput type="number" value={pauzaData.customH} onChange={val => setPauzaData(p => ({...p, customH: val}))} placeholder="np. 36" />
-                </MF>
-              </div>
-            )}
-            <button onClick={addPauza}
-              className="w-full py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90"
-              style={{ background: "#1d4ed8" }}>
-              Zapisz pauzę
-            </button>
-          </div>
-        )}
-
-        {/* Lista pauz */}
-        {pauzy.length === 0 && !showPauzaForm && (
-          <div className="text-xs text-gray-400 italic py-2">Brak zaplanowanych pauz</div>
-        )}
-        <div className="space-y-2">
-          {pauzy.sort((a,b) => b.start.localeCompare(a.start)).map(p => {
-            const now = new Date();
-            const startD = new Date(p.start + "T00:00:00");
-            const endD = new Date(p.end);
-            const isActive = now >= startD && now <= endD;
-            const isPast = now > endD;
-            const isFuture = now < startD;
-            const endStr = endD.toLocaleDateString("pl-PL", { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" });
-            const startStr = startD.toLocaleDateString("pl-PL", { day:"numeric", month:"short" });
-            return (
-              <div key={p.id} className="flex items-center justify-between px-3 py-2 rounded-xl text-xs"
-                style={{
-                  background: isActive ? "#fef2f2" : isFuture ? "#f0f9ff" : "#f9fafb",
-                  border: `1px solid ${isActive ? "#fecaca" : isFuture ? "#bfdbfe" : "#e5e7eb"}`,
-                  color: isActive ? "#b91c1c" : isFuture ? "#1d4ed8" : "#9ca3af"
-                }}>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold">{p.hours}h</span>
-                  <span>{isActive ? "Trwa pauza" : isFuture ? "Zaplanowana" : "Zakończona"}</span>
-                  <span className="text-gray-400">· {startStr} → {endStr}</span>
-                </div>
-                <button onClick={() => onDeletePauza(p.id)}
-                  className="w-5 h-5 rounded flex items-center justify-center text-gray-300 hover:text-red-400 transition-all">✕</button>
-              </div>
-            );
-          })}
         </div>
       </div>
 
