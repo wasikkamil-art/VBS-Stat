@@ -838,6 +838,22 @@ function App({ user, role, appUsers = [] }) {
         />
       )}
       {showAddVehicle && <AddVehicleModal onSave={addVehicle} onClose={() => setShowAddVehicle(false)} />}
+      {czasPracyVehicleId && (() => {
+        const czV = vehicles.find(x => x.id === czasPracyVehicleId);
+        if (!czV) return null;
+        const czEntries = pauzy.filter(p => p.vehicleId === czasPracyVehicleId);
+        return <CzasPracyModal
+          vehicle={czV}
+          entries={czEntries}
+          onSave={async (data) => {
+            try { await addDoc(collection(db, "pauzy"), data); showToast("Zapisano"); } catch(e) { console.error("addPauza", e); }
+          }}
+          onDelete={async (id) => {
+            try { await deleteDoc(doc(db, "pauzy", id)); } catch(e) { console.error("delPauza", e); }
+          }}
+          onClose={() => setCzasPracyVehicleId(null)}
+        />;
+      })()}
       {editCostId && (
         <AddCostModal
           vehicles={vehicles} categories={categories}
@@ -1230,130 +1246,15 @@ function App({ user, role, appUsers = [] }) {
                             </div>
                           )}
 
-                          {/* PRZYCISK CZAS PRACY */}
+                          {/* PRZYCISK CZAS PRACY — otwiera modal */}
                           <div className="px-4 pb-3">
-                            <button onClick={() => setCzasPracyVehicleId(czasPracyVehicleId === v.id ? null : v.id)}
+                            <button onClick={() => setCzasPracyVehicleId(v.id)}
                               className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all"
-                              style={{
-                                background: czasPracyVehicleId === v.id ? "#111827" : "#f3f4f6",
-                                color: czasPracyVehicleId === v.id ? "#fff" : "#6b7280"
-                              }}>
+                              style={{ background: "#f3f4f6", color: "#6b7280" }}>
                               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                               Czas pracy
                             </button>
                           </div>
-
-                          {/* PANEL CZASU PRACY */}
-                          {czasPracyVehicleId === v.id && (() => {
-                            const vPauzy = pauzy.filter(p => p.vehicleId === v.id).sort((a,b) => b.start.localeCompare(a.start));
-                            const now = new Date();
-                            return (
-                              <div className="border-t border-gray-100 px-4 py-3">
-                                <div className="flex items-center justify-between mb-3">
-                                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Czas pracy · {v.plate}</span>
-                                </div>
-
-                                {/* FORMULARZ DODAWANIA */}
-                                <div className="rounded-xl p-3 mb-3" style={{ background: "#f0f9ff", border: "1px solid #bfdbfe" }}>
-                                  <div className="text-xs font-semibold text-blue-700 mb-2">Nowa pauza</div>
-                                  <div className="grid grid-cols-2 gap-2 mb-2">
-                                    <div>
-                                      <label className="text-xs text-gray-500 block mb-1">Data rozpoczęcia</label>
-                                      <input type="date" id={`pauza-start-${v.id}`}
-                                        defaultValue={new Date().toISOString().slice(0,10)}
-                                        className="w-full px-2.5 py-1.5 rounded-lg text-sm border border-gray-200 bg-white outline-none" />
-                                    </div>
-                                    <div>
-                                      <label className="text-xs text-gray-500 block mb-1">Typ pauzy</label>
-                                      <select id={`pauza-typ-${v.id}`} defaultValue="45"
-                                        className="w-full px-2.5 py-1.5 rounded-lg text-sm border border-gray-200 bg-white outline-none"
-                                        onChange={e => {
-                                          const customDiv = document.getElementById(`pauza-custom-${v.id}`);
-                                          if (customDiv) customDiv.style.display = e.target.value === "custom" ? "block" : "none";
-                                        }}>
-                                        <option value="9">9h (dzienny skrócony)</option>
-                                        <option value="11">11h (dzienny)</option>
-                                        <option value="24">24h (tygodniowy skrócony)</option>
-                                        <option value="45">45h (tygodniowy)</option>
-                                        <option value="custom">Inne...</option>
-                                      </select>
-                                    </div>
-                                  </div>
-                                  <div id={`pauza-custom-${v.id}`} style={{ display: "none" }} className="mb-2">
-                                    <label className="text-xs text-gray-500 block mb-1">Liczba godzin</label>
-                                    <input type="number" id={`pauza-hours-${v.id}`} placeholder="np. 36"
-                                      className="w-full px-2.5 py-1.5 rounded-lg text-sm border border-gray-200 bg-white outline-none" />
-                                  </div>
-                                  <button onClick={async () => {
-                                    const startEl = document.getElementById(`pauza-start-${v.id}`);
-                                    const typEl = document.getElementById(`pauza-typ-${v.id}`);
-                                    const hoursEl = document.getElementById(`pauza-hours-${v.id}`);
-                                    const startVal = startEl?.value;
-                                    const typVal = typEl?.value;
-                                    const hours = typVal === "custom" ? parseInt(hoursEl?.value) || 0 : parseInt(typVal);
-                                    if (!hours || !startVal) return;
-                                    const startDate = new Date(startVal + "T00:00:00");
-                                    const endDate = new Date(startDate.getTime() + hours * 3600000);
-                                    try {
-                                      await addDoc(collection(db, "pauzy"), {
-                                        vehicleId: v.id,
-                                        plate: v.plate,
-                                        driver: driverName,
-                                        start: startVal,
-                                        end: endDate.toISOString().slice(0, 16),
-                                        hours,
-                                        created: new Date().toISOString(),
-                                      });
-                                      showToast("Pauza dodana");
-                                    } catch(e) { console.error("addPauza", e); }
-                                  }}
-                                    className="w-full py-2 rounded-lg text-xs font-semibold text-white transition-all hover:opacity-90"
-                                    style={{ background: "#1d4ed8" }}>
-                                    Zapisz pauzę
-                                  </button>
-                                </div>
-
-                                {/* LISTA PAUZ */}
-                                {vPauzy.length === 0 ? (
-                                  <div className="text-xs text-gray-400 italic text-center py-2">Brak pauz</div>
-                                ) : (
-                                  <div className="space-y-1.5">
-                                    {vPauzy.map(p => {
-                                      const startD = new Date(p.start + "T00:00:00");
-                                      const endD = new Date(p.end);
-                                      const isActive = now >= startD && now <= endD;
-                                      const isPast = now > endD;
-                                      const isFuture = now < startD;
-                                      const startStr = startD.toLocaleDateString("pl-PL", { day:"numeric", month:"short" });
-                                      const endStr = endD.toLocaleString("pl-PL", { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" });
-                                      const hoursLeft = isActive ? Math.max(0, Math.round((endD - now) / 3600000)) : null;
-                                      return (
-                                        <div key={p.id} className="flex items-center justify-between px-3 py-2 rounded-xl text-xs"
-                                          style={{
-                                            background: isActive ? "#fef2f2" : isFuture ? "#f0f9ff" : "#f9fafb",
-                                            border: `1px solid ${isActive ? "#fecaca" : isFuture ? "#bfdbfe" : "#e5e7eb"}`
-                                          }}>
-                                          <div className="flex items-center gap-2">
-                                            <span className={`w-2 h-2 rounded-full ${isActive ? "bg-red-500 animate-pulse" : isFuture ? "bg-blue-500" : "bg-green-500"}`} />
-                                            <span className="font-semibold" style={{ color: isActive ? "#b91c1c" : isFuture ? "#1d4ed8" : "#6b7280" }}>{p.hours}h</span>
-                                            <span style={{ color: isActive ? "#dc2626" : isFuture ? "#2563eb" : "#9ca3af" }}>
-                                              {isActive ? `Trwa · ${hoursLeft}h do końca` : isFuture ? "Zaplanowana" : "Zakończona"}
-                                            </span>
-                                          </div>
-                                          <div className="flex items-center gap-2">
-                                            <span className="text-gray-400">{startStr} → {endStr}</span>
-                                            <button onClick={async () => {
-                                              try { await deleteDoc(doc(db, "pauzy", p.id)); } catch(e) { console.error("delPauza", e); }
-                                            }} className="w-4 h-4 rounded flex items-center justify-center text-gray-300 hover:text-red-400 transition-all">✕</button>
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })()}
                         </div>
                       );
                     })}
@@ -1452,46 +1353,54 @@ function App({ user, role, appUsers = [] }) {
                 </div>
               </div>
 
-              {/* CZAS PRACY — przegląd pauz kierowców */}
+              {/* CZAS PRACY — przegląd statusów kierowców */}
               {(() => {
                 const now = new Date();
+                const todayStr = now.toISOString().slice(0,10);
+                const getStatusLabel = (s) => {
+                  const map = { jazda: "Jazda", pauza9: "Pauza 9h", pauza11: "Pauza 11h", pauza24: "Pauza 24h", pauza45: "Pauza 45h", baza: "Baza" };
+                  return map[s] || s || (s && s.hours ? `Pauza ${s.hours}h` : "—");
+                };
+                const getStatusColor = (s) => {
+                  const map = { jazda: "#15803d", pauza9: "#b45309", pauza11: "#c2410c", pauza24: "#dc2626", pauza45: "#9333ea", baza: "#6b7280" };
+                  return map[s] || "#6b7280";
+                };
+                const getStatusBg = (s) => {
+                  const map = { jazda: "#f0fdf4", pauza9: "#fffbeb", pauza11: "#fff7ed", pauza24: "#fef2f2", pauza45: "#faf5ff", baza: "#f3f4f6" };
+                  return map[s] || "#f9fafb";
+                };
+                const getStatusBorder = (s) => {
+                  const map = { jazda: "#bbf7d0", pauza9: "#fde68a", pauza11: "#fed7aa", pauza24: "#fecaca", pauza45: "#e9d5ff", baza: "#d1d5db" };
+                  return map[s] || "#e5e7eb";
+                };
+
                 const activePauzy = pauzy.filter(p => {
-                  const s = new Date(p.start + "T00:00:00");
-                  const e = new Date(p.end);
-                  return now >= s && now <= e;
+                  if (p.status === "jazda") return false;
+                  return p.start <= todayStr && p.end >= todayStr;
                 });
                 const futurePauzy = pauzy.filter(p => {
-                  const s = new Date(p.start + "T00:00:00");
-                  return now < s;
+                  return p.start > todayStr;
                 }).sort((a,b) => a.start.localeCompare(b.start)).slice(0, 5);
-                const recentPauzy = pauzy.filter(p => {
-                  const e = new Date(p.end);
-                  return now > e && (now - e) < 7 * 86400000;
-                }).sort((a,b) => b.end.localeCompare(a.end)).slice(0, 3);
 
-                if (activePauzy.length === 0 && futurePauzy.length === 0 && recentPauzy.length === 0) return null;
+                if (activePauzy.length === 0 && futurePauzy.length === 0) return null;
 
                 return (
                   <div className="bg-white rounded-2xl border border-gray-100 p-4 mt-4">
-                    <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Czas pracy — pauzy kierowców</div>
+                    <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Czas pracy — statusy kierowców</div>
                     <div className="space-y-2">
-                      {activePauzy.map(p => {
-                        const endD = new Date(p.end);
-                        const hoursLeft = Math.max(0, Math.round((endD - now) / 3600000));
-                        return (
-                          <div key={p.id} className="flex items-center justify-between px-3 py-2.5 rounded-xl text-sm"
-                            style={{ background: "#fef2f2", border: "1px solid #fecaca" }}>
-                            <div className="flex items-center gap-2">
-                              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                              <span className="font-semibold text-red-700">{p.plate}</span>
-                              <span className="text-red-600">{p.driver}</span>
-                            </div>
-                            <div className="text-xs text-red-500">
-                              Pauza {p.hours}h · jeszcze {hoursLeft}h do {endD.toLocaleString("pl-PL", { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" })}
-                            </div>
+                      {activePauzy.map(p => (
+                        <div key={p.id} className="flex items-center justify-between px-3 py-2.5 rounded-xl text-sm"
+                          style={{ background: getStatusBg(p.status), border: `1px solid ${getStatusBorder(p.status)}` }}>
+                          <div className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: getStatusColor(p.status) }} />
+                            <span className="font-semibold" style={{ color: getStatusColor(p.status) }}>{p.plate}</span>
+                            <span style={{ color: getStatusColor(p.status), opacity: 0.8 }}>{p.driver}</span>
                           </div>
-                        );
-                      })}
+                          <div className="text-xs" style={{ color: getStatusColor(p.status) }}>
+                            {getStatusLabel(p.status)} · do {new Date(p.end + "T00:00:00").toLocaleDateString("pl-PL", { day:"numeric", month:"short" })}
+                          </div>
+                        </div>
+                      ))}
                       {futurePauzy.map(p => {
                         const startD = new Date(p.start + "T00:00:00");
                         const daysUntil = Math.ceil((startD - now) / 86400000);
@@ -1504,23 +1413,7 @@ function App({ user, role, appUsers = [] }) {
                               <span className="text-blue-600">{p.driver}</span>
                             </div>
                             <div className="text-xs text-blue-500">
-                              {p.hours}h · za {daysUntil} {daysUntil === 1 ? "dzień" : "dni"} ({startD.toLocaleDateString("pl-PL", { day:"numeric", month:"short" })})
-                            </div>
-                          </div>
-                        );
-                      })}
-                      {recentPauzy.map(p => {
-                        const endD = new Date(p.end);
-                        return (
-                          <div key={p.id} className="flex items-center justify-between px-3 py-2.5 rounded-xl text-sm"
-                            style={{ background: "#f9fafb", border: "1px solid #e5e7eb" }}>
-                            <div className="flex items-center gap-2">
-                              <span className="w-2 h-2 rounded-full bg-green-500" />
-                              <span className="font-semibold text-gray-600">{p.plate}</span>
-                              <span className="text-gray-500">{p.driver}</span>
-                            </div>
-                            <div className="text-xs text-green-600">
-                              Wrócił · {endD.toLocaleString("pl-PL", { day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" })}
+                              {getStatusLabel(p.status)} · za {daysUntil} {daysUntil === 1 ? "dzień" : "dni"} ({startD.toLocaleDateString("pl-PL", { day:"numeric", month:"short" })})
                             </div>
                           </div>
                         );
@@ -5893,6 +5786,252 @@ function DriverCopyRow({ vehicle: v, active }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // VEHICLE EDIT PANEL (inline, inside vehicle card)
 // ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+// CZAS PRACY — Modal z kalendarzem
+// ═══════════════════════════════════════════════════════════════════════════════
+const CZAS_STATUSY = [
+  { id: "jazda",    label: "Jazda",       color: "#15803d", bg: "#f0fdf4", border: "#bbf7d0" },
+  { id: "pauza9",   label: "Pauza 9h",    color: "#b45309", bg: "#fffbeb", border: "#fde68a" },
+  { id: "pauza11",  label: "Pauza 11h",   color: "#c2410c", bg: "#fff7ed", border: "#fed7aa" },
+  { id: "pauza24",  label: "Pauza 24h",   color: "#dc2626", bg: "#fef2f2", border: "#fecaca" },
+  { id: "pauza45",  label: "Pauza 45h",   color: "#9333ea", bg: "#faf5ff", border: "#e9d5ff" },
+  { id: "baza",     label: "Baza",        color: "#6b7280", bg: "#f3f4f6", border: "#d1d5db" },
+];
+
+function CzasPracyModal({ vehicle, entries, onSave, onDelete, onClose }) {
+  const [month, setMonth] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
+  const [selectedStatus, setSelectedStatus] = useState("jazda");
+  const [rangeStart, setRangeStart] = useState(null);
+  const [rangeEnd, setRangeEnd] = useState(null);
+
+  const driverName = (vehicle.driverHistory || []).find(d => !d.to)?.name || "—";
+
+  // Calendar helpers
+  const daysInMonth = new Date(month.y, month.m + 1, 0).getDate();
+  const firstDow = (new Date(month.y, month.m, 1).getDay() + 6) % 7; // Mon=0
+  const dayNames = ["Pn", "Wt", "Śr", "Cz", "Pt", "Sb", "Nd"];
+
+  const fmtDate = (y, m, d) => `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+  const today = new Date().toISOString().slice(0,10);
+
+  // Map entries by date
+  const entryMap = {};
+  entries.forEach(e => {
+    const start = new Date(e.start + "T00:00:00");
+    const end = new Date(e.end + "T00:00:00");
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      entryMap[d.toISOString().slice(0,10)] = e;
+    }
+  });
+
+  const getStatusForDate = (dateStr) => {
+    const e = entryMap[dateStr];
+    return e ? CZAS_STATUSY.find(s => s.id === e.status) : null;
+  };
+
+  const isInRange = (dateStr) => {
+    if (!rangeStart) return false;
+    const end = rangeEnd || rangeStart;
+    return dateStr >= (rangeStart < end ? rangeStart : end) && dateStr <= (rangeStart < end ? end : rangeStart);
+  };
+
+  const handleDayClick = (dateStr) => {
+    if (!rangeStart || (rangeStart && rangeEnd)) {
+      setRangeStart(dateStr);
+      setRangeEnd(null);
+    } else {
+      setRangeEnd(dateStr);
+    }
+  };
+
+  const handleSaveRange = () => {
+    if (!rangeStart) return;
+    const end = rangeEnd || rangeStart;
+    const from = rangeStart < end ? rangeStart : end;
+    const to = rangeStart < end ? end : rangeStart;
+    onSave({
+      vehicleId: vehicle.id,
+      plate: vehicle.plate,
+      driver: driverName,
+      status: selectedStatus,
+      start: from,
+      end: to,
+      created: new Date().toISOString(),
+    });
+    setRangeStart(null);
+    setRangeEnd(null);
+  };
+
+  const prevMonth = () => setMonth(p => p.m === 0 ? { y: p.y - 1, m: 11 } : { y: p.y, m: p.m - 1 });
+  const nextMonth = () => setMonth(p => p.m === 11 ? { y: p.y + 1, m: 0 } : { y: p.y, m: p.m + 1 });
+  const monthLabel = new Date(month.y, month.m).toLocaleDateString("pl-PL", { month: "long", year: "numeric" });
+
+  // Podsumowanie miesiąca
+  const monthEntries = entries.filter(e => {
+    const mStart = fmtDate(month.y, month.m, 1);
+    const mEnd = fmtDate(month.y, month.m, daysInMonth);
+    return e.start <= mEnd && e.end >= mStart;
+  });
+
+  const countDays = (statusId) => {
+    let count = 0;
+    for (let d = 1; d <= daysInMonth; d++) {
+      const ds = fmtDate(month.y, month.m, d);
+      const e = entryMap[ds];
+      if (e && e.status === statusId) count++;
+    }
+    return count;
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.4)" }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full flex flex-col" style={{ maxWidth: 720, maxHeight: "90vh" }}>
+
+        {/* HEADER */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <VehicleIcon v={vehicle} size={24} />
+            <div>
+              <div className="font-bold text-gray-900">{vehicle.plate} — Czas pracy</div>
+              <div className="text-xs text-gray-400">{vehicle.brand} · {driverName}</div>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 text-sm">✕</button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 px-6 py-4">
+          {/* STATUS SELECTOR */}
+          <div className="mb-4">
+            <div className="text-xs text-gray-500 mb-2 font-medium">Wybierz status i zaznacz zakres na kalendarzu:</div>
+            <div className="flex flex-wrap gap-1.5">
+              {CZAS_STATUSY.map(s => (
+                <button key={s.id} onClick={() => setSelectedStatus(s.id)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                  style={{
+                    background: selectedStatus === s.id ? s.color : s.bg,
+                    color: selectedStatus === s.id ? "#fff" : s.color,
+                    border: `1.5px solid ${selectedStatus === s.id ? s.color : s.border}`,
+                  }}>
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* NAWIGACJA MIESIĄCA */}
+          <div className="flex items-center justify-between mb-3">
+            <button onClick={prevMonth} className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 text-sm">←</button>
+            <span className="font-semibold text-gray-900 capitalize">{monthLabel}</span>
+            <button onClick={nextMonth} className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 text-sm">→</button>
+          </div>
+
+          {/* KALENDARZ */}
+          <div className="grid grid-cols-7 gap-1 mb-4">
+            {dayNames.map(d => <div key={d} className="text-center text-xs font-semibold text-gray-400 py-1">{d}</div>)}
+            {Array.from({ length: firstDow }, (_, i) => <div key={`e${i}`} />)}
+            {Array.from({ length: daysInMonth }, (_, i) => {
+              const day = i + 1;
+              const dateStr = fmtDate(month.y, month.m, day);
+              const status = getStatusForDate(dateStr);
+              const inRange = isInRange(dateStr);
+              const isToday = dateStr === today;
+              const isStart = dateStr === rangeStart;
+              const isEnd = dateStr === rangeEnd;
+              const selSt = CZAS_STATUSY.find(s => s.id === selectedStatus);
+
+              return (
+                <button key={day} onClick={() => handleDayClick(dateStr)}
+                  className="relative h-10 rounded-lg text-xs font-medium transition-all hover:ring-2 hover:ring-blue-300 flex flex-col items-center justify-center"
+                  style={{
+                    background: inRange ? (selSt?.bg || "#e0e7ff") : status ? status.bg : isToday ? "#f0f9ff" : "#fff",
+                    border: `1.5px solid ${inRange ? (selSt?.color || "#6366f1") : status ? status.border : isToday ? "#bfdbfe" : "#e5e7eb"}`,
+                    color: status ? status.color : "#374151",
+                    outline: (isStart || isEnd) ? `2px solid ${selSt?.color || "#1d4ed8"}` : "none",
+                    outlineOffset: "-1px",
+                  }}>
+                  <span>{day}</span>
+                  {status && <span className="w-1.5 h-1.5 rounded-full absolute bottom-1" style={{ background: status.color }} />}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* ZAKRES + PRZYCISK ZAPISZ */}
+          {rangeStart && (
+            <div className="flex items-center gap-3 mb-4 p-3 rounded-xl" style={{ background: CZAS_STATUSY.find(s=>s.id===selectedStatus)?.bg, border: `1px solid ${CZAS_STATUSY.find(s=>s.id===selectedStatus)?.border}` }}>
+              <div className="flex-1 text-sm">
+                <span className="font-semibold" style={{ color: CZAS_STATUSY.find(s=>s.id===selectedStatus)?.color }}>
+                  {CZAS_STATUSY.find(s=>s.id===selectedStatus)?.label}
+                </span>
+                <span className="text-gray-500 ml-2">
+                  {rangeStart}{rangeEnd && rangeEnd !== rangeStart ? ` → ${rangeEnd}` : ""}
+                </span>
+              </div>
+              <button onClick={handleSaveRange}
+                className="px-4 py-2 rounded-lg text-xs font-bold text-white transition-all hover:opacity-90"
+                style={{ background: CZAS_STATUSY.find(s=>s.id===selectedStatus)?.color }}>
+                Zapisz
+              </button>
+              <button onClick={() => { setRangeStart(null); setRangeEnd(null); }}
+                className="px-3 py-2 rounded-lg text-xs font-medium text-gray-500 bg-gray-100 hover:bg-gray-200">
+                Anuluj
+              </button>
+            </div>
+          )}
+
+          {/* LEGENDA / PODSUMOWANIE MIESIĄCA */}
+          <div className="grid grid-cols-3 gap-2 mb-4">
+            {CZAS_STATUSY.map(s => {
+              const cnt = countDays(s.id);
+              if (!cnt) return null;
+              return (
+                <div key={s.id} className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs"
+                  style={{ background: s.bg, border: `1px solid ${s.border}` }}>
+                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: s.color }} />
+                  <span className="font-medium" style={{ color: s.color }}>{s.label}</span>
+                  <span className="ml-auto font-bold" style={{ color: s.color }}>{cnt}d</span>
+                </div>
+              );
+            }).filter(Boolean)}
+          </div>
+
+          {/* WPISY Z BIEŻĄCEGO MIESIĄCA */}
+          <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Wpisy w tym miesiącu</div>
+          {monthEntries.length === 0 ? (
+            <div className="text-xs text-gray-400 italic py-2">Brak wpisów</div>
+          ) : (
+            <div className="space-y-1.5">
+              {monthEntries.sort((a,b) => b.start.localeCompare(a.start)).map(e => {
+                const st = CZAS_STATUSY.find(s => s.id === e.status);
+                const startD = new Date(e.start + "T00:00:00");
+                const endD = new Date(e.end + "T00:00:00");
+                const days = Math.round((endD - startD) / 86400000) + 1;
+                return (
+                  <div key={e.id} className="flex items-center justify-between px-3 py-2 rounded-xl text-xs"
+                    style={{ background: st?.bg || "#f9fafb", border: `1px solid ${st?.border || "#e5e7eb"}` }}>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full" style={{ background: st?.color }} />
+                      <span className="font-semibold" style={{ color: st?.color }}>{st?.label}</span>
+                      <span className="text-gray-500">
+                        {startD.toLocaleDateString("pl-PL", { day:"numeric", month:"short" })}
+                        {days > 1 ? ` → ${endD.toLocaleDateString("pl-PL", { day:"numeric", month:"short" })}` : ""}
+                        {days > 1 ? ` (${days} dni)` : " (1 dzień)"}
+                      </span>
+                    </div>
+                    <button onClick={() => onDelete(e.id)}
+                      className="w-5 h-5 rounded flex items-center justify-center text-gray-300 hover:text-red-400 transition-all">✕</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function VehicleEditPanel({ vehicle, onSave, onClose }) {
   const [v, setV] = useState({
     ...vehicle,
