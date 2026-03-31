@@ -934,17 +934,9 @@ function App({ user, role, appUsers = [] }) {
         <main className="flex-1 px-4 py-6 md:px-8 md:py-8 pb-32 md:pb-8 overflow-y-auto">
 
           {/* Mobile header */}
-          <div className="flex md:hidden items-center justify-between mb-5">
-            <span className="font-bold text-lg text-gray-900">FleetStat</span>
-            <div className="flex gap-1">
-              {[["dashboard","◈"],["costs","≡"],["vehicles","⊡"],["docs","🛡️"],["imi","🌍"]].map(([id,icon]) => (
-                <button key={id} onClick={() => setTab(id)}
-                  className="w-9 h-9 rounded-lg text-sm flex items-center justify-center transition-all"
-                  style={{ background: tab === id ? "#111827" : "#f3f4f6", color: tab === id ? "#fff" : "#6b7280" }}>
-                  {icon}
-                </button>
-              ))}
-            </div>
+          <div className="flex md:hidden items-center mb-4" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
+            <img src="/icon-192.png" alt="FS" className="w-8 h-8 rounded-lg mr-2" />
+            <span className="font-bold text-base text-gray-900">FleetStat</span>
           </div>
 
           {/* ══ DASHBOARD — TABLICA DYSPOZYTORSKA ═══════════════════════════ */}
@@ -1857,23 +1849,31 @@ function App({ user, role, appUsers = [] }) {
         style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
         <div className="flex overflow-x-auto px-2 py-1.5 gap-1 no-scrollbar">
           {[
-            ["dashboard","◈","Przegląd"],
-            ["frachty","🚚","Frachty"],
-            ["fv","🧾","FV"],
-            ["costs","≡","Koszty"],
-            ["vehicles","🚛","Pojazdy"],
-            ["rent","📊","Rentow."],
-            ["docs","🛡️","Dok."],
-            ["imi","🌍","IMI"],
-            ["serwis","🔧","Serwis"],
-            ...((isAdmin||isDyspozytor)?[["sprawy","⚡","Sprawy"]]:[] ),
-            ...(isAdmin?[["users","👥","Osoby"]]:[] ),
-          ].map(([id,icon,label]) => (
-            <button key={id} onClick={() => setTab(id)}
+            { id: "dashboard", label: "Przegląd", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></svg> },
+            { id: "frachty", label: "Frachty", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 17V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a1 1 0 0 0 1 1h1.5"/><path d="M13 8h4l4 4v4h-1.5"/><circle cx="7.5" cy="17.5" r="2.5"/><circle cx="17" cy="17.5" r="2.5"/><path d="M10 17.5h4.5"/></svg> },
+            ...(canFinance ? [
+              { id: "fv", label: "FV", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 8h6"/><path d="M14 12c0-1.5-3-1.5-3 0s3 1.5 3 0"/><path d="M9 17h3"/></svg> },
+              { id: "costs", label: "Koszty", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="13" rx="2.5"/><path d="M2 10h20"/><path d="M6 15h4"/></svg> },
+            ] : []),
+            { id: "vehicles", label: "Pojazdy", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="6" width="11" height="10" rx="2"/><path d="M14 10h3.5l3 3v3a1 1 0 0 1-1 1h-1"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M9 17h6"/><path d="M3 16h1.5"/></svg> },
+            ...(canFinance ? [
+              { id: "rent", label: "Rentow.", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg> },
+            ] : []),
+            { id: "docs", label: "Dok.", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> },
+            { id: "imi", label: "IMI", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> },
+            { id: "serwis", label: "Serwis", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> },
+            ...((isAdmin||isDyspozytor) ? [
+              { id: "sprawy", label: "Sprawy", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v6"/><line x1="7" y1="13" x2="12" y2="13"/><line x1="7" y1="17" x2="10" y2="17"/></svg> },
+            ] : []),
+            ...(isAdmin ? [
+              { id: "users", label: "Osoby", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
+            ] : []),
+          ].map((item) => (
+            <button key={item.id} onClick={() => setTab(item.id)}
               className="flex-shrink-0 flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all min-w-14"
-              style={{ color: tab === id ? "#111827" : "#9ca3af", background: tab === id ? "#f3f4f6" : "transparent", fontWeight: tab === id ? 600 : 400 }}>
-              <span className="text-lg leading-none">{icon}</span>
-              <span className="text-xs leading-none mt-0.5">{label}</span>
+              style={{ color: tab === item.id ? "#111827" : "#9ca3af", background: tab === item.id ? "#f3f4f6" : "transparent", fontWeight: tab === item.id ? 600 : 400 }}>
+              <span className="leading-none">{item.icon}</span>
+              <span className="text-xs leading-none mt-0.5">{item.label}</span>
             </button>
           ))}
         </div>
