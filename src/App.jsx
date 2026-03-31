@@ -5790,12 +5790,12 @@ function DriverCopyRow({ vehicle: v, active }) {
 // CZAS PRACY — Modal z kalendarzem
 // ═══════════════════════════════════════════════════════════════════════════════
 const CZAS_STATUSY = [
-  { id: "jazda",    label: "Jazda",       color: "#15803d", bg: "#f0fdf4", border: "#bbf7d0" },
-  { id: "pauza9",   label: "Pauza 9h",    color: "#b45309", bg: "#fffbeb", border: "#fde68a" },
-  { id: "pauza11",  label: "Pauza 11h",   color: "#c2410c", bg: "#fff7ed", border: "#fed7aa" },
-  { id: "pauza24",  label: "Pauza 24h",   color: "#dc2626", bg: "#fef2f2", border: "#fecaca" },
-  { id: "pauza45",  label: "Pauza 45h",   color: "#9333ea", bg: "#faf5ff", border: "#e9d5ff" },
-  { id: "baza",     label: "Baza",        color: "#6b7280", bg: "#f3f4f6", border: "#d1d5db" },
+  { id: "jazda",    label: "Jazda",       color: "#15803d", bg: "#f0fdf4", border: "#bbf7d0", hours: 0 },
+  { id: "pauza9",   label: "Pauza 9h",    color: "#b45309", bg: "#fffbeb", border: "#fde68a", hours: 9 },
+  { id: "pauza11",  label: "Pauza 11h",   color: "#c2410c", bg: "#fff7ed", border: "#fed7aa", hours: 11 },
+  { id: "pauza24",  label: "Pauza 24h",   color: "#dc2626", bg: "#fef2f2", border: "#fecaca", hours: 24 },
+  { id: "pauza45",  label: "Pauza 45h",   color: "#9333ea", bg: "#faf5ff", border: "#e9d5ff", hours: 45 },
+  { id: "baza",     label: "Baza",        color: "#6b7280", bg: "#f3f4f6", border: "#d1d5db", hours: 0 },
 ];
 
 function CzasPracyModal({ vehicle, entries, onSave, onDelete, onClose }) {
@@ -5803,6 +5803,7 @@ function CzasPracyModal({ vehicle, entries, onSave, onDelete, onClose }) {
   const [selectedStatus, setSelectedStatus] = useState("jazda");
   const [rangeStart, setRangeStart] = useState(null);
   const [rangeEnd, setRangeEnd] = useState(null);
+  const [startTime, setStartTime] = useState("06:00");
 
   const driverName = (vehicle.driverHistory || []).find(d => !d.to)?.name || "—";
 
@@ -5844,11 +5845,23 @@ function CzasPracyModal({ vehicle, entries, onSave, onDelete, onClose }) {
     }
   };
 
+  const calcEndTime = (time, hours) => {
+    if (!hours || !time) return null;
+    const [h, m] = time.split(":").map(Number);
+    const totalMin = h * 60 + m + hours * 60;
+    const endH = Math.floor(totalMin / 60) % 24;
+    const endM = totalMin % 60;
+    const overflowDays = Math.floor(totalMin / (24 * 60));
+    return { time: `${String(endH).padStart(2,"0")}:${String(endM).padStart(2,"0")}`, overflowDays };
+  };
+
   const handleSaveRange = () => {
     if (!rangeStart) return;
     const end = rangeEnd || rangeStart;
     const from = rangeStart < end ? rangeStart : end;
     const to = rangeStart < end ? end : rangeStart;
+    const st = CZAS_STATUSY.find(s => s.id === selectedStatus);
+    const endCalc = st?.hours ? calcEndTime(startTime, st.hours) : null;
     onSave({
       vehicleId: vehicle.id,
       plate: vehicle.plate,
@@ -5856,6 +5869,9 @@ function CzasPracyModal({ vehicle, entries, onSave, onDelete, onClose }) {
       status: selectedStatus,
       start: from,
       end: to,
+      startTime: startTime || null,
+      endTime: endCalc?.time || null,
+      hours: st?.hours || 0,
       created: new Date().toISOString(),
     });
     setRangeStart(null);
@@ -5957,28 +5973,45 @@ function CzasPracyModal({ vehicle, entries, onSave, onDelete, onClose }) {
             })}
           </div>
 
-          {/* ZAKRES + PRZYCISK ZAPISZ */}
-          {rangeStart && (
-            <div className="flex items-center gap-3 mb-4 p-3 rounded-xl" style={{ background: CZAS_STATUSY.find(s=>s.id===selectedStatus)?.bg, border: `1px solid ${CZAS_STATUSY.find(s=>s.id===selectedStatus)?.border}` }}>
-              <div className="flex-1 text-sm">
-                <span className="font-semibold" style={{ color: CZAS_STATUSY.find(s=>s.id===selectedStatus)?.color }}>
-                  {CZAS_STATUSY.find(s=>s.id===selectedStatus)?.label}
-                </span>
-                <span className="text-gray-500 ml-2">
-                  {rangeStart}{rangeEnd && rangeEnd !== rangeStart ? ` → ${rangeEnd}` : ""}
-                </span>
+          {/* ZAKRES + GODZINA START + PRZYCISK ZAPISZ */}
+          {rangeStart && (() => {
+            const selSt = CZAS_STATUSY.find(s=>s.id===selectedStatus);
+            const endCalc = selSt?.hours ? calcEndTime(startTime, selSt.hours) : null;
+            return (
+              <div className="mb-4 p-3 rounded-xl" style={{ background: selSt?.bg, border: `1px solid ${selSt?.border}` }}>
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="flex-1 text-sm">
+                    <span className="font-semibold" style={{ color: selSt?.color }}>
+                      {selSt?.label}
+                    </span>
+                    <span className="text-gray-500 ml-2">
+                      {rangeStart}{rangeEnd && rangeEnd !== rangeStart ? ` → ${rangeEnd}` : ""}
+                    </span>
+                  </div>
+                  <button onClick={handleSaveRange}
+                    className="px-4 py-2 rounded-lg text-xs font-bold text-white transition-all hover:opacity-90"
+                    style={{ background: selSt?.color }}>
+                    Zapisz
+                  </button>
+                  <button onClick={() => { setRangeStart(null); setRangeEnd(null); }}
+                    className="px-3 py-2 rounded-lg text-xs font-medium text-gray-500 bg-gray-100 hover:bg-gray-200">
+                    Anuluj
+                  </button>
+                </div>
+                <div className="flex items-center gap-3">
+                  <label className="text-xs text-gray-500 font-medium">Start:</label>
+                  <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)}
+                    className="px-2.5 py-1.5 rounded-lg text-sm border border-gray-200 bg-white outline-none w-28"
+                    style={{ fontFamily: "'DM Sans', sans-serif" }} />
+                  {endCalc && (
+                    <span className="text-xs font-semibold" style={{ color: selSt?.color }}>
+                      → Koniec: {endCalc.time}{endCalc.overflowDays > 0 ? ` (+${endCalc.overflowDays} ${endCalc.overflowDays === 1 ? "dzień" : "dni"})` : ""}
+                    </span>
+                  )}
+                </div>
               </div>
-              <button onClick={handleSaveRange}
-                className="px-4 py-2 rounded-lg text-xs font-bold text-white transition-all hover:opacity-90"
-                style={{ background: CZAS_STATUSY.find(s=>s.id===selectedStatus)?.color }}>
-                Zapisz
-              </button>
-              <button onClick={() => { setRangeStart(null); setRangeEnd(null); }}
-                className="px-3 py-2 rounded-lg text-xs font-medium text-gray-500 bg-gray-100 hover:bg-gray-200">
-                Anuluj
-              </button>
-            </div>
-          )}
+            );
+          })()}
 
           {/* LEGENDA / PODSUMOWANIE MIESIĄCA */}
           <div className="grid grid-cols-3 gap-2 mb-4">
@@ -6015,7 +6048,9 @@ function CzasPracyModal({ vehicle, entries, onSave, onDelete, onClose }) {
                       <span className="font-semibold" style={{ color: st?.color }}>{st?.label}</span>
                       <span className="text-gray-500">
                         {startD.toLocaleDateString("pl-PL", { day:"numeric", month:"short" })}
+                        {e.startTime ? ` ${e.startTime}` : ""}
                         {days > 1 ? ` → ${endD.toLocaleDateString("pl-PL", { day:"numeric", month:"short" })}` : ""}
+                        {e.endTime ? ` ${e.endTime}` : ""}
                         {days > 1 ? ` (${days} dni)` : " (1 dzień)"}
                       </span>
                     </div>
