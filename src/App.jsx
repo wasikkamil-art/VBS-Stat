@@ -4920,73 +4920,121 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                 ))}
               </div>
             </div>
-            <div className="overflow-x-auto" style={{fontFamily:"inherit"}}>
-              <style>{`.yrow26{background:#f0f9ff;border-top:2px solid #3b82f6}.yrow25{background:#fafafa}.yrowdiff{background:#fff;border-bottom:3px solid #e2e8f0}.ytot26{background:#dbeafe;border-top:2px solid #2563eb}.ytot25{background:#f1f5f9}.ytotd{background:#f8fafc;border-bottom:3px solid #2563eb}.ysum{border-left:2px solid #e2e8f0}.ppos{color:#15803d;font-size:11px;font-weight:700;background:#f0fdf4;border-radius:4px;padding:1px 5px}.pneg{color:#b91c1c;font-size:11px;font-weight:700;background:#fef2f2;border-radius:4px;padding:1px 5px}`}</style>
-              <table className="w-full text-xs" style={{minWidth:900,borderCollapse:"collapse"}}>
-                <thead>
-                  <tr style={{borderBottom:"2px solid #e2e8f0"}}>
-                    <th className="text-left px-2 py-2 text-gray-400 font-semibold" style={{width:90}}>Pojazd</th>
-                    <th className="text-left px-2 py-2" style={{width:44}}></th>
-                    {MS.map(m=><th key={m} className="text-right px-2 py-2 text-gray-400 font-semibold">{m}</th>)}
-                    <th className="text-right px-2 py-2 text-gray-400 font-semibold ysum">SUMA</th>
-                    <th className="text-right px-2 py-2 text-gray-400 font-semibold">∆%</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row,ri)=>{
-                    const sum25=row.vals25.reduce((a,b)=>a+b,0);
-                    const sum26=row.vals26.reduce((a,b)=>a+b,0);
-                    const pill=(v25,v26)=>{ if(!v25||!v26) return <span style={{color:"#d1d5db"}}>-</span>; const d=v26-v25; const fmt=Math.abs(d)>=1000?(d/1000).toFixed(1)+"k":d.toFixed(d<10&&d>-10?1:0); return <span className={d>=0?"ppos":"pneg"}>{(d>=0?"+":"")+fmt}</span>; };
-                    return (
-                      <>
-                        <tr className="yrow26">
-                          <td style={{fontWeight:700,fontSize:11,color:"#1e293b",fontFamily:"monospace",padding:"6px 8px"}} rowSpan={3}>{row.label}</td>
-                          <td style={{color:"#2563eb",fontSize:11,fontWeight:700,padding:"6px 8px"}}>2026</td>
-                          {row.vals26.map((v,mi)=><td key={mi} style={{textAlign:"right",padding:"6px 8px",color:"#1e293b",fontWeight:600}}>{fmtV(v)}</td>)}
-                          <td className="ysum" style={{textAlign:"right",padding:"6px 8px",fontWeight:700,color:"#1e293b"}}>{fmtV(sum26)}</td>
-                          <td></td>
-                        </tr>
-                        <tr className="yrow25">
-                          <td style={{color:"#94a3b8",fontSize:11,padding:"6px 8px"}}>2025</td>
-                          {row.vals25.map((v,mi)=><td key={mi} style={{textAlign:"right",padding:"6px 8px",color:"#94a3b8"}}>{fmtV(v)}</td>)}
-                          <td className="ysum" style={{textAlign:"right",padding:"6px 8px",color:"#94a3b8",fontWeight:600}}>{fmtV(sum25)}</td>
-                          <td></td>
-                        </tr>
-                        <tr className="yrowdiff">
-                          <td style={{fontSize:10,color:"#cbd5e1",padding:"4px 8px"}}>diff</td>
-                          {row.vals25.map((v25,mi)=><td key={mi} style={{textAlign:"right",padding:"4px 8px"}}>{pill(v25,row.vals26[mi])}</td>)}
-                          <td className="ysum" style={{textAlign:"right",padding:"4px 8px"}}>{pill(sum25,sum26)}</td>
-                          <td style={{textAlign:"right",padding:"4px 8px"}}>{pill(sum25,sum26)}</td>
-                        </tr>
-                      </>
-                    );
-                  })}
-                  {(()=>{
-                    const tot25=MS.map((_,mi)=>activeVehs.reduce((s,v)=>s+met.fn(v.id,2025,mi),0));
-                    const tot26=MS.map((_,mi)=>activeVehs.reduce((s,v)=>s+met.fn(v.id,2026,mi),0));
-                    const s25=tot25.reduce((a,b)=>a+b,0),s26=tot26.reduce((a,b)=>a+b,0);
-                    const pill=(v25,v26)=>{ if(!v25||!v26) return <span style={{color:"#d1d5db"}}>-</span>; const d=v26-v25; const fmt=Math.abs(d)>=1000?(d/1000).toFixed(1)+"k":d.toFixed(d<10&&d>-10?1:0); return <span className={d>=0?"ppos":"pneg"}>{(d>=0?"+":"")+fmt}</span>; };
-                    return (<>
-                      <tr className="ytot26">
-                        <td style={{fontSize:11,fontWeight:700,color:"#1d4ed8",padding:"6px 8px"}} colSpan={2}>FLOTA 2026</td>
-                        {tot26.map((v,mi)=><td key={mi} style={{textAlign:"right",padding:"6px 8px",color:"#1d4ed8",fontWeight:700}}>{fmtV(v)}</td>)}
-                        <td className="ysum" style={{textAlign:"right",padding:"6px 8px",color:"#1d4ed8",fontWeight:700}}>{fmtV(s26)}</td><td></td>
-                      </tr>
-                      <tr className="ytot25">
-                        <td style={{fontSize:11,color:"#94a3b8",padding:"6px 8px"}} colSpan={2}>FLOTA 2025</td>
-                        {tot25.map((v,mi)=><td key={mi} style={{textAlign:"right",padding:"6px 8px",color:"#94a3b8"}}>{fmtV(v)}</td>)}
-                        <td className="ysum" style={{textAlign:"right",padding:"6px 8px",color:"#94a3b8",fontWeight:600}}>{fmtV(s25)}</td><td></td>
-                      </tr>
-                      <tr className="ytotd">
-                        <td style={{fontSize:10,color:"#94a3b8",padding:"4px 8px"}} colSpan={2}>diff</td>
-                        {tot25.map((v25,mi)=><td key={mi} style={{textAlign:"right",padding:"4px 8px"}}>{pill(v25,tot26[mi])}</td>)}
-                        <td className="ysum" style={{textAlign:"right",padding:"4px 8px"}}>{pill(s25,s26)}</td>
-                        <td style={{textAlign:"right",padding:"4px 8px"}}>{pill(s25,s26)}</td>
-                      </tr>
-                    </>);
-                  })()}
-                </tbody>
-              </table>
+            <div style={{fontFamily:"inherit"}}>
+              <style>{`
+                .ymc{background:#f8fafc;border-radius:8px;padding:8px 7px;min-width:0}
+                .ymc.good{background:#f0fdf4;border:0.5px solid #bbf7d0}
+                .ymc.future{opacity:.42}
+                .ymc .yr{font-size:10px;font-weight:500}
+                .ymc .val{font-size:12px;font-weight:600;text-align:right}
+                .ymc .val.c26{color:#1d4ed8}
+                .ymc .val.c25{color:#94a3b8}
+                .ymc .drow{border-top:0.5px solid #e2e8f0;margin-top:4px;padding-top:3px;text-align:right}
+                .ymc.good .drow{border-color:#bbf7d0}
+                .ppos{color:#15803d;font-size:10px;font-weight:700;background:#f0fdf4;border-radius:3px;padding:1px 4px}
+                .pneg{color:#b91c1c;font-size:10px;font-weight:700;background:#fef2f2;border-radius:3px;padding:1px 4px}
+                .qcard{background:#f8fafc;border-radius:8px;padding:8px 10px}
+                .hcard{background:#f1f5f9;border-radius:8px;padding:8px 12px}
+                .brace{height:7px;border-left:1.5px solid #cbd5e1;border-right:1.5px solid #cbd5e1;border-bottom:1.5px solid #cbd5e1;border-radius:0 0 4px 4px;margin:0 8px}
+              `}</style>
+              {(()=>{
+                const MNAMES=["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paż","Lis","Gru"];
+                const pill=(v25,v26)=>{
+                  if(!v26) return <span style={{color:"#d1d5db"}}>—</span>;
+                  const d=v26-v25;
+                  const fmt=Math.abs(d)>=1000?(Math.abs(d)/1000).toFixed(1)+"k":Math.round(Math.abs(d))+"";
+                  return <span className={d>=0?"ppos":"pneg"}>{(d>=0?"+":"-")+fmt}</span>;
+                };
+                const fmtV=v=>!v?<span style={{color:"#cbd5e1"}}>—</span>:(Math.abs(v)>=1000?(v/1000).toFixed(1)+"k":Math.round(v)+"");
+                const rows = yoyMode==="flota"
+                  ? [{label:"Flota total", vals25:MS.map((_,mi)=>activeVehs.reduce((s,v)=>s+met.fn(v.id,2025,mi),0)), vals26:MS.map((_,mi)=>activeVehs.reduce((s,v)=>s+met.fn(v.id,2026,mi),0))}]
+                  : vehicles.map(v=>({ label:v.plate, vals25: MS.map((_,mi)=>getVehVal(v.id,2025,mi)), vals26: MS.map((_,mi)=>getVehVal(v.id,2026,mi)) }));
+                const qSum=(vals,q)=>vals.slice(q*3,q*3+3).reduce((a,b)=>a+b,0);
+                const hSum=(vals,h)=>vals.slice(h*6,h*6+6).reduce((a,b)=>a+b,0);
+                return rows.map((row,ri)=>{
+                  return (
+                    <div key={ri} style={{marginBottom: rows.length>1?"28px":0}}>
+                      {rows.length>1&&<div style={{fontSize:11,fontWeight:600,color:"#475569",marginBottom:8}}>{row.label}</div>}
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(12,minmax(0,1fr))",gap:5}}>
+                        {MNAMES.map((mn,mi)=>{
+                          const v26=row.vals26[mi], v25=row.vals25[mi];
+                          const hasCur=v26>0;
+                          const isGood=hasCur&&v26>=v25;
+                          const isFut=!hasCur;
+                          return (
+                            <div key={mi} className={"ymc"+(isGood?" good":isFut?" future":"")}>
+                              <div style={{textAlign:"center",fontSize:10,color:isGood?"#166534":"#94a3b8",marginBottom:6}}>{mn}</div>
+                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                                <span className="yr" style={{color:"#1d4ed8"}}>26</span>
+                                <span className="val c26">{fmtV(v26)}</span>
+                              </div>
+                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:2}}>
+                                <span className="yr" style={{color:"#94a3b8"}}>25</span>
+                                <span className="val c25">{fmtV(v25)}</span>
+                              </div>
+                              <div className="drow">{pill(v25,v26)}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(12,minmax(0,1fr))",gap:5,marginTop:3}}>
+                        {[0,1,2,3].map(q=>(
+                          <div key={q} style={{gridColumn:"span 3",display:"flex",flexDirection:"column",alignItems:"center"}}>
+                            <div className="brace" style={{width:"calc(100% - 12px)"}}></div>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:5,marginTop:3}}>
+                        {[0,1,2,3].map(q=>{
+                          const q25=qSum(row.vals25,q), q26=qSum(row.vals26,q);
+                          const hasQ=q26>0;
+                          return (
+                            <div key={q} className="qcard" style={{opacity:hasQ?1:.42}}>
+                              <div style={{fontSize:10,fontWeight:600,color:"#64748b",marginBottom:5}}>Q{q+1}</div>
+                              <div style={{display:"flex",justifyContent:"space-between"}}>
+                                <span style={{fontSize:10,color:"#1d4ed8",fontWeight:500}}>2026</span>
+                                <span style={{fontSize:12,fontWeight:600,color:"#1d4ed8"}}>{fmtV(q26)}</span>
+                              </div>
+                              <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}>
+                                <span style={{fontSize:10,color:"#94a3b8"}}>2025</span>
+                                <span style={{fontSize:12,color:"#94a3b8"}}>{fmtV(q25)}</span>
+                              </div>
+                              <div style={{borderTop:"0.5px solid #e2e8f0",marginTop:4,paddingTop:3,textAlign:"right"}}>{pill(q25,q26)}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:5,marginTop:3}}>
+                        {[0,1].map(h=>(
+                          <div key={h} style={{gridColumn:"span 2",display:"flex",flexDirection:"column",alignItems:"center"}}>
+                            <div className="brace" style={{width:"calc(100% - 12px)"}}></div>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:5,marginTop:3}}>
+                        {[0,1].map(h=>{
+                          const h25=hSum(row.vals25,h), h26=hSum(row.vals26,h);
+                          const hasH=h26>0;
+                          return (
+                            <div key={h} className="hcard" style={{opacity:hasH?1:.42}}>
+                              <div style={{fontSize:11,fontWeight:600,color:"#64748b",marginBottom:5}}>H{h+1}</div>
+                              <div style={{display:"flex",justifyContent:"space-between"}}>
+                                <span style={{fontSize:10,color:"#1d4ed8",fontWeight:500}}>2026</span>
+                                <span style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{fmtV(h26)}</span>
+                              </div>
+                              <div style={{display:"flex",justifyContent:"space-between",marginTop:3}}>
+                                <span style={{fontSize:10,color:"#94a3b8"}}>2025</span>
+                                <span style={{fontSize:14,color:"#94a3b8"}}>{fmtV(h25)}</span>
+                              </div>
+                              <div style={{borderTop:"0.5px solid #e2e8f0",marginTop:5,paddingTop:4,textAlign:"right"}}>{pill(h25,h26)}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
             </div>
           </div>
         );
