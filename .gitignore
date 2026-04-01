@@ -1,0 +1,29 @@
+# Firebase credentials - NIGDY nie commituj
+vbs-stats-firebase-adminsdk.json
+*-adminsdk*.json
+
+# System
+.DS_Store
+node_modules/
+dist/
+
+# Temporary scripts
+*.bak
+check_*.js
+clean_*.js
+cut_*.js
+delete_*.js
+fix_*.js
+migrate_*.js
+restore_*.js
+patch_*.py
+
+# Images - working files
+*.png
+!public/*.png
+
+# Data files
+*.json
+!package.json
+!package-lock.json
+!public/manifest.json
