@@ -56,9 +56,26 @@ service cloud.firestore {
     // ═══════════════════════════════════════════════════════════════
     // FLEET — główne dane (pojazdy, koszty, frachty, dokumenty)
     // ═══════════════════════════════════════════════════════════════
+
+    // Blokada zapisu pustych tablic do kluczowych pól fleet/data
+    // Zapobiega nadpisaniu danych przez bug w kliencie (np. onSnapshot error)
+    function notEmptyIfPresent(field) {
+      return !(field in request.resource.data)
+             || request.resource.data[field].size() > 0;
+    }
+
+    function fleetDataSafe() {
+      return notEmptyIfPresent('fleetv2_vehicles')
+          && notEmptyIfPresent('fleetv2_costs')
+          && notEmptyIfPresent('fleetv2_categories')
+          && notEmptyIfPresent('fleetv2_frachty')
+          && notEmptyIfPresent('fleetv2_rent');
+    }
+
     match /fleet/{docId} {
       allow read: if canRead();
-      allow create, update: if canEdit();
+      allow create: if canEdit();
+      allow update: if canEdit() && fleetDataSafe();
       allow delete: if isAdmin();
     }
 

@@ -40,26 +40,98 @@ jobs:
           const sa = JSON.parse(fs.readFileSync('sa.json', 'utf8'));
           admin.initializeApp({ credential: admin.credential.cert(sa) });
           const db = admin.firestore();
+
+          // Minimalne oczekiwane ilości — jeśli spadnie poniżej = ALERT
+          const MIN_EXPECTED = {
+            fleetv2_vehicles: 4,
+            fleetv2_costs: 100,
+            fleetv2_categories: 10,
+            fleetv2_frachty: 50,
+            fleetv2_rent: 10
+          };
+
           async function run() {
             const snap = await db.doc('fleet/data').get();
             const data = snap.data() || {};
             const date = new Date().toISOString().slice(0,10);
             fs.mkdirSync('backup-repo/backups', { recursive: true });
             fs.writeFileSync('backup-repo/backups/' + date + '.json', JSON.stringify(data, null, 2));
+
             // Backup kolekcji sprawy
             const sprawySnap = await db.collection('sprawy').get();
             const sprawyData = sprawySnap.docs.map(d => ({ id: d.id, ...d.data() }));
             fs.writeFileSync('backup-repo/backups/sprawy_' + date + '.json', JSON.stringify(sprawyData, null, 2));
 
-            const stats = { date, vehicles: (data.fleetv2_vehicles||[]).length, costs: (data.fleetv2_costs||[]).length, frachty: (data.fleetv2_frachty||[]).length, sprawy: sprawyData.length };
+            const stats = {
+              date,
+              vehicles: (data.fleetv2_vehicles||[]).length,
+              costs: (data.fleetv2_costs||[]).length,
+              categories: (data.fleetv2_categories||[]).length,
+              frachty: (data.fleetv2_frachty||[]).length,
+              rent: (data.fleetv2_rent||[]).length,
+              imi: (data.fleetv2_imi||[]).length,
+              sprawy: sprawyData.length
+            };
             console.log('Backup OK:', JSON.stringify(stats));
+
+            // === WALIDACJA — wykryj anomalie ===
+            const alerts = [];
+            for (const [field, minCount] of Object.entries(MIN_EXPECTED)) {
+              const actual = (data[field] || []).length;
+              if (actual < minCount) {
+                alerts.push(field + ': ' + actual + ' (min: ' + minCount + ')');
+              }
+            }
+
+            stats.alerts = alerts;
+            stats.status = alerts.length > 0 ? 'WARNING' : 'OK';
             fs.writeFileSync('backup-repo/latest.json', JSON.stringify(stats, null, 2));
+
+            if (alerts.length > 0) {
+              console.error('⚠️ ALERT — dane poniżej minimum!');
+              alerts.forEach(a => console.error('  ' + a));
+              // Zapisz alert do pliku — GitHub Actions step go odczyta
+              fs.writeFileSync('alert.txt', alerts.join('\n'));
+            }
           }
           run().catch(e => { console.error(e); process.exit(1); });
           JS
 
       - name: Run backup
         run: node run_backup.js
+
+      - name: Check for data anomaly alerts
+        if: always()
+        run: |
+          if [ -f alert.txt ]; then
+            echo "::warning::⚠️ FleetStat data anomaly detected!"
+            cat alert.txt
+            echo ""
+            echo "ALERT=true" >> $GITHUB_ENV
+            echo "ALERT_MSG<<EOF" >> $GITHUB_ENV
+            cat alert.txt >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
+          fi
+
+      - name: Send alert email via SendGrid
+        if: env.ALERT == 'true'
+        env:
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+        run: |
+          if [ -z "$SENDGRID_API_KEY" ]; then
+            echo "SendGrid API key not configured — skipping email alert"
+            exit 0
+          fi
+          curl -s --request POST \
+            --url https://api.sendgrid.com/v3/mail/send \
+            --header "Authorization: Bearer $SENDGRID_API_KEY" \
+            --header "Content-Type: application/json" \
+            --data "{
+              \"personalizations\": [{\"to\": [{\"email\": \"wasik.kamil@gmail.com\"}]}],
+              \"from\": {\"email\": \"flotaVBS@fleetstat.pl\", \"name\": \"FleetStat Backup\"},
+              \"subject\": \"⚠️ FleetStat ALERT — dane poniżej minimum!\",
+              \"content\": [{\"type\": \"text/plain\", \"value\": \"Backup z dnia $(date +%Y-%m-%d) wykrył anomalię:\\n\\n${ALERT_MSG}\\n\\nSprawdź dane na fleetstat.pl i porównaj z ostatnim backupem.\\nRepo backupów: https://github.com/wasikkamil-art/vbs-stat-backups\"}]
+            }"
 
       - name: Commit backup
         env:

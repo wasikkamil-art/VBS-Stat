@@ -684,10 +684,19 @@ function App({ user, role, appUsers = [] }) {
       if (!_pendingWrites.has(SK.rent))    setRentRecords(data[SK.rent] || []);
       if (!_pendingWrites.has(SK.frachty)) setFrachtyList(data[SK.frachty] || []);
 
+      // 🛡️ Zapamiętaj ilości z snapshot — używane przez safeDbSet
+      Object.values(SK).forEach(key => {
+        const arr = data[key];
+        if (Array.isArray(arr)) snapshotCounts.current[key] = arr.length;
+      });
+
       setLoaded(true);
     }, (err) => {
       console.error("onSnapshot error", err);
-      setLoaded(true);
+      // ⚠️ NIE ustawiaj loaded=true przy błędzie!
+      // To zapobiegnie nadpisaniu danych pustymi tablicami przez efekty zapisu.
+      // Zamiast tego pokaż komunikat o błędzie połączenia.
+      showToast("⚠️ Błąd połączenia z bazą danych. Odśwież stronę.");
     });
     return () => unsub(); // cleanup przy odmontowaniu
   }, []);
@@ -724,13 +733,30 @@ function App({ user, role, appUsers = [] }) {
     debounceTimers.current[key] = setTimeout(() => { dbSet(key, value); }, delay);
   };
 
-  useEffect(() => { if (loaded) debouncedDbSet(SK.vehicles, vehicles); },    [vehicles, loaded]);
-  useEffect(() => { if (loaded) debouncedDbSet(SK.costs, costs); },          [costs, loaded]);
-  useEffect(() => { if (loaded) debouncedDbSet(SK.categories, categories); },[categories, loaded]);
-  useEffect(() => { if (loaded) debouncedDbSet(SK.docs, docs); },            [docs, loaded]);
-  useEffect(() => { if (loaded) debouncedDbSet(SK.imi, imiRecords); },       [imiRecords, loaded]);
-  useEffect(() => { if (loaded && rentRecords.length > 0) debouncedDbSet(SK.rent, rentRecords); },     [rentRecords, loaded]);
-  useEffect(() => { if (loaded && frachtyList.length > 0) debouncedDbSet(SK.frachty, frachtyList); },  [frachtyList, loaded]);
+  // ── SAFE WRITE — dodatkowa warstwa ochrony przed utratą danych ──
+  // Zapamiętuje ilości z pierwszego snapshot i blokuje zapis jeśli dane spadną
+  // nagle do zera (co oznaczałoby bug, nie realną zmianę użytkownika).
+  const snapshotCounts = useRef({});  // ilości z ostatniego onSnapshot
+  const safeDbSet = (key, value) => {
+    const prevCount = snapshotCounts.current[key] || 0;
+    const newCount = Array.isArray(value) ? value.length : 0;
+    // Blokuj jeśli: było > 3 rekordów i nagle spadło do 0
+    if (prevCount > 3 && newCount === 0) {
+      console.error(`🛡️ BLOCKED: zapis ${key} zablokowany — spadek z ${prevCount} do 0 rekordów`);
+      return;
+    }
+    debouncedDbSet(key, value);
+  };
+
+  // ⚠️ WAŻNE: Wszystkie zapisy mają guard length > 0
+  // + safeDbSet blokuje nagły spadek do zera (podwójna ochrona)
+  useEffect(() => { if (loaded && vehicles.length > 0) safeDbSet(SK.vehicles, vehicles); },       [vehicles, loaded]);
+  useEffect(() => { if (loaded && costs.length > 0) safeDbSet(SK.costs, costs); },                [costs, loaded]);
+  useEffect(() => { if (loaded && categories.length > 0) safeDbSet(SK.categories, categories); }, [categories, loaded]);
+  useEffect(() => { if (loaded && docs.length > 0) safeDbSet(SK.docs, docs); },                   [docs, loaded]);
+  useEffect(() => { if (loaded && imiRecords.length > 0) safeDbSet(SK.imi, imiRecords); },        [imiRecords, loaded]);
+  useEffect(() => { if (loaded && rentRecords.length > 0) safeDbSet(SK.rent, rentRecords); },     [rentRecords, loaded]);
+  useEffect(() => { if (loaded && frachtyList.length > 0) safeDbSet(SK.frachty, frachtyList); },  [frachtyList, loaded]);
 
 
   // ── CSS INJECTION ──
@@ -2032,7 +2058,7 @@ function App({ user, role, appUsers = [] }) {
               eurRate={eurRate}
               eurRateDate={eurRateDate}
               showToast={showToast}
-              onAdd={async (s) => { try { await addDoc(collection(db, "sprawy"), { ...s, dataUtworzenia: new Date().toISOString() }); } catch(e) { console.error("onAdd sprawa", e); } }}
+              onAdd={async (s) => { try { await addDoc(collection(db, "sprawy"), { ...s, dataUtworzenia: new Date().toISOString() }); showToast("✅ Sprawa dodana"); } catch(e) { console.error("onAdd sprawa", e); showToast("❌ Błąd dodawania sprawy"); } }}
               onUpdate={async (id, data) => {
                 try {
                   if (data._addZdarzenie) {
@@ -2045,7 +2071,7 @@ function App({ user, role, appUsers = [] }) {
                   }
                 } catch(e) { console.error("onUpdate sprawa", e); }
               }}
-              onDelete={(id) => setSprawyList(p => p.filter(s => s.id !== id))}
+              onDelete={async (id) => { try { await deleteDoc(doc(db, "sprawy", id)); showToast("✅ Sprawa usunięta"); } catch(e) { console.error("onDelete sprawa", e); showToast("❌ Błąd usuwania"); } }}
             />
           )}
 
@@ -2234,6 +2260,8 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
   const [przypomnienieOpis, setRzypomnienieOpis] = useState("");
   const [editMode, setEditMode] = useState(false);
   const [editData, setEditData] = useState({...sprawa});
+  // Synchronizuj editData gdy sprawa się zmieni (np. po onSnapshot)
+  useEffect(() => { if (!editMode) setEditData({...sprawa}); }, [sprawa, editMode]);
 
   const typ = allTypy.find(t => t.id === sprawa.typ);
   const status = SPRAWA_STATUSY.find(s => s.id === sprawa.status) || SPRAWA_STATUSY[0];
@@ -2281,7 +2309,7 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
             {SPRAWA_STATUSY.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
           </select>
           <button onClick={() => setEditMode(!editMode)} className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 hover:bg-gray-50 whitespace-nowrap">✏️ Edytuj</button>
-          <button onClick={async () => { if(window.confirm("Usunąć sprawę?")) { try { await deleteDoc(doc(db, "sprawy", sprawa.id)); } catch(e) { console.error("deleteDoc sprawa", e); } onDelete(); } }}
+          <button onClick={async () => { if(window.confirm("Usunąć sprawę?")) onDelete(); }}
             className="w-8 h-8 flex items-center justify-center rounded-lg border border-red-200 text-red-500 hover:bg-red-50 flex-shrink-0"
             title="Usuń sprawę">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -2636,7 +2664,15 @@ function SprawyTab({ sprawyList, vehicles, currentUser, appUsers, eurRate, eurRa
     if (filterTyp !== "all" && s.typ !== filterTyp) return false;
     if (filterMoje && !(s.przypisani||[]).includes(currentUser.email)) return false;
     return true;
-  }).sort((a,b) => (b.dataUtworzenia||"").localeCompare(a.dataUtworzenia||""));
+  }).sort((a,b) => {
+    // Priorytet: otwarta (0) > w_toku (1) > wstrzymana (2) > zamknieta/wygrana/przegrana (3)
+    const statusOrder = { otwarta: 0, w_toku: 1, wstrzymana: 2, zamknieta: 3, wygrana: 3, przegrana: 3 };
+    const oa = statusOrder[a.status] ?? 1;
+    const ob = statusOrder[b.status] ?? 1;
+    if (oa !== ob) return oa - ob;
+    // W tej samej grupie — nowsze na górze
+    return (b.dataUtworzenia||"").localeCompare(a.dataUtworzenia||"");
+  });
 
   if (view === "szczegoly" && selected) {
     return <SprawaDetail
@@ -2646,7 +2682,7 @@ function SprawyTab({ sprawyList, vehicles, currentUser, appUsers, eurRate, eurRa
       currentUser={currentUser}
       appUsers={appUsers}
       onUpdate={(data) => onUpdate(selected.id, data)}
-      onDelete={() => { onDelete(selected.id); setView("lista"); setSelectedId(null); showToast("Sprawa usunięta"); }}
+      onDelete={async () => { await onDelete(selected.id); setView("lista"); setSelectedId(null); }}
       onBack={() => setView("lista")}
       showToast={showToast}
     />;
