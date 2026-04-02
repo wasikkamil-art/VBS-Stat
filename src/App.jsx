@@ -8,6 +8,7 @@ import { initializeApp } from "firebase/app";
 import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, orderBy, arrayUnion } from "firebase/firestore";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
+import { getFunctions, httpsCallable } from "firebase/functions";
 
 // ─── STORAGE HELPERS (per-user, per-key documents) ───────────────────────────
 // Każdy klucz to osobny dokument: fleet/{uid}/{key}
@@ -24,9 +25,10 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-const db      = getFirestore(app);
-const auth    = getAuth(app);
-const storage = getStorage(app);
+const db        = getFirestore(app);
+const auth      = getAuth(app);
+const storage   = getStorage(app);
+const functions = getFunctions(app, "europe-west1");
 
 // ─── STORAGE (Firebase Firestore) ────────────────────────────────────────────
 // Dane w jednym dokumencie fleet/data (merge strategy)
@@ -287,24 +289,58 @@ export default function Root() {
   }, []);
 
   useEffect(() => {
-    return onAuthStateChanged(auth, async (u) => {
+    let unsubClaims = null;
+
+    const unsub = onAuthStateChanged(auth, async (u) => {
       setUser(u);
+      // Wyczyść poprzedni listener na claimsUpdatedAt
+      if (unsubClaims) { unsubClaims(); unsubClaims = null; }
+
       if (u) {
         try {
-          const snap = await getDoc(doc(db, "users", u.uid));
-          if (snap.exists()) {
-            setRole(snap.data().role || "podglad");
-          } else {
-            const usersSnap = await getDocs(collection(db, "users"));
-            const isFirst = usersSnap.empty;
-            const assignedRole = isFirst ? "admin" : "podglad";
-            await setDoc(doc(db, "users", u.uid), {
-              email: u.email,
-              role: assignedRole,
-              createdAt: new Date().toISOString(),
-            });
-            setRole(assignedRole);
+          // 1. Odczytaj rolę z Custom Claims (token Auth)
+          const tokenResult = await u.getIdTokenResult();
+          let tokenRole = tokenResult.claims.role;
+
+          // 2. Fallback: jeśli brak claims (stary user), czytaj z Firestore
+          if (!tokenRole) {
+            const snap = await getDoc(doc(db, "users", u.uid));
+            if (snap.exists()) {
+              tokenRole = snap.data().role || "podglad";
+            } else {
+              // Nowy użytkownik — Cloud Function (onNewUser) ustawi claims,
+              // ale na wszelki wypadek tworzymy dokument i fallback
+              const usersSnap = await getDocs(collection(db, "users"));
+              const isFirst = usersSnap.empty;
+              tokenRole = isFirst ? "admin" : "podglad";
+              await setDoc(doc(db, "users", u.uid), {
+                email: u.email,
+                role: tokenRole,
+                createdAt: new Date().toISOString(),
+              });
+            }
           }
+
+          setRole(tokenRole);
+
+          // 3. Nasłuchuj zmian roli (claimsUpdatedAt) — kiedy admin zmieni rolę,
+          //    Cloud Function zaktualizuje claimsUpdatedAt → odświeżamy token
+          unsubClaims = onSnapshot(doc(db, "users", u.uid), async (snap) => {
+            if (!snap.exists()) return;
+            const data = snap.data();
+            const freshToken = await u.getIdTokenResult();
+            const currentTokenRole = freshToken.claims.role;
+
+            // Jeśli rola w Firestore różni się od tokena — wymuś odświeżenie
+            if (data.role && data.role !== currentTokenRole) {
+              await u.getIdToken(true); // force refresh
+              const refreshed = await u.getIdTokenResult();
+              if (refreshed.claims.role) {
+                setRole(refreshed.claims.role);
+              }
+            }
+          });
+
         } catch (e) {
           console.error("Blad ladowania roli:", e);
           setRole("podglad");
@@ -319,6 +355,11 @@ export default function Root() {
         setRoleLoaded(false);
       }
     });
+
+    return () => {
+      unsub();
+      if (unsubClaims) unsubClaims();
+    };
   }, []);
 
   if (user === undefined) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f8f9fb",fontSize:32}}><IconTruck size={32}/></div>;
@@ -2735,11 +2776,21 @@ function UsersTab({ currentUid, showToast }) {
 
   async function changeRole(uid, newRole) {
     try {
-      await setDoc(doc(db, "users", uid), { role: newRole }, { merge: true });
+      // Wywołaj Cloud Function (ustawia Custom Claims + aktualizuje Firestore)
+      const setUserRole = httpsCallable(functions, "setUserRole");
+      await setUserRole({ uid, role: newRole });
       setUsers(p => p.map(u => u.uid === uid ? { ...u, role: newRole } : u));
-      showToast("✅ Rola zaktualizowana");
+      showToast("✅ Rola zaktualizowana (Custom Claims)");
     } catch(e) {
-      showToast("❌ Błąd zapisu roli");
+      console.warn("Cloud Function niedostępna, fallback na Firestore:", e);
+      // Fallback: bezpośredni zapis do Firestore (trigger onRoleChange ustawi claims)
+      try {
+        await setDoc(doc(db, "users", uid), { role: newRole }, { merge: true });
+        setUsers(p => p.map(u => u.uid === uid ? { ...u, role: newRole } : u));
+        showToast("✅ Rola zaktualizowana");
+      } catch(e2) {
+        showToast("❌ Błąd zapisu roli");
+      }
     }
   }
 
