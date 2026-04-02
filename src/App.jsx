@@ -1059,16 +1059,16 @@ function App({ user, role, appUsers = [] }) {
                 return (
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
                     {vehicles.filter(v => {
-                      const todayISO = new Date().toISOString().slice(0,10);
+                      const tISO = new Date().toLocaleDateString("sv-SE");
                       // Pokaż jeśli pojazd ma aktywną pauzę
-                      const hasPauza = pauzy.some(p => p.vehicleId === v.id && p.status !== "jazda" && p.start <= todayISO && p.end >= todayISO);
+                      const hasPauza = pauzy.some(p => p.vehicleId === v.id && p.status !== "jazda" && p.start <= tISO && p.end >= tISO);
                       if (hasPauza) return true;
                       const vf = frachtyList.filter(r => r.vehicleId === v.id && r.dataZaladunku)
                         .sort((a,b) => (b.dataZaladunku||"").localeCompare(a.dataZaladunku||""));
                       if (vf.length === 0) return false;
-                      const lastDone = vf.find(r => r.dataRozladunku && r.dataRozladunku < todayISO);
+                      const lastDone = vf.find(r => r.dataRozladunku && r.dataRozladunku < tISO);
                       if (!lastDone) return true;
-                      const daysSince = Math.round((new Date() - new Date(lastDone.dataRozladunku)) / 86400000);
+                      const daysSince = Math.round((new Date(tISO + "T00:00:00") - new Date(lastDone.dataRozladunku + "T00:00:00")) / 86400000);
                       return daysSince <= 30;
                     }).map(v => {
                       const driverName = (v.driverHistory||[]).find(d => !d.to)?.name || "—";
@@ -1089,43 +1089,38 @@ function App({ user, role, appUsers = [] }) {
                       let statusBg = "#fffbeb";
                       let statusIcon = "⏳";
 
-                      const todayMidnight = new Date(today); todayMidnight.setHours(0,0,0,0);
-                      const todayStr2 = todayMidnight.toISOString().slice(0,10);
+                      // Porównania na stringach YYYY-MM-DD — bez problemów z timezone
+                      const todayISO = new Date().toLocaleDateString("sv-SE"); // "2026-04-02" w lokalnym timezone
+                      const todayMs = new Date(todayISO + "T00:00:00").getTime();
 
                       // Szukaj aktywnego frachtu (zał <= dziś <= rozł, nie rozładowany)
                       const activeF = vFrachty.find(r => {
-                        const zal = r.dataZaladunku ? new Date(r.dataZaladunku) : null;
-                        const rozl = r.dataRozladunku ? new Date(r.dataRozladunku) : null;
-                        if (!zal || !rozl) return false;
-                        zal.setHours(0,0,0,0); rozl.setHours(0,0,0,0);
+                        if (!r.dataZaladunku || !r.dataRozladunku) return false;
                         if (r.statusRozladunku === "rozladowano") return false;
-                        return zal <= todayMidnight && todayMidnight <= rozl;
+                        return r.dataZaladunku <= todayISO && todayISO <= r.dataRozladunku;
                       });
 
                       // Szukaj następnego zaplanowanego (zał > dziś)
                       const nextF = vFrachty
-                        .filter(r => r.dataZaladunku && new Date(r.dataZaladunku) > todayMidnight)
+                        .filter(r => r.dataZaladunku && r.dataZaladunku > todayISO)
                         .sort((a,b) => a.dataZaladunku.localeCompare(b.dataZaladunku))[0] || null;
 
-                      // Ostatni rozładowany — do wyliczenia dni postoju
-                      const lastDoneF = vFrachty.filter(r => {
-                        const rozl = r.dataRozladunku ? new Date(r.dataRozladunku) : null;
-                        if (!rozl) return false;
-                        rozl.setHours(0,0,0,0);
-                        return rozl < todayMidnight;
-                      }).sort((a,b) => (b.dataRozladunku||"").localeCompare(a.dataRozladunku||""))[0] || null;
+                      // Ostatni rozładowany (rozł < dziś) — do wyliczenia dni postoju
+                      const lastDoneF = vFrachty
+                        .filter(r => r.dataRozladunku && r.dataRozladunku < todayISO)
+                        .sort((a,b) => (b.dataRozladunku||"").localeCompare(a.dataRozladunku||""))[0] || null;
 
                       // Aktywna pauza dla tego pojazdu (z kolekcji pauzy)
                       const vehiclePauza = pauzy.find(p =>
                         p.vehicleId === v.id &&
                         p.status !== "jazda" &&
-                        p.start <= todayStr2 &&
-                        p.end >= todayStr2
+                        p.start <= todayISO &&
+                        p.end >= todayISO
                       );
 
                       // Ile dni stoi (od ostatniego rozładunku)
                       const daysSinceUnload = lastDoneF
-                        ? Math.round((todayMidnight - new Date(lastDoneF.dataRozladunku + "T00:00:00")) / 86400000)
+                        ? Math.round((todayMs - new Date(lastDoneF.dataRozladunku + "T00:00:00").getTime()) / 86400000)
                         : null;
 
                       // PRIORYTET 1: W trasie
@@ -1152,9 +1147,9 @@ function App({ user, role, appUsers = [] }) {
                       }
                       // PRIORYTET 3: Załadunek za X dni (data)
                       else if (nextF) {
-                        const nextZal = new Date(nextF.dataZaladunku); nextZal.setHours(0,0,0,0);
-                        const diffDays = Math.round((nextZal - todayMidnight) / 86400000);
-                        const dateStr = nextZal.toLocaleDateString("pl-PL", { day:"numeric", month:"short" });
+                        const nextZalMs = new Date(nextF.dataZaladunku + "T00:00:00").getTime();
+                        const diffDays = Math.round((nextZalMs - todayMs) / 86400000);
+                        const dateStr = new Date(nextF.dataZaladunku + "T00:00:00").toLocaleDateString("pl-PL", { day:"numeric", month:"short" });
                         status = "planowany";
                         if (diffDays === 0) {
                           statusLabel = `Dziś załadunek`;
