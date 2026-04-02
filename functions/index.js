@@ -276,7 +276,6 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
       <tr>
         <td style="padding:14px 20px;border-bottom:1px solid #f3f4f6;">
           <strong style="color:#111827;font-size:14px;">${vehicleInfo || v.type || "—"}</strong>
-          <br><span style="color:#9ca3af;font-size:11px;">${v.plate}${plate2}</span>
         </td>
         <td style="padding:14px 16px;border-bottom:1px solid #f3f4f6;text-align:center;">
           <span style="display:inline-block;padding:5px 14px;border-radius:20px;font-size:12px;font-weight:600;color:${statusColor};background:${statusBg};white-space:nowrap;">
