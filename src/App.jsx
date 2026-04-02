@@ -1059,13 +1059,17 @@ function App({ user, role, appUsers = [] }) {
                 return (
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
                     {vehicles.filter(v => {
+                      const todayISO = new Date().toISOString().slice(0,10);
+                      // Pokaż jeśli pojazd ma aktywną pauzę
+                      const hasPauza = pauzy.some(p => p.vehicleId === v.id && p.status !== "jazda" && p.start <= todayISO && p.end >= todayISO);
+                      if (hasPauza) return true;
                       const vf = frachtyList.filter(r => r.vehicleId === v.id && r.dataZaladunku)
                         .sort((a,b) => (b.dataZaladunku||"").localeCompare(a.dataZaladunku||""));
-                      if (vf.length === 0) return false; // brak zleceń w ogóle — ukryj
-                      const lastDone = vf.find(r => r.dataRozladunku && r.dataRozladunku < new Date().toISOString().slice(0,10));
-                      if (!lastDone) return true; // aktywny lub zaplanowany — pokaż
+                      if (vf.length === 0) return false;
+                      const lastDone = vf.find(r => r.dataRozladunku && r.dataRozladunku < todayISO);
+                      if (!lastDone) return true;
                       const daysSince = Math.round((new Date() - new Date(lastDone.dataRozladunku)) / 86400000);
-                      return daysSince <= 30; // pokaż tylko jeśli rozładunek był w ciągu 30 dni
+                      return daysSince <= 30;
                     }).map(v => {
                       const driverName = (v.driverHistory||[]).find(d => !d.to)?.name || "—";
                       // Ostatni fracht dla tego pojazdu
@@ -1074,23 +1078,26 @@ function App({ user, role, appUsers = [] }) {
                         .sort((a,b) => (b.dataZaladunku||"").localeCompare(a.dataZaladunku||""));
                       const lastF = vFrachty[0] || null;
 
-                      // Logika statusów na podstawie dat frachtów
-                      let status = "brak";
-                      let statusLabel = "Brak zleceń";
-                      let statusColor = "#94a3b8";
-                      let statusBg = "#f8fafc";
-                      let statusIcon = "⬜";
+                      // ── NOWA LOGIKA STATUSÓW ──
+                      // 1. W trasie — aktywny fracht
+                      // 2. Pauza — zaciągana z czasu pracy (kolekcja pauzy)
+                      // 3. Załadunek za Xd (data) — następny fracht w przyszłości
+                      // 4. Czeka na zlecenie · Xd — brak frachtu, ile dni stoi
+                      let status = "czeka";
+                      let statusLabel = "Czeka na zlecenie";
+                      let statusColor = "#d97706";
+                      let statusBg = "#fffbeb";
+                      let statusIcon = "⏳";
 
                       const todayMidnight = new Date(today); todayMidnight.setHours(0,0,0,0);
-                      const yesterday = new Date(todayMidnight); yesterday.setDate(yesterday.getDate()-1);
+                      const todayStr2 = todayMidnight.toISOString().slice(0,10);
 
-                      // Szukaj aktywnego frachtu (zał <= dziś <= rozł)
+                      // Szukaj aktywnego frachtu (zał <= dziś <= rozł, nie rozładowany)
                       const activeF = vFrachty.find(r => {
                         const zal = r.dataZaladunku ? new Date(r.dataZaladunku) : null;
                         const rozl = r.dataRozladunku ? new Date(r.dataRozladunku) : null;
                         if (!zal || !rozl) return false;
                         zal.setHours(0,0,0,0); rozl.setHours(0,0,0,0);
-                        // Nie traktuj jako aktywnego jeśli już oznaczono jako rozładowany
                         if (r.statusRozladunku === "rozladowano") return false;
                         return zal <= todayMidnight && todayMidnight <= rozl;
                       });
@@ -1100,7 +1107,7 @@ function App({ user, role, appUsers = [] }) {
                         .filter(r => r.dataZaladunku && new Date(r.dataZaladunku) > todayMidnight)
                         .sort((a,b) => a.dataZaladunku.localeCompare(b.dataZaladunku))[0] || null;
 
-                      // Ostatni rozładowany (rozł < dziś) - bierzemy najnowszy
+                      // Ostatni rozładowany — do wyliczenia dni postoju
                       const lastDoneF = vFrachty.filter(r => {
                         const rozl = r.dataRozladunku ? new Date(r.dataRozladunku) : null;
                         if (!rozl) return false;
@@ -1108,43 +1115,69 @@ function App({ user, role, appUsers = [] }) {
                         return rozl < todayMidnight;
                       }).sort((a,b) => (b.dataRozladunku||"").localeCompare(a.dataRozladunku||""))[0] || null;
 
+                      // Aktywna pauza dla tego pojazdu (z kolekcji pauzy)
+                      const vehiclePauza = pauzy.find(p =>
+                        p.vehicleId === v.id &&
+                        p.status !== "jazda" &&
+                        p.start <= todayStr2 &&
+                        p.end >= todayStr2
+                      );
+
+                      // Ile dni stoi (od ostatniego rozładunku)
+                      const daysSinceUnload = lastDoneF
+                        ? Math.round((todayMidnight - new Date(lastDoneF.dataRozladunku + "T00:00:00")) / 86400000)
+                        : null;
+
+                      // PRIORYTET 1: W trasie
                       if (activeF) {
                         status = "trasa";
                         statusLabel = "W trasie";
                         statusIcon = <IconTruck size={14}/>;
                         statusColor = "#15803d";
                         statusBg = "#f0fdf4";
-                      } else if (nextF) {
-                        // Sprawdź czy data zał jest jutro lub później
+                      }
+                      // PRIORYTET 2: Pauza (z czasu pracy)
+                      else if (vehiclePauza) {
+                        const pauzaLabels = { pauza9: "Pauza 9h", pauza11: "Pauza 11h", pauza24: "Pauza 24h", pauza45: "Pauza 45h", pauzaInne: "Pauza", baza: "Baza" };
+                        const pauzaColors = { pauza9: "#b45309", pauza11: "#c2410c", pauza24: "#dc2626", pauza45: "#9333ea", pauzaInne: "#0369a1", baza: "#6b7280" };
+                        const pauzaBgs =    { pauza9: "#fffbeb", pauza11: "#fff7ed", pauza24: "#fef2f2", pauza45: "#faf5ff", pauzaInne: "#f0f9ff", baza: "#f3f4f6" };
+                        const pauzaIcons =  { pauza9: "🛏️", pauza11: "🛏️", pauza24: "🛏️", pauza45: "🛏️", pauzaInne: "⏸️", baza: "🏠" };
+                        const ps = vehiclePauza.status;
+                        const endDate = new Date(vehiclePauza.end + "T00:00:00").toLocaleDateString("pl-PL", { day:"numeric", month:"short" });
+                        status = "pauza";
+                        statusLabel = `${pauzaLabels[ps] || "Pauza"} · do ${endDate}`;
+                        statusIcon = pauzaIcons[ps] || "⏸️";
+                        statusColor = pauzaColors[ps] || "#6b7280";
+                        statusBg = pauzaBgs[ps] || "#f3f4f6";
+                      }
+                      // PRIORYTET 3: Załadunek za X dni (data)
+                      else if (nextF) {
                         const nextZal = new Date(nextF.dataZaladunku); nextZal.setHours(0,0,0,0);
                         const diffDays = Math.round((nextZal - todayMidnight) / 86400000);
+                        const dateStr = nextZal.toLocaleDateString("pl-PL", { day:"numeric", month:"short" });
                         status = "planowany";
-                        statusLabel = diffDays === 1 ? "Jutro załadunek" : diffDays === 0 ? "Dziś załadunek" : `Zał. za ${diffDays}d`;
+                        if (diffDays === 0) {
+                          statusLabel = `Dziś załadunek`;
+                        } else if (diffDays === 1) {
+                          statusLabel = `Załadunek jutro (${dateStr})`;
+                        } else {
+                          statusLabel = `Załadunek za ${diffDays}d (${dateStr})`;
+                        }
                         statusIcon = "📋";
                         statusColor = "#1d4ed8";
                         statusBg = "#eff6ff";
-                      } else if (lastDoneF) {
-                        const rozl = new Date(lastDoneF.dataRozladunku); rozl.setHours(0,0,0,0);
-                        const diffDays = Math.round((todayMidnight - rozl) / 86400000);
-                        if (diffDays <= 1) {
-                          status = "czeka";
-                          statusLabel = "Czeka na załadunek";
-                          statusIcon = "⏳";
-                          statusColor = "#d97706";
-                          statusBg = "#fffbeb";
+                      }
+                      // PRIORYTET 4: Czeka na zlecenie (z liczbą dni)
+                      else {
+                        status = "czeka";
+                        if (daysSinceUnload !== null && daysSinceUnload > 0) {
+                          statusLabel = `Czeka na zlecenie · ${daysSinceUnload}d`;
                         } else {
-                          status = "postoj";
-                          statusLabel = diffDays <= 3 ? `Wolny · ${diffDays}d` : `Wolny`;
-                          statusIcon = "🅿️";
-                          statusColor = "#94a3b8";
-                          statusBg = "#f8fafc";
+                          statusLabel = "Czeka na zlecenie";
                         }
-                      } else if (vFrachty.length === 0) {
-                        status = "brak";
-                        statusLabel = "Brak zleceń";
-                        statusIcon = "⬜";
-                        statusColor = "#94a3b8";
-                        statusBg = "#f8fafc";
+                        statusIcon = "⏳";
+                        statusColor = "#d97706";
+                        statusBg = "#fffbeb";
                       }
 
                       // Aktywny fracht do wyświetlenia na karcie
@@ -1163,7 +1196,7 @@ function App({ user, role, appUsers = [] }) {
 
                       return (
                         <div key={v.id} className="bg-white rounded-2xl border overflow-hidden"
-                          style={{ borderColor: status === "trasa" ? "#bbf7d0" : status === "czeka" ? "#fde68a" : status === "planowany" ? "#bfdbfe" : "#f3f4f6" }}>
+                          style={{ borderColor: status === "trasa" ? "#bbf7d0" : status === "pauza" ? "#e9d5ff" : status === "czeka" ? "#fde68a" : status === "planowany" ? "#bfdbfe" : "#f3f4f6" }}>
 
                           {/* HEADER karty */}
                           <div className="px-4 pt-4 pb-3 flex items-start justify-between"
