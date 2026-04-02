@@ -975,6 +975,7 @@ function App({ user, role, appUsers = [] }) {
               { id: "imi", label: "IMI / SIPSI", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> },
               ...(isAdmin ? [
                 { id: "users", label: "Użytkownicy", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
+                { id: "email", label: "Email statusy", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> },
               ] : []),
               ...((isAdmin || isDyspozytor) ? [
                 { id: "sprawy", label: "Sprawy", badge: sprawyList.filter(s => !['zamknieta','wygrana','przegrana'].includes(s.status) && (s.przypisani||[]).includes(user?.email)).length || null, icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v6"/><line x1="7" y1="13" x2="12" y2="13"/><line x1="7" y1="17" x2="10" y2="17"/></svg> },
@@ -2018,6 +2019,10 @@ function App({ user, role, appUsers = [] }) {
             <UsersTab currentUid={user.uid} showToast={showToast} />
           )}
 
+          {tab === "email" && isAdmin && (
+            <EmailStatusTab showToast={showToast} />
+          )}
+
           {tab === "sprawy" && (isAdmin || isDyspozytor) && (
             <SprawyTab
               sprawyList={sprawyList}
@@ -2070,6 +2075,7 @@ function App({ user, role, appUsers = [] }) {
             ] : []),
             ...(isAdmin ? [
               { id: "users", label: "Osoby", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
+              { id: "email", label: "Email", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> },
             ] : []),
           ].map((item) => (
             <button key={item.id} onClick={() => setTab(item.id)}
@@ -2791,6 +2797,227 @@ function SprawyTab({ sprawyList, vehicles, currentUser, appUsers, eurRate, eurRa
                 setShowNewTyp(false);
               }} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Dodaj</button>
             </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EMAIL STATUS TAB — zarządzanie odbiorcami i konfiguracja wysyłki statusów
+// ═══════════════════════════════════════════════════════════════════════════════
+function EmailStatusTab({ showToast }) {
+  const [recipients, setRecipients] = useState([]);
+  const [newEmail, setNewEmail] = useState("");
+  const [newName, setNewName] = useState("");
+  const [sendgridKey, setSendgridKey] = useState("");
+  const [senderEmail, setSenderEmail] = useState("");
+  const [configLoaded, setConfigLoaded] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [logs, setLogs] = useState([]);
+
+  // Wczytaj odbiorców
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "emailRecipients"), (snap) => {
+      setRecipients(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return () => unsub();
+  }, []);
+
+  // Wczytaj konfigurację SendGrid
+  useEffect(() => {
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "config", "email"));
+        if (snap.exists()) {
+          const data = snap.data();
+          setSendgridKey(data.sendgridApiKey || "");
+          setSenderEmail(data.senderEmail || "");
+        }
+      } catch (e) { console.error("config load err", e); }
+      setConfigLoaded(true);
+    })();
+  }, []);
+
+  // Wczytaj logi wysyłek
+  useEffect(() => {
+    (async () => {
+      try {
+        const snap = await getDocs(collection(db, "emailLogs"));
+        const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setLogs(all.sort((a, b) => (b.sentAt || "").localeCompare(a.sentAt || "")).slice(0, 10));
+      } catch (e) { /* brak kolekcji */ }
+    })();
+  }, [sending]);
+
+  // Zapisz konfigurację SendGrid
+  const saveConfig = async () => {
+    try {
+      await setDoc(doc(db, "config", "email"), {
+        sendgridApiKey: sendgridKey.trim(),
+        senderEmail: senderEmail.trim(),
+        updatedAt: new Date().toISOString(),
+      });
+      showToast("✅ Konfiguracja zapisana");
+    } catch (e) {
+      showToast("❌ Błąd zapisu konfiguracji");
+    }
+  };
+
+  // Dodaj odbiorcę
+  const addRecipient = async () => {
+    const email = newEmail.trim().toLowerCase();
+    if (!email || !email.includes("@")) { showToast("❌ Podaj prawidłowy email"); return; }
+    if (recipients.find(r => r.email === email)) { showToast("❌ Ten email już jest na liście"); return; }
+    try {
+      await addDoc(collection(db, "emailRecipients"), {
+        email,
+        name: newName.trim() || email.split("@")[0],
+        active: true,
+        addedAt: new Date().toISOString(),
+      });
+      setNewEmail("");
+      setNewName("");
+      showToast("✅ Odbiorca dodany");
+    } catch (e) {
+      showToast("❌ Błąd dodawania");
+    }
+  };
+
+  // Toggle aktywność
+  const toggleActive = async (id, current) => {
+    try {
+      await updateDoc(doc(db, "emailRecipients", id), { active: !current });
+    } catch (e) { showToast("❌ Błąd"); }
+  };
+
+  // Usuń odbiorcę
+  const removeRecipient = async (id) => {
+    try {
+      await deleteDoc(doc(db, "emailRecipients", id));
+      showToast("Odbiorca usunięty");
+    } catch (e) { showToast("❌ Błąd usuwania"); }
+  };
+
+  // Wyślij testowy email
+  const sendTestEmail = async () => {
+    if (!sendgridKey.trim()) { showToast("❌ Najpierw zapisz SendGrid API Key"); return; }
+    if (recipients.filter(r => r.active).length === 0) { showToast("❌ Dodaj co najmniej jednego aktywnego odbiorcę"); return; }
+    setSending(true);
+    try {
+      const fn = httpsCallable(functions, "sendFleetEmailNow");
+      const result = await fn();
+      if (result.data.success) {
+        showToast(`✅ Email wysłany do ${result.data.recipients} odbiorców`);
+      } else {
+        showToast(`❌ Błąd: ${result.data.error}`);
+      }
+    } catch (e) {
+      showToast("❌ Błąd wysyłki: " + (e.message || ""));
+    }
+    setSending(false);
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">Email — Statusy floty</h2>
+          <p className="text-sm text-gray-400 mt-0.5">Automatyczna wysyłka 3x dziennie (8:00, 14:00, 20:00)</p>
+        </div>
+        <button onClick={sendTestEmail} disabled={sending}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all"
+          style={{ background: sending ? "#9ca3af" : "#3b82f6" }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          {sending ? "Wysyłam..." : "Wyślij teraz"}
+        </button>
+      </div>
+
+      {/* KONFIGURACJA SENDGRID */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-5 mb-4">
+        <h3 className="text-sm font-semibold text-gray-800 mb-3">Konfiguracja SendGrid</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">SendGrid API Key</label>
+            <input type="password" value={sendgridKey} onChange={e => setSendgridKey(e.target.value)}
+              placeholder="SG.xxxx..." className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Email nadawcy</label>
+            <input type="email" value={senderEmail} onChange={e => setSenderEmail(e.target.value)}
+              placeholder="fleetstat@firma.pl" className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+          </div>
+        </div>
+        <button onClick={saveConfig}
+          className="mt-3 px-4 py-2 rounded-lg bg-gray-900 text-white text-xs font-semibold">
+          Zapisz konfigurację
+        </button>
+      </div>
+
+      {/* ODBIORCY */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-5 mb-4">
+        <h3 className="text-sm font-semibold text-gray-800 mb-3">
+          Odbiorcy ({recipients.filter(r => r.active).length} aktywnych)
+        </h3>
+
+        {/* Formularz dodawania */}
+        <div className="flex gap-2 mb-4">
+          <input value={newEmail} onChange={e => setNewEmail(e.target.value)}
+            placeholder="email@firma.pl" className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm"
+            onKeyDown={e => e.key === "Enter" && addRecipient()} />
+          <input value={newName} onChange={e => setNewName(e.target.value)}
+            placeholder="Nazwa (opcjonalnie)" className="w-40 px-3 py-2 rounded-lg border border-gray-200 text-sm"
+            onKeyDown={e => e.key === "Enter" && addRecipient()} />
+          <button onClick={addRecipient}
+            className="px-4 py-2 rounded-lg bg-blue-500 text-white text-sm font-semibold flex-shrink-0">
+            + Dodaj
+          </button>
+        </div>
+
+        {/* Lista odbiorców */}
+        <div className="space-y-2">
+          {recipients.length === 0 && (
+            <p className="text-sm text-gray-400 text-center py-4">Brak odbiorców — dodaj pierwszy email powyżej</p>
+          )}
+          {recipients.map(r => (
+            <div key={r.id} className="flex items-center justify-between px-3 py-2.5 rounded-xl border border-gray-100"
+              style={{ opacity: r.active ? 1 : 0.5 }}>
+              <div className="flex items-center gap-3">
+                <button onClick={() => toggleActive(r.id, r.active)}
+                  className="w-5 h-5 rounded flex items-center justify-center border-2 transition-all"
+                  style={{ borderColor: r.active ? "#22c55e" : "#d1d5db", background: r.active ? "#f0fdf4" : "#fff" }}>
+                  {r.active && <span className="text-green-600 text-xs">✓</span>}
+                </button>
+                <div>
+                  <span className="text-sm font-semibold text-gray-800">{r.name || r.email.split("@")[0]}</span>
+                  <span className="text-xs text-gray-400 ml-2">{r.email}</span>
+                </div>
+              </div>
+              <button onClick={() => removeRecipient(r.id)}
+                className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50">
+                Usuń
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* LOGI WYSYŁEK */}
+      {logs.length > 0 && (
+        <div className="bg-white rounded-2xl border border-gray-100 p-5">
+          <h3 className="text-sm font-semibold text-gray-800 mb-3">Ostatnie wysyłki</h3>
+          <div className="space-y-1.5">
+            {logs.map(l => (
+              <div key={l.id} className="flex items-center justify-between text-xs px-3 py-2 rounded-lg bg-gray-50">
+                <span className="text-gray-500">
+                  {new Date(l.sentAt).toLocaleString("pl-PL", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })}
+                </span>
+                <span className={l.status === "sent" ? "text-green-600 font-semibold" : "text-red-500 font-semibold"}>
+                  {l.status === "sent" ? `✅ Wysłano do ${l.recipients?.length || 0}` : `❌ ${l.error || "Błąd"}`}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       )}
