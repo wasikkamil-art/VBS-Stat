@@ -47,11 +47,20 @@ async function dbGet(key) {
   }
 }
 
+// Flaga blokująca onSnapshot podczas lokalnych zapisów
+// Zapobiega race condition: zmiana statusu → dbSet → onSnapshot nadpisuje starymi danymi
+const _pendingWrites = new Set();
+const WRITE_COOLDOWN = 2000; // 2s blokada onSnapshot po zapisie
+
 async function dbSet(key, value) {
   try {
+    _pendingWrites.add(key);
     await setDoc(DATA_REF(), { [key]: value }, { merge: true });
+    // Daj czas na propagację — onSnapshot ignoruje zmiany przez WRITE_COOLDOWN
+    setTimeout(() => _pendingWrites.delete(key), WRITE_COOLDOWN);
   } catch (e) {
     console.error("dbSet error", e);
+    _pendingWrites.delete(key);
   }
 }
 
@@ -634,45 +643,47 @@ function App({ user, role, appUsers = [] }) {
       if (!snap.exists()) { setLoaded(true); return; }
       const data = snap.data();
 
-      const v  = data[SK.vehicles];
-      const c  = data[SK.costs];
-      const ca = data[SK.categories];
-      const d  = data[SK.docs];
-      const im = data[SK.imi];
-      const rn = data[SK.rent];
-      const fr = data[SK.frachty];
+      // Aktualizuj tylko te klucze, które NIE mają aktywnego zapisu
+      // Zapobiega race condition przy zmianie statusów
+      if (!_pendingWrites.has(SK.vehicles)) {
+        const v = data[SK.vehicles];
+        setVehicles(v || SEED_VEHICLES);
+      }
 
-      setVehicles(v || SEED_VEHICLES);
+      if (!_pendingWrites.has(SK.costs)) {
+        const rawCosts = data[SK.costs] || SEED_COSTS;
+        const patchedCosts = rawCosts.map(cost => {
+          const n = (cost.note || "").toLowerCase();
+          if (n.includes("nego") || n.includes("negometal")) return { ...cost, category: "oplaty" };
+          if (cost.category === "myto") return { ...cost, category: "oplaty" };
+          if (cost.category === "nego") return { ...cost, category: "oplaty" };
+          if (cost.category === "etoll") return { ...cost, category: "oplaty" };
+          return cost;
+        });
+        setCosts(patchedCosts);
+      }
 
-      // Patch kategorii — nego/myto/etoll → oplaty
-      const rawCosts = c || SEED_COSTS;
-      const patchedCosts = rawCosts.map(cost => {
-        const n = (cost.note || "").toLowerCase();
-        if (n.includes("nego") || n.includes("negometal")) return { ...cost, category: "oplaty" };
-        if (cost.category === "myto") return { ...cost, category: "oplaty" };
-        if (cost.category === "nego") return { ...cost, category: "oplaty" };
-        if (cost.category === "etoll") return { ...cost, category: "oplaty" };
-        return cost;
-      });
-      setCosts(patchedCosts);
+      if (!_pendingWrites.has(SK.categories)) {
+        const loadedCats = data[SK.categories] || SEED_CATEGORIES;
+        const REQUIRED_CATS = [
+          { id: "wyplata",       label: "Wynagrodzenie", color: "#f43f5e", icon: "👤" },
+          { id: "ubezpieczenie", label: "Ubezpieczenie",  color: "#10b981", icon: "🛡️" },
+        ];
+        const mergedCats = [...loadedCats].map(cat => {
+          if (cat.id === "wyplata") return { ...cat, label: "Wynagrodzenie", icon: "👤", color: "#f43f5e" };
+          return cat;
+        });
+        REQUIRED_CATS.forEach(req => {
+          if (!mergedCats.find(c => c.id === req.id)) mergedCats.push(req);
+        });
+        setCategories(mergedCats);
+      }
 
-      const loadedCats = ca || SEED_CATEGORIES;
-      const REQUIRED_CATS = [
-        { id: "wyplata",       label: "Wynagrodzenie", color: "#f43f5e", icon: "👤" },
-        { id: "ubezpieczenie", label: "Ubezpieczenie",  color: "#10b981", icon: "🛡️" },
-      ];
-      const mergedCats = [...loadedCats].map(cat => {
-        if (cat.id === "wyplata") return { ...cat, label: "Wynagrodzenie", icon: "👤", color: "#f43f5e" };
-        return cat;
-      });
-      REQUIRED_CATS.forEach(req => {
-        if (!mergedCats.find(c => c.id === req.id)) mergedCats.push(req);
-      });
-      setCategories(mergedCats);
-      setDocs(d || []);
-      setImiRecords(im || []);
-      setRentRecords(rn || []);
-      setFrachtyList(fr || []);
+      if (!_pendingWrites.has(SK.docs))    setDocs(data[SK.docs] || []);
+      if (!_pendingWrites.has(SK.imi))     setImiRecords(data[SK.imi] || []);
+      if (!_pendingWrites.has(SK.rent))    setRentRecords(data[SK.rent] || []);
+      if (!_pendingWrites.has(SK.frachty)) setFrachtyList(data[SK.frachty] || []);
+
       setLoaded(true);
     }, (err) => {
       console.error("onSnapshot error", err);
@@ -706,14 +717,20 @@ function App({ user, role, appUsers = [] }) {
     return () => unsub();
   }, []);
 
-  // ── PERSIST ──
-  useEffect(() => { if (loaded) dbSet(SK.vehicles, vehicles); },    [vehicles, loaded]);
-  useEffect(() => { if (loaded) dbSet(SK.costs, costs); },          [costs, loaded]);
-  useEffect(() => { if (loaded) dbSet(SK.categories, categories); },[categories, loaded]);
-  useEffect(() => { if (loaded) dbSet(SK.docs, docs); },            [docs, loaded]);
-  useEffect(() => { if (loaded) dbSet(SK.imi, imiRecords); },       [imiRecords, loaded]);
-  useEffect(() => { if (loaded && rentRecords.length > 0) dbSet(SK.rent, rentRecords); },     [rentRecords, loaded]);
-  useEffect(() => { if (loaded && frachtyList.length > 0) dbSet(SK.frachty, frachtyList); },  [frachtyList, loaded]);
+  // ── PERSIST (z debounce 300ms — zapobiega wielokrotnemu zapisowi) ──
+  const debounceTimers = useRef({});
+  const debouncedDbSet = (key, value, delay = 300) => {
+    if (debounceTimers.current[key]) clearTimeout(debounceTimers.current[key]);
+    debounceTimers.current[key] = setTimeout(() => { dbSet(key, value); }, delay);
+  };
+
+  useEffect(() => { if (loaded) debouncedDbSet(SK.vehicles, vehicles); },    [vehicles, loaded]);
+  useEffect(() => { if (loaded) debouncedDbSet(SK.costs, costs); },          [costs, loaded]);
+  useEffect(() => { if (loaded) debouncedDbSet(SK.categories, categories); },[categories, loaded]);
+  useEffect(() => { if (loaded) debouncedDbSet(SK.docs, docs); },            [docs, loaded]);
+  useEffect(() => { if (loaded) debouncedDbSet(SK.imi, imiRecords); },       [imiRecords, loaded]);
+  useEffect(() => { if (loaded && rentRecords.length > 0) debouncedDbSet(SK.rent, rentRecords); },     [rentRecords, loaded]);
+  useEffect(() => { if (loaded && frachtyList.length > 0) debouncedDbSet(SK.frachty, frachtyList); },  [frachtyList, loaded]);
 
 
   // ── CSS INJECTION ──
