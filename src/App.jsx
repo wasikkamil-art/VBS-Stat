@@ -1123,6 +1123,16 @@ function App({ user, role, appUsers = [] }) {
                         ? Math.round((todayMs - new Date(lastDoneF.dataRozladunku + "T00:00:00").getTime()) / 86400000)
                         : null;
 
+                      // DEBUG — tymczasowy log do diagnostyki (USUNĄĆ PO NAPRAWIE)
+                      console.log(`[STATUS DEBUG] ${v.plate}:`, {
+                        todayISO,
+                        activeF: activeF ? { zal: activeF.dataZaladunku, rozl: activeF.dataRozladunku, stRozl: activeF.statusRozladunku } : null,
+                        nextF: nextF ? { zal: nextF.dataZaladunku } : null,
+                        lastDoneF: lastDoneF ? { rozl: lastDoneF.dataRozladunku } : null,
+                        vehiclePauza: vehiclePauza ? { status: vehiclePauza.status, start: vehiclePauza.start, end: vehiclePauza.end } : null,
+                        allFrachty: vFrachty.map(r => ({ zal: r.dataZaladunku, rozl: r.dataRozladunku, stRozl: r.statusRozladunku, nr: r.nrFrachtu })),
+                      });
+
                       // PRIORYTET 1: W trasie
                       if (activeF) {
                         status = "trasa";
