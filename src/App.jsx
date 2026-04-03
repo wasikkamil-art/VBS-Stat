@@ -5337,93 +5337,87 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
             </div>
           ))}
         </div>
-        <ResponsiveContainer width="100%" height={260}>
-          <LineChart margin={{top:10,right:20,left:10,bottom:5}}
-            data={MS.map((m,mi)=>({name:m,...Object.fromEntries(series.map((s,si)=>[si,s.pts[mi]||null]))}))}
-          >
-            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false}/>
-            <XAxis dataKey="name" tick={{fontSize:11,fill:"#94a3b8"}} axisLine={false} tickLine={false}/>
-            <YAxis tick={{fontSize:10,fill:"#94a3b8"}} axisLine={false} tickLine={false} width={45}
-              tickFormatter={v=>v>=1000?(v/1000).toFixed(1)+"k":v}/>
-            <Tooltip formatter={(v,n)=>[v>=1000?(v/1000).toFixed(1)+"k":v?.toFixed(0), series[n]?.label||n]}
-              contentStyle={{fontSize:12,borderRadius:8,border:"1px solid #e2e8f0"}}/>
-            {series.map((s,si)=>(
-              <Line key={si} type="monotone" dataKey={si} stroke={s.color} strokeWidth={2.5}
-                dot={{r:3.5,fill:s.color,strokeWidth:2,stroke:"white"}}
-                activeDot={{r:5}} connectNulls={false}/>
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
-
-        {/* TABELA SUMARYCZNA pod wykresem */}
         {(() => {
-          // Grupuj serie wg roku, sumuj miesiące
+          // Grupuj serie wg roku — sumy miesięczne
           const yearTotals = {};
           series.forEach(s => {
-            const yearMatch = s.label.match(/(\d{4})$/);
-            if (!yearMatch) return;
-            const yr = yearMatch[1];
+            const yrM = s.label.match(/(\d{4})$/);
+            if (!yrM) return;
+            const yr = yrM[1];
             if (!yearTotals[yr]) yearTotals[yr] = Array(12).fill(0);
             s.pts.forEach((v, mi) => { yearTotals[yr][mi] += (v || 0); });
           });
-          const sortedYears = Object.keys(yearTotals).sort();
-          if (sortedYears.length < 1) return null;
+          const sortedYrs = Object.keys(yearTotals).sort();
+          const yt25 = yearTotals["2025"], yt26 = yearTotals["2026"];
+          const hasDiff = yt25 && yt26;
+          const YRCOLORS = { "2024":"#8b5cf6", "2025":"#94a3b8", "2026":"#3b82f6" };
+          const fmtTk = v => v===0?"—":Math.abs(v)>=1000?(v/1000).toFixed(1)+"k":Number.isInteger(v)?String(v):v.toFixed(1);
+          const ROW_H = 16; // px per data row in xAxis
+          const xAxisH = 20 + sortedYrs.length * ROW_H + (hasDiff ? ROW_H + 6 : 4);
 
-          const fmtV = v => v === 0 ? "—" : v >= 1000 ? (v/1000).toFixed(1)+"k" : v % 1 === 0 ? v : v.toFixed(1);
-          const yr25 = yearTotals["2025"];
-          const yr26 = yearTotals["2026"];
-          const hasDiff = yr25 && yr26;
-
-          const YEAR_COLORS = { "2024":"#8b5cf6","2025":"#94a3b8","2026":"#3b82f6" };
+          const CustomXTick = ({ x, y, payload }) => {
+            const mi = MS.indexOf(payload.value);
+            if (mi < 0) return null;
+            return (
+              <g transform={`translate(${x},${y})`}>
+                {/* separator line */}
+                <line x1={-26} x2={26} y1={0} y2={0} stroke="#f1f5f9" strokeWidth={1}/>
+                {/* miesiąc */}
+                <text y={0} dy={14} textAnchor="middle" fill="#94a3b8" fontSize={11}>{payload.value}</text>
+                {/* wartości per rok */}
+                {sortedYrs.map((yr, i) => {
+                  const v = yearTotals[yr]?.[mi] || 0;
+                  const color = YRCOLORS[yr] || "#64748b";
+                  return (
+                    <text key={yr} y={(i+1)*ROW_H} dy={14} textAnchor="middle"
+                      fill={v===0?"#e2e8f0":color} fontSize={10}
+                      fontWeight={yr==="2026"?"700":"400"}>{fmtTk(v)}</text>
+                  );
+                })}
+                {/* różnica */}
+                {hasDiff && (()=>{
+                  const diff = (yt26[mi]||0) - (yt25[mi]||0);
+                  const c = diff>0?"#15803d":diff<0?"#dc2626":"#d1d5db";
+                  return <>
+                    <line x1={-22} x2={22} y1={(sortedYrs.length)*ROW_H+4} y2={(sortedYrs.length)*ROW_H+4} stroke="#f1f5f9" strokeWidth={1}/>
+                    <text y={(sortedYrs.length)*ROW_H+6} dy={14} textAnchor="middle" fill={c} fontSize={10} fontWeight="700">
+                      {diff===0?"—":(diff>0?"+":"")+fmtTk(diff)}
+                    </text>
+                  </>;
+                })()}
+              </g>
+            );
+          };
 
           return (
-            <div style={{marginTop:12,overflowX:"auto"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                <thead>
-                  <tr style={{background:"#f8fafc"}}>
-                    <th style={{padding:"6px 10px",textAlign:"left",color:"#94a3b8",fontWeight:600,fontSize:10,textTransform:"uppercase",letterSpacing:"0.05em",minWidth:80,borderBottom:"1px solid #e5e7eb"}}>Rok</th>
-                    {MS.map(m => (
-                      <th key={m} style={{padding:"6px 6px",textAlign:"right",color:"#94a3b8",fontWeight:600,fontSize:10,textTransform:"uppercase",letterSpacing:"0.05em",borderBottom:"1px solid #e5e7eb",minWidth:46}}>{m}</th>
-                    ))}
-                    <th style={{padding:"6px 10px",textAlign:"right",color:"#94a3b8",fontWeight:600,fontSize:10,textTransform:"uppercase",letterSpacing:"0.05em",borderBottom:"1px solid #e5e7eb",minWidth:56}}>Suma</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedYears.map(yr => {
-                    const vals = yearTotals[yr];
-                    const total = vals.reduce((a,b)=>a+b,0);
-                    const color = YEAR_COLORS[yr] || "#64748b";
-                    return (
-                      <tr key={yr} style={{borderBottom:"1px solid #f3f4f6"}}>
-                        <td style={{padding:"5px 10px",fontWeight:700,color,fontSize:12}}>{yr}</td>
-                        {vals.map((v,mi) => (
-                          <td key={mi} style={{padding:"5px 6px",textAlign:"right",color: v===0?"#d1d5db":color,fontWeight: v===0?400:600,fontSize:11}}>{fmtV(v)}</td>
-                        ))}
-                        <td style={{padding:"5px 10px",textAlign:"right",fontWeight:800,color,fontSize:12}}>{fmtV(total)}</td>
-                      </tr>
-                    );
-                  })}
-                  {hasDiff && (
-                    <tr style={{background:"#f8fafc",borderTop:"2px solid #e5e7eb"}}>
-                      <td style={{padding:"5px 10px",fontWeight:700,color:"#374151",fontSize:11}}>Różnica</td>
-                      {MS.map((_,mi) => {
-                        const diff = (yr26[mi]||0) - (yr25[mi]||0);
-                        const isPos = diff > 0, isNeg = diff < 0;
-                        return (
-                          <td key={mi} style={{padding:"5px 6px",textAlign:"right",fontWeight:700,fontSize:11,color:isPos?"#15803d":isNeg?"#dc2626":"#d1d5db"}}>
-                            {diff===0?"—":(isPos?"+":"")+fmtV(diff)}
-                          </td>
-                        );
-                      })}
-                      {(() => {
-                        const diff = yr26.reduce((a,b)=>a+b,0) - yr25.reduce((a,b)=>a+b,0);
-                        return <td style={{padding:"5px 10px",textAlign:"right",fontWeight:800,fontSize:12,color:diff>=0?"#15803d":"#dc2626"}}>{diff>=0?"+":""}{fmtV(diff)}</td>;
-                      })()}
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <>
+              <ResponsiveContainer width="100%" height={260 + xAxisH}>
+                <LineChart margin={{top:10,right:20,left:10,bottom:5}}
+                  data={MS.map((m,mi)=>({name:m,...Object.fromEntries(series.map((s,si)=>[si,s.pts[mi]||null]))}))}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false}/>
+                  <XAxis dataKey="name" tick={<CustomXTick/>} height={xAxisH} axisLine={false} tickLine={false}/>
+                  <YAxis tick={{fontSize:10,fill:"#94a3b8"}} axisLine={false} tickLine={false} width={45}
+                    tickFormatter={v=>v>=1000?(v/1000).toFixed(1)+"k":v}/>
+                  <Tooltip formatter={(v,n)=>[v>=1000?(v/1000).toFixed(1)+"k":v?.toFixed(0), series[n]?.label||n]}
+                    contentStyle={{fontSize:12,borderRadius:8,border:"1px solid #e2e8f0"}}/>
+                  {series.map((s,si)=>(
+                    <Line key={si} type="monotone" dataKey={si} stroke={s.color} strokeWidth={2.5}
+                      dot={{r:3.5,fill:s.color,strokeWidth:2,stroke:"white"}}
+                      activeDot={{r:5}} connectNulls={false}/>
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+              {/* Legenda wierszy */}
+              {sortedYrs.length > 0 && (
+                <div style={{display:"flex",gap:16,padding:"0 0 4px 56px",marginTop:-xAxisH+16}}>
+                  {sortedYrs.map(yr=>(
+                    <span key={yr} style={{fontSize:10,fontWeight:yr==="2026"?"700":"400",color:YRCOLORS[yr]||"#64748b",whiteSpace:"nowrap"}}>● {yr}</span>
+                  ))}
+                  {hasDiff&&<span style={{fontSize:10,fontWeight:700,color:"#374151",whiteSpace:"nowrap",marginLeft:2}}>● Różnica</span>}
+                </div>
+              )}
+            </>
           );
         })()}
       </div>
