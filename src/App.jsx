@@ -5364,7 +5364,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
           if (isRate) {
             Object.keys(yearTotals).forEach(yr => {
               yearTotals[yr] = yearTotals[yr].map((sum, mi) =>
-                yearCounts[yr][mi] > 0 ? parseFloat((sum / yearCounts[yr][mi]).toFixed(1)) : 0
+                yearCounts[yr][mi] > 0 ? parseFloat((sum / yearCounts[yr][mi]).toFixed(4)) : 0
               );
             });
           }
