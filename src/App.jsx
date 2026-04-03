@@ -5403,9 +5403,13 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
 
             {/* Per-row rendering */}
             {rows.map((row,ri)=>{
-              const activeMonths = row.vals26.filter(v=>v>0).length;
-              const ytd26 = row.vals26.slice(0,activeMonths).reduce((a,b)=>a+b,0);
-              const ytd25 = row.vals25.slice(0,activeMonths).reduce((a,b)=>a+b,0);
+              // calendarMonths = ile miesięcy 2026 minęło wg kalendarza (kwiecień = 4)
+              const calendarMonths = Math.min(new Date().getMonth() + 1, 12);
+              // activeMonths = ile miesięcy ma dane w 2026 (do wyświetlenia "X mies.")
+              const activeMonths = Math.max(row.vals26.filter(v=>v>0).length, 0);
+              // YTD zawsze porównuje ten sam okres wg kalendarza, niezależnie od dostępności danych
+              const ytd26 = row.vals26.slice(0,calendarMonths).reduce((a,b)=>a+b,0);
+              const ytd25 = row.vals25.slice(0,calendarMonths).reduce((a,b)=>a+b,0);
               const full25 = row.vals25.reduce((a,b)=>a+b,0);
               const pctYtd = ytd25 ? ((ytd26-ytd25)/Math.abs(ytd25)*100) : 0;
               const projection = activeMonths>0 ? Math.round(ytd26/activeMonths*12) : 0;
