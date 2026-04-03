@@ -5402,11 +5402,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                     tickFormatter={v=>v>=1000?(v/1000).toFixed(1)+"k":v}/>
                   <Tooltip formatter={(v,n)=>[v>=1000?(v/1000).toFixed(1)+"k":(isRate?v?.toFixed(v<1?2:1):v?.toFixed(0)), series[n]?.label||n]}
                     contentStyle={{fontSize:12,borderRadius:8,border:"1px solid #e2e8f0"}}
-                    cursor={({points,width:bw})=>{
-                      if(!points||!points.length)return null;
-                      const x=points[0].x+(bw||0)/2;
-                      return <line x1={x} x2={x} y1={points[0].y} y2={points[1]?.y??points[0].y} stroke="#cbd5e1" strokeWidth={1}/>;
-                    }}/>
+                    cursor={false}/>
                   {series.map((s,si)=>(
                     <Line key={si} type="monotone" dataKey={si} stroke={s.color} strokeWidth={2.5}
                       dot={{r:3.5,fill:s.color,strokeWidth:2,stroke:"white"}}
