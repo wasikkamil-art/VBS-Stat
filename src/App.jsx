@@ -5375,7 +5375,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                   data={MS.map((m,mi)=>({name:m,...Object.fromEntries(series.map((s,si)=>[si,s.pts[mi]||null]))}))}
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false}/>
-                  <XAxis dataKey="name" scale="band" tick={{fontSize:11,fill:"#94a3b8"}} height={20} axisLine={false} tickLine={false} padding={{left:0,right:0}}/>
+                  <XAxis dataKey="name" scale="band" tick={false} height={4} axisLine={false} tickLine={false} padding={{left:0,right:0}}/>
                   <YAxis tick={{fontSize:10,fill:"#94a3b8"}} axisLine={false} tickLine={false} width={45}
                     tickFormatter={v=>v>=1000?(v/1000).toFixed(1)+"k":v}/>
                   <Tooltip formatter={(v,n)=>[v>=1000?(v/1000).toFixed(1)+"k":v?.toFixed(0), series[n]?.label||n]}
@@ -5389,10 +5389,16 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
               </ResponsiveContainer>
 
               {/* ── TABELA POD WYKRESEM — wariant C ── */}
-              {/* Bez nagłówka miesięcy — nazwy są na osi X wykresu */}
-              {/* grid: 12×1fr + stała kolumna TOTAL_COL px = idealnie pod wykresem */}
+              {/* Nazwy miesięcy jako pierwszy wiersz tabeli — idealnie wyrównane z danymi */}
               {showTable && (
                 <div style={{marginLeft:CHART_LEFT, fontSize:11}}>
+
+                  {/* Nagłówek miesięcy */}
+                  <div style={{display:"grid", gridTemplateColumns:`repeat(12,1fr) ${TOTAL_COL}px`,
+                    textAlign:"center", padding:"2px 0 4px"}}>
+                    {MS.map(m=><div key={m} style={{fontSize:11,color:"#94a3b8",fontWeight:500}}>{m}</div>)}
+                    <div/>
+                  </div>
 
                   {/* Wiersze lat — bieżący rok pierwszy */}
                   {displayYrs.map(yr=>{
