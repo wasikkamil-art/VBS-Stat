@@ -5384,13 +5384,6 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
               {/* ── TABELA MIESIĘCZNA — wyrównana przez padding do osi wykresu ── */}
               {sortedYrs.length > 0 && (
                 <div style={{paddingLeft: CHART_LEFT, paddingRight: CHART_RIGHT, marginTop: 2}}>
-                  {/* Nagłówki: miesiące */}
-                  <div style={{display:"grid", gridTemplateColumns:"repeat(12,1fr)", borderBottom:"2px solid #f1f5f9", paddingBottom:4, marginBottom:4}}>
-                    {MS.map(m => (
-                      <div key={m} style={{textAlign:"center", fontSize:11, color:"#94a3b8", fontWeight:500}}>{m}</div>
-                    ))}
-                  </div>
-
                   {/* Wiersz per rok */}
                   {sortedYrs.map(yr => {
                     const totals = yearTotals[yr] || [];
