@@ -5420,7 +5420,10 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                     const isCur = yr===curYr;
                     const col = YRCOLORS[yr]||"#64748b";
                     const bg = YRBG[yr]||"#f8fafc";
-                    const yrTotal = (yearTotals[yr]||[]).reduce((s,v)=>s+(v||0),0);
+                    const yrVals = (yearTotals[yr]||[]).filter(v=>v>0);
+                    const yrTotal = isRate
+                      ? (yrVals.length ? parseFloat((yrVals.reduce((s,v)=>s+v,0)/yrVals.length).toFixed(1)) : 0)
+                      : (yearTotals[yr]||[]).reduce((s,v)=>s+(v||0),0);
                     return (
                       <div key={yr} style={{display:"grid", gridTemplateColumns:`repeat(12,1fr) ${TOTAL_COL}px`,
                         background:bg, borderRadius:6, padding:"4px 0", marginTop:2, textAlign:"center", alignItems:"center"}}>
@@ -5434,7 +5437,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                         })}
                         <div style={{paddingLeft:8,paddingRight:4,fontWeight:700,color:col,fontSize:10,whiteSpace:"nowrap",
                           borderLeft:"1px solid "+(isCur?"#dbeafe":"#e5e7eb")}}>
-                          {yr}: {fmtTk(yrTotal)}
+                          {yr}{isRate?" ⌀":""}: {fmtTk(yrTotal)}
                         </div>
                       </div>
                     );
@@ -5442,7 +5445,15 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
 
                   {/* Wiersz Δ (różnica) — tylko gdy oba lata */}
                   {hasDiff && (()=>{
-                    const totalDiff = yt26.reduce((s,v,i)=>s+(v||0)-(yt25[i]||0),0);
+                    let totalDiff;
+                    if (isRate) {
+                      const avg26 = yt26.filter(v=>v>0); const avg25 = yt25.filter(v=>v>0);
+                      const m26 = avg26.length ? avg26.reduce((s,v)=>s+v,0)/avg26.length : 0;
+                      const m25 = avg25.length ? avg25.reduce((s,v)=>s+v,0)/avg25.length : 0;
+                      totalDiff = parseFloat((m26 - m25).toFixed(1));
+                    } else {
+                      totalDiff = yt26.reduce((s,v,i)=>s+(v||0)-(yt25[i]||0),0);
+                    }
                     const totalC = totalDiff>0?"#15803d":totalDiff<0?"#dc2626":"#9ca3af";
                     return (
                       <div style={{display:"grid", gridTemplateColumns:`repeat(12,1fr) ${TOTAL_COL}px`,
