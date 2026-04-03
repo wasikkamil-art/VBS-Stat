@@ -5338,15 +5338,30 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
           ))}
         </div>
         {(() => {
-          // Grupuj serie wg roku — sumy miesięczne
+          // Grupuj serie wg roku — sumy lub średnie miesięczne
+          // Metryki stawkowe (rate) → średnia, reszta → suma
+          const RATE_METRICS = ["spalanie","eurKm"];
+          const isRate = tMetryki.length === 1 && RATE_METRICS.includes(tMetryki[0]);
           const yearTotals = {};
+          const yearCounts = {}; // ile niezerowych wartości (do średniej)
           series.forEach(s => {
             const yrM = s.label.match(/(\d{4})$/);
             if (!yrM) return;
             const yr = yrM[1];
-            if (!yearTotals[yr]) yearTotals[yr] = Array(12).fill(0);
-            s.pts.forEach((v, mi) => { yearTotals[yr][mi] += (v || 0); });
+            if (!yearTotals[yr]) { yearTotals[yr] = Array(12).fill(0); yearCounts[yr] = Array(12).fill(0); }
+            s.pts.forEach((v, mi) => {
+              yearTotals[yr][mi] += (v || 0);
+              if (v) yearCounts[yr][mi] += 1;
+            });
           });
+          // Dla metryk stawkowych: podziel sumę przez liczbę pojazdów z danymi
+          if (isRate) {
+            Object.keys(yearTotals).forEach(yr => {
+              yearTotals[yr] = yearTotals[yr].map((sum, mi) =>
+                yearCounts[yr][mi] > 0 ? parseFloat((sum / yearCounts[yr][mi]).toFixed(1)) : 0
+              );
+            });
+          }
           const sortedYrs = Object.keys(yearTotals).sort();
           const yt25 = yearTotals["2025"], yt26 = yearTotals["2026"];
           const hasDiff = yt25 && yt26;
