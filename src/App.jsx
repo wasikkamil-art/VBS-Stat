@@ -5350,53 +5350,25 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
           const sortedYrs = Object.keys(yearTotals).sort();
           const yt25 = yearTotals["2025"], yt26 = yearTotals["2026"];
           const hasDiff = yt25 && yt26;
-          const YRCOLORS = { "2024":"#8b5cf6", "2025":"#94a3b8", "2026":"#3b82f6" };
-          const fmtTk = v => v===0?"—":Math.abs(v)>=1000?(v/1000).toFixed(1)+"k":Number.isInteger(v)?String(v):v.toFixed(1);
-          const ROW_H = 16; // px per data row in xAxis
-          const xAxisH = 20 + sortedYrs.length * ROW_H + (hasDiff ? ROW_H + 6 : 4);
-
-          const CustomXTick = ({ x, y, payload }) => {
-            const mi = MS.indexOf(payload.value);
-            if (mi < 0) return null;
-            return (
-              <g transform={`translate(${x},${y})`}>
-                {/* separator line */}
-                <line x1={-26} x2={26} y1={0} y2={0} stroke="#f1f5f9" strokeWidth={1}/>
-                {/* miesiąc */}
-                <text y={0} dy={14} textAnchor="middle" fill="#94a3b8" fontSize={11}>{payload.value}</text>
-                {/* wartości per rok */}
-                {sortedYrs.map((yr, i) => {
-                  const v = yearTotals[yr]?.[mi] || 0;
-                  const color = YRCOLORS[yr] || "#64748b";
-                  return (
-                    <text key={yr} y={(i+1)*ROW_H} dy={14} textAnchor="middle"
-                      fill={v===0?"#e2e8f0":color} fontSize={10}
-                      fontWeight={yr==="2026"?"700":"400"}>{fmtTk(v)}</text>
-                  );
-                })}
-                {/* różnica */}
-                {hasDiff && (()=>{
-                  const diff = (yt26[mi]||0) - (yt25[mi]||0);
-                  const c = diff>0?"#15803d":diff<0?"#dc2626":"#d1d5db";
-                  return <>
-                    <line x1={-22} x2={22} y1={(sortedYrs.length)*ROW_H+4} y2={(sortedYrs.length)*ROW_H+4} stroke="#f1f5f9" strokeWidth={1}/>
-                    <text y={(sortedYrs.length)*ROW_H+6} dy={14} textAnchor="middle" fill={c} fontSize={10} fontWeight="700">
-                      {diff===0?"—":(diff>0?"+":"")+fmtTk(diff)}
-                    </text>
-                  </>;
-                })()}
-              </g>
-            );
+          const YRCOLORS = { "2024":"#8b5cf6", "2025":"#64748b", "2026":"#3b82f6" };
+          const fmtTk = v => {
+            if (v === 0) return "—";
+            const abs = Math.abs(v);
+            if (abs >= 1000) return (v/1000).toFixed(1) + "k";
+            return Number.isInteger(v) ? String(v) : v.toFixed(1);
           };
+          // Marginesy wykresu — muszą pasować do LineChart margin i YAxis width
+          const CHART_LEFT = 55; // margin.left(10) + YAxis width(45)
+          const CHART_RIGHT = 20; // margin.right(20)
 
           return (
             <>
-              <ResponsiveContainer width="100%" height={260 + xAxisH}>
-                <LineChart margin={{top:10,right:20,left:10,bottom:5}}
+              <ResponsiveContainer width="100%" height={270}>
+                <LineChart margin={{top:10,right:CHART_RIGHT,left:10,bottom:8}}
                   data={MS.map((m,mi)=>({name:m,...Object.fromEntries(series.map((s,si)=>[si,s.pts[mi]||null]))}))}
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false}/>
-                  <XAxis dataKey="name" tick={<CustomXTick/>} height={xAxisH} axisLine={false} tickLine={false}/>
+                  <XAxis dataKey="name" tick={{fontSize:11,fill:"#94a3b8"}} height={20} axisLine={false} tickLine={false}/>
                   <YAxis tick={{fontSize:10,fill:"#94a3b8"}} axisLine={false} tickLine={false} width={45}
                     tickFormatter={v=>v>=1000?(v/1000).toFixed(1)+"k":v}/>
                   <Tooltip formatter={(v,n)=>[v>=1000?(v/1000).toFixed(1)+"k":v?.toFixed(0), series[n]?.label||n]}
@@ -5408,13 +5380,82 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                   ))}
                 </LineChart>
               </ResponsiveContainer>
-              {/* Legenda wierszy */}
+
+              {/* ── TABELA MIESIĘCZNA — wyrównana przez padding do osi wykresu ── */}
               {sortedYrs.length > 0 && (
-                <div style={{display:"flex",gap:16,padding:"0 0 4px 56px",marginTop:-xAxisH+16}}>
-                  {sortedYrs.map(yr=>(
-                    <span key={yr} style={{fontSize:10,fontWeight:yr==="2026"?"700":"400",color:YRCOLORS[yr]||"#64748b",whiteSpace:"nowrap"}}>● {yr}</span>
-                  ))}
-                  {hasDiff&&<span style={{fontSize:10,fontWeight:700,color:"#374151",whiteSpace:"nowrap",marginLeft:2}}>● Różnica</span>}
+                <div style={{paddingLeft: CHART_LEFT, paddingRight: CHART_RIGHT, marginTop: 2}}>
+                  {/* Nagłówki: miesiące */}
+                  <div style={{display:"grid", gridTemplateColumns:"repeat(12,1fr)", borderBottom:"2px solid #f1f5f9", paddingBottom:4, marginBottom:4}}>
+                    {MS.map(m => (
+                      <div key={m} style={{textAlign:"center", fontSize:11, color:"#94a3b8", fontWeight:500}}>{m}</div>
+                    ))}
+                  </div>
+
+                  {/* Wiersz per rok */}
+                  {sortedYrs.map(yr => {
+                    const totals = yearTotals[yr] || [];
+                    const color = YRCOLORS[yr] || "#64748b";
+                    const isCurrent = yr === "2026";
+                    const yearTotal = totals.reduce((s,v)=>s+(v||0),0);
+                    return (
+                      <div key={yr} style={{display:"flex", alignItems:"stretch", marginBottom:2}}>
+                        {/* Etykieta roku — absolutnie poza gridem, wyśrodkowana */}
+                        <div style={{display:"grid", gridTemplateColumns:"repeat(12,1fr)", flex:1}}>
+                          {totals.map((v, mi) => (
+                            <div key={mi} style={{
+                              textAlign:"center", fontSize:11, padding:"3px 0",
+                              color: v===0 ? "#d1d5db" : color,
+                              fontWeight: isCurrent ? 700 : 400,
+                              background: isCurrent && v > 0 ? "#eff6ff" : "transparent",
+                              borderRadius: 4,
+                            }}>{fmtTk(v)}</div>
+                          ))}
+                        </div>
+                        {/* Suma roczna po prawej */}
+                        <div style={{
+                          minWidth: 52, textAlign:"right", fontSize:11,
+                          color, fontWeight: isCurrent ? 700 : 500,
+                          paddingLeft: 8, whiteSpace:"nowrap",
+                          display:"flex", alignItems:"center", justifyContent:"flex-end"
+                        }}>
+                          <span style={{
+                            background: isCurrent ? "#dbeafe" : "#f8fafc",
+                            color, borderRadius:6, padding:"2px 7px", fontSize:11,
+                            fontWeight: isCurrent ? 700 : 500,
+                          }}>{yr}: {fmtTk(yearTotal)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {/* Wiersz różnicy 2026 vs 2025 */}
+                  {hasDiff && (
+                    <div style={{display:"flex", alignItems:"stretch", borderTop:"1px solid #f1f5f9", paddingTop:4, marginTop:2}}>
+                      <div style={{display:"grid", gridTemplateColumns:"repeat(12,1fr)", flex:1}}>
+                        {Array.from({length:12}, (_,mi) => {
+                          const diff = (yt26[mi]||0) - (yt25[mi]||0);
+                          const c = diff>0?"#15803d":diff<0?"#dc2626":"#9ca3af";
+                          return (
+                            <div key={mi} style={{textAlign:"center", fontSize:11, padding:"3px 0", color:c, fontWeight:700}}>
+                              {diff===0?"—":(diff>0?"+":"")+fmtTk(diff)}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {/* Suma różnicy */}
+                      {(() => {
+                        const totalDiff = yt26.reduce((s,v,i)=>s+(v||0)-(yt25[i]||0),0);
+                        const c = totalDiff>0?"#15803d":totalDiff<0?"#dc2626":"#9ca3af";
+                        return (
+                          <div style={{minWidth:52,textAlign:"right",paddingLeft:8,display:"flex",alignItems:"center",justifyContent:"flex-end"}}>
+                            <span style={{background:totalDiff>0?"#dcfce7":totalDiff<0?"#fee2e2":"#f8fafc",color:c,borderRadius:6,padding:"2px 7px",fontSize:11,fontWeight:700}}>
+                              Δ: {totalDiff>0?"+":""}{fmtTk(totalDiff)}
+                            </span>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
                 </div>
               )}
             </>
