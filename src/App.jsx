@@ -1090,8 +1090,8 @@ function App({ user, role, appUsers = [] }) {
                       // Pokaż jeśli pojazd ma aktywną pauzę
                       const hasPauza = pauzy.some(p => p.vehicleId === v.id && p.status !== "jazda" && p.start <= tISO && p.end >= tISO);
                       if (hasPauza) return true;
-                      const vf = frachtyList.filter(r => r.vehicleId === v.id && r.dataZaladunku)
-                        .sort((a,b) => (b.dataZaladunku||"").localeCompare(a.dataZaladunku||""));
+                      const vf = frachtyList.filter(r => r.vehicleId === v.id && (r.dataZaladunku || r.dataZlecenia))
+                        .sort((a,b) => (b.dataZaladunku||b.dataZlecenia||"").localeCompare(a.dataZaladunku||a.dataZlecenia||""));
                       if (vf.length === 0) return false;
                       const lastDone = vf.find(r => r.dataRozladunku && r.dataRozladunku < tISO);
                       if (!lastDone) return true;
@@ -1101,8 +1101,8 @@ function App({ user, role, appUsers = [] }) {
                       const driverName = (v.driverHistory||[]).find(d => !d.to)?.name || "—";
                       // Ostatni fracht dla tego pojazdu
                       const vFrachty = frachtyList
-                        .filter(r => r.vehicleId === v.id && r.dataZaladunku)
-                        .sort((a,b) => (b.dataZaladunku||"").localeCompare(a.dataZaladunku||""));
+                        .filter(r => r.vehicleId === v.id && (r.dataZaladunku || r.dataZlecenia))
+                        .sort((a,b) => (b.dataZaladunku||b.dataZlecenia||"").localeCompare(a.dataZaladunku||a.dataZlecenia||""));
                       const lastF = vFrachty[0] || null;
 
                       // ── NOWA LOGIKA STATUSÓW ──
@@ -5102,7 +5102,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
                             {(() => {
                               const op = operacyjne.find(o => o.vehicleId === selVehicle && o.year === selYear && o.month === mi+1);
                               const koszt_km = op?.kmLicznik && r?.costs ? (Object.values(r.costs||{}).reduce((s,v)=>s+v,0) / op.kmLicznik).toFixed(2) : null;
-                              const _wagi = frachtyList.filter(f => f.vehicleId === selVehicle && (f.dataZaladunku||'').startsWith(`${selYear}-${String(mi+1).padStart(2,'0')}`) && parseFloat(f.wagaLadunku) > 0); const sr_waga = (_wagi.length > 0 && f > 0) ? _wagi.reduce((s,f,_,arr) => s + (parseFloat(f.wagaLadunku)||0)/arr.length, 0) : (op?.srWaga || 0);
+                              const _wagi = frachtyList.filter(f => f.vehicleId === selVehicle && (f.dataZaladunku||f.dataZlecenia||'').startsWith(`${selYear}-${String(mi+1).padStart(2,'0')}`) && parseFloat(f.wagaLadunku) > 0); const sr_waga = (_wagi.length > 0 && f > 0) ? _wagi.reduce((s,f,_,arr) => s + (parseFloat(f.wagaLadunku)||0)/arr.length, 0) : (op?.srWaga || 0);
                               return (<>
                                 <td className="text-right px-3 py-2.5 text-gray-400">{op?.kmLicznik ? op.kmLicznik.toLocaleString("pl-PL") : <span className="text-gray-200">—</span>}</td>
                                 <td className="text-right px-3 py-2.5 text-gray-400">{op?.dni ? op.dni : <span className="text-gray-200">—</span>}</td>
