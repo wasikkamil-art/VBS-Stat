@@ -5357,99 +5357,91 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
             if (abs >= 1000) return (v/1000).toFixed(1) + "k";
             return Number.isInteger(v) ? String(v) : v.toFixed(1);
           };
-          // Marginesy wykresu — muszą pasować do LineChart margin i YAxis width
+          // Marginesy wykresu — muszą pasować do tabeli pod spodem
           const CHART_LEFT = 55; // margin.left(10) + YAxis width(45)
-          const CHART_RIGHT = 20; // margin.right(20)
+          const TOTAL_COL = 80;  // szerokość kolumny total po prawej
+          // margin.right wykresu = TOTAL_COL → tabela repeat(12,1fr) + TOTAL_COL px pasuje idealnie
 
           const showTable = sortedYrs.length > 0;
+          // Kolejność: bieżący rok pierwszy, potem poprzedni (desc)
+          const displayYrs = [...sortedYrs].reverse();
+          const curYr = displayYrs[0]; // najnowszy rok
+          const YRBG = { "2026":"#eff6ff", "2025":"#f8fafc", "2024":"#faf5ff" };
           return (
-            <div style={{display:"flex", gap:0, alignItems:"stretch"}}>
+            <div>
               {/* ── WYKRES ── */}
-              <div style={{flex:"1 1 0", minWidth:0}}>
-                <ResponsiveContainer width="100%" height={270}>
-                  <LineChart margin={{top:10,right:12,left:10,bottom:8}}
-                    data={MS.map((m,mi)=>({name:m,...Object.fromEntries(series.map((s,si)=>[si,s.pts[mi]||null]))}))}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false}/>
-                    <XAxis dataKey="name" tick={{fontSize:11,fill:"#94a3b8"}} height={20} axisLine={false} tickLine={false}/>
-                    <YAxis tick={{fontSize:10,fill:"#94a3b8"}} axisLine={false} tickLine={false} width={45}
-                      tickFormatter={v=>v>=1000?(v/1000).toFixed(1)+"k":v}/>
-                    <Tooltip formatter={(v,n)=>[v>=1000?(v/1000).toFixed(1)+"k":v?.toFixed(0), series[n]?.label||n]}
-                      contentStyle={{fontSize:12,borderRadius:8,border:"1px solid #e2e8f0"}}/>
-                    {series.map((s,si)=>(
-                      <Line key={si} type="monotone" dataKey={si} stroke={s.color} strokeWidth={2.5}
-                        dot={{r:3.5,fill:s.color,strokeWidth:2,stroke:"white"}}
-                        activeDot={{r:5}} connectNulls={false}/>
-                    ))}
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+              <ResponsiveContainer width="100%" height={270}>
+                <LineChart margin={{top:10,right:TOTAL_COL,left:10,bottom:8}}
+                  data={MS.map((m,mi)=>({name:m,...Object.fromEntries(series.map((s,si)=>[si,s.pts[mi]||null]))}))}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false}/>
+                  <XAxis dataKey="name" tick={{fontSize:11,fill:"#94a3b8"}} height={20} axisLine={false} tickLine={false}/>
+                  <YAxis tick={{fontSize:10,fill:"#94a3b8"}} axisLine={false} tickLine={false} width={45}
+                    tickFormatter={v=>v>=1000?(v/1000).toFixed(1)+"k":v}/>
+                  <Tooltip formatter={(v,n)=>[v>=1000?(v/1000).toFixed(1)+"k":v?.toFixed(0), series[n]?.label||n]}
+                    contentStyle={{fontSize:12,borderRadius:8,border:"1px solid #e2e8f0"}}/>
+                  {series.map((s,si)=>(
+                    <Line key={si} type="monotone" dataKey={si} stroke={s.color} strokeWidth={2.5}
+                      dot={{r:3.5,fill:s.color,strokeWidth:2,stroke:"white"}}
+                      activeDot={{r:5}} connectNulls={false}/>
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
 
-              {/* ── TABELA PODSUMOWANIA (po prawej) ── */}
+              {/* ── TABELA POD WYKRESEM — wariant C ── */}
+              {/* Bez nagłówka miesięcy — nazwy są na osi X wykresu */}
+              {/* grid: 12×1fr + stała kolumna TOTAL_COL px = idealnie pod wykresem */}
               {showTable && (
-                <div style={{
-                  flexShrink:0, width: hasDiff ? 180 : 140,
-                  borderLeft:"1px solid #f1f5f9", marginLeft:8, paddingLeft:10,
-                  display:"flex", flexDirection:"column", justifyContent:"center",
-                  fontSize:11,
-                }}>
-                  {/* Nagłówek kolumn: lata + Δ */}
-                  <div style={{display:"grid", gridTemplateColumns:`repeat(${sortedYrs.length+(hasDiff?1:0)},1fr)`, marginBottom:4, paddingBottom:4, borderBottom:"1px solid #f1f5f9"}}>
-                    {sortedYrs.map(yr=>(
-                      <div key={yr} style={{textAlign:"center",fontWeight:700,color:YRCOLORS[yr]||"#64748b",fontSize:10}}>{yr}</div>
-                    ))}
-                    {hasDiff && <div style={{textAlign:"center",fontWeight:700,color:"#374151",fontSize:10}}>Δ</div>}
-                  </div>
+                <div style={{marginLeft:CHART_LEFT, fontSize:11}}>
 
-                  {/* Wiersze miesięcy */}
-                  {MS.map((m, mi)=>{
-                    const diff = hasDiff ? (yt26[mi]||0)-(yt25[mi]||0) : null;
-                    const diffC = diff===null?"#9ca3af":diff>0?"#15803d":diff<0?"#dc2626":"#9ca3af";
+                  {/* Wiersze lat — bieżący rok pierwszy */}
+                  {displayYrs.map(yr=>{
+                    const isCur = yr===curYr;
+                    const col = YRCOLORS[yr]||"#64748b";
+                    const bg = YRBG[yr]||"#f8fafc";
+                    const yrTotal = (yearTotals[yr]||[]).reduce((s,v)=>s+(v||0),0);
                     return (
-                      <div key={m} style={{display:"grid", gridTemplateColumns:`repeat(${sortedYrs.length+(hasDiff?1:0)},1fr)`, padding:"1.5px 0"}}>
-                        {sortedYrs.map(yr=>{
+                      <div key={yr} style={{display:"grid", gridTemplateColumns:`repeat(12,1fr) ${TOTAL_COL}px`,
+                        background:bg, borderRadius:6, padding:"4px 0", marginTop:2, textAlign:"center", alignItems:"center"}}>
+                        {MS.map((_,mi)=>{
                           const v = yearTotals[yr]?.[mi]||0;
-                          const col = YRCOLORS[yr]||"#64748b";
-                          const isCur = yr==="2026";
                           return (
-                            <div key={yr} style={{
-                              textAlign:"center", color: v===0?"#d1d5db":col,
-                              fontWeight: isCur?700:400,
-                              background: isCur&&v>0?"#eff6ff":"transparent",
-                              borderRadius:3, padding:"1px 2px",
-                            }}>
-                              <div>{fmtTk(v)}</div>
-                              <div style={{fontSize:9,color:"#94a3b8",fontWeight:400}}>{m}</div>
+                            <div key={mi} style={{color:v===0?"#d1d5db":col, fontWeight:isCur?700:400, fontSize:11}}>
+                              {fmtTk(v)}
                             </div>
                           );
                         })}
-                        {hasDiff && (
-                          <div style={{textAlign:"center",color:diffC,fontWeight:700,padding:"1px 2px"}}>
-                            <div>{diff===0?"—":(diff>0?"+":"")+fmtTk(diff)}</div>
-                            <div style={{fontSize:9,color:"#94a3b8",fontWeight:400}}>{m}</div>
-                          </div>
-                        )}
+                        <div style={{paddingLeft:8,paddingRight:4,fontWeight:700,color:col,fontSize:10,whiteSpace:"nowrap",
+                          borderLeft:"1px solid "+(isCur?"#dbeafe":"#e5e7eb")}}>
+                          {yr}: {fmtTk(yrTotal)}
+                        </div>
                       </div>
                     );
                   })}
 
-                  {/* Suma łączna */}
-                  <div style={{display:"grid", gridTemplateColumns:`repeat(${sortedYrs.length+(hasDiff?1:0)},1fr)`, borderTop:"1px solid #f1f5f9", marginTop:4, paddingTop:4}}>
-                    {sortedYrs.map(yr=>{
-                      const total = (yearTotals[yr]||[]).reduce((s,v)=>s+(v||0),0);
-                      const col = YRCOLORS[yr]||"#64748b";
-                      return (
-                        <div key={yr} style={{textAlign:"center",fontWeight:700,color:col,fontSize:11}}>
-                          {fmtTk(total)}
+                  {/* Wiersz Δ (różnica) — tylko gdy oba lata */}
+                  {hasDiff && (()=>{
+                    const totalDiff = yt26.reduce((s,v,i)=>s+(v||0)-(yt25[i]||0),0);
+                    const totalC = totalDiff>0?"#15803d":totalDiff<0?"#dc2626":"#9ca3af";
+                    return (
+                      <div style={{display:"grid", gridTemplateColumns:`repeat(12,1fr) ${TOTAL_COL}px`,
+                        borderTop:"1px solid #e5e7eb", marginTop:4, paddingTop:4, textAlign:"center", alignItems:"center"}}>
+                        {MS.map((_,mi)=>{
+                          const d = (yt26[mi]||0)-(yt25[mi]||0);
+                          const c = d===0?"#9ca3af":d>0?"#15803d":"#dc2626";
+                          return (
+                            <div key={mi} style={{fontWeight:700,fontSize:10,color:c}}>
+                              {d===0?"—":(d>0?"+":"")+fmtTk(d)}
+                            </div>
+                          );
+                        })}
+                        <div style={{paddingLeft:8,paddingRight:4,fontWeight:700,color:totalC,fontSize:10,whiteSpace:"nowrap",
+                          borderLeft:"1px solid #e5e7eb"}}>
+                          Δ: {totalDiff>0?"+":""}{fmtTk(totalDiff)}
                         </div>
-                      );
-                    })}
-                    {hasDiff && (()=>{
-                      const td = yt26.reduce((s,v,i)=>s+(v||0)-(yt25[i]||0),0);
-                      const c = td>0?"#15803d":td<0?"#dc2626":"#9ca3af";
-                      return <div style={{textAlign:"center",fontWeight:700,color:c,fontSize:11}}>{td>0?"+":""}{fmtTk(td)}</div>;
-                    })()}
-                  </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>
