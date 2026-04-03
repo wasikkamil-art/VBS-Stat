@@ -5361,100 +5361,98 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
           const CHART_LEFT = 55; // margin.left(10) + YAxis width(45)
           const CHART_RIGHT = 20; // margin.right(20)
 
+          const showTable = sortedYrs.length > 0;
           return (
-            <>
-              <ResponsiveContainer width="100%" height={270}>
-                <LineChart margin={{top:10,right:CHART_RIGHT,left:10,bottom:8}}
-                  data={MS.map((m,mi)=>({name:m,...Object.fromEntries(series.map((s,si)=>[si,s.pts[mi]||null]))}))}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false}/>
-                  <XAxis dataKey="name" tick={{fontSize:11,fill:"#94a3b8"}} height={20} axisLine={false} tickLine={false}/>
-                  <YAxis tick={{fontSize:10,fill:"#94a3b8"}} axisLine={false} tickLine={false} width={45}
-                    tickFormatter={v=>v>=1000?(v/1000).toFixed(1)+"k":v}/>
-                  <Tooltip formatter={(v,n)=>[v>=1000?(v/1000).toFixed(1)+"k":v?.toFixed(0), series[n]?.label||n]}
-                    contentStyle={{fontSize:12,borderRadius:8,border:"1px solid #e2e8f0"}}/>
-                  {series.map((s,si)=>(
-                    <Line key={si} type="monotone" dataKey={si} stroke={s.color} strokeWidth={2.5}
-                      dot={{r:3.5,fill:s.color,strokeWidth:2,stroke:"white"}}
-                      activeDot={{r:5}} connectNulls={false}/>
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
+            <div style={{display:"flex", gap:0, alignItems:"stretch"}}>
+              {/* ── WYKRES ── */}
+              <div style={{flex:"1 1 0", minWidth:0}}>
+                <ResponsiveContainer width="100%" height={270}>
+                  <LineChart margin={{top:10,right:12,left:10,bottom:8}}
+                    data={MS.map((m,mi)=>({name:m,...Object.fromEntries(series.map((s,si)=>[si,s.pts[mi]||null]))}))}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false}/>
+                    <XAxis dataKey="name" tick={{fontSize:11,fill:"#94a3b8"}} height={20} axisLine={false} tickLine={false}/>
+                    <YAxis tick={{fontSize:10,fill:"#94a3b8"}} axisLine={false} tickLine={false} width={45}
+                      tickFormatter={v=>v>=1000?(v/1000).toFixed(1)+"k":v}/>
+                    <Tooltip formatter={(v,n)=>[v>=1000?(v/1000).toFixed(1)+"k":v?.toFixed(0), series[n]?.label||n]}
+                      contentStyle={{fontSize:12,borderRadius:8,border:"1px solid #e2e8f0"}}/>
+                    {series.map((s,si)=>(
+                      <Line key={si} type="monotone" dataKey={si} stroke={s.color} strokeWidth={2.5}
+                        dot={{r:3.5,fill:s.color,strokeWidth:2,stroke:"white"}}
+                        activeDot={{r:5}} connectNulls={false}/>
+                    ))}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
 
-              {/* ── TABELA MIESIĘCZNA — wyrównana do osi wykresu ── */}
-              {sortedYrs.length > 0 && (
-                <div style={{marginTop:2}}>
-                  {/* Wiersze lat */}
-                  {sortedYrs.map(yr => {
-                    const totals = yearTotals[yr] || [];
-                    const color = YRCOLORS[yr] || "#64748b";
-                    const isCurrent = yr === "2026";
-                    const yearTotal = totals.reduce((s,v)=>s+(v||0),0);
+              {/* ── TABELA PODSUMOWANIA (po prawej) ── */}
+              {showTable && (
+                <div style={{
+                  flexShrink:0, width: hasDiff ? 180 : 140,
+                  borderLeft:"1px solid #f1f5f9", marginLeft:8, paddingLeft:10,
+                  display:"flex", flexDirection:"column", justifyContent:"center",
+                  fontSize:11,
+                }}>
+                  {/* Nagłówek kolumn: lata + Δ */}
+                  <div style={{display:"grid", gridTemplateColumns:`repeat(${sortedYrs.length+(hasDiff?1:0)},1fr)`, marginBottom:4, paddingBottom:4, borderBottom:"1px solid #f1f5f9"}}>
+                    {sortedYrs.map(yr=>(
+                      <div key={yr} style={{textAlign:"center",fontWeight:700,color:YRCOLORS[yr]||"#64748b",fontSize:10}}>{yr}</div>
+                    ))}
+                    {hasDiff && <div style={{textAlign:"center",fontWeight:700,color:"#374151",fontSize:10}}>Δ</div>}
+                  </div>
+
+                  {/* Wiersze miesięcy */}
+                  {MS.map((m, mi)=>{
+                    const diff = hasDiff ? (yt26[mi]||0)-(yt25[mi]||0) : null;
+                    const diffC = diff===null?"#9ca3af":diff>0?"#15803d":diff<0?"#dc2626":"#9ca3af";
                     return (
-                      <div key={yr} style={{display:"flex", alignItems:"center", marginBottom:2}}>
-                        {/* Etykieta roku w obszarze YAxis (CHART_LEFT px) */}
-                        <div style={{
-                          width: CHART_LEFT, flexShrink:0, textAlign:"right",
-                          paddingRight:8, fontSize:10, fontWeight: isCurrent?700:500,
-                          color, whiteSpace:"nowrap"
-                        }}>
-                          {yr}: {fmtTk(yearTotal)}
-                        </div>
-                        {/* 12 kolumn danych — dokładnie obszar danych wykresu */}
-                        <div style={{
-                          flex:1, display:"grid", gridTemplateColumns:"repeat(12,1fr)",
-                          paddingRight: CHART_RIGHT
-                        }}>
-                          {totals.map((v, mi) => (
-                            <div key={mi} style={{
-                              textAlign:"center", fontSize:11, padding:"3px 2px",
-                              color: v===0 ? "#d1d5db" : color,
-                              fontWeight: isCurrent ? 700 : 400,
-                              background: isCurrent && v > 0 ? "#eff6ff" : "transparent",
-                              borderRadius: 4,
-                            }}>{fmtTk(v)}</div>
-                          ))}
-                        </div>
+                      <div key={m} style={{display:"grid", gridTemplateColumns:`repeat(${sortedYrs.length+(hasDiff?1:0)},1fr)`, padding:"1.5px 0"}}>
+                        {sortedYrs.map(yr=>{
+                          const v = yearTotals[yr]?.[mi]||0;
+                          const col = YRCOLORS[yr]||"#64748b";
+                          const isCur = yr==="2026";
+                          return (
+                            <div key={yr} style={{
+                              textAlign:"center", color: v===0?"#d1d5db":col,
+                              fontWeight: isCur?700:400,
+                              background: isCur&&v>0?"#eff6ff":"transparent",
+                              borderRadius:3, padding:"1px 2px",
+                            }}>
+                              <div>{fmtTk(v)}</div>
+                              <div style={{fontSize:9,color:"#94a3b8",fontWeight:400}}>{m}</div>
+                            </div>
+                          );
+                        })}
+                        {hasDiff && (
+                          <div style={{textAlign:"center",color:diffC,fontWeight:700,padding:"1px 2px"}}>
+                            <div>{diff===0?"—":(diff>0?"+":"")+fmtTk(diff)}</div>
+                            <div style={{fontSize:9,color:"#94a3b8",fontWeight:400}}>{m}</div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
 
-                  {/* Wiersz różnicy 2026 vs 2025 */}
-                  {hasDiff && (
-                    <div style={{display:"flex", alignItems:"center", borderTop:"1px solid #f1f5f9", paddingTop:3, marginTop:2}}>
-                      {/* Etykieta */}
-                      {(() => {
-                        const totalDiff = yt26.reduce((s,v,i)=>s+(v||0)-(yt25[i]||0),0);
-                        const c = totalDiff>0?"#15803d":totalDiff<0?"#dc2626":"#9ca3af";
-                        return (
-                          <div style={{
-                            width: CHART_LEFT, flexShrink:0, textAlign:"right",
-                            paddingRight:8, fontSize:10, fontWeight:700, color:c, whiteSpace:"nowrap"
-                          }}>
-                            Δ: {totalDiff>0?"+":""}{fmtTk(totalDiff)}
-                          </div>
-                        );
-                      })()}
-                      {/* Wartości */}
-                      <div style={{
-                        flex:1, display:"grid", gridTemplateColumns:"repeat(12,1fr)",
-                        paddingRight: CHART_RIGHT
-                      }}>
-                        {Array.from({length:12}, (_,mi) => {
-                          const diff = (yt26[mi]||0) - (yt25[mi]||0);
-                          const c = diff>0?"#15803d":diff<0?"#dc2626":"#9ca3af";
-                          return (
-                            <div key={mi} style={{textAlign:"center", fontSize:11, padding:"3px 2px", color:c, fontWeight:700}}>
-                              {diff===0?"—":(diff>0?"+":"")+fmtTk(diff)}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
+                  {/* Suma łączna */}
+                  <div style={{display:"grid", gridTemplateColumns:`repeat(${sortedYrs.length+(hasDiff?1:0)},1fr)`, borderTop:"1px solid #f1f5f9", marginTop:4, paddingTop:4}}>
+                    {sortedYrs.map(yr=>{
+                      const total = (yearTotals[yr]||[]).reduce((s,v)=>s+(v||0),0);
+                      const col = YRCOLORS[yr]||"#64748b";
+                      return (
+                        <div key={yr} style={{textAlign:"center",fontWeight:700,color:col,fontSize:11}}>
+                          {fmtTk(total)}
+                        </div>
+                      );
+                    })}
+                    {hasDiff && (()=>{
+                      const td = yt26.reduce((s,v,i)=>s+(v||0)-(yt25[i]||0),0);
+                      const c = td>0?"#15803d":td<0?"#dc2626":"#9ca3af";
+                      return <div style={{textAlign:"center",fontWeight:700,color:c,fontSize:11}}>{td>0?"+":""}{fmtTk(td)}</div>;
+                    })()}
+                  </div>
                 </div>
               )}
-            </>
+            </div>
           );
         })()}
       </div>
