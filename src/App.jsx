@@ -5376,6 +5376,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
             if (v === 0) return "—";
             const abs = Math.abs(v);
             if (abs >= 1000) return (v/1000).toFixed(1) + "k";
+            if (isRate) return v.toFixed(abs < 1 ? 2 : 1);
             return Number.isInteger(v) ? String(v) : v.toFixed(1);
           };
           // Marginesy wykresu — muszą pasować do tabeli pod spodem
@@ -5399,7 +5400,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                   <XAxis dataKey="name" scale="band" tick={false} height={4} axisLine={false} tickLine={false} padding={{left:0,right:0}}/>
                   <YAxis tick={{fontSize:10,fill:"#94a3b8"}} axisLine={false} tickLine={false} width={45}
                     tickFormatter={v=>v>=1000?(v/1000).toFixed(1)+"k":v}/>
-                  <Tooltip formatter={(v,n)=>[v>=1000?(v/1000).toFixed(1)+"k":v?.toFixed(0), series[n]?.label||n]}
+                  <Tooltip formatter={(v,n)=>[v>=1000?(v/1000).toFixed(1)+"k":(isRate?v?.toFixed(v<1?2:1):v?.toFixed(0)), series[n]?.label||n]}
                     contentStyle={{fontSize:12,borderRadius:8,border:"1px solid #e2e8f0"}}/>
                   {series.map((s,si)=>(
                     <Line key={si} type="monotone" dataKey={si} stroke={s.color} strokeWidth={2.5}
