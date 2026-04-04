@@ -633,8 +633,8 @@ function App({ user, role, appUsers = [] }) {
   const [czasPracyVehicleId, setCzasPracyVehicleId] = useState(null); // otwarty panel czasu pracy na dashboardzie
   const [filterVehicle, setFilterVehicle]     = useState("all");
   const [filterCat, setFilterCat]             = useState("all");
-  const [filterMonth, setFilterMonth]         = useState("all");
-  const [filterYear, setCostFilterYear]       = useState("all");
+  const [filterMonth, setFilterMonth]         = useState(`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,"0")}`);
+  const [filterYear, setCostFilterYear]       = useState(String(new Date().getFullYear()));
   const [filterNote, setFilterNote]           = useState("all");
 
   // ── LOAD — real-time onSnapshot ──
@@ -7705,8 +7705,8 @@ const FV_STATUSES = [
 function FVTab({ frachtyList, vehicles, onUpdate }) {
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [filterStatus, setFilterStatus] = useState("all");
-  const [filterYear, setFilterYear] = useState("all");
-  const [filterMonth, setFilterMonth] = useState("all");
+  const [filterYear, setFilterYear] = useState(String(new Date().getFullYear()));
+  const [filterMonth, setFilterMonth] = useState(String(new Date().getMonth()+1).padStart(2,"0"));
   const [editFVId, setEditFVId] = useState(null);
 
   const fmt = (n) => n ? parseFloat(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-";
