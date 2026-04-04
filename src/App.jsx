@@ -8113,8 +8113,8 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
   const [showImport, setShowImport] = useState(false);
-  const [overviewYear, setOverviewYear] = useState("all");
-  const [overviewMonth, setOverviewMonth] = useState("all");
+  const [overviewYear, setOverviewYear] = useState(String(new Date().getFullYear()));
+  const [overviewMonth, setOverviewMonth] = useState(String(new Date().getMonth() + 1).padStart(2, "0"));
   const [filterMonth, setFilterMonth] = useState(null);
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
   const fmt = (n) => n && parseFloat(n) > 0 ? parseFloat(n).toLocaleString("pl-PL",{minimumFractionDigits:2,maximumFractionDigits:2}) : "—";
