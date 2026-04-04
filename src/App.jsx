@@ -1637,10 +1637,36 @@ function App({ user, role, appUsers = [] }) {
                 const totalEUR = filteredCosts.reduce((s,c) => s + getEUR(c), 0);
                 const totalPLN = filteredTotal;
 
+                // Średnia cena €/L paliwa — łączymy 2 źródła:
+                // A) rekordy kosztów z litrami (importy marzec+)
+                // B) operacyjne.cenaPaliwa ważone paliwoL (starsze miesiące)
+                const fuelWithL = filteredCosts.filter(c => c.category === "paliwo" && (c.liters || 0) > 0);
+                let sumEUR = fuelWithL.reduce((s,c) => s + getEUR(c), 0);
+                let sumL   = fuelWithL.reduce((s,c) => s + (parseFloat(c.liters) || 0), 0);
+                // Zbierz miesiące pokryte przez koszty z litrami
+                const coveredMonths = new Set(fuelWithL.map(c => c.date?.slice(0,7)));
+                // Dodaj z operacyjne miesiące których NIE pokrywają koszty
+                if (operacyjne && operacyjne.length > 0) {
+                  operacyjne.forEach(op => {
+                    if (filterYear !== "all" && op.year !== parseInt(filterYear)) return;
+                    if (filterMonth !== "all") {
+                      const opM = `${op.year}-${String(op.month).padStart(2,"0")}`;
+                      if (opM !== filterMonth) return;
+                    }
+                    const opKey = `${op.year}-${String(op.month).padStart(2,"0")}`;
+                    if (coveredMonths.has(opKey)) return; // ten miesiąc już z kosztów
+                    if (op.cenaPaliwa > 0 && op.paliwoL > 0) {
+                      sumEUR += op.cenaPaliwa * op.paliwoL;
+                      sumL   += op.paliwoL;
+                    }
+                  });
+                }
+                const avgEurPerL = sumL > 0 ? (sumEUR / sumL) : 0;
+
                 return (
                   <div className="mb-5 space-y-3">
                     {/* KPI */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                       <div className="bg-white rounded-xl p-3 border border-gray-100">
                         <div className="text-xs text-gray-400 mb-1">Łącznie EUR</div>
                         <div className="text-lg font-bold text-gray-900">{totalEUR.toLocaleString("pl-PL",{minimumFractionDigits:2,maximumFractionDigits:2})} €</div>
@@ -1656,6 +1682,10 @@ function App({ user, role, appUsers = [] }) {
                       <div className="bg-white rounded-xl p-3 border border-gray-100">
                         <div className="text-xs text-gray-400 mb-1">Główna kategoria</div>
                         <div className="text-sm font-bold text-gray-900 truncate">{byCat[0] ? `${byCat[0].icon} ${byCat[0].label}` : "—"}</div>
+                      </div>
+                      <div className="bg-white rounded-xl p-3 border border-gray-100">
+                        <div className="text-xs text-gray-400 mb-1">Śr. cena paliwa</div>
+                        <div className="text-lg font-bold text-gray-900">{avgEurPerL > 0 ? avgEurPerL.toFixed(3) : "—"} €/L</div>
                       </div>
                     </div>
 
