@@ -1015,6 +1015,7 @@ function App({ user, role, appUsers = [] }) {
               ...((isAdmin || isDyspozytor) ? [
                 { id: "sprawy", label: "Sprawy", badge: sprawyList.filter(s => !['zamknieta','wygrana','przegrana'].includes(s.status) && (s.przypisani||[]).includes(user?.email)).length || null, icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v6"/><line x1="7" y1="13" x2="12" y2="13"/><line x1="7" y1="17" x2="10" y2="17"/></svg> },
               ] : []),
+              { id: "chat", label: "Czat", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> },
             ].map((item) => (
               <button key={item.id} onClick={() => setTab(item.id)}
                 className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm text-left transition-all"
@@ -2088,6 +2089,10 @@ function App({ user, role, appUsers = [] }) {
             <EmailStatusTab showToast={showToast} />
           )}
 
+          {tab === "chat" && (
+            <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} />
+          )}
+
           {tab === "sprawy" && (isAdmin || isDyspozytor) && (
             <SprawyTab
               sprawyList={sprawyList}
@@ -2138,6 +2143,7 @@ function App({ user, role, appUsers = [] }) {
             ...((isAdmin||isDyspozytor) ? [
               { id: "sprawy", label: "Sprawy", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v6"/><line x1="7" y1="13" x2="12" y2="13"/><line x1="7" y1="17" x2="10" y2="17"/></svg> },
             ] : []),
+            { id: "chat", label: "Czat", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> },
             ...(isAdmin ? [
               { id: "users", label: "Osoby", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
               { id: "email", label: "Email", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> },
@@ -2152,6 +2158,388 @@ function App({ user, role, appUsers = [] }) {
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CHAT TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+function ChatTab({ currentUser, appUsers = [], showToast }) {
+  const [rooms, setRooms] = useState([]);
+  const [activeRoom, setActiveRoom] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [msgText, setMsgText] = useState("");
+  const [showNewRoom, setShowNewRoom] = useState(false);
+  const [newRoomName, setNewRoomName] = useState("");
+  const [newRoomType, setNewRoomType] = useState("channel");
+  const [newRoomMembers, setNewRoomMembers] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [showMembers, setShowMembers] = useState(false);
+  const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  // Pobierz pokoje czatu (real-time)
+  useEffect(() => {
+    const q = query(collection(db, "chatRooms"), orderBy("lastMessageAt", "desc"));
+    const unsub = onSnapshot(q, (snap) => {
+      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // Pokaż tylko pokoje gdzie user jest członkiem
+      const myRooms = all.filter(r =>
+        r.type === "channel" || (r.members || []).includes(currentUser.uid)
+      );
+      setRooms(myRooms);
+    });
+    return () => unsub();
+  }, [currentUser.uid]);
+
+  // Pobierz wiadomości aktywnego pokoju (real-time)
+  useEffect(() => {
+    if (!activeRoom) { setMessages([]); return; }
+    const q = query(
+      collection(db, "chatRooms", activeRoom.id, "messages"),
+      orderBy("timestamp", "asc")
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      setMessages(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return () => unsub();
+  }, [activeRoom?.id]);
+
+  // Auto-scroll do ostatniej wiadomości
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // Wyślij wiadomość
+  const sendMessage = async (text, fileUrl, fileName) => {
+    if (!activeRoom) return;
+    if (!text?.trim() && !fileUrl) return;
+    const msg = {
+      text: text?.trim() || "",
+      senderId: currentUser.uid,
+      senderEmail: currentUser.email,
+      senderName: appUsers.find(u => u.uid === currentUser.uid)?.email?.split("@")[0] || currentUser.email,
+      timestamp: new Date().toISOString(),
+    };
+    if (fileUrl) { msg.fileUrl = fileUrl; msg.fileName = fileName; }
+    try {
+      await addDoc(collection(db, "chatRooms", activeRoom.id, "messages"), msg);
+      // Aktualizuj ostatnią wiadomość w pokoju
+      await updateDoc(doc(db, "chatRooms", activeRoom.id), {
+        lastMessage: text?.trim() || fileName || "📎 Plik",
+        lastMessageAt: new Date().toISOString(),
+        lastSender: currentUser.email,
+      });
+      setMsgText("");
+    } catch (e) { console.error("sendMessage", e); showToast("Błąd wysyłania"); }
+  };
+
+  // Upload pliku
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) { showToast("Maks. 10MB"); return; }
+    setUploading(true);
+    try {
+      const path = `chat/${activeRoom.id}/${Date.now()}_${file.name}`;
+      const sRef = storageRef(storage, path);
+      await uploadBytes(sRef, file);
+      const url = await getDownloadURL(sRef);
+      await sendMessage("", url, file.name);
+    } catch (e) { console.error("upload", e); showToast("Błąd uploadu"); }
+    setUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  // Utwórz nowy pokój
+  const createRoom = async () => {
+    if (!newRoomName.trim()) { showToast("Podaj nazwę"); return; }
+    const room = {
+      name: newRoomName.trim(),
+      type: newRoomType,
+      members: newRoomType === "channel"
+        ? appUsers.map(u => u.uid)
+        : [currentUser.uid, ...newRoomMembers],
+      createdBy: currentUser.uid,
+      createdAt: new Date().toISOString(),
+      lastMessage: "",
+      lastMessageAt: new Date().toISOString(),
+      lastSender: "",
+    };
+    try {
+      const docRef = await addDoc(collection(db, "chatRooms"), room);
+      setShowNewRoom(false);
+      setNewRoomName("");
+      setNewRoomMembers([]);
+      setActiveRoom({ id: docRef.id, ...room });
+      showToast("Pokój utworzony");
+    } catch (e) { console.error("createRoom", e); showToast("Błąd tworzenia"); }
+  };
+
+  // Formatuj czas
+  const fmtTime = (ts) => {
+    if (!ts) return "";
+    const d = new Date(ts);
+    const now = new Date();
+    const isToday = d.toDateString() === now.toDateString();
+    const time = d.toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
+    if (isToday) return time;
+    return `${d.toLocaleDateString("pl-PL", { day: "numeric", month: "short" })} ${time}`;
+  };
+
+  // Ikona typu pokoju
+  const roomIcon = (r) => {
+    if (r.type === "dm") return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>;
+    if (r.type === "group") return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>;
+    return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
+  };
+
+  // Nazwa pokoju DM → pokaż email drugiej osoby
+  const roomDisplayName = (r) => {
+    if (r.type === "dm" && r.members) {
+      const other = r.members.find(uid => uid !== currentUser.uid);
+      const otherUser = appUsers.find(u => u.uid === other);
+      return otherUser?.email?.split("@")[0] || r.name;
+    }
+    return r.name;
+  };
+
+  // Rozpocznij DM z osobą
+  const startDM = (targetUid) => {
+    // Sprawdź czy DM już istnieje
+    const existing = rooms.find(r =>
+      r.type === "dm" && r.members?.includes(targetUid) && r.members?.includes(currentUser.uid) && r.members?.length === 2
+    );
+    if (existing) { setActiveRoom(existing); setShowNewRoom(false); return; }
+    // Utwórz nowy DM
+    const target = appUsers.find(u => u.uid === targetUid);
+    setNewRoomName(`DM: ${target?.email?.split("@")[0] || "?"}`);
+    setNewRoomType("dm");
+    setNewRoomMembers([targetUid]);
+    createRoom();
+  };
+
+  return (
+    <div className="flex h-[calc(100vh-2rem)] bg-white rounded-xl border border-gray-100 overflow-hidden">
+      {/* LISTA POKOJÓW */}
+      <div className={`${activeRoom ? "hidden md:flex" : "flex"} flex-col w-full md:w-72 border-r border-gray-100 bg-gray-50/50`}>
+        <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+          <h2 className="font-semibold text-gray-800">Czat</h2>
+          <button onClick={() => setShowNewRoom(true)}
+            className="p-1.5 rounded-lg hover:bg-gray-200 transition-colors text-gray-500"
+            title="Nowy pokój">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {rooms.length === 0 && (
+            <div className="p-6 text-center text-gray-400 text-sm">
+              Brak pokojów. Utwórz pierwszy!
+            </div>
+          )}
+          {rooms.map(r => (
+            <button key={r.id} onClick={() => setActiveRoom(r)}
+              className="w-full text-left px-4 py-3 border-b border-gray-50 hover:bg-gray-100/80 transition-colors"
+              style={{ background: activeRoom?.id === r.id ? "#eff6ff" : "transparent" }}>
+              <div className="flex items-center gap-2">
+                <span className="text-gray-400">{roomIcon(r)}</span>
+                <span className="font-medium text-sm text-gray-800 truncate">{roomDisplayName(r)}</span>
+              </div>
+              {r.lastMessage && (
+                <div className="mt-1 flex items-center gap-1">
+                  <span className="text-xs text-gray-400 truncate max-w-[160px]">
+                    {r.lastSender ? `${r.lastSender.split("@")[0]}: ` : ""}{r.lastMessage}
+                  </span>
+                  <span className="text-xs text-gray-300 ml-auto flex-shrink-0">{fmtTime(r.lastMessageAt)}</span>
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* OKNO ROZMOWY */}
+      <div className={`${activeRoom ? "flex" : "hidden md:flex"} flex-col flex-1`}>
+        {activeRoom ? (
+          <>
+            {/* Header pokoju */}
+            <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3 bg-white">
+              <button onClick={() => setActiveRoom(null)} className="md:hidden p-1 text-gray-400">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+              </button>
+              <span className="text-gray-400">{roomIcon(activeRoom)}</span>
+              <h3 className="font-semibold text-gray-800">{roomDisplayName(activeRoom)}</h3>
+              <span className="text-xs text-gray-400">
+                {activeRoom.type === "channel" ? "kanał" : activeRoom.type === "dm" ? "prywatna" : "grupa"}
+              </span>
+              <button onClick={() => setShowMembers(!showMembers)} className="ml-auto p-1.5 rounded-lg hover:bg-gray-100 text-gray-400" title="Członkowie">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              </button>
+            </div>
+
+            {/* Panel członków */}
+            {showMembers && (
+              <div className="px-4 py-2 bg-blue-50 border-b border-blue-100 text-xs text-gray-600">
+                <strong>Członkowie:</strong>{" "}
+                {(activeRoom.members || []).map(uid => {
+                  const u = appUsers.find(a => a.uid === uid);
+                  return u?.email?.split("@")[0] || uid;
+                }).join(", ")}
+              </div>
+            )}
+
+            {/* Wiadomości */}
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-1">
+              {messages.length === 0 && (
+                <div className="text-center text-gray-300 text-sm py-12">Brak wiadomości. Napisz pierwszą!</div>
+              )}
+              {messages.map((m, i) => {
+                const isMine = m.senderId === currentUser.uid;
+                const showSender = !isMine && (i === 0 || messages[i - 1]?.senderId !== m.senderId);
+                return (
+                  <div key={m.id} className={`flex ${isMine ? "justify-end" : "justify-start"}`}>
+                    <div className={`max-w-[75%] ${isMine ? "order-1" : ""}`}>
+                      {showSender && (
+                        <div className="text-xs text-gray-400 mb-0.5 ml-1">{m.senderName || m.senderEmail?.split("@")[0]}</div>
+                      )}
+                      <div className={`px-3 py-2 rounded-2xl text-sm ${
+                        isMine
+                          ? "bg-blue-500 text-white rounded-br-md"
+                          : "bg-gray-100 text-gray-800 rounded-bl-md"
+                      }`}>
+                        {m.text && <div style={{whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{m.text}</div>}
+                        {m.fileUrl && (
+                          <a href={safeHref(m.fileUrl)} target="_blank" rel="noopener noreferrer"
+                            className={`flex items-center gap-1.5 mt-1 text-xs ${isMine ? "text-blue-100 hover:text-white" : "text-blue-600 hover:text-blue-700"}`}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                            {m.fileName || "Plik"}
+                          </a>
+                        )}
+                        {m.fileUrl && m.fileName?.match(/\.(jpg|jpeg|png|gif|webp)$/i) && (
+                          <img src={m.fileUrl} alt={m.fileName} className="mt-2 rounded-lg max-w-full max-h-48 object-cover cursor-pointer"
+                            onClick={() => window.open(m.fileUrl, "_blank")} />
+                        )}
+                      </div>
+                      <div className={`text-xs text-gray-300 mt-0.5 ${isMine ? "text-right mr-1" : "ml-1"}`}>
+                        {fmtTime(m.timestamp)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* Input wiadomości */}
+            <div className="px-4 py-3 border-t border-gray-100 bg-white">
+              <div className="flex items-center gap-2">
+                <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
+                <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
+                  className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors disabled:opacity-50"
+                  title="Dodaj plik">
+                  {uploading ? (
+                    <svg width="18" height="18" viewBox="0 0 24 24" className="animate-spin" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v4m0 12v4m-7.07-3.93l2.83-2.83m8.48-8.48l2.83-2.83M2 12h4m12 0h4m-3.93 7.07l-2.83-2.83M7.76 7.76L4.93 4.93"/></svg>
+                  ) : (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                  )}
+                </button>
+                <input
+                  type="text"
+                  value={msgText}
+                  onChange={e => setMsgText(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(msgText); } }}
+                  placeholder="Napisz wiadomość..."
+                  className="flex-1 px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
+                />
+                <button onClick={() => sendMessage(msgText)} disabled={!msgText.trim()}
+                  className="p-2 rounded-xl bg-blue-500 text-white hover:bg-blue-600 transition-colors disabled:opacity-30 disabled:hover:bg-blue-500">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                </button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-gray-300">
+            <div className="text-center">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mx-auto mb-3 opacity-30"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              <div className="text-sm">Wybierz pokój lub utwórz nowy</div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* MODAL — NOWY POKÓJ */}
+      {showNewRoom && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowNewRoom(false)}>
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-lg mb-4">Nowy pokój czatu</h3>
+
+            <label className="block text-sm text-gray-600 mb-1">Nazwa</label>
+            <input type="text" value={newRoomName} onChange={e => setNewRoomName(e.target.value)}
+              placeholder="np. Ogólny, Trasa FR, ..."
+              className="w-full px-3 py-2 border rounded-lg text-sm mb-3 focus:outline-none focus:border-blue-400" />
+
+            <label className="block text-sm text-gray-600 mb-1">Typ</label>
+            <div className="flex gap-2 mb-3">
+              {[
+                { id: "channel", label: "Kanał", desc: "Wszyscy zalogowani" },
+                { id: "group", label: "Grupa", desc: "Wybrane osoby" },
+                { id: "dm", label: "Prywatna", desc: "1 na 1" },
+              ].map(t => (
+                <button key={t.id} onClick={() => { setNewRoomType(t.id); setNewRoomMembers([]); }}
+                  className={`flex-1 p-2 rounded-lg border text-xs text-center transition-colors ${
+                    newRoomType === t.id ? "border-blue-400 bg-blue-50 text-blue-700" : "border-gray-200 text-gray-500 hover:bg-gray-50"
+                  }`}>
+                  <div className="font-medium">{t.label}</div>
+                  <div className="text-gray-400 mt-0.5">{t.desc}</div>
+                </button>
+              ))}
+            </div>
+
+            {/* Wybór członków dla grupy/DM */}
+            {(newRoomType === "group" || newRoomType === "dm") && (
+              <div className="mb-3">
+                <label className="block text-sm text-gray-600 mb-1">
+                  {newRoomType === "dm" ? "Wybierz osobę" : "Wybierz członków"}
+                </label>
+                <div className="max-h-40 overflow-y-auto border rounded-lg">
+                  {appUsers.filter(u => u.uid !== currentUser.uid).map(u => (
+                    <label key={u.uid}
+                      className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-50 last:border-0">
+                      <input
+                        type={newRoomType === "dm" ? "radio" : "checkbox"}
+                        name="member"
+                        checked={newRoomMembers.includes(u.uid)}
+                        onChange={() => {
+                          if (newRoomType === "dm") {
+                            setNewRoomMembers([u.uid]);
+                          } else {
+                            setNewRoomMembers(prev =>
+                              prev.includes(u.uid) ? prev.filter(id => id !== u.uid) : [...prev, u.uid]
+                            );
+                          }
+                        }}
+                        className="accent-blue-500"
+                      />
+                      <span className="text-sm text-gray-700">{u.email}</span>
+                      <span className="text-xs text-gray-400 ml-auto">{u.role || "user"}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setShowNewRoom(false)}
+                className="px-4 py-2 text-sm text-gray-500 hover:bg-gray-100 rounded-lg">Anuluj</button>
+              <button onClick={createRoom}
+                className="px-4 py-2 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600">Utwórz</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

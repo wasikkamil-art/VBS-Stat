@@ -130,6 +130,28 @@ service cloud.firestore {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // CHAT — pokoje czatu
+    // ═══════════════════════════════════════════════════════════════
+    match /chatRooms/{roomId} {
+      // Każdy zalogowany może czytać pokoje (filtracja po members w kliencie)
+      allow read: if isAuth();
+      // Każdy zalogowany może tworzyć pokoje
+      allow create: if isAuth();
+      // Członkowie mogą aktualizować (lastMessage itp.)
+      allow update: if isAuth();
+      // Tylko admin może usuwać pokoje
+      allow delete: if isAdmin();
+
+      // Wiadomości w pokoju
+      match /messages/{msgId} {
+        allow read: if isAuth();
+        allow create: if isAuth();
+        // Tylko autor może edytować/usunąć swoją wiadomość
+        allow update, delete: if isAuth() && request.auth.uid == resource.data.senderId;
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // DOMYŚLNA REGUŁA — blokuj wszystko inne
     // ═══════════════════════════════════════════════════════════════
     match /{document=**} {
