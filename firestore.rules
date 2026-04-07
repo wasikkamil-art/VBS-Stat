@@ -159,8 +159,10 @@ service cloud.firestore {
     // FCM TOKENS — push notifications
     // Każdy zalogowany może zapisać/odczytać SWÓJ token
     // ═══════════════════════════════════════════════════════════════
-    match /fcmTokens/{uid} {
-      allow read, write: if isAuth() && request.auth.uid == uid;
+    match /fcmTokens/{tokenDoc} {
+      allow read: if isAuth();
+      allow create, update: if isAuth() && request.resource.data.uid == request.auth.uid;
+      allow delete: if isAuth();
     }
 
     // ═══════════════════════════════════════════════════════════════

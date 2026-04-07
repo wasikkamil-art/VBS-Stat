@@ -9,11 +9,12 @@
  * Nowi użytkownicy obsługiwani przez App.jsx + onRoleChange trigger.
  */
 
-const { onDocumentWritten } = require("firebase-functions/v2/firestore");
+const { onDocumentWritten, onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { onCall, HttpsError }  = require("firebase-functions/v2/https");
 const { initializeApp }       = require("firebase-admin/app");
 const { getAuth }             = require("firebase-admin/auth");
 const { getFirestore }        = require("firebase-admin/firestore");
+const { getMessaging }        = require("firebase-admin/messaging");
 
 // Inicjalizacja Firebase Admin
 initializeApp();
@@ -443,5 +444,86 @@ exports.sendFleetEmailNow = onCall(
     if (!request.auth) throw new HttpsError("unauthenticated", "Musisz być zalogowany.");
     if (request.auth.token.role !== "admin") throw new HttpsError("permission-denied", "Tylko admin.");
     return await sendFleetStatusEmail();
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════
+// 4. PUSH NOTIFICATIONS — nowa wiadomość w czacie
+//    Trigger: nowy dokument w chatRooms/{roomId}/messages
+//    Wysyła push do wszystkich członków pokoju OPRÓCZ nadawcy
+// ═══════════════════════════════════════════════════════════════
+exports.onNewChatMessage = onDocumentCreated(
+  { document: "chatRooms/{roomId}/messages/{msgId}", region: "europe-west1" },
+  async (event) => {
+    const msgData = event.data?.data();
+    if (!msgData) return;
+
+    const roomId = event.params.roomId;
+    const senderId = msgData.senderId;
+    const senderName = msgData.senderName || msgData.senderEmail?.split("@")[0] || "Ktoś";
+    const text = msgData.deleted ? "Wiadomość usunięta" : (msgData.text || "📎 Plik");
+
+    const db = getFirestore();
+
+    // 1. Pobierz dane pokoju (członkowie, nazwa)
+    const roomSnap = await db.doc(`chatRooms/${roomId}`).get();
+    if (!roomSnap.exists) return;
+    const room = roomSnap.data();
+    const roomName = room.name || "Czat";
+    const members = room.members || [];
+
+    // 2. Pobierz FCM tokeny członków (oprócz nadawcy)
+    // Tokeny zapisane jako {uid}_{tokenHash} — szukamy po polu uid
+    const recipientUids = members.filter(uid => uid !== senderId);
+    if (recipientUids.length === 0) return;
+
+    // Pobierz WSZYSTKIE tokeny dla odbiorców (wiele urządzeń per user)
+    const allTokenSnaps = await db.collection("fcmTokens")
+      .where("uid", "in", recipientUids.slice(0, 30)) // Firestore limit: 30 per "in"
+      .get();
+    const tokens = allTokenSnaps.docs
+      .filter(d => d.data().token)
+      .map(d => ({ docId: d.id, uid: d.data().uid, token: d.data().token }));
+
+    if (tokens.length === 0) return;
+
+    // 3. Wyślij push notifications
+    const messaging = getMessaging();
+    const results = await Promise.allSettled(
+      tokens.map(({ token }) =>
+        messaging.send({
+          token,
+          notification: {
+            title: room.type === "dm" ? senderName : `${roomName}`,
+            body: room.type === "dm" ? text : `${senderName}: ${text}`,
+          },
+          data: { roomId, senderId, type: "chat" },
+          webpush: {
+            fcmOptions: { link: "https://fleetstat.pl" },
+            notification: {
+              icon: "/icon-192.png",
+              badge: "/icon-192.png",
+              tag: roomId,
+              renotify: true,
+              vibrate: [200, 100, 200],
+            },
+          },
+        })
+      )
+    );
+
+    // 4. Usuń nieaktywne tokeny
+    const failedDocIds = [];
+    results.forEach((r, i) => {
+      if (r.status === "rejected" && r.reason?.code === "messaging/registration-token-not-registered") {
+        failedDocIds.push(tokens[i].docId);
+      }
+    });
+    if (failedDocIds.length > 0) {
+      await Promise.all(failedDocIds.map(id => db.doc(`fcmTokens/${id}`).delete()));
+    }
+
+    const sent = results.filter(r => r.status === "fulfilled").length;
+    console.log(`✅ Push sent: ${sent}/${tokens.length} for room ${roomName}`);
   }
 );

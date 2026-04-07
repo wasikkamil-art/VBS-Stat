@@ -48,8 +48,10 @@ async function registerFCMToken(uid) {
       serviceWorkerRegistration: sw,
     });
     if (token) {
-      // Zapisz token w Firestore — Cloud Function użyje go do wysyłki push
-      await setDoc(doc(db, "fcmTokens", uid), {
+      // Zapisz token w Firestore — każde urządzenie ma osobny dokument
+      // Klucz to hash tokena (pierwsze 20 znaków) żeby nie nadpisywać tokenów z innych urządzeń
+      const tokenId = token.slice(0, 20).replace(/[^a-zA-Z0-9]/g, "");
+      await setDoc(doc(db, "fcmTokens", `${uid}_${tokenId}`), {
         token, updatedAt: new Date().toISOString(), uid,
       }, { merge: true });
     }
