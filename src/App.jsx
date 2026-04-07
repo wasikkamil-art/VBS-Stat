@@ -2245,12 +2245,18 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
   }, [activeRoom?.id]);
 
   const chatContainerRef = useRef(null);
+  const lastMsgIdRef = useRef(null);
 
-  // Auto-scroll do ostatniej wiadomości (tylko w kontenerze czatu, nie całej strony)
+  // Auto-scroll TYLKO gdy pojawi się nowa wiadomość (nie przy update readBy)
   useEffect(() => {
-    const container = chatContainerRef.current;
-    if (container) {
-      container.scrollTop = container.scrollHeight;
+    if (messages.length === 0) return;
+    const lastId = messages[messages.length - 1]?.id;
+    if (lastId !== lastMsgIdRef.current) {
+      lastMsgIdRef.current = lastId;
+      const container = chatContainerRef.current;
+      if (container) {
+        container.scrollTop = container.scrollHeight;
+      }
     }
   }, [messages]);
 
