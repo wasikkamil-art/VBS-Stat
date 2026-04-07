@@ -1,4 +1,4 @@
-# VBS-Stat — Zasady i podsumowanie prac
+# VBS-Stat (FleetStat) — Zasady, procesy i podsumowanie prac
 
 ## 1. Flota pojazdów
 
@@ -10,6 +10,8 @@
 | v4 | TK314CL | — |
 | v5 | WGM0507M | — |
 | v6 | TK315CL | — |
+
+**Pomijane rejestracje (nie nasze):** OKAZICIEL3/4/5, TRUCK, TK135AM, UNIVERSAL5570
 
 ---
 
@@ -45,27 +47,56 @@ Wzór: `netto = brutto / (1 + VAT)`
 
 ---
 
-## 4. Kursy walut (marzec 2026)
+## 4. Kursy walut
 
-| Waluta | Kurs do EUR |
-|--------|------------|
-| PLN | 4.285 (dzielimy PLN / 4.285) |
-| CZK | 24.21 (dzielimy CZK / 24.21) |
-| EUR | 1.0 |
+### Zasada: kurs dzienny NBP z dnia transakcji
+- API: `https://api.nbp.pl/api/exchangerates/rates/a/eur/YYYY-MM-DD/?format=json`
+- Jeśli dzień wolny → NBP zwraca 404, szukamy dzień wcześniej (max -5 dni)
+- Plik cache: `nbp-rates.json` — 209 kursów dziennych (cze 2025 — mar 2026)
+
+| Waluta | Sposób przeliczenia |
+|--------|-------------------|
+| PLN | `amountEUR = amountPLN / kurs_NBP_z_dnia` |
+| CZK | `amountEUR = amountCZK / kurs_CZK_z_dnia` |
+| EUR | bez przeliczenia |
 
 ---
 
-## 5. Struktura rekordu kosztu w Firebase
+## 5. Struktura danych w Firebase
 
-Dokument: `fleet/data`, pole: `fleetv2_costs` (tablica obiektów)
+### Główny dokument: `fleet/data`
+
+| Pole | Typ | Opis |
+|------|-----|------|
+| `fleetv2_costs` | array[1358] | Koszty (paliwo, opłaty, serwis...) |
+| `fleetv2_frachty` | array[544] | Frachty |
+| `fleetv2_vehicles` | array[6] | Pojazdy |
+| `fleetv2_records` | array[72] | Rekordy miesięczne |
+| `fleetv2_rent` | array[82] | Rentowność |
+| `fleetv2_categories` | array[17] | Kategorie kosztów |
+| `fleetv2_imi` | array[34] | Dane IMI |
+| `fleetv2_docs` | array[0] | Dokumenty |
+| `fleetv2_sprawy` | array[0] | Sprawy (przeniesione do kolekcji) |
+
+### Kolekcje osobne:
+- `operacyjne` — dane operacyjne per pojazd/miesiąc (km, litry, spalanie, cenaPaliwa)
+- `sprawy` — tickety/sprawy
+- `pauzy` — czas pracy kierowców
+- `config` — konfiguracja (SendGrid API key)
+- `emailRecipients` — odbiorcy maili
+- `emailLogs` — historia wysyłek
+- `rentownosc` — rentowność per pojazd/miesiąc
+- `users` — użytkownicy z rolami
+
+### Rekord kosztu:
 
 ```json
 {
-  "id": "e100_mar26_v5_20260331_abc123",
+  "id": "e100_20260331_v5_0_sjult6",
   "vehicleId": "v5",
   "category": "paliwo",
   "date": "2026-03-31",
-  "amountEUR": 71.47,
+  "amountEUR": 71.39,
   "amountOriginal": 306.23,
   "currency": "PLN",
   "note": "E-100 ON 51.6L PL E100",
@@ -73,16 +104,7 @@ Dokument: `fleet/data`, pole: `fleetv2_costs` (tablica obiektów)
 }
 ```
 
-### Pola:
-- **id** — unikalny, format: `{dostawca}_mar26_{vehicleId}_{data}_{random}`
-- **vehicleId** — v1–v6
-- **category** — `paliwo` (diesel) lub `inne` (AdBlue, parking)
-- **date** — `YYYY-MM-DD`
-- **amountEUR** — kwota NETTO w EUR
-- **amountOriginal** — kwota NETTO w oryginalnej walucie
-- **currency** — `EUR`, `PLN`, `CZK`
-- **note** — format: `{Dostawca} {usługa} {litry}L {kraj/miasto} {stacja}`
-- **liters** — ilość litrów (0 dla parkingu)
+Pola: `id`, `vehicleId`, `category`, `date`, `amountEUR`, `amountOriginal`, `amountPLN`, `currency`, `note`, `liters`
 
 ---
 
@@ -93,7 +115,16 @@ Dokument: `fleet/data`, pole: `fleetv2_costs` (tablica obiektów)
 | ON / Diesel / Olej Napedowy | `paliwo` | Główne paliwo |
 | AdBlue | `inne` | Dodatek |
 | Parking TIR | `inne` | Parking |
-| Inne | `inne` | Pozostałe |
+| Opłaty drogowe | `oplaty` | |
+| Leasing | `leasing` | |
+| Naprawa / serwis | `naprawa` | |
+| OCP/D | `ocpd` | Ubezpieczenie |
+| Telefon | `telefon` | |
+| Hotele | `hotele` | |
+| Mandaty | `mandaty` | |
+| Wypłata | `wyplata` | |
+| ZUS | `zus` | |
+| Pozostałe | `inne` | |
 
 ---
 
@@ -105,18 +136,33 @@ Jeśli rekord o takim kluczu już istnieje — pomijamy (nie dodajemy duplikatu)
 
 ---
 
-## 8. Metryki w TrendyTab (wykres trendów)
+## 8. KPI Dashboard (Koszty)
+
+5 kafelków w siatce `grid-cols-5`:
+
+1. **Łącznie EUR** — suma kosztów netto w EUR
+2. **Wpisów** — ilość rekordów kosztów
+3. **Najdroższe auto** — pojazd z najwyższymi kosztami
+4. **Główna kategoria** — kategoria z najwyższymi kosztami
+5. **Śr. cena paliwa** — średnia cena €/L (ważona litrami)
+
+### Obliczanie średniej ceny paliwa (€/L):
+Dwa źródła danych (nie podwójnie liczone):
+- **A)** Rekordy kosztów z polem `liters > 0` (importy cze 2025+)
+- **B)** Kolekcja `operacyjne` z `cenaPaliwa` × `paliwoL` (starsze miesiące)
+- Miesiące pokryte przez źródło A są pomijane w źródle B (`coveredMonths`)
+- Wzór: `avgEurPerL = sumEUR / sumLiters`
+
+---
+
+## 9. Metryki w TrendyTab (wykres trendów)
 
 ### Metryki sumowane (aggregacja = suma):
-- Kilometry (`kmLicznik`)
-- Koszty paliwa, opłaty drogowe, serwis itd.
-- Przychód
+- Kilometry (`kmLicznik`), koszty paliwa, opłaty drogowe, serwis, przychód
 
 ### Metryki rate (aggregacja = średnia):
 - **Spalanie** (`spalanie`) — L/100km, średnia po pojazdach, NIE suma
 - **€/km** (`eurKm`) — koszt paliwa za kilometr, średnia po pojazdach
-
-Rozpoznanie: `const RATE_METRICS = ["spalanie", "eurKm"]`
 
 ### €/km — zasady obliczania:
 - Licznik: **tylko koszty paliwa** (category = `paliwo`), NIE wszystkie koszty
@@ -130,7 +176,7 @@ Rozpoznanie: `const RATE_METRICS = ["spalanie", "eurKm"]`
 
 ---
 
-## 9. TrendyTab — design wykresu + tabeli
+## 10. TrendyTab — design wykresu + tabeli
 
 ### Wykres (Recharts LineChart):
 - `scale="band"` na XAxis — punkty wyśrodkowane w bandach
@@ -153,26 +199,24 @@ Rozpoznanie: `const RATE_METRICS = ["spalanie", "eurKm"]`
 - Rate metrics: `< 1` → 2 miejsca po przecinku, `≥ 1` → 1 miejsce
 - Inne: integer lub 1 miejsce
 
-### Precyzja pośrednia:
-- Obliczenia pośrednie: `.toFixed(4)` — nie zaokrąglamy za wcześnie
-- Wyświetlanie: `fmtTk` obsługuje formatowanie końcowe
-
 ---
 
-## 10. Dane historyczne (2025 vs 2026)
+## 11. Dane historyczne (zakres i źródła)
 
-| Rok | Źródło danych operacyjnych | Źródło kosztów |
-|-----|---------------------------|----------------|
-| 2025 | Obiekt `r` (rekord miesięczny pojazdu) | `r.costs.paliwo`, `r.costs.droga` itd. |
-| 2026 | Obiekt `op` (operacje) | `fleetv2_costs` z Firebase (filtrowane po vehicleId + miesiąc) |
+| Okres | Źródło kosztów | Kursy walut | Status |
+|-------|---------------|-------------|--------|
+| Sty–Maj 2025 | Stare dane (nietknięte) | Kurs miesięczny | Prawdopodobnie brutto — do weryfikacji |
+| Cze 2025–Mar 2026 | Nowy import (3 karty) | Kurs dzienny NBP | ✅ Netto, zweryfikowane |
 
-### €/km dla 2025:
+Import obejmuje: 1358 rekordów (266 starych + 1100 nowych - 8 duplikatów)
+
+### €/km dla 2025 (stare dane):
 ```javascript
 fuelCost = r?.costs?.paliwo || 0
 eurKm = fuelCost / r.kmLicznik
 ```
 
-### €/km dla 2026:
+### €/km dla 2026 (nowe dane):
 ```javascript
 fuelCost = costs.filter(c => c.vehicleId === vid
   && c.date.startsWith(monthStr)
@@ -183,37 +227,118 @@ eurKm = fuelCost / op.kmLicznik
 
 ---
 
-## 11. Pliki w projekcie
+## 12. Domyślne widoki (filtry)
+
+Wszystkie zakładki otwierają się na **bieżącym roku + bieżącym miesiącu**:
+
+| Zakładka | Domyślny rok | Domyślny miesiąc |
+|----------|-------------|------------------|
+| Koszty | `new Date().getFullYear()` | `YYYY-MM` |
+| FV/Płatności | `new Date().getFullYear()` | `MM` (zero-padded) |
+| Frachty (overview) | `new Date().getFullYear()` | `MM` (zero-padded) |
+| Frachty (per auto) | `new Date().getFullYear()` | `getMonth()` (0-indexed) |
+
+---
+
+## 13. Deployment
+
+### Produkcja: Vercel → fleetstat.pl
+- Auto-deploy z GitHub po `git push` na `main`
+- IP: 76.76.21.21
+- `git push` = deploy
+
+### Backup: Firebase Hosting → vbs-stats.web.app
+- Projekt Firebase: `vbs-stats`
+- Deploy: `firebase deploy --only hosting --project vbs-stats`
+
+### GitHub Actions backup:
+- Plik: `.github/workflows/backup.yml`
+- Cron: `0 22 * * *` (22:00 UTC = 00:00 PL)
+- Repo backup: `wasikkamil-art/vbs-stat-backups`
+- Uwaga: GitHub dodaje kilka minut jitteru do crona
+
+---
+
+## 14. Bezpieczeństwo
+
+### Firestore Rules:
+- Custom Claims z tokena Auth (szybkie, bezpieczne)
+- Role: `admin`, `dyspozytor`, zwykły user
+- Ochrona `fleetDataSafe()` — blokuje zapis pustych tablic do kluczowych pól
+- Domyślna reguła: `allow read, write: if false` (blokuje wszystko niezdefiniowane)
+- Config/email — tylko admin
+
+### Walidacja URL:
+- Funkcja `safeHref()` w App.jsx — blokuje `javascript:` i `data:` injection
+- Wszystkie dynamiczne `href=` używają `safeHref()`
+
+### .gitignore (chroni przed commitowaniem):
+- `serviceAccountKey.json`, `sa.json`, `*-adminsdk*.json`
+- `*.json` (poza package.json, package-lock.json, manifest.json)
+- `*.csv`, `*.xlsx` — pliki źródłowe importów
+- `.env`, `.env*.local`
+- `firebase.json`
+- Skrypty jednorazowe: `fix_*.js`, `import-*.js`, `diagnose*.js`, `audit-all.js` itd.
+
+### SendGrid:
+- API key przechowywany w Firestore `config/email` (dostęp: tylko admin)
+- Nie jest hardcoded w kodzie
+- Docelowo przenieść na Cloud Functions
+
+### Firebase config (apiKey w App.jsx):
+- To jest **normalne** dla Firebase web apps — klucz jest publiczny z założenia
+- Bezpieczeństwo zapewniają Firestore Rules (nie klucz API)
+
+### Skrypty admin:
+- Pliki z `firebase-admin` przeniesione **poza `src/`** — Vite ich nie bundluje
+- Lokalizacja: główny katalog projektu (`~/Desktop/VBS-Stat.nosync/`)
+
+---
+
+## 15. Audyt — wykonane naprawy (kwiecień 2026)
+
+### Dane:
+- ✅ 4 ujemne kwoty (korekty E-100) → zamienione na wartości bezwzględne
+- ✅ Duplikat operacyjne v1 2026-03 → usunięty (zostawiony wpis z srWaga=3500)
+- ✅ Marzec 2026 €/L=1.688 → poprawne (wzrost cen rynkowych)
+- ✅ 0 duplikatów kosztów, 0 brakujących pól krytycznych
+
+### Kod:
+- ✅ Poprawione literówki setterów (setRzypomnienieData → setPrzypomnienieData)
+- ✅ Null-safe sort: `(b.date||"").localeCompare(a.date||"")`
+- ✅ Walidacja URL (safeHref)
+- ✅ Skrypty admin przeniesione z src/
+
+### Bezpieczeństwo:
+- ✅ .gitignore wzmocniony
+- ✅ serviceAccountKey.json nie w repo
+- ✅ Firestore rules solidne
+
+---
+
+## 16. Pliki w projekcie
 
 | Plik | Opis |
 |------|------|
-| `src/App.jsx` | Główna aplikacja React (TrendyTab ~linie 5340-5470) |
-| `serviceAccountKey.json` | Klucz Firebase Admin SDK |
-| `import-fuel-march.json` | E-100 dane marzec (29 rekordów) |
-| `import-fuel-march.js` | Skrypt importu E-100 ✅ uruchomiony |
-| `import-ewag-march.json` | E-WAG dane marzec (87 rekordów) |
-| `import-ewag-march.js` | Skrypt importu E-WAG ✅ uruchomiony |
-| `import-andamur-march.json` | Andamur dane marzec (9 rekordów) |
-| `import-andamur-march.js` | Skrypt importu Andamur ✅ uruchomiony |
-| `fix-netto-march.js` | Skrypt korekty E-100 i Andamur brutto→netto ✅ uruchomiony |
+| `src/App.jsx` | Główna aplikacja React (~9000 linii) |
+| `src/frachty_component.js` | Komponent frachtów |
+| `serviceAccountKey.json` | Klucz Firebase Admin SDK (nie w repo!) |
+| `nbp-rates.json` | Cache kursów dziennych NBP (209 kursów) |
+| `import-all-costs.js` | Import zbiorczy 3 kart (cze 2025–mar 2026) |
+| `fetch-nbp-rates.js` | Pobieranie kursów NBP |
+| `fix-netto-march.js` | Korekta brutto→netto marzec |
+| `fix-audit-issues.js` | Naprawa ujemnych kwot |
+| `audit-all.js` | Skrypt pełnego audytu |
+| `diagnose*.js` | Skrypty diagnostyczne |
+| `gen_rentownosc_lut26.js` | Generator rentowności |
+| `reimport_frachty_2026.js` | Reimport frachtów |
+| `delete_frachty_2026.js` | Usuwanie frachtów |
+| `.github/workflows/backup.yml` | Automatyczny backup GitHub Actions |
+| `ZASADY-VBS-STAT.md` | Ten plik — dokumentacja projektu |
 
 ---
 
-## 12. Proces importu nowych kosztów (checklist)
-
-1. Otrzymaj plik CSV/XLSX od dostawcy
-2. Zidentyfikuj kolumnę kwoty — netto czy brutto?
-3. Jeśli brutto → przelicz na netto (VAT wg kraju tankowania)
-4. Mapuj rejestracje na vehicleId (v1–v6)
-5. Klasyfikuj: diesel → `paliwo`, AdBlue/parking → `inne`
-6. Przelicz waluty obce → EUR (aktualny średni kurs miesiąca)
-7. Wygeneruj JSON z rekordami
-8. Uruchom skrypt importu z deduplikacją
-9. Zweryfikuj w aplikacji
-
----
-
-## 13. Komendy (terminal)
+## 17. Komendy (terminal)
 
 Projekt: `~/Desktop/VBS-Stat.nosync`
 
@@ -221,31 +346,60 @@ Projekt: `~/Desktop/VBS-Stat.nosync`
 # Build aplikacji (zawsze na Macu, nie w sandbox)
 cd ~/Desktop/VBS-Stat.nosync && npm run build
 
+# Build z czyszczeniem cache Vite (gdy zmiany nie widać)
+cd ~/Desktop/VBS-Stat.nosync && rm -rf dist node_modules/.vite && npm run build
+
 # Deploy na produkcję (Vercel — auto z GitHub po pushu na main)
-# Vercel buduje automatycznie — fleetstat.pl
 cd ~/Desktop/VBS-Stat.nosync && git add src/App.jsx && git commit -m "opis zmian" && git push
 
 # Firebase Hosting (backup, vbs-stats.web.app) — opcjonalnie
-# cd ~/Desktop/VBS-Stat.nosync && npm run build && firebase deploy --only hosting --project vbs-stats
+cd ~/Desktop/VBS-Stat.nosync && npm run build && firebase deploy --only hosting --project vbs-stats
 
 # Dev server
 cd ~/Desktop/VBS-Stat.nosync && npm run dev
 
-# Import kosztów (przykład)
-cd ~/Desktop/VBS-Stat.nosync && node import-fuel-march.js
+# Import kosztów
+cd ~/Desktop/VBS-Stat.nosync && node import-all-costs.js
 
-# Korekta netto
-cd ~/Desktop/VBS-Stat.nosync && node fix-netto-march.js
+# Audyt danych
+cd ~/Desktop/VBS-Stat.nosync && node audit-all.js
+
+# Diagnostyka
+cd ~/Desktop/VBS-Stat.nosync && node diagnose4.js
 ```
 
 **ZASADA: Zawsze podawaj gotową komendę do terminala — użytkownik kopiuje i wkleja.**
 
 ---
 
-## 14. Uwagi
+## 18. Proces importu nowych kosztów (checklist)
 
-- Koszty 2025 — **prawdopodobnie też brutto** (do weryfikacji w przyszłości, jeśli dane 2025 też pochodziły z tych samych kart)
-- Kurs walut — ustalany raz na miesiąc (średni NBP), marzec 2026: PLN 4.285, CZK 24.21
-- UNIVERSAL5570 w pliku E-WAG — to nie nasz pojazd, pomijamy przy imporcie
+1. Otrzymaj pliki CSV/XLSX od dostawców (E-100, E-WAG, Andamur)
+2. Umieść pliki w katalogu projektu
+3. Zidentyfikuj kolumnę kwoty — netto czy brutto?
+4. Pobierz kursy dzienne NBP: `node fetch-nbp-rates.js`
+5. Uruchom import: `node import-all-costs.js`
+   - E-100: brutto → netto (VAT wg kraju), PLN → EUR (kurs dzienny)
+   - E-WAG: już netto, PLN/CZK → EUR (kurs dzienny)
+   - Andamur: brutto → netto (VAT wg kraju), EUR
+6. Skrypt: usuwa stare koszty w pokrytych miesiącach, dodaje nowe, deduplikuje
+7. Zweryfikuj w aplikacji na fleetstat.pl
+
+---
+
+## 19. Uwagi
+
+- Koszty sty–maj 2025 — stare dane, nietknięte, prawdopodobnie brutto (do weryfikacji)
 - Build aplikacji — robimy lokalnie na Macu (sandbox nie obsługuje arm64)
+- Vite cache — czasem trzeba `rm -rf dist node_modules/.vite` przed buildem
 - **Zawsze podawaj gotową komendę** — nie każ użytkownikowi samemu wymyślać
+
+---
+
+## 20. TODO na przyszłość
+
+- **Push notifications (PWA)** — powiadomienia na telefon z FleetStat (FCM + Service Worker + manifest.json). Przypomnienia o serwisie, brakujących danych, terminach itp.
+- **SendGrid na Cloud Functions** — przenieść obsługę maili z frontendu na backend
+- **Rate limiting na /api/claude** — ochrona przed nadmiernym zużyciem API
+- **npm audit** — regularne sprawdzanie podatności w zależnościach
+- **Weryfikacja kosztów sty–maj 2025** — czy stare dane są netto czy brutto
