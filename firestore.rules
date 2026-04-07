@@ -156,6 +156,14 @@ service cloud.firestore {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // FCM TOKENS — push notifications
+    // Każdy zalogowany może zapisać/odczytać SWÓJ token
+    // ═══════════════════════════════════════════════════════════════
+    match /fcmTokens/{uid} {
+      allow read, write: if isAuth() && request.auth.uid == uid;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // DOMYŚLNA REGUŁA — blokuj wszystko inne
     // ═══════════════════════════════════════════════════════════════
     match /{document=**} {

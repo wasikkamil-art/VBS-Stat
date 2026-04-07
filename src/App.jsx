@@ -8,6 +8,7 @@ import { initializeApp } from "firebase/app";
 import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, orderBy, arrayUnion } from "firebase/firestore";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
+import { getMessaging, getToken, onMessage } from "firebase/messaging";
 import { getFunctions, httpsCallable } from "firebase/functions";
 
 // ─── STORAGE HELPERS (per-user, per-key documents) ───────────────────────────
@@ -29,6 +30,31 @@ const db        = getFirestore(app);
 const auth      = getAuth(app);
 const storage   = getStorage(app);
 const functions = getFunctions(app, "europe-west1");
+
+// ─── FCM (Push Notifications) ───────────────────────────────────────────────
+let messaging = null;
+try { messaging = getMessaging(app); } catch (e) { /* brak wsparcia w przeglądarce */ }
+
+// Rejestracja FCM token i zapis do Firestore
+async function registerFCMToken(uid) {
+  if (!messaging || !("Notification" in window)) return;
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") return;
+    // Rejestruj service worker dla FCM
+    const sw = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
+    const token = await getToken(messaging, {
+      vapidKey: "BFS79b5DBeiWgH98Uzmw4nbdK4vn7ggvop2W4acNbPBgO9Q2QaChaxOH5u9sNEdmXnG9cf-7sXzRdRg_-l1OO8M",
+      serviceWorkerRegistration: sw,
+    });
+    if (token) {
+      // Zapisz token w Firestore — Cloud Function użyje go do wysyłki push
+      await setDoc(doc(db, "fcmTokens", uid), {
+        token, updatedAt: new Date().toISOString(), uid,
+      }, { merge: true });
+    }
+  } catch (e) { console.warn("FCM registration failed:", e); }
+}
 
 // ─── SECURITY: walidacja URL (chroni przed javascript: / data: injection) ───
 const safeHref = (url) => {
@@ -340,6 +366,9 @@ export default function Root() {
           }
 
           setRole(tokenRole);
+
+          // Rejestruj FCM token do push notifications
+          registerFCMToken(u.uid);
 
           // 3. Nasłuchuj zmian roli (claimsUpdatedAt) — kiedy admin zmieni rolę,
           //    Cloud Function zaktualizuje claimsUpdatedAt → odświeżamy token
