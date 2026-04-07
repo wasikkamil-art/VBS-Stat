@@ -2245,9 +2245,9 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     if (!activeRoom) { setMessages([]); return; }
     const q = query(collection(db, "chatRooms", activeRoom.id, "messages"), orderBy("timestamp", "asc"));
     const unsub = onSnapshot(q, (snap) => {
-      // Firestore orderBy gwarantuje kolejność; dodajemy tiebreaker po ID dla identycznych timestampów
-      const newMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => (a.timestamp || "").localeCompare(b.timestamp || "") || a.id.localeCompare(b.id));
+      // WAŻNE: NIE sortujemy kliencko! snap.docs jest JUŻ posortowane przez Firestore orderBy.
+      // Kliencki localeCompare mógł zmieniać kolejność wiadomości (bug "nadpisywania").
+      const newMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       if (prevMsgCountRef.current > 0 && newMsgs.length > prevMsgCountRef.current) {
         const latest = newMsgs[newMsgs.length - 1];
         if (latest.senderId !== currentUser.uid) playNotifSound();
@@ -2291,14 +2291,22 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     .filter(([uid, ts]) => uid !== currentUser.uid && ts && (Date.now() - new Date(ts).getTime()) < 5000)
     .map(([uid]) => appUsers.find(u => u.uid === uid)?.email?.split("@")[0] || "?");
 
-  // ── AUTO-SCROLL ──
+  // ── AUTO-SCROLL (inteligentny) ──
   useEffect(() => {
     if (messages.length === 0) return;
-    const lastId = messages[messages.length - 1]?.id;
-    if (lastId !== lastMsgIdRef.current) {
-      lastMsgIdRef.current = lastId;
-      const c = chatContainerRef.current;
-      if (c) c.scrollTop = c.scrollHeight;
+    const lastMsg = messages[messages.length - 1];
+    const lastId = lastMsg?.id;
+    if (lastId === lastMsgIdRef.current) return; // ta sama ostatnia wiadomość — nie scrolluj
+    lastMsgIdRef.current = lastId;
+    const c = chatContainerRef.current;
+    if (!c) return;
+    // Scrolluj na dół TYLKO gdy:
+    // 1. To moja własna wiadomość (zawsze chcę widzieć co wysłałem)
+    // 2. Jestem blisko dołu (< 200px od końca)
+    const isNearBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 200;
+    const isMyMessage = lastMsg?.senderId === currentUser.uid;
+    if (isMyMessage || isNearBottom) {
+      requestAnimationFrame(() => { c.scrollTop = c.scrollHeight; });
     }
   }, [messages]);
 
