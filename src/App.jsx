@@ -2163,7 +2163,7 @@ function App({ user, role, appUsers = [] }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// CHAT TAB
+// CHAT TAB — pełna wersja z edycją, usuwaniem, reply, reakcjami, zarządzaniem pokojami
 // ═══════════════════════════════════════════════════════════════════════════════
 function ChatTab({ currentUser, appUsers = [], showToast }) {
   const [rooms, setRooms] = useState([]);
@@ -2176,71 +2176,67 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
   const [newRoomMembers, setNewRoomMembers] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
+  const [editingMsg, setEditingMsg] = useState(null);
+  const [editText, setEditText] = useState("");
+  const [replyTo, setReplyTo] = useState(null);
+  const [contextMenu, setContextMenu] = useState(null);
+  const [showRoomSettings, setShowRoomSettings] = useState(false);
+  const [editRoomName, setEditRoomName] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showSearch, setShowSearch] = useState(false);
+  const [typingUsers, setTypingUsers] = useState({});
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const prevMsgCountRef = useRef(0);
+  const chatContainerRef = useRef(null);
+  const lastMsgIdRef = useRef(null);
+  const typingTimeoutRef = useRef(null);
+  const msgInputRef = useRef(null);
 
-  // Dźwięk powiadomienia (Web Audio API — działa bez plików)
+  // Dźwięk powiadomienia
   const playNotifSound = useRef(() => {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
+      osc.connect(gain); gain.connect(ctx.destination);
       osc.type = "sine";
-      // Dwa tony: ding-dong
-      osc.frequency.setValueAtTime(880, ctx.currentTime);        // A5
-      osc.frequency.setValueAtTime(1047, ctx.currentTime + 0.1); // C6
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.setValueAtTime(1047, ctx.currentTime + 0.1);
       gain.gain.setValueAtTime(0.3, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.3);
-    } catch (e) { /* ignoruj jeśli audio niedostępne */ }
+      osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.3);
+    } catch (e) {}
   }).current;
 
   const lastRoomTimestamps = useRef({});
 
-  // Pobierz pokoje czatu (real-time)
+  // ── POKOJE (real-time) ──
   useEffect(() => {
     const q = query(collection(db, "chatRooms"), orderBy("lastMessageAt", "desc"));
     const unsub = onSnapshot(q, (snap) => {
       const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const myRooms = all.filter(r =>
-        r.type === "channel" || (r.members || []).includes(currentUser.uid)
-      );
-      // Dźwięk gdy nowa wiadomość w INNYM pokoju
+      const myRooms = all.filter(r => r.type === "channel" || (r.members || []).includes(currentUser.uid));
       myRooms.forEach(r => {
         const prev = lastRoomTimestamps.current[r.id];
-        if (prev && r.lastMessageAt > prev && r.lastSender !== currentUser.email && r.id !== activeRoom?.id) {
-          playNotifSound();
-        }
+        if (prev && r.lastMessageAt > prev && r.lastSender !== currentUser.email && r.id !== activeRoom?.id) playNotifSound();
         lastRoomTimestamps.current[r.id] = r.lastMessageAt || "";
       });
       setRooms(myRooms);
-      // Sync activeRoom z najnowszymi danymi (lastRead itp.)
       setActiveRoom(prev => prev ? myRooms.find(r => r.id === prev.id) || prev : null);
     });
     return () => unsub();
   }, [currentUser.uid]);
 
-  // Pobierz wiadomości aktywnego pokoju (real-time)
+  // ── WIADOMOŚCI (real-time) ──
   useEffect(() => {
     if (!activeRoom) { setMessages([]); return; }
-    const q = query(
-      collection(db, "chatRooms", activeRoom.id, "messages"),
-      orderBy("timestamp", "asc")
-    );
+    const q = query(collection(db, "chatRooms", activeRoom.id, "messages"), orderBy("timestamp", "asc"));
     const unsub = onSnapshot(q, (snap) => {
-      const newMsgs = snap.docs
-        .map(d => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => (a.timestamp || "").localeCompare(b.timestamp || ""));
-      // Dźwięk gdy nowa wiadomość od kogoś innego
+      const newMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.timestamp || "").localeCompare(b.timestamp || ""));
       if (prevMsgCountRef.current > 0 && newMsgs.length > prevMsgCountRef.current) {
         const latest = newMsgs[newMsgs.length - 1];
-        if (latest.senderId !== currentUser.uid) {
-          playNotifSound();
-        }
+        if (latest.senderId !== currentUser.uid) playNotifSound();
       }
       prevMsgCountRef.current = newMsgs.length;
       setMessages(newMsgs);
@@ -2248,36 +2244,58 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     return () => { unsub(); prevMsgCountRef.current = 0; };
   }, [activeRoom?.id]);
 
-  const chatContainerRef = useRef(null);
-  const lastMsgIdRef = useRef(null);
+  // ── TYPING INDICATOR ──
+  useEffect(() => {
+    if (!activeRoom) return;
+    const unsub = onSnapshot(doc(db, "chatRooms", activeRoom.id), (snap) => {
+      const data = snap.data();
+      setTypingUsers(data?.typing || {});
+    });
+    return () => unsub();
+  }, [activeRoom?.id]);
 
-  // Auto-scroll TYLKO gdy pojawi się nowa wiadomość (nie przy update readBy)
+  const setTyping = (isTyping) => {
+    if (!activeRoom) return;
+    const field = `typing.${currentUser.uid}`;
+    updateDoc(doc(db, "chatRooms", activeRoom.id), {
+      [field]: isTyping ? new Date().toISOString() : null,
+    }).catch(() => {});
+  };
+
+  const handleTyping = () => {
+    setTyping(true);
+    clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => setTyping(false), 3000);
+  };
+
+  // Aktywni piszący (nie starsze niż 5s)
+  const activeTypers = Object.entries(typingUsers)
+    .filter(([uid, ts]) => uid !== currentUser.uid && ts && (Date.now() - new Date(ts).getTime()) < 5000)
+    .map(([uid]) => appUsers.find(u => u.uid === uid)?.email?.split("@")[0] || "?");
+
+  // ── AUTO-SCROLL ──
   useEffect(() => {
     if (messages.length === 0) return;
     const lastId = messages[messages.length - 1]?.id;
     if (lastId !== lastMsgIdRef.current) {
       lastMsgIdRef.current = lastId;
-      const container = chatContainerRef.current;
-      if (container) {
-        container.scrollTop = container.scrollHeight;
-      }
+      const c = chatContainerRef.current;
+      if (c) c.scrollTop = c.scrollHeight;
     }
   }, [messages]);
 
-  // Oznacz pokój jako przeczytany — jeden update na room, nie na każdej wiadomości
+  // ── LAST READ ──
   useEffect(() => {
     if (!activeRoom || messages.length === 0) return;
     const lastMsg = messages[messages.length - 1];
     if (!lastMsg?.timestamp) return;
     const myLastRead = activeRoom.lastRead?.[currentUser.uid];
     if (!myLastRead || lastMsg.timestamp > myLastRead) {
-      updateDoc(doc(db, "chatRooms", activeRoom.id), {
-        [`lastRead.${currentUser.uid}`]: lastMsg.timestamp,
-      }).catch(() => {});
+      updateDoc(doc(db, "chatRooms", activeRoom.id), { [`lastRead.${currentUser.uid}`]: lastMsg.timestamp }).catch(() => {});
     }
   }, [activeRoom?.id, messages.length]);
 
-  // Wyślij wiadomość
+  // ── WYŚLIJ WIADOMOŚĆ ──
   const sendMessage = async (text, fileUrl, fileName) => {
     if (!activeRoom) return;
     if (!text?.trim() && !fileUrl) return;
@@ -2289,262 +2307,364 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
       timestamp: new Date().toISOString(),
     };
     if (fileUrl) { msg.fileUrl = fileUrl; msg.fileName = fileName; }
+    if (replyTo) { msg.replyTo = { id: replyTo.id, text: replyTo.text?.slice(0, 100) || "📎 Plik", senderName: replyTo.senderName || replyTo.senderEmail?.split("@")[0] }; }
     try {
       await addDoc(collection(db, "chatRooms", activeRoom.id, "messages"), msg);
-      // Aktualizuj ostatnią wiadomość w pokoju
       await updateDoc(doc(db, "chatRooms", activeRoom.id), {
         lastMessage: text?.trim() || fileName || "📎 Plik",
         lastMessageAt: new Date().toISOString(),
         lastSender: currentUser.email,
       });
-      setMsgText("");
+      setMsgText(""); setReplyTo(null); setTyping(false);
     } catch (e) { console.error("sendMessage", e); showToast("Błąd wysyłania"); }
   };
 
-  // Upload pliku
-  // Kompresja obrazu przed uploadem (max 1200px, jakość 0.7 → ~150-250KB)
+  // ── EDYCJA WIADOMOŚCI ──
+  const saveEdit = async () => {
+    if (!editingMsg || !editText.trim()) return;
+    try {
+      await updateDoc(doc(db, "chatRooms", activeRoom.id, "messages", editingMsg.id), {
+        text: editText.trim(), edited: true, editedAt: new Date().toISOString(),
+      });
+      setEditingMsg(null); setEditText("");
+    } catch (e) { showToast("Błąd edycji"); }
+  };
+
+  // ── USUWANIE WIADOMOŚCI ──
+  const deleteMessage = async (m) => {
+    try {
+      await updateDoc(doc(db, "chatRooms", activeRoom.id, "messages", m.id), {
+        text: "", deleted: true, deletedAt: new Date().toISOString(), fileUrl: null, fileName: null,
+      });
+      showToast("Wiadomość usunięta");
+    } catch (e) { showToast("Błąd usuwania"); }
+  };
+
+  // ── REAKCJE EMOJI ──
+  const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
+  const toggleReaction = async (m, emoji) => {
+    const reactions = { ...(m.reactions || {}) };
+    const users = reactions[emoji] || [];
+    if (users.includes(currentUser.uid)) {
+      reactions[emoji] = users.filter(u => u !== currentUser.uid);
+      if (reactions[emoji].length === 0) delete reactions[emoji];
+    } else {
+      reactions[emoji] = [...users, currentUser.uid];
+    }
+    try {
+      await updateDoc(doc(db, "chatRooms", activeRoom.id, "messages", m.id), { reactions });
+    } catch (e) {}
+    setContextMenu(null);
+  };
+
+  // ── KOMPRESJA OBRAZU ──
   const compressImage = (file, maxWidth = 1200, quality = 0.7) => {
     return new Promise((resolve) => {
-      // Nie kompresuj nie-obrazów
-      if (!file.type.startsWith("image/") || file.type === "image/gif") {
-        resolve(file);
-        return;
-      }
-      const img = new Image();
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        img.onload = () => {
-          const canvas = document.createElement("canvas");
-          let w = img.width, h = img.height;
-          if (w > maxWidth) { h = Math.round(h * maxWidth / w); w = maxWidth; }
-          canvas.width = w;
-          canvas.height = h;
-          const ctx = canvas.getContext("2d");
-          ctx.drawImage(img, 0, 0, w, h);
-          canvas.toBlob((blob) => {
-            if (blob && blob.size < file.size) {
-              // Kompresja się opłaca
-              const compressed = new File([blob], file.name, { type: "image/jpeg" });
-              resolve(compressed);
-            } else {
-              resolve(file); // oryginał mniejszy
-            }
-          }, "image/jpeg", quality);
-        };
-        img.src = e.target.result;
-      };
-      reader.readAsDataURL(file);
+      if (!file.type.startsWith("image/") || file.type === "image/gif") { resolve(file); return; }
+      const img = new Image(); const reader = new FileReader();
+      reader.onload = (e) => { img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let w = img.width, h = img.height;
+        if (w > maxWidth) { h = Math.round(h * maxWidth / w); w = maxWidth; }
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        canvas.toBlob((blob) => { resolve(blob && blob.size < file.size ? new File([blob], file.name, { type: "image/jpeg" }) : file); }, "image/jpeg", quality);
+      }; img.src = e.target.result; }; reader.readAsDataURL(file);
     });
   };
 
   const handleFileUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const file = e.target.files?.[0]; if (!file) return;
     if (file.size > 10 * 1024 * 1024) { showToast("Maks. 10MB"); return; }
     setUploading(true);
     try {
       const toUpload = await compressImage(file);
-      const sizeBefore = (file.size / 1024).toFixed(0);
-      const sizeAfter = (toUpload.size / 1024).toFixed(0);
-      if (toUpload !== file) console.log(`Kompresja: ${sizeBefore}KB → ${sizeAfter}KB`);
       const path = `chat/${activeRoom.id}/${Date.now()}_${file.name}`;
       const sRef = storageRef(storage, path);
       await uploadBytes(sRef, toUpload);
       const url = await getDownloadURL(sRef);
       await sendMessage("", url, file.name);
-    } catch (e) { console.error("upload", e); showToast("Błąd uploadu"); }
+    } catch (e) { showToast("Błąd uploadu"); }
     setUploading(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  // Utwórz nowy pokój
+  // ── ZARZĄDZANIE POKOJAMI ──
   const createRoom = async () => {
     if (!newRoomName.trim()) { showToast("Podaj nazwę"); return; }
     const room = {
-      name: newRoomName.trim(),
-      type: newRoomType,
-      members: newRoomType === "channel"
-        ? appUsers.map(u => u.uid)
-        : [currentUser.uid, ...newRoomMembers],
-      createdBy: currentUser.uid,
-      createdAt: new Date().toISOString(),
-      lastMessage: "",
-      lastMessageAt: new Date().toISOString(),
-      lastSender: "",
+      name: newRoomName.trim(), type: newRoomType,
+      members: newRoomType === "channel" ? appUsers.map(u => u.uid) : [currentUser.uid, ...newRoomMembers],
+      createdBy: currentUser.uid, createdAt: new Date().toISOString(),
+      lastMessage: "", lastMessageAt: new Date().toISOString(), lastSender: "",
     };
     try {
       const docRef = await addDoc(collection(db, "chatRooms"), room);
-      setShowNewRoom(false);
-      setNewRoomName("");
-      setNewRoomMembers([]);
-      setActiveRoom({ id: docRef.id, ...room });
-      showToast("Pokój utworzony");
-    } catch (e) { console.error("createRoom", e); showToast("Błąd tworzenia"); }
+      setShowNewRoom(false); setNewRoomName(""); setNewRoomMembers([]);
+      setActiveRoom({ id: docRef.id, ...room }); showToast("Pokój utworzony");
+    } catch (e) { showToast("Błąd tworzenia"); }
   };
 
-  // Formatuj czas
+  const renameRoom = async () => {
+    if (!editRoomName.trim() || !activeRoom) return;
+    try {
+      await updateDoc(doc(db, "chatRooms", activeRoom.id), { name: editRoomName.trim() });
+      showToast("Nazwa zmieniona"); setShowRoomSettings(false);
+    } catch (e) { showToast("Błąd zmiany nazwy"); }
+  };
+
+  const deleteRoom = async () => {
+    if (!activeRoom || !window.confirm("Usunąć pokój i wszystkie wiadomości?")) return;
+    try {
+      await deleteDoc(doc(db, "chatRooms", activeRoom.id));
+      setActiveRoom(null); setShowRoomSettings(false); showToast("Pokój usunięty");
+    } catch (e) { showToast("Błąd usuwania pokoju"); }
+  };
+
+  const leaveRoom = async () => {
+    if (!activeRoom) return;
+    const newMembers = (activeRoom.members || []).filter(uid => uid !== currentUser.uid);
+    try {
+      await updateDoc(doc(db, "chatRooms", activeRoom.id), { members: newMembers });
+      setActiveRoom(null); setShowRoomSettings(false); showToast("Opuszczono pokój");
+    } catch (e) { showToast("Błąd"); }
+  };
+
+  const addMember = async (uid) => {
+    if (!activeRoom) return;
+    const members = [...new Set([...(activeRoom.members || []), uid])];
+    try {
+      await updateDoc(doc(db, "chatRooms", activeRoom.id), { members });
+      showToast("Dodano członka");
+    } catch (e) { showToast("Błąd"); }
+  };
+
+  const removeMember = async (uid) => {
+    if (!activeRoom || uid === activeRoom.createdBy) return;
+    const members = (activeRoom.members || []).filter(u => u !== uid);
+    try {
+      await updateDoc(doc(db, "chatRooms", activeRoom.id), { members });
+      showToast("Usunięto członka");
+    } catch (e) { showToast("Błąd"); }
+  };
+
+  // ── HELPERS ──
   const fmtTime = (ts) => {
     if (!ts) return "";
-    const d = new Date(ts);
-    const now = new Date();
-    const isToday = d.toDateString() === now.toDateString();
+    const d = new Date(ts), now = new Date();
     const time = d.toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
-    if (isToday) return time;
-    return `${d.toLocaleDateString("pl-PL", { day: "numeric", month: "short" })} ${time}`;
+    return d.toDateString() === now.toDateString() ? time : `${d.toLocaleDateString("pl-PL", { day: "numeric", month: "short" })} ${time}`;
   };
 
-  // Ikona typu pokoju
   const roomIcon = (r) => {
     if (r.type === "dm") return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>;
     if (r.type === "group") return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>;
     return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
   };
 
-  // Nazwa pokoju DM → pokaż email drugiej osoby
   const roomDisplayName = (r) => {
     if (r.type === "dm" && r.members) {
       const other = r.members.find(uid => uid !== currentUser.uid);
-      const otherUser = appUsers.find(u => u.uid === other);
-      return otherUser?.email?.split("@")[0] || r.name;
+      return appUsers.find(u => u.uid === other)?.email?.split("@")[0] || r.name;
     }
     return r.name;
   };
 
-  // Rozpocznij DM z osobą
-  const startDM = (targetUid) => {
-    // Sprawdź czy DM już istnieje
-    const existing = rooms.find(r =>
-      r.type === "dm" && r.members?.includes(targetUid) && r.members?.includes(currentUser.uid) && r.members?.length === 2
-    );
-    if (existing) { setActiveRoom(existing); setShowNewRoom(false); return; }
-    // Utwórz nowy DM
-    const target = appUsers.find(u => u.uid === targetUid);
-    setNewRoomName(`DM: ${target?.email?.split("@")[0] || "?"}`);
-    setNewRoomType("dm");
-    setNewRoomMembers([targetUid]);
-    createRoom();
-  };
+  // Wyszukiwanie
+  const filteredMessages = showSearch && searchQuery.trim()
+    ? messages.filter(m => m.text?.toLowerCase().includes(searchQuery.toLowerCase()))
+    : messages;
 
   return (
     <div className="flex h-[calc(100vh-2rem)] bg-white rounded-xl border border-gray-100 overflow-hidden">
-      {/* LISTA POKOJÓW */}
+      {/* ── LISTA POKOJÓW ── */}
       <div className={`${activeRoom ? "hidden md:flex" : "flex"} flex-col w-full md:w-72 border-r border-gray-100 bg-gray-50/50`}>
         <div className="p-4 border-b border-gray-100 flex items-center justify-between">
           <h2 className="font-semibold text-gray-800">Czat</h2>
-          <button onClick={() => setShowNewRoom(true)}
-            className="p-1.5 rounded-lg hover:bg-gray-200 transition-colors text-gray-500"
-            title="Nowy pokój">
+          <button onClick={() => setShowNewRoom(true)} className="p-1.5 rounded-lg hover:bg-gray-200 transition-colors text-gray-500" title="Nowy pokój">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           </button>
         </div>
-
         <div className="flex-1 overflow-y-auto">
-          {rooms.length === 0 && (
-            <div className="p-6 text-center text-gray-400 text-sm">
-              Brak pokojów. Utwórz pierwszy!
-            </div>
-          )}
-          {rooms.map(r => (
-            <button key={r.id} onClick={() => setActiveRoom(r)}
-              className="w-full text-left px-4 py-3 border-b border-gray-50 hover:bg-gray-100/80 transition-colors"
-              style={{ background: activeRoom?.id === r.id ? "#eff6ff" : "transparent" }}>
-              <div className="flex items-center gap-2">
-                <span className="text-gray-400">{roomIcon(r)}</span>
-                <span className="font-medium text-sm text-gray-800 truncate">{roomDisplayName(r)}</span>
-              </div>
-              {r.lastMessage && (
-                <div className="mt-1 flex items-center gap-1">
-                  <span className="text-xs text-gray-400 truncate max-w-[160px]">
-                    {r.lastSender ? `${r.lastSender.split("@")[0]}: ` : ""}{r.lastMessage}
-                  </span>
-                  <span className="text-xs text-gray-300 ml-auto flex-shrink-0">{fmtTime(r.lastMessageAt)}</span>
+          {rooms.length === 0 && <div className="p-6 text-center text-gray-400 text-sm">Brak pokojów. Utwórz pierwszy!</div>}
+          {rooms.map(r => {
+            const myRead = r.lastRead?.[currentUser.uid];
+            const hasUnread = r.lastMessageAt && r.lastSender !== currentUser.email && (!myRead || r.lastMessageAt > myRead);
+            return (
+              <button key={r.id} onClick={() => { setActiveRoom(r); setShowSearch(false); setSearchQuery(""); setContextMenu(null); }}
+                className="w-full text-left px-4 py-3 border-b border-gray-50 hover:bg-gray-100/80 transition-colors"
+                style={{ background: activeRoom?.id === r.id ? "#eff6ff" : "transparent" }}>
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-400">{roomIcon(r)}</span>
+                  <span className={`text-sm truncate ${hasUnread ? "font-bold text-gray-900" : "font-medium text-gray-800"}`}>{roomDisplayName(r)}</span>
+                  {hasUnread && <span className="ml-auto w-2.5 h-2.5 rounded-full bg-blue-500 flex-shrink-0"/>}
                 </div>
-              )}
-            </button>
-          ))}
+                {r.lastMessage && (
+                  <div className="mt-1 flex items-center gap-1">
+                    <span className={`text-xs truncate max-w-[160px] ${hasUnread ? "text-gray-600 font-medium" : "text-gray-400"}`}>
+                      {r.lastSender ? `${r.lastSender.split("@")[0]}: ` : ""}{r.lastMessage}
+                    </span>
+                    <span className="text-xs text-gray-300 ml-auto flex-shrink-0">{fmtTime(r.lastMessageAt)}</span>
+                  </div>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {/* OKNO ROZMOWY */}
+      {/* ── OKNO ROZMOWY ── */}
       <div className={`${activeRoom ? "flex" : "hidden md:flex"} flex-col flex-1`}>
         {activeRoom ? (
           <>
-            {/* Header pokoju */}
+            {/* Header */}
             <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3 bg-white">
               <button onClick={() => setActiveRoom(null)} className="md:hidden p-1 text-gray-400">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
               </button>
               <span className="text-gray-400">{roomIcon(activeRoom)}</span>
               <h3 className="font-semibold text-gray-800">{roomDisplayName(activeRoom)}</h3>
-              <span className="text-xs text-gray-400">
-                {activeRoom.type === "channel" ? "kanał" : activeRoom.type === "dm" ? "prywatna" : "grupa"}
-              </span>
-              <button onClick={() => setShowMembers(!showMembers)} className="ml-auto p-1.5 rounded-lg hover:bg-gray-100 text-gray-400" title="Członkowie">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-              </button>
+              <span className="text-xs text-gray-400">{activeRoom.type === "channel" ? "kanał" : activeRoom.type === "dm" ? "prywatna" : "grupa"}</span>
+              <div className="ml-auto flex items-center gap-1">
+                <button onClick={() => { setShowSearch(!showSearch); setSearchQuery(""); }} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400" title="Szukaj">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                </button>
+                <button onClick={() => { setShowRoomSettings(!showRoomSettings); setEditRoomName(activeRoom.name); setShowMembers(false); }} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400" title="Ustawienia pokoju">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                </button>
+              </div>
             </div>
 
-            {/* Panel członków */}
-            {showMembers && (
-              <div className="px-4 py-2 bg-blue-50 border-b border-blue-100 text-xs text-gray-600">
-                <strong>Członkowie:</strong>{" "}
-                {(activeRoom.members || []).map(uid => {
-                  const u = appUsers.find(a => a.uid === uid);
-                  return u?.email?.split("@")[0] || uid;
-                }).join(", ")}
+            {/* Wyszukiwanie */}
+            {showSearch && (
+              <div className="px-4 py-2 border-b border-gray-100 bg-gray-50">
+                <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Szukaj w wiadomościach..."
+                  className="w-full px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:border-blue-400" autoFocus />
+                {searchQuery && <div className="text-xs text-gray-400 mt-1">Znaleziono: {filteredMessages.length}</div>}
+              </div>
+            )}
+
+            {/* Ustawienia pokoju */}
+            {showRoomSettings && (
+              <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 space-y-3">
+                {activeRoom.type !== "dm" && (
+                  <div>
+                    <label className="text-xs text-gray-500">Nazwa pokoju</label>
+                    <div className="flex gap-2 mt-1">
+                      <input type="text" value={editRoomName} onChange={e => setEditRoomName(e.target.value)}
+                        className="flex-1 px-2 py-1 border rounded text-sm focus:outline-none focus:border-blue-400" />
+                      <button onClick={renameRoom} className="px-3 py-1 bg-blue-500 text-white rounded text-xs hover:bg-blue-600">Zmień</button>
+                    </div>
+                  </div>
+                )}
+                {/* Członkowie */}
+                <div>
+                  <label className="text-xs text-gray-500">Członkowie ({(activeRoom.members || []).length})</label>
+                  <div className="mt-1 max-h-32 overflow-y-auto space-y-1">
+                    {(activeRoom.members || []).map(uid => {
+                      const u = appUsers.find(a => a.uid === uid);
+                      const isCreator = uid === activeRoom.createdBy;
+                      return (
+                        <div key={uid} className="flex items-center gap-2 text-sm py-1">
+                          <span className="text-gray-700">{u?.email?.split("@")[0] || uid}</span>
+                          {isCreator && <span className="text-xs bg-yellow-100 text-yellow-700 px-1.5 rounded">twórca</span>}
+                          {!isCreator && activeRoom.createdBy === currentUser.uid && activeRoom.type !== "dm" && (
+                            <button onClick={() => removeMember(uid)} className="ml-auto text-xs text-red-400 hover:text-red-600">Usuń</button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {/* Dodaj członka */}
+                  {activeRoom.type !== "dm" && activeRoom.createdBy === currentUser.uid && (
+                    <div className="mt-2">
+                      <label className="text-xs text-gray-500">Dodaj osobę</label>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {appUsers.filter(u => !(activeRoom.members || []).includes(u.uid)).map(u => (
+                          <button key={u.uid} onClick={() => addMember(u.uid)}
+                            className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100">+ {u.email?.split("@")[0]}</button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {/* Akcje */}
+                <div className="flex gap-2 pt-2 border-t border-gray-200">
+                  {activeRoom.type !== "dm" && (
+                    <button onClick={leaveRoom} className="text-xs px-3 py-1.5 text-orange-600 hover:bg-orange-50 rounded">Opuść pokój</button>
+                  )}
+                  {activeRoom.createdBy === currentUser.uid && (
+                    <button onClick={deleteRoom} className="text-xs px-3 py-1.5 text-red-600 hover:bg-red-50 rounded">Usuń pokój</button>
+                  )}
+                  <button onClick={() => setShowRoomSettings(false)} className="ml-auto text-xs px-3 py-1.5 text-gray-500 hover:bg-gray-100 rounded">Zamknij</button>
+                </div>
               </div>
             )}
 
             {/* Wiadomości */}
-            <div ref={chatContainerRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-1">
-              {messages.length === 0 && (
-                <div className="text-center text-gray-300 text-sm py-12">Brak wiadomości. Napisz pierwszą!</div>
-              )}
-              {messages.map((m, i) => {
+            <div ref={chatContainerRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-1" onClick={() => setContextMenu(null)}>
+              {filteredMessages.length === 0 && <div className="text-center text-gray-300 text-sm py-12">{searchQuery ? "Brak wyników" : "Brak wiadomości. Napisz pierwszą!"}</div>}
+              {filteredMessages.map((m, i) => {
                 const isMine = m.senderId === currentUser.uid;
-                const showSender = !isMine && (i === 0 || messages[i - 1]?.senderId !== m.senderId);
+                const showSender = !isMine && (i === 0 || filteredMessages[i - 1]?.senderId !== m.senderId);
+                const isDeleted = m.deleted;
                 return (
-                  <div key={m.id} className={`flex ${isMine ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[75%] ${isMine ? "order-1" : ""}`}>
-                      {showSender && (
-                        <div className="text-xs text-gray-400 mb-0.5 ml-1">{m.senderName || m.senderEmail?.split("@")[0]}</div>
+                  <div key={m.id} className={`flex ${isMine ? "justify-end" : "justify-start"} group`}>
+                    <div className={`max-w-[75%] relative ${isMine ? "order-1" : ""}`}>
+                      {showSender && <div className="text-xs text-gray-400 mb-0.5 ml-1">{m.senderName || m.senderEmail?.split("@")[0]}</div>}
+
+                      {/* Reply quote */}
+                      {m.replyTo && !isDeleted && (
+                        <div className={`text-xs px-2 py-1 mb-0.5 rounded-t-lg border-l-2 ${isMine ? "bg-blue-400/30 border-blue-300 text-blue-100" : "bg-gray-200 border-gray-400 text-gray-600"}`}>
+                          <span className="font-medium">{m.replyTo.senderName}</span>: {m.replyTo.text}
+                        </div>
                       )}
-                      <div className={`px-3 py-2 rounded-2xl text-sm ${
-                        isMine
-                          ? "bg-blue-500 text-white rounded-br-md"
-                          : "bg-gray-100 text-gray-800 rounded-bl-md"
-                      }`}>
-                        {m.text && <div style={{whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{m.text}</div>}
-                        {m.fileUrl && (
-                          <a href={safeHref(m.fileUrl)} target="_blank" rel="noopener noreferrer"
-                            className={`flex items-center gap-1.5 mt-1 text-xs ${isMine ? "text-blue-100 hover:text-white" : "text-blue-600 hover:text-blue-700"}`}>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-                            {m.fileName || "Plik"}
-                          </a>
-                        )}
-                        {m.fileUrl && m.fileName?.match(/\.(jpg|jpeg|png|gif|webp)$/i) && (
-                          <img src={m.fileUrl} alt={m.fileName} className="mt-2 rounded-lg max-w-full max-h-48 object-cover cursor-pointer"
-                            onClick={() => window.open(m.fileUrl, "_blank")} />
+
+                      <div className={`px-3 py-2 rounded-2xl text-sm relative ${
+                        isDeleted ? "bg-gray-100 text-gray-400 italic" :
+                        isMine ? "bg-blue-500 text-white rounded-br-md" : "bg-gray-100 text-gray-800 rounded-bl-md"
+                      }`}
+                        onContextMenu={(e) => { if (!isDeleted) { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, msg: m }); } }}
+                        onClick={(e) => { if (!isDeleted && e.detail === 2) { setContextMenu({ x: e.clientX, y: e.clientY, msg: m }); } }}>
+                        {isDeleted ? "Wiadomość usunięta" : (
+                          <>
+                            {m.text && <div style={{whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{m.text}</div>}
+                            {m.edited && <span className={`text-xs ${isMine ? "text-blue-200" : "text-gray-400"}`}> (edytowano)</span>}
+                            {m.fileUrl && (
+                              <a href={safeHref(m.fileUrl)} target="_blank" rel="noopener noreferrer"
+                                className={`flex items-center gap-1.5 mt-1 text-xs ${isMine ? "text-blue-100 hover:text-white" : "text-blue-600 hover:text-blue-700"}`}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                                {m.fileName || "Plik"}
+                              </a>
+                            )}
+                            {m.fileUrl && m.fileName?.match(/\.(jpg|jpeg|png|gif|webp)$/i) && (
+                              <img src={m.fileUrl} alt={m.fileName} className="mt-2 rounded-lg max-w-full max-h-48 object-cover cursor-pointer" onClick={() => window.open(m.fileUrl, "_blank")} />
+                            )}
+                          </>
                         )}
                       </div>
+
+                      {/* Reakcje */}
+                      {!isDeleted && m.reactions && Object.keys(m.reactions).length > 0 && (
+                        <div className={`flex flex-wrap gap-1 mt-0.5 ${isMine ? "justify-end" : ""}`}>
+                          {Object.entries(m.reactions).filter(([,u]) => u.length > 0).map(([emoji, users]) => (
+                            <button key={emoji} onClick={() => toggleReaction(m, emoji)}
+                              className={`text-xs px-1.5 py-0.5 rounded-full border ${users.includes(currentUser.uid) ? "bg-blue-50 border-blue-200" : "bg-gray-50 border-gray-200"}`}
+                              title={users.map(uid => appUsers.find(u => u.uid === uid)?.email?.split("@")[0] || "?").join(", ")}>
+                              {emoji} {users.length}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
                       <div className={`text-xs text-gray-300 mt-0.5 flex items-center gap-1 ${isMine ? "justify-end mr-1" : "ml-1"}`}>
                         <span>{fmtTime(m.timestamp)}</span>
-                        {isMine && (() => {
+                        {isMine && !isDeleted && (() => {
                           const lastRead = activeRoom.lastRead || {};
-                          const readers = Object.entries(lastRead)
-                            .filter(([uid, ts]) => uid !== currentUser.uid && ts >= m.timestamp)
-                            .map(([uid]) => uid);
-                          if (readers.length === 0) return (
-                            <span title="Wysłano">
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                            </span>
-                          );
+                          const readers = Object.entries(lastRead).filter(([uid, ts]) => uid !== currentUser.uid && ts >= m.timestamp).map(([uid]) => uid);
+                          if (readers.length === 0) return <span title="Wysłano"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>;
                           const names = readers.map(uid => appUsers.find(u => u.uid === uid)?.email?.split("@")[0] || "?").join(", ");
-                          return (
-                            <span title={`Przeczytane: ${names}`} className="cursor-default">
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 6 7 17 2 12"/><polyline points="22 6 11 17"/></svg>
-                            </span>
-                          );
+                          return <span title={`Przeczytane: ${names}`} className="cursor-default"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 6 7 17 2 12"/><polyline points="22 6 11 17"/></svg></span>;
                         })()}
                       </div>
                     </div>
@@ -2554,30 +2674,57 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input wiadomości */}
+            {/* Typing indicator */}
+            {activeTypers.length > 0 && (
+              <div className="px-4 py-1 text-xs text-gray-400 italic">
+                {activeTypers.join(", ")} {activeTypers.length === 1 ? "pisze" : "piszą"}...
+              </div>
+            )}
+
+            {/* Reply bar */}
+            {replyTo && (
+              <div className="px-4 py-2 bg-blue-50 border-t border-blue-100 flex items-center gap-2">
+                <div className="flex-1 text-xs text-blue-700 truncate">
+                  Odpowiedź do <strong>{replyTo.senderName || replyTo.senderEmail?.split("@")[0]}</strong>: {replyTo.text?.slice(0, 60) || "📎 Plik"}
+                </div>
+                <button onClick={() => setReplyTo(null)} className="text-blue-400 hover:text-blue-600">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+            )}
+
+            {/* Edit bar */}
+            {editingMsg && (
+              <div className="px-4 py-2 bg-yellow-50 border-t border-yellow-200">
+                <div className="text-xs text-yellow-700 mb-1">Edytujesz wiadomość</div>
+                <div className="flex gap-2">
+                  <input type="text" value={editText} onChange={e => setEditText(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") setEditingMsg(null); }}
+                    className="flex-1 px-2 py-1 border rounded text-sm focus:outline-none focus:border-yellow-400" autoFocus />
+                  <button onClick={saveEdit} className="px-3 py-1 bg-yellow-500 text-white rounded text-xs">Zapisz</button>
+                  <button onClick={() => setEditingMsg(null)} className="px-3 py-1 text-gray-500 text-xs">Anuluj</button>
+                </div>
+              </div>
+            )}
+
+            {/* Input */}
             <div className="px-4 py-3 border-t border-gray-100 bg-white">
               <div className="flex items-center gap-2">
                 <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
                 <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
-                  className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors disabled:opacity-50"
-                  title="Dodaj plik">
-                  {uploading ? (
-                    <svg width="18" height="18" viewBox="0 0 24 24" className="animate-spin" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v4m0 12v4m-7.07-3.93l2.83-2.83m8.48-8.48l2.83-2.83M2 12h4m12 0h4m-3.93 7.07l-2.83-2.83M7.76 7.76L4.93 4.93"/></svg>
-                  ) : (
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-                  )}
+                  className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors disabled:opacity-50" title="Dodaj plik">
+                  {uploading
+                    ? <svg width="18" height="18" viewBox="0 0 24 24" className="animate-spin" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v4m0 12v4m-7.07-3.93l2.83-2.83m8.48-8.48l2.83-2.83M2 12h4m12 0h4m-3.93 7.07l-2.83-2.83M7.76 7.76L4.93 4.93"/></svg>
+                    : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>}
                 </button>
-                <input
-                  type="text"
-                  value={msgText}
-                  onChange={e => setMsgText(e.target.value)}
+                <input ref={msgInputRef} type="text" value={msgText}
+                  onChange={e => { setMsgText(e.target.value); handleTyping(); }}
                   onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(msgText); } }}
                   placeholder="Napisz wiadomość..."
-                  className="flex-1 px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
-                />
+                  className="flex-1 px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100" />
                 <button onClick={() => sendMessage(msgText)} disabled={!msgText.trim()}
-                  className="p-2 rounded-xl bg-blue-500 text-white hover:bg-blue-600 transition-colors disabled:opacity-30 disabled:hover:bg-blue-500">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                  className="p-2 rounded-xl bg-blue-500 text-white hover:bg-blue-600 transition-colors disabled:opacity-30">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
                 </button>
               </div>
             </div>
@@ -2585,66 +2732,76 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
         ) : (
           <div className="flex-1 flex items-center justify-center text-gray-300">
             <div className="text-center">
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mx-auto mb-3 opacity-30"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mx-auto mb-3 opacity-30"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
               <div className="text-sm">Wybierz pokój lub utwórz nowy</div>
             </div>
           </div>
         )}
       </div>
 
-      {/* MODAL — NOWY POKÓJ */}
+      {/* ── CONTEXT MENU (prawy klik / double tap) ── */}
+      {contextMenu && (
+        <div className="fixed z-50 bg-white rounded-xl shadow-xl border border-gray-200 py-1 min-w-[180px]"
+          style={{ top: Math.min(contextMenu.y, window.innerHeight - 280), left: Math.min(contextMenu.x, window.innerWidth - 200) }}>
+          {/* Reakcje */}
+          <div className="flex gap-1 px-3 py-2 border-b border-gray-100">
+            {REACTIONS.map(emoji => (
+              <button key={emoji} onClick={() => toggleReaction(contextMenu.msg, emoji)}
+                className="text-lg hover:scale-125 transition-transform p-0.5">{emoji}</button>
+            ))}
+          </div>
+          {/* Odpowiedz */}
+          <button onClick={() => { setReplyTo(contextMenu.msg); setContextMenu(null); msgInputRef.current?.focus(); }}
+            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
+            Odpowiedz
+          </button>
+          {/* Edytuj (tylko swoje) */}
+          {contextMenu.msg.senderId === currentUser.uid && !contextMenu.msg.deleted && (
+            <button onClick={() => { setEditingMsg(contextMenu.msg); setEditText(contextMenu.msg.text || ""); setContextMenu(null); }}
+              className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              Edytuj
+            </button>
+          )}
+          {/* Usuń (tylko swoje) */}
+          {contextMenu.msg.senderId === currentUser.uid && !contextMenu.msg.deleted && (
+            <button onClick={() => { deleteMessage(contextMenu.msg); setContextMenu(null); }}
+              className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              Usuń
+            </button>
+          )}
+          <button onClick={() => setContextMenu(null)} className="w-full text-left px-4 py-2 text-xs text-gray-400 hover:bg-gray-50">Zamknij</button>
+        </div>
+      )}
+
+      {/* ── MODAL — NOWY POKÓJ ── */}
       {showNewRoom && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowNewRoom(false)}>
           <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
             <h3 className="font-semibold text-lg mb-4">Nowy pokój czatu</h3>
-
             <label className="block text-sm text-gray-600 mb-1">Nazwa</label>
-            <input type="text" value={newRoomName} onChange={e => setNewRoomName(e.target.value)}
-              placeholder="np. Ogólny, Trasa FR, ..."
+            <input type="text" value={newRoomName} onChange={e => setNewRoomName(e.target.value)} placeholder="np. Ogólny, Trasa FR, ..."
               className="w-full px-3 py-2 border rounded-lg text-sm mb-3 focus:outline-none focus:border-blue-400" />
-
             <label className="block text-sm text-gray-600 mb-1">Typ</label>
             <div className="flex gap-2 mb-3">
-              {[
-                { id: "channel", label: "Kanał", desc: "Wszyscy zalogowani" },
-                { id: "group", label: "Grupa", desc: "Wybrane osoby" },
-                { id: "dm", label: "Prywatna", desc: "1 na 1" },
-              ].map(t => (
+              {[{ id: "channel", label: "Kanał", desc: "Wszyscy" }, { id: "group", label: "Grupa", desc: "Wybrane osoby" }, { id: "dm", label: "Prywatna", desc: "1 na 1" }].map(t => (
                 <button key={t.id} onClick={() => { setNewRoomType(t.id); setNewRoomMembers([]); }}
-                  className={`flex-1 p-2 rounded-lg border text-xs text-center transition-colors ${
-                    newRoomType === t.id ? "border-blue-400 bg-blue-50 text-blue-700" : "border-gray-200 text-gray-500 hover:bg-gray-50"
-                  }`}>
-                  <div className="font-medium">{t.label}</div>
-                  <div className="text-gray-400 mt-0.5">{t.desc}</div>
+                  className={`flex-1 p-2 rounded-lg border text-xs text-center transition-colors ${newRoomType === t.id ? "border-blue-400 bg-blue-50 text-blue-700" : "border-gray-200 text-gray-500 hover:bg-gray-50"}`}>
+                  <div className="font-medium">{t.label}</div><div className="text-gray-400 mt-0.5">{t.desc}</div>
                 </button>
               ))}
             </div>
-
-            {/* Wybór członków dla grupy/DM */}
             {(newRoomType === "group" || newRoomType === "dm") && (
               <div className="mb-3">
-                <label className="block text-sm text-gray-600 mb-1">
-                  {newRoomType === "dm" ? "Wybierz osobę" : "Wybierz członków"}
-                </label>
+                <label className="block text-sm text-gray-600 mb-1">{newRoomType === "dm" ? "Wybierz osobę" : "Wybierz członków"}</label>
                 <div className="max-h-40 overflow-y-auto border rounded-lg">
                   {appUsers.filter(u => u.uid !== currentUser.uid).map(u => (
-                    <label key={u.uid}
-                      className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-50 last:border-0">
-                      <input
-                        type={newRoomType === "dm" ? "radio" : "checkbox"}
-                        name="member"
-                        checked={newRoomMembers.includes(u.uid)}
-                        onChange={() => {
-                          if (newRoomType === "dm") {
-                            setNewRoomMembers([u.uid]);
-                          } else {
-                            setNewRoomMembers(prev =>
-                              prev.includes(u.uid) ? prev.filter(id => id !== u.uid) : [...prev, u.uid]
-                            );
-                          }
-                        }}
-                        className="accent-blue-500"
-                      />
+                    <label key={u.uid} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-50 last:border-0">
+                      <input type={newRoomType === "dm" ? "radio" : "checkbox"} name="member" checked={newRoomMembers.includes(u.uid)}
+                        onChange={() => newRoomType === "dm" ? setNewRoomMembers([u.uid]) : setNewRoomMembers(prev => prev.includes(u.uid) ? prev.filter(id => id !== u.uid) : [...prev, u.uid])}
+                        className="accent-blue-500" />
                       <span className="text-sm text-gray-700">{u.email}</span>
                       <span className="text-xs text-gray-400 ml-auto">{u.role || "user"}</span>
                     </label>
@@ -2652,12 +2809,9 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
                 </div>
               </div>
             )}
-
             <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => setShowNewRoom(false)}
-                className="px-4 py-2 text-sm text-gray-500 hover:bg-gray-100 rounded-lg">Anuluj</button>
-              <button onClick={createRoom}
-                className="px-4 py-2 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600">Utwórz</button>
+              <button onClick={() => setShowNewRoom(false)} className="px-4 py-2 text-sm text-gray-500 hover:bg-gray-100 rounded-lg">Anuluj</button>
+              <button onClick={createRoom} className="px-4 py-2 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600">Utwórz</button>
             </div>
           </div>
         </div>
