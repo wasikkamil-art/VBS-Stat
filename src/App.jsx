@@ -2218,6 +2218,8 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
         lastRoomTimestamps.current[r.id] = r.lastMessageAt || "";
       });
       setRooms(myRooms);
+      // Sync activeRoom z najnowszymi danymi (lastRead itp.)
+      setActiveRoom(prev => prev ? myRooms.find(r => r.id === prev.id) || prev : null);
     });
     return () => unsub();
   }, [currentUser.uid]);
@@ -2262,29 +2264,18 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     }
   }, [messages]);
 
-  // Oznacz wiadomości jako przeczytane (z debouncem — unika pętli onSnapshot)
-  const markedAsRead = useRef(new Set());
+  // Oznacz pokój jako przeczytany — jeden update na room, nie na każdej wiadomości
   useEffect(() => {
     if (!activeRoom || messages.length === 0) return;
-    const unread = messages.filter(m =>
-      m.senderId !== currentUser.uid
-      && !(m.readBy || []).includes(currentUser.uid)
-      && !markedAsRead.current.has(m.id)
-    );
-    if (unread.length === 0) return;
-    const timer = setTimeout(() => {
-      unread.forEach(m => {
-        markedAsRead.current.add(m.id);
-        updateDoc(doc(db, "chatRooms", activeRoom.id, "messages", m.id), {
-          readBy: [...new Set([...(m.readBy || []), currentUser.uid])],
-        }).catch(() => {});
-      });
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [messages, activeRoom?.id, currentUser.uid]);
-
-  // Reset markedAsRead przy zmianie pokoju
-  useEffect(() => { markedAsRead.current = new Set(); }, [activeRoom?.id]);
+    const lastMsg = messages[messages.length - 1];
+    if (!lastMsg?.timestamp) return;
+    const myLastRead = activeRoom.lastRead?.[currentUser.uid];
+    if (!myLastRead || lastMsg.timestamp > myLastRead) {
+      updateDoc(doc(db, "chatRooms", activeRoom.id), {
+        [`lastRead.${currentUser.uid}`]: lastMsg.timestamp,
+      }).catch(() => {});
+    }
+  }, [activeRoom?.id, messages.length]);
 
   // Wyślij wiadomość
   const sendMessage = async (text, fileUrl, fileName) => {
@@ -2296,7 +2287,6 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
       senderEmail: currentUser.email,
       senderName: appUsers.find(u => u.uid === currentUser.uid)?.email?.split("@")[0] || currentUser.email,
       timestamp: new Date().toISOString(),
-      readBy: [currentUser.uid],
     };
     if (fileUrl) { msg.fileUrl = fileUrl; msg.fileName = fileName; }
     try {
@@ -2540,7 +2530,10 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
                       <div className={`text-xs text-gray-300 mt-0.5 flex items-center gap-1 ${isMine ? "justify-end mr-1" : "ml-1"}`}>
                         <span>{fmtTime(m.timestamp)}</span>
                         {isMine && (() => {
-                          const readers = (m.readBy || []).filter(uid => uid !== currentUser.uid);
+                          const lastRead = activeRoom.lastRead || {};
+                          const readers = Object.entries(lastRead)
+                            .filter(([uid, ts]) => uid !== currentUser.uid && ts >= m.timestamp)
+                            .map(([uid]) => uid);
                           if (readers.length === 0) return (
                             <span title="Wysłano">
                               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
