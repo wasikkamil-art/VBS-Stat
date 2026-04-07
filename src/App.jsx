@@ -2244,9 +2244,14 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     return () => { unsub(); prevMsgCountRef.current = 0; };
   }, [activeRoom?.id]);
 
-  // Auto-scroll do ostatniej wiadomości
+  const chatContainerRef = useRef(null);
+
+  // Auto-scroll do ostatniej wiadomości (tylko w kontenerze czatu, nie całej strony)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const container = chatContainerRef.current;
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+    }
   }, [messages]);
 
   // Oznacz wiadomości jako przeczytane
@@ -2482,7 +2487,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
             )}
 
             {/* Wiadomości */}
-            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-1">
+            <div ref={chatContainerRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-1">
               {messages.length === 0 && (
                 <div className="text-center text-gray-300 text-sm py-12">Brak wiadomości. Napisz pierwszą!</div>
               )}
