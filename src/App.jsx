@@ -30,6 +30,15 @@ const auth      = getAuth(app);
 const storage   = getStorage(app);
 const functions = getFunctions(app, "europe-west1");
 
+// ─── SECURITY: walidacja URL (chroni przed javascript: / data: injection) ───
+const safeHref = (url) => {
+  if (!url || typeof url !== "string") return "#";
+  try {
+    const parsed = new URL(url, window.location.origin);
+    return ["http:", "https:"].includes(parsed.protocol) ? url : "#";
+  } catch { return "#"; }
+};
+
 // ─── STORAGE (Firebase Firestore) ────────────────────────────────────────────
 // Dane w jednym dokumencie fleet/data (merge strategy)
 
@@ -542,7 +551,7 @@ function AttachmentList({ files, onDelete }) {
       {files.map((f, i) => (
         <div key={i} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-xs">
           <span>{f.type === "application/pdf" ? "📄" : (f.name?.endsWith(".docx")||f.name?.endsWith(".doc")) ? "📝" : "🖼️"}</span>
-          <a href={f.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline max-w-32 truncate">{f.name}</a>
+          <a href={safeHref(f.url)} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline max-w-32 truncate">{f.name}</a>
           {onDelete && <button onClick={() => onDelete(i)} className="text-gray-300 hover:text-red-400 ml-1">✕</button>}
         </div>
       ))}
@@ -2561,7 +2570,7 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
                     {(editZdData.zalacznik || z.zalacznik) ? (
                       <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-200 bg-gray-50 text-xs">
                         <span>{(editZdData.zalacznik||z.zalacznik).type === "application/pdf" ? "📄" : "🖼️"}</span>
-                        <a href={(editZdData.zalacznik||z.zalacznik).url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate max-w-48">{(editZdData.zalacznik||z.zalacznik).name}</a>
+                        <a href={safeHref((editZdData.zalacznik||z.zalacznik).url)} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate max-w-48">{(editZdData.zalacznik||z.zalacznik).name}</a>
                         <button onClick={() => setEditZdData(p=>({...p,zalacznik:null}))} className="ml-auto text-gray-400 hover:text-red-400">✕</button>
                       </div>
                     ) : (
@@ -2610,7 +2619,7 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
                   <div className="text-sm text-gray-700 whitespace-pre-wrap">{z.tresc}</div>
                   {z.zalacznik && (
                     <div className="mt-2">
-                      <a href={z.zalacznik.url} target="_blank" rel="noopener noreferrer"
+                      <a href={safeHref(z.zalacznik.url)} target="_blank" rel="noopener noreferrer"
                         className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-gray-50 text-xs text-blue-600 hover:bg-blue-50 transition-all">
                         <span>{z.zalacznik.type === "application/pdf" ? "📄" : "🖼️"}</span>
                         <span className="max-w-48 truncate">{z.zalacznik.name}</span>
@@ -7437,7 +7446,7 @@ Jeśli nie możesz odczytać danego pola, wpisz null.`,
   if (existingUrl) {
     return (
       <div className="flex items-center gap-1">
-        <a href={existingUrl} target="_blank" rel="noopener noreferrer"
+        <a href={safeHref(existingUrl)} target="_blank" rel="noopener noreferrer"
           className="text-xs px-2 py-1 rounded-lg font-semibold"
           style={{ background: isFV ? "#f0fdf4" : "#eff6ff", color: isFV ? "#166534" : "#1d4ed8" }}>
           {isFV ? "📄 FV" : "📋 Zlec."}
@@ -7993,7 +8002,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                   <td className="px-3 py-2.5 whitespace-nowrap text-right">
                     <div className="flex items-center gap-1 justify-end">
                       {r.urlZlecenie
-                        ? <a href={r.urlZlecenie} target="_blank" rel="noopener noreferrer"
+                        ? <a href={safeHref(r.urlZlecenie)} target="_blank" rel="noopener noreferrer"
                             className="text-xs px-2 py-1 rounded-lg font-medium transition-all hover:bg-blue-100"
                             style={{background:"#f0fdf4", color:"#15803d"}}>📄 Otwórz</a>
                         : <ZlecenieUploadBtn frachtId={r.id}
@@ -8321,11 +8330,11 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
                 <div className="text-xs text-gray-400">{r.dyspozytor || "—"} · {r.nrFV || "brak FV"}</div>
                 <div className="flex gap-1 flex-wrap">
                   {r.urlZlecenie && (
-                    <a href={r.urlZlecenie} target="_blank" rel="noopener noreferrer"
+                    <a href={safeHref(r.urlZlecenie)} target="_blank" rel="noopener noreferrer"
                       className="h-8 px-2 rounded-lg flex items-center justify-center bg-blue-50 text-blue-600 text-xs font-semibold hover:bg-blue-100">📄 Zlecenie</a>
                   )}
                   {r.urlFV && (
-                    <a href={r.urlFV} target="_blank" rel="noopener noreferrer"
+                    <a href={safeHref(r.urlFV)} target="_blank" rel="noopener noreferrer"
                       className="h-8 px-2 rounded-lg flex items-center justify-center bg-green-50 text-green-600 text-xs font-semibold hover:bg-green-100">🧾 FV</a>
                   )}
                   <button onClick={() => { setEditId(r.id); setShowForm(true); }}
@@ -8406,7 +8415,7 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
                   <td className="px-2 py-2 whitespace-nowrap text-right">
                     <div className="flex gap-1 justify-end items-center">
                       {r.urlZlecenie
-                        ? <a href={r.urlZlecenie} target="_blank" rel="noopener noreferrer"
+                        ? <a href={safeHref(r.urlZlecenie)} target="_blank" rel="noopener noreferrer"
                             className="text-xs px-2 py-1 rounded-lg font-medium transition-all hover:bg-blue-100"
                             style={{background:"#f0fdf4", color:"#15803d"}}>📄 Otwórz</a>
                         : <ZlecenieUploadBtn frachtId={r.id}
@@ -8924,7 +8933,7 @@ function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }
                 <span className="text-2xl">📋</span>
                 <div className="flex-1">
                   <div className="text-sm font-semibold text-blue-800">Zlecenie wgrane</div>
-                  <a href={f.urlZlecenie} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">Otwórz dokument →</a>
+                  <a href={safeHref(f.urlZlecenie)} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">Otwórz dokument →</a>
                 </div>
                 <ZlecenieUploadBtn
                   frachtId={record?.id || "new"}
