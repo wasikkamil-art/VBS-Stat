@@ -884,7 +884,7 @@ function App({ user, role, appUsers = [] }) {
     if (filterYear    !== "all" && !c.date?.startsWith(filterYear))  return false;
     if (filterNote    !== "all" && c.note !== filterNote)             return false;
     return true;
-  }).sort((a, b) => b.date?.localeCompare(a.date)), [costs, filterVehicle, filterCat, filterMonth, filterYear, filterNote]);
+  }).sort((a, b) => (b.date||"").localeCompare(a.date||"")), [costs, filterVehicle, filterCat, filterMonth, filterYear, filterNote]);
 
   const months = useMemo(() => {
     const s = new Set(costs.map((c) => c.date?.slice(0, 7)).filter(Boolean));
@@ -2285,9 +2285,9 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
   const [zdFile, setZdFile] = useState(null);
   const [editZdarzenieId, setEditZdarzenieId] = useState(null);
   const [editZdData, setEditZdData] = useState({});
-  const [przypomnienieZdId, setPoprzypomnienieZdId] = useState(null);
-  const [przypomnienieData, setRzypomnienieData] = useState("");
-  const [przypomnienieOpis, setRzypomnienieOpis] = useState("");
+  const [przypomnienieZdId, setPrzypomnienieZdId] = useState(null);
+  const [przypomnienieData, setPrzypomnienieData] = useState("");
+  const [przypomnienieOpis, setPrzypomnienieOpis] = useState("");
   const [editMode, setEditMode] = useState(false);
   const [editData, setEditData] = useState({...sprawa});
   // Synchronizuj editData gdy sprawa się zmieni (np. po onSnapshot)
@@ -2597,7 +2597,7 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
                       <div className="flex gap-1">
                         <button onClick={() => { setEditZdarzenieId(z.id); setEditZdData({typ:z.typ,tresc:z.tresc,ktoDoKogo:z.ktoDoKogo}); }}
                           className="px-2 py-0.5 rounded text-xs text-gray-400 hover:bg-gray-100">✏️</button>
-                        <button onClick={() => { setPoprzypomnienieZdId(z.id); setRzypomnienieData(z.przypomnienie||""); setRzypomnienieOpis(z.przypomnienieOpis||""); }}
+                        <button onClick={() => { setPrzypomnienieZdId(z.id); setPrzypomnienieData(z.przypomnienie||""); setPrzypomnienieOpis(z.przypomnienieOpis||""); }}
                           className="px-2 py-0.5 rounded text-xs hover:bg-orange-50 transition-all"
                           style={{color: z.przypomnienie ? "#f97316" : "#d1d5db"}} title="Ustaw przypomnienie">⏰</button>
                         <button onClick={() => { if(window.confirm("Usunąć zdarzenie?")) onUpdate({zdarzenia:(sprawa.zdarzenia||[]).filter(zd=>zd.id!==z.id)}); }}
@@ -2637,12 +2637,12 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
             <h3 style={{fontWeight:700,fontSize:15,marginBottom:16,color:"#111827"}}>Ustaw przypomnienie</h3>
             <div style={{marginBottom:12}}>
               <label style={{display:"block",fontSize:12,fontWeight:600,color:"#6b7280",marginBottom:4}}>Data i godzina</label>
-              <input type="datetime-local" value={przypomnienieData} onChange={e => setRzypomnienieData(e.target.value)}
+              <input type="datetime-local" value={przypomnienieData} onChange={e => setPrzypomnienieData(e.target.value)}
                 style={{width:"100%",padding:"8px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",boxSizing:"border-box"}} />
             </div>
             <div style={{marginBottom:16}}>
               <label style={{display:"block",fontSize:12,fontWeight:600,color:"#6b7280",marginBottom:4}}>Krotki opis</label>
-              <input value={przypomnienieOpis} onChange={e => setRzypomnienieOpis(e.target.value)}
+              <input value={przypomnienieOpis} onChange={e => setPrzypomnienieOpis(e.target.value)}
                 placeholder="np. Zadzwon do klienta..."
                 style={{width:"100%",padding:"8px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",boxSizing:"border-box"}} />
             </div>
@@ -2651,15 +2651,15 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
                 <button onClick={() => {
                   const updated = (sprawa.zdarzenia||[]).map(zd => zd.id === przypomnienieZdId ? {...zd, przypomnienie:null, przypomnienieOpis:null} : zd);
                   onUpdate({zdarzenia: updated});
-                  setPoprzypomnienieZdId(null);
+                  setPrzypomnienieZdId(null);
                 }} style={{padding:"8px 14px",borderRadius:8,border:"1.5px solid #fecaca",background:"#fff",fontSize:12,cursor:"pointer",color:"#ef4444"}}>Usun</button>
               )}
-              <button onClick={() => setPoprzypomnienieZdId(null)}
+              <button onClick={() => setPrzypomnienieZdId(null)}
                 style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer"}}>Anuluj</button>
               <button onClick={() => {
                 const updated = (sprawa.zdarzenia||[]).map(zd => zd.id === przypomnienieZdId ? {...zd, przypomnienie: przypomnienieData, przypomnienieOpis: przypomnienieOpis} : zd);
                 onUpdate({zdarzenia: updated});
-                setPoprzypomnienieZdId(null);
+                setPrzypomnienieZdId(null);
                 showToast("Przypomnienie ustawione");
               }} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Zapisz</button>
             </div>
