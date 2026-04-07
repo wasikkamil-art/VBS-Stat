@@ -2230,7 +2230,9 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
       orderBy("timestamp", "asc")
     );
     const unsub = onSnapshot(q, (snap) => {
-      const newMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const newMsgs = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (a.timestamp || "").localeCompare(b.timestamp || ""));
       // Dźwięk gdy nowa wiadomość od kogoś innego
       if (prevMsgCountRef.current > 0 && newMsgs.length > prevMsgCountRef.current) {
         const latest = newMsgs[newMsgs.length - 1];
@@ -2260,18 +2262,29 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     }
   }, [messages]);
 
-  // Oznacz wiadomości jako przeczytane
+  // Oznacz wiadomości jako przeczytane (z debouncem — unika pętli onSnapshot)
+  const markedAsRead = useRef(new Set());
   useEffect(() => {
     if (!activeRoom || messages.length === 0) return;
     const unread = messages.filter(m =>
-      m.senderId !== currentUser.uid && !(m.readBy || []).includes(currentUser.uid)
+      m.senderId !== currentUser.uid
+      && !(m.readBy || []).includes(currentUser.uid)
+      && !markedAsRead.current.has(m.id)
     );
-    unread.forEach(m => {
-      updateDoc(doc(db, "chatRooms", activeRoom.id, "messages", m.id), {
-        readBy: [...(m.readBy || []), currentUser.uid],
-      }).catch(() => {});
-    });
+    if (unread.length === 0) return;
+    const timer = setTimeout(() => {
+      unread.forEach(m => {
+        markedAsRead.current.add(m.id);
+        updateDoc(doc(db, "chatRooms", activeRoom.id, "messages", m.id), {
+          readBy: [...new Set([...(m.readBy || []), currentUser.uid])],
+        }).catch(() => {});
+      });
+    }, 500);
+    return () => clearTimeout(timer);
   }, [messages, activeRoom?.id, currentUser.uid]);
+
+  // Reset markedAsRead przy zmianie pokoju
+  useEffect(() => { markedAsRead.current = new Set(); }, [activeRoom?.id]);
 
   // Wyślij wiadomość
   const sendMessage = async (text, fileUrl, fileName) => {
