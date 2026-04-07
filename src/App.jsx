@@ -625,6 +625,7 @@ function App({ user, role, appUsers = [] }) {
   const [rentRecords, setRentRecords] = useState([]);
   const [frachtyList, setFrachtyList] = useState([]);
   const [sprawyList, setSprawyList] = useState([]);
+  const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const [operacyjne, setOperacyjne] = useState([]);
   const [pauzy, setPauzy] = useState([]);
   const [loaded, setLoaded]         = useState(false);
@@ -726,6 +727,23 @@ function App({ user, role, appUsers = [] }) {
     }, (err) => console.error("sprawy onSnapshot error", err));
     return () => unsub();
   }, []);
+
+  // ── CZAT — liczba nieprzeczytanych pokojów (badge w sidebar) ──
+  useEffect(() => {
+    if (!user) { setChatUnreadCount(0); return; }
+    const q = query(collection(db, "chatRooms"), orderBy("lastMessageAt", "desc"));
+    const unsub = onSnapshot(q, (snap) => {
+      const rooms = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const myRooms = rooms.filter(r => r.type === "channel" || (r.members || []).includes(user.uid));
+      const unread = myRooms.filter(r => {
+        if (!r.lastMessageAt || r.lastSender === user.email) return false;
+        const myRead = r.lastRead?.[user.uid];
+        return !myRead || r.lastMessageAt > myRead;
+      }).length;
+      setChatUnreadCount(unread);
+    }, () => {});
+    return () => unsub();
+  }, [user?.uid]);
 
   // ── PAUZY KIEROWCÓW — osobna kolekcja ──
   useEffect(() => {
@@ -1015,7 +1033,7 @@ function App({ user, role, appUsers = [] }) {
               ...((isAdmin || isDyspozytor) ? [
                 { id: "sprawy", label: "Sprawy", badge: sprawyList.filter(s => !['zamknieta','wygrana','przegrana'].includes(s.status) && (s.przypisani||[]).includes(user?.email)).length || null, icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v6"/><line x1="7" y1="13" x2="12" y2="13"/><line x1="7" y1="17" x2="10" y2="17"/></svg> },
               ] : []),
-              { id: "chat", label: "Czat", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> },
+              { id: "chat", label: "Czat", badge: chatUnreadCount || null, icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> },
             ].map((item) => (
               <button key={item.id} onClick={() => setTab(item.id)}
                 className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm text-left transition-all"
@@ -2143,7 +2161,7 @@ function App({ user, role, appUsers = [] }) {
             ...((isAdmin||isDyspozytor) ? [
               { id: "sprawy", label: "Sprawy", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v6"/><line x1="7" y1="13" x2="12" y2="13"/><line x1="7" y1="17" x2="10" y2="17"/></svg> },
             ] : []),
-            { id: "chat", label: "Czat", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> },
+            { id: "chat", label: "Czat", badge: chatUnreadCount || null, icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> },
             ...(isAdmin ? [
               { id: "users", label: "Osoby", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
               { id: "email", label: "Email", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> },
@@ -2152,7 +2170,10 @@ function App({ user, role, appUsers = [] }) {
             <button key={item.id} onClick={() => setTab(item.id)}
               className="flex-shrink-0 flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all min-w-14"
               style={{ color: tab === item.id ? "#111827" : "#9ca3af", background: tab === item.id ? "#f3f4f6" : "transparent", fontWeight: tab === item.id ? 600 : 400 }}>
-              <span className="leading-none">{item.icon}</span>
+              <span className="leading-none relative">
+                {item.icon}
+                {item.badge ? <span className="absolute -top-1.5 -right-2.5 px-1 py-0 rounded-full text-[9px] font-bold leading-tight" style={{background:"#ef4444",color:"#fff",minWidth:"14px",textAlign:"center"}}>{item.badge}</span> : null}
+              </span>
               <span className="text-xs leading-none mt-0.5">{item.label}</span>
             </button>
           ))}
