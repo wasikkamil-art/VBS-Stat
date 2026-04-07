@@ -2335,13 +2335,13 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
 
   const lastRoomTimestamps = useRef({});
 
-  // ── Auto-rejestracja push tokena (gdy permission już granted, np. po Pozwalaj na iOS) ──
+  // ── Auto-rejestracja push tokena — rejestruj w tle ale NIE ukrywaj przycisku ──
   useEffect(() => {
-    if (!currentUser?.uid || pushRegistered) return;
+    if (!currentUser?.uid) return;
     if (typeof Notification !== "undefined" && Notification.permission === "granted") {
       registerFCMToken(currentUser.uid).then(r => {
-        if (r?.success) { setPushRegistered(true); console.log("✅ Auto push token registered"); }
-        else console.log("Push auto-reg:", r);
+        console.log("Push auto-reg result:", r);
+        // NIE ustawiamy pushRegistered — przycisk zniknie dopiero po ręcznym kliknięciu
       });
     }
   }, [currentUser?.uid]);
