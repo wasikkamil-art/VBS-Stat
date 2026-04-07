@@ -2178,16 +2178,45 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
   const [showMembers, setShowMembers] = useState(false);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
+  const prevMsgCountRef = useRef(0);
+
+  // Dźwięk powiadomienia (Web Audio API — działa bez plików)
+  const playNotifSound = useRef(() => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = "sine";
+      // Dwa tony: ding-dong
+      osc.frequency.setValueAtTime(880, ctx.currentTime);        // A5
+      osc.frequency.setValueAtTime(1047, ctx.currentTime + 0.1); // C6
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.3);
+    } catch (e) { /* ignoruj jeśli audio niedostępne */ }
+  }).current;
+
+  const lastRoomTimestamps = useRef({});
 
   // Pobierz pokoje czatu (real-time)
   useEffect(() => {
     const q = query(collection(db, "chatRooms"), orderBy("lastMessageAt", "desc"));
     const unsub = onSnapshot(q, (snap) => {
       const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      // Pokaż tylko pokoje gdzie user jest członkiem
       const myRooms = all.filter(r =>
         r.type === "channel" || (r.members || []).includes(currentUser.uid)
       );
+      // Dźwięk gdy nowa wiadomość w INNYM pokoju
+      myRooms.forEach(r => {
+        const prev = lastRoomTimestamps.current[r.id];
+        if (prev && r.lastMessageAt > prev && r.lastSender !== currentUser.email && r.id !== activeRoom?.id) {
+          playNotifSound();
+        }
+        lastRoomTimestamps.current[r.id] = r.lastMessageAt || "";
+      });
       setRooms(myRooms);
     });
     return () => unsub();
@@ -2201,9 +2230,18 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
       orderBy("timestamp", "asc")
     );
     const unsub = onSnapshot(q, (snap) => {
-      setMessages(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const newMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // Dźwięk gdy nowa wiadomość od kogoś innego
+      if (prevMsgCountRef.current > 0 && newMsgs.length > prevMsgCountRef.current) {
+        const latest = newMsgs[newMsgs.length - 1];
+        if (latest.senderId !== currentUser.uid) {
+          playNotifSound();
+        }
+      }
+      prevMsgCountRef.current = newMsgs.length;
+      setMessages(newMsgs);
     });
-    return () => unsub();
+    return () => { unsub(); prevMsgCountRef.current = 0; };
   }, [activeRoom?.id]);
 
   // Auto-scroll do ostatniej wiadomości
