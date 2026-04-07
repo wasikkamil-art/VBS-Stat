@@ -33,29 +33,95 @@ const functions = getFunctions(app, "europe-west1");
 
 // ─── FCM (Push Notifications) ───────────────────────────────────────────────
 let messaging = null;
-try { messaging = getMessaging(app); } catch (e) { /* brak wsparcia w przeglądarce */ }
+try { messaging = getMessaging(app); } catch (e) { console.warn("FCM init skip:", e.message); }
+
+// Diagnostyka push notifications
+const pushDiag = {
+  supported: "serviceWorker" in navigator && "PushManager" in window && "Notification" in window,
+  isIOS: /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.userAgent.includes("Mac") && "ontouchend" in document),
+  isStandalone: window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true,
+};
 
 // Rejestracja FCM token i zapis do Firestore
+// Zwraca obiekt z wynikiem diagnostyki
 async function registerFCMToken(uid) {
-  if (!messaging || !("Notification" in window)) return;
+  const result = { success: false, error: null, step: "", token: null };
+
+  // Krok 1: Sprawdź wsparcie przeglądarki
+  if (!("serviceWorker" in navigator)) { result.error = "Brak Service Worker"; result.step = "sw-check"; return result; }
+  if (!("PushManager" in window)) { result.error = "Brak PushManager (iOS wymaga dodania do ekranu głównego)"; result.step = "push-check"; return result; }
+  if (!("Notification" in window)) { result.error = "Brak Notification API"; result.step = "notif-check"; return result; }
+
+  // Krok 2: FCM messaging
+  if (!messaging) {
+    try { messaging = getMessaging(app); } catch (e) {
+      result.error = "FCM init error: " + e.message; result.step = "fcm-init"; return result;
+    }
+  }
+
   try {
+    // Krok 3: Permission
+    result.step = "permission";
     const permission = await Notification.requestPermission();
-    if (permission !== "granted") return;
-    // Rejestruj service worker dla FCM
+    if (permission !== "granted") { result.error = `Permission: ${permission}`; return result; }
+
+    // Krok 4: Service Worker registration
+    result.step = "sw-register";
     const sw = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
+    // Czekaj aż SW będzie aktywny (ważne na iOS)
+    if (sw.installing) {
+      await new Promise((resolve) => {
+        sw.installing.addEventListener("statechange", function handler(e) {
+          if (e.target.state === "activated") { e.target.removeEventListener("statechange", handler); resolve(); }
+        });
+        setTimeout(resolve, 5000); // timeout safety
+      });
+    }
+
+    // Krok 5: Token
+    result.step = "get-token";
     const token = await getToken(messaging, {
       vapidKey: "BFS79b5DBeiWgH98Uzmw4nbdK4vn7ggvop2W4acNbPBgO9Q2QaChaxOH5u9sNEdmXnG9cf-7sXzRdRg_-l1OO8M",
       serviceWorkerRegistration: sw,
     });
-    if (token) {
-      // Zapisz token w Firestore — każde urządzenie ma osobny dokument
-      // Klucz to hash tokena (pierwsze 20 znaków) żeby nie nadpisywać tokenów z innych urządzeń
-      const tokenId = token.slice(0, 20).replace(/[^a-zA-Z0-9]/g, "");
-      await setDoc(doc(db, "fcmTokens", `${uid}_${tokenId}`), {
-        token, updatedAt: new Date().toISOString(), uid,
-      }, { merge: true });
-    }
-  } catch (e) { console.warn("FCM registration failed:", e); }
+
+    if (!token) { result.error = "Token pusty"; return result; }
+
+    // Krok 6: Zapis do Firestore
+    result.step = "save-token";
+    const tokenId = token.slice(0, 20).replace(/[^a-zA-Z0-9]/g, "");
+    const platform = pushDiag.isIOS ? "ios" : (navigator.userAgent.includes("Android") ? "android" : "desktop");
+    await setDoc(doc(db, "fcmTokens", `${uid}_${tokenId}`), {
+      token, updatedAt: new Date().toISOString(), uid, platform,
+      userAgent: navigator.userAgent.slice(0, 200),
+    }, { merge: true });
+
+    result.success = true;
+    result.token = token.slice(0, 12) + "...";
+    console.log(`✅ FCM token saved (${platform}):`, token.slice(0, 20));
+    return result;
+  } catch (e) {
+    result.error = e.message || String(e);
+    console.warn("FCM registration failed at step:", result.step, e);
+    return result;
+  }
+}
+
+// Foreground message handler — pokaż powiadomienie gdy apka jest otwarta
+if (messaging) {
+  try {
+    onMessage(messaging, (payload) => {
+      console.log("📩 Foreground push:", payload);
+      // Pokaż natywne powiadomienie nawet gdy apka jest otwarta
+      if (Notification.permission === "granted" && payload.notification) {
+        new Notification(payload.notification.title || "FleetStat", {
+          body: payload.notification.body,
+          icon: "/icon-192.png",
+          tag: payload.data?.roomId || "chat",
+        });
+      }
+    });
+  } catch (e) { /* ignore */ }
 }
 
 // ─── SECURITY: walidacja URL (chroni przed javascript: / data: injection) ───
@@ -2239,6 +2305,9 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
   const [showSearch, setShowSearch] = useState(false);
   const [typingUsers, setTypingUsers] = useState({});
   const [lastReadMap, setLastReadMap] = useState({});
+  const [pushStatus, setPushStatus] = useState(null); // null | "checking" | {success, error, step, token}
+  const [showPushPanel, setShowPushPanel] = useState(false);
+  const [pushRegistered, setPushRegistered] = useState(false);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const prevMsgCountRef = useRef(0);
@@ -2265,6 +2334,17 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
   }).current;
 
   const lastRoomTimestamps = useRef({});
+
+  // ── Auto-rejestracja push tokena (gdy permission już granted, np. po Pozwalaj na iOS) ──
+  useEffect(() => {
+    if (!currentUser?.uid || pushRegistered) return;
+    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+      registerFCMToken(currentUser.uid).then(r => {
+        if (r?.success) { setPushRegistered(true); console.log("✅ Auto push token registered"); }
+        else console.log("Push auto-reg:", r);
+      });
+    }
+  }, [currentUser?.uid]);
 
   // ── POKOJE (real-time) ──
   useEffect(() => {
@@ -2579,6 +2659,29 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           </button>
         </div>
+        {/* Push notification banner — ZAWSZE widoczny dopóki nie zarejestrowano tokena z tego urządzenia */}
+        {!pushRegistered && (
+          <button onClick={async () => {
+            setPushStatus("checking");
+            const result = await registerFCMToken(currentUser.uid);
+            setPushStatus(result);
+            if (result.success) { setPushRegistered(true); showToast("Powiadomienia push włączone!"); }
+          }} className="mx-3 mt-2 mb-1 px-4 py-2.5 rounded-xl bg-blue-500 text-white text-sm font-medium flex items-center gap-2 hover:bg-blue-600 active:bg-blue-700 transition-colors shadow-sm"
+            style={{ minHeight: 44 }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            {pushStatus === "checking" ? "Rejestracja..." : "Włącz powiadomienia push"}
+          </button>
+        )}
+        {/* Push status info */}
+        {pushStatus && pushStatus !== "checking" && !pushStatus.success && (
+          <div className="mx-3 mt-1 mb-1 px-4 py-2 rounded-xl bg-red-50 text-xs">
+            <div className="text-red-600 font-medium">Błąd: {pushStatus.error}</div>
+            <div className="text-gray-500">Krok: {pushStatus.step}</div>
+            {pushDiag.isIOS && !pushDiag.isStandalone && (
+              <div className="mt-1 text-amber-700 font-medium">📱 Dodaj stronę do ekranu głównego (Share → Dodaj do ekranu głównego)</div>
+            )}
+          </div>
+        )}
         <div className="flex-1 overflow-y-auto">
           {rooms.length === 0 && <div className="p-6 text-center text-gray-400 text-sm">Brak pokojów. Utwórz pierwszy!</div>}
           {rooms.map(r => {
