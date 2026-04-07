@@ -2211,6 +2211,19 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Oznacz wiadomości jako przeczytane
+  useEffect(() => {
+    if (!activeRoom || messages.length === 0) return;
+    const unread = messages.filter(m =>
+      m.senderId !== currentUser.uid && !(m.readBy || []).includes(currentUser.uid)
+    );
+    unread.forEach(m => {
+      updateDoc(doc(db, "chatRooms", activeRoom.id, "messages", m.id), {
+        readBy: [...(m.readBy || []), currentUser.uid],
+      }).catch(() => {});
+    });
+  }, [messages, activeRoom?.id, currentUser.uid]);
+
   // Wyślij wiadomość
   const sendMessage = async (text, fileUrl, fileName) => {
     if (!activeRoom) return;
@@ -2221,6 +2234,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
       senderEmail: currentUser.email,
       senderName: appUsers.find(u => u.uid === currentUser.uid)?.email?.split("@")[0] || currentUser.email,
       timestamp: new Date().toISOString(),
+      readBy: [currentUser.uid],
     };
     if (fileUrl) { msg.fileUrl = fileUrl; msg.fileName = fileName; }
     try {
@@ -2461,8 +2475,22 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
                             onClick={() => window.open(m.fileUrl, "_blank")} />
                         )}
                       </div>
-                      <div className={`text-xs text-gray-300 mt-0.5 ${isMine ? "text-right mr-1" : "ml-1"}`}>
-                        {fmtTime(m.timestamp)}
+                      <div className={`text-xs text-gray-300 mt-0.5 flex items-center gap-1 ${isMine ? "justify-end mr-1" : "ml-1"}`}>
+                        <span>{fmtTime(m.timestamp)}</span>
+                        {isMine && (() => {
+                          const readers = (m.readBy || []).filter(uid => uid !== currentUser.uid);
+                          if (readers.length === 0) return (
+                            <span title="Wysłano">
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            </span>
+                          );
+                          const names = readers.map(uid => appUsers.find(u => u.uid === uid)?.email?.split("@")[0] || "?").join(", ");
+                          return (
+                            <span title={`Przeczytane: ${names}`} className="cursor-default">
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 6 7 17 2 12"/><polyline points="22 6 11 17"/></svg>
+                            </span>
+                          );
+                        })()}
                       </div>
                     </div>
                   </div>
