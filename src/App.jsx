@@ -2313,21 +2313,28 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     .filter(([uid, ts]) => uid !== currentUser.uid && ts && (Date.now() - new Date(ts).getTime()) < 5000)
     .map(([uid]) => appUsers.find(u => u.uid === uid)?.email?.split("@")[0] || "?");
 
-  // ── AUTO-SCROLL (inteligentny) ──
+  // ── AUTO-SCROLL ──
+  // Reset ref przy zmianie pokoju, żeby zawsze scrollować na dół przy wejściu
+  useEffect(() => {
+    lastMsgIdRef.current = null;
+  }, [activeRoom?.id]);
+
   useEffect(() => {
     if (messages.length === 0) return;
     const lastMsg = messages[messages.length - 1];
     const lastId = lastMsg?.id;
-    if (lastId === lastMsgIdRef.current) return; // ta sama ostatnia wiadomość — nie scrolluj
+    if (lastId === lastMsgIdRef.current) return;
+    const isRoomSwitch = lastMsgIdRef.current === null; // pierwsze załadowanie pokoju
     lastMsgIdRef.current = lastId;
     const c = chatContainerRef.current;
     if (!c) return;
-    // Scrolluj na dół TYLKO gdy:
-    // 1. To moja własna wiadomość (zawsze chcę widzieć co wysłałem)
-    // 2. Jestem blisko dołu (< 200px od końca)
+    // Scrolluj na dół gdy:
+    // 1. Właśnie wszedłem do pokoju (zawsze na dół)
+    // 2. To moja własna wiadomość
+    // 3. Jestem blisko dołu (< 200px)
     const isNearBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 200;
     const isMyMessage = lastMsg?.senderId === currentUser.uid;
-    if (isMyMessage || isNearBottom) {
+    if (isRoomSwitch || isMyMessage || isNearBottom) {
       requestAnimationFrame(() => { c.scrollTop = c.scrollHeight; });
     }
   }, [messages]);
