@@ -2185,6 +2185,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
   const [typingUsers, setTypingUsers] = useState({});
+  const [lastReadMap, setLastReadMap] = useState({});
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const prevMsgCountRef = useRef(0);
@@ -2192,6 +2193,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
   const lastMsgIdRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const msgInputRef = useRef(null);
+  const activeRoomIdRef = useRef(null);
 
   // Dźwięk powiadomienia
   const playNotifSound = useRef(() => {
@@ -2219,11 +2221,21 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
       const myRooms = all.filter(r => r.type === "channel" || (r.members || []).includes(currentUser.uid));
       myRooms.forEach(r => {
         const prev = lastRoomTimestamps.current[r.id];
-        if (prev && r.lastMessageAt > prev && r.lastSender !== currentUser.email && r.id !== activeRoom?.id) playNotifSound();
+        if (prev && r.lastMessageAt > prev && r.lastSender !== currentUser.email && r.id !== activeRoomIdRef.current) playNotifSound();
         lastRoomTimestamps.current[r.id] = r.lastMessageAt || "";
       });
       setRooms(myRooms);
-      setActiveRoom(prev => prev ? myRooms.find(r => r.id === prev.id) || prev : null);
+      // NIE aktualizujemy activeRoom z rooms listenera — to powodowało kaskadę re-renderów
+      // activeRoom jest aktualizowany tylko przez dedykowany listener pokoju (poniżej)
+      setActiveRoom(prev => {
+        if (!prev) return null;
+        const updated = myRooms.find(r => r.id === prev.id);
+        if (!updated) return null; // pokój usunięty
+        // Aktualizuj TYLKO jeśli zmienił się name, members, type (strukturalne zmiany)
+        if (updated.name !== prev.name || updated.type !== prev.type
+          || JSON.stringify(updated.members) !== JSON.stringify(prev.members)) return updated;
+        return prev; // ten sam obiekt = brak re-renderu
+      });
     });
     return () => unsub();
   }, [currentUser.uid]);
@@ -2233,7 +2245,9 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     if (!activeRoom) { setMessages([]); return; }
     const q = query(collection(db, "chatRooms", activeRoom.id, "messages"), orderBy("timestamp", "asc"));
     const unsub = onSnapshot(q, (snap) => {
-      const newMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.timestamp || "").localeCompare(b.timestamp || ""));
+      // Firestore orderBy gwarantuje kolejność; dodajemy tiebreaker po ID dla identycznych timestampów
+      const newMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (a.timestamp || "").localeCompare(b.timestamp || "") || a.id.localeCompare(b.id));
       if (prevMsgCountRef.current > 0 && newMsgs.length > prevMsgCountRef.current) {
         const latest = newMsgs[newMsgs.length - 1];
         if (latest.senderId !== currentUser.uid) playNotifSound();
@@ -2244,14 +2258,18 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     return () => { unsub(); prevMsgCountRef.current = 0; };
   }, [activeRoom?.id]);
 
-  // ── TYPING INDICATOR ──
+  // ── ROOM DETAIL LISTENER (typing + lastRead) ──
   useEffect(() => {
-    if (!activeRoom) return;
+    if (!activeRoom) { setTypingUsers({}); setLastReadMap({}); return; }
+    activeRoomIdRef.current = activeRoom.id;
     const unsub = onSnapshot(doc(db, "chatRooms", activeRoom.id), (snap) => {
       const data = snap.data();
-      setTypingUsers(data?.typing || {});
+      if (data) {
+        setTypingUsers(data.typing || {});
+        setLastReadMap(data.lastRead || {});
+      }
     });
-    return () => unsub();
+    return () => { unsub(); activeRoomIdRef.current = null; };
   }, [activeRoom?.id]);
 
   const setTyping = (isTyping) => {
@@ -2289,7 +2307,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     if (!activeRoom || messages.length === 0) return;
     const lastMsg = messages[messages.length - 1];
     if (!lastMsg?.timestamp) return;
-    const myLastRead = activeRoom.lastRead?.[currentUser.uid];
+    const myLastRead = lastReadMap[currentUser.uid];
     if (!myLastRead || lastMsg.timestamp > myLastRead) {
       updateDoc(doc(db, "chatRooms", activeRoom.id), { [`lastRead.${currentUser.uid}`]: lastMsg.timestamp }).catch(() => {});
     }
@@ -2310,12 +2328,15 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     if (replyTo) { msg.replyTo = { id: replyTo.id, text: replyTo.text?.slice(0, 100) || "📎 Plik", senderName: replyTo.senderName || replyTo.senderEmail?.split("@")[0] }; }
     try {
       await addDoc(collection(db, "chatRooms", activeRoom.id, "messages"), msg);
+      // Łączymy update lastMessage + wyłączenie typing w JEDEN zapis (mniej snapshotów)
+      clearTimeout(typingTimeoutRef.current);
       await updateDoc(doc(db, "chatRooms", activeRoom.id), {
         lastMessage: text?.trim() || fileName || "📎 Plik",
         lastMessageAt: new Date().toISOString(),
         lastSender: currentUser.email,
+        [`typing.${currentUser.uid}`]: null,
       });
-      setMsgText(""); setReplyTo(null); setTyping(false);
+      setMsgText(""); setReplyTo(null);
     } catch (e) { console.error("sendMessage", e); showToast("Błąd wysyłania"); }
   };
 
@@ -2660,8 +2681,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
                       <div className={`text-xs text-gray-300 mt-0.5 flex items-center gap-1 ${isMine ? "justify-end mr-1" : "ml-1"}`}>
                         <span>{fmtTime(m.timestamp)}</span>
                         {isMine && !isDeleted && (() => {
-                          const lastRead = activeRoom.lastRead || {};
-                          const readers = Object.entries(lastRead).filter(([uid, ts]) => uid !== currentUser.uid && ts >= m.timestamp).map(([uid]) => uid);
+                          const readers = Object.entries(lastReadMap).filter(([uid, ts]) => uid !== currentUser.uid && ts >= m.timestamp).map(([uid]) => uid);
                           if (readers.length === 0) return <span title="Wysłano"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>;
                           const names = readers.map(uid => appUsers.find(u => u.uid === uid)?.email?.split("@")[0] || "?").join(", ");
                           return <span title={`Przeczytane: ${names}`} className="cursor-default"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 6 7 17 2 12"/><polyline points="22 6 11 17"/></svg></span>;
