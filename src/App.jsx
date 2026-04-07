@@ -2236,15 +2236,54 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
   };
 
   // Upload pliku
+  // Kompresja obrazu przed uploadem (max 1200px, jakość 0.7 → ~150-250KB)
+  const compressImage = (file, maxWidth = 1200, quality = 0.7) => {
+    return new Promise((resolve) => {
+      // Nie kompresuj nie-obrazów
+      if (!file.type.startsWith("image/") || file.type === "image/gif") {
+        resolve(file);
+        return;
+      }
+      const img = new Image();
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          let w = img.width, h = img.height;
+          if (w > maxWidth) { h = Math.round(h * maxWidth / w); w = maxWidth; }
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, w, h);
+          canvas.toBlob((blob) => {
+            if (blob && blob.size < file.size) {
+              // Kompresja się opłaca
+              const compressed = new File([blob], file.name, { type: "image/jpeg" });
+              resolve(compressed);
+            } else {
+              resolve(file); // oryginał mniejszy
+            }
+          }, "image/jpeg", quality);
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 10 * 1024 * 1024) { showToast("Maks. 10MB"); return; }
     setUploading(true);
     try {
+      const toUpload = await compressImage(file);
+      const sizeBefore = (file.size / 1024).toFixed(0);
+      const sizeAfter = (toUpload.size / 1024).toFixed(0);
+      if (toUpload !== file) console.log(`Kompresja: ${sizeBefore}KB → ${sizeAfter}KB`);
       const path = `chat/${activeRoom.id}/${Date.now()}_${file.name}`;
       const sRef = storageRef(storage, path);
-      await uploadBytes(sRef, file);
+      await uploadBytes(sRef, toUpload);
       const url = await getDownloadURL(sRef);
       await sendMessage("", url, file.name);
     } catch (e) { console.error("upload", e); showToast("Błąd uploadu"); }
