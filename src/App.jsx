@@ -736,6 +736,7 @@ function App({ user, role, appUsers = [] }) {
       const rooms = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       const myRooms = rooms.filter(r => r.type === "channel" || (r.members || []).includes(user.uid));
       const unread = myRooms.filter(r => {
+        if (r.type === "self") return false; // notatki do siebie — nie licz jako nieprzeczytane
         if (!r.lastMessageAt || r.lastSender === user.email) return false;
         const myRead = r.lastRead?.[user.uid];
         return !myRead || r.lastMessageAt > myRead;
@@ -2463,10 +2464,12 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
 
   // ── ZARZĄDZANIE POKOJAMI ──
   const createRoom = async () => {
-    if (!newRoomName.trim()) { showToast("Podaj nazwę"); return; }
+    const isSelf = newRoomType === "self";
+    const name = isSelf ? `📝 ${currentUser.email?.split("@")[0] || "Notatki"}` : newRoomName.trim();
+    if (!isSelf && !newRoomName.trim()) { showToast("Podaj nazwę"); return; }
     const room = {
-      name: newRoomName.trim(), type: newRoomType,
-      members: newRoomType === "channel" ? appUsers.map(u => u.uid) : [currentUser.uid, ...newRoomMembers],
+      name, type: isSelf ? "self" : newRoomType,
+      members: newRoomType === "channel" ? appUsers.map(u => u.uid) : isSelf ? [currentUser.uid] : [currentUser.uid, ...newRoomMembers],
       createdBy: currentUser.uid, createdAt: new Date().toISOString(),
       lastMessage: "", lastMessageAt: new Date().toISOString(), lastSender: "",
     };
@@ -2529,6 +2532,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
   };
 
   const roomIcon = (r) => {
+    if (r.type === "self") return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>;
     if (r.type === "dm") return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>;
     if (r.type === "group") return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>;
     return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
@@ -2596,7 +2600,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
               </button>
               <span className="text-gray-400">{roomIcon(activeRoom)}</span>
               <h3 className="font-semibold text-gray-800">{roomDisplayName(activeRoom)}</h3>
-              <span className="text-xs text-gray-400">{activeRoom.type === "channel" ? "kanał" : activeRoom.type === "dm" ? "prywatna" : "grupa"}</span>
+              <span className="text-xs text-gray-400">{activeRoom.type === "channel" ? "kanał" : activeRoom.type === "dm" ? "prywatna" : activeRoom.type === "self" ? "notatki" : "grupa"}</span>
               <div className="ml-auto flex items-center gap-1">
                 <button onClick={() => { setShowSearch(!showSearch); setSearchQuery(""); }} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400" title="Szukaj">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -2852,12 +2856,14 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowNewRoom(false)}>
           <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
             <h3 className="font-semibold text-lg mb-4">Nowy pokój czatu</h3>
-            <label className="block text-sm text-gray-600 mb-1">Nazwa</label>
-            <input type="text" value={newRoomName} onChange={e => setNewRoomName(e.target.value)} placeholder="np. Ogólny, Trasa FR, ..."
-              className="w-full px-3 py-2 border rounded-lg text-sm mb-3 focus:outline-none focus:border-blue-400" />
+            {newRoomType !== "self" && (<>
+              <label className="block text-sm text-gray-600 mb-1">Nazwa</label>
+              <input type="text" value={newRoomName} onChange={e => setNewRoomName(e.target.value)} placeholder="np. Ogólny, Trasa FR, ..."
+                className="w-full px-3 py-2 border rounded-lg text-sm mb-3 focus:outline-none focus:border-blue-400" />
+            </>)}
             <label className="block text-sm text-gray-600 mb-1">Typ</label>
             <div className="flex gap-2 mb-3">
-              {[{ id: "channel", label: "Kanał", desc: "Wszyscy" }, { id: "group", label: "Grupa", desc: "Wybrane osoby" }, { id: "dm", label: "Prywatna", desc: "1 na 1" }].map(t => (
+              {[{ id: "self", label: "Notatki", desc: "Do siebie" }, { id: "channel", label: "Kanał", desc: "Wszyscy" }, { id: "group", label: "Grupa", desc: "Wybrane osoby" }, { id: "dm", label: "Prywatna", desc: "1 na 1" }].map(t => (
                 <button key={t.id} onClick={() => { setNewRoomType(t.id); setNewRoomMembers([]); }}
                   className={`flex-1 p-2 rounded-lg border text-xs text-center transition-colors ${newRoomType === t.id ? "border-blue-400 bg-blue-50 text-blue-700" : "border-gray-200 text-gray-500 hover:bg-gray-50"}`}>
                   <div className="font-medium">{t.label}</div><div className="text-gray-400 mt-0.5">{t.desc}</div>
