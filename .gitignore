@@ -1,6 +1,8 @@
 # Firebase credentials - NIGDY nie commituj
+serviceAccountKey.json
 vbs-stats-firebase-adminsdk.json
 *-adminsdk*.json
+sa.json
 
 # System
 .DS_Store
@@ -17,6 +19,10 @@ fix_*.js
 migrate_*.js
 restore_*.js
 patch_*.py
+diagnose*.js
+audit-all.js
+import-*.js
+fetch-*.js
 
 # Images - working files
 *.png
@@ -27,3 +33,11 @@ patch_*.py
 !package.json
 !package-lock.json
 !public/manifest.json
+*.csv
+*.xlsx
+
+# Environment & deploy
+.vercel
+.env
+.env*.local
+firebase.json
