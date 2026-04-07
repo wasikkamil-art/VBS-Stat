@@ -146,8 +146,12 @@ service cloud.firestore {
       match /messages/{msgId} {
         allow read: if isAuth();
         allow create: if isAuth();
-        // Tylko autor może edytować/usunąć swoją wiadomość
-        allow update, delete: if isAuth() && request.auth.uid == resource.data.senderId;
+        // Autor może edytować/usunąć, każdy zalogowany może dodać reakcję
+        allow update: if isAuth() && (
+          request.auth.uid == resource.data.senderId
+          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])
+        );
+        allow delete: if isAuth() && request.auth.uid == resource.data.senderId;
       }
     }
 
