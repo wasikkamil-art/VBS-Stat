@@ -2317,6 +2317,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
   // Reset ref przy zmianie pokoju, żeby zawsze scrollować na dół przy wejściu
   useEffect(() => {
     lastMsgIdRef.current = null;
+    lastReadTsRef.current = null;
   }, [activeRoom?.id]);
 
   useEffect(() => {
@@ -2339,16 +2340,17 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     }
   }, [messages]);
 
-  // ── LAST READ ──
+  // ── LAST READ — aktualizuj przy wejściu do pokoju i przy nowych wiadomościach ──
+  const lastReadTsRef = useRef(null);
   useEffect(() => {
     if (!activeRoom || messages.length === 0) return;
     const lastMsg = messages[messages.length - 1];
-    if (!lastMsg?.timestamp) return;
-    const myLastRead = lastReadMap[currentUser.uid];
-    if (!myLastRead || lastMsg.timestamp > myLastRead) {
-      updateDoc(doc(db, "chatRooms", activeRoom.id), { [`lastRead.${currentUser.uid}`]: lastMsg.timestamp }).catch(() => {});
-    }
-  }, [activeRoom?.id, messages.length]);
+    if (!lastMsg?.timestamp || lastMsg.timestamp === lastReadTsRef.current) return;
+    lastReadTsRef.current = lastMsg.timestamp;
+    updateDoc(doc(db, "chatRooms", activeRoom.id), {
+      [`lastRead.${currentUser.uid}`]: lastMsg.timestamp
+    }).catch(() => {});
+  }, [activeRoom?.id, messages]);
 
   // ── WYŚLIJ WIADOMOŚĆ ──
   const sendMessage = async (text, fileUrl, fileName) => {
