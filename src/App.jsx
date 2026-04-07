@@ -2240,20 +2240,42 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     return () => unsub();
   }, [currentUser.uid]);
 
-  // ── WIADOMOŚCI (real-time) ──
+  // ── WIADOMOŚCI (real-time, APPEND-ONLY) ──
+  // Wiadomości raz wyświetlone NIGDY nie zmieniają pozycji.
+  // Nowe wiadomości są ZAWSZE dodawane na końcu (jak WhatsApp).
+  // To eliminuje "nadpisywanie" — przegrupowanie wiadomości przy każdym snapshot.
   useEffect(() => {
     if (!activeRoom) { setMessages([]); return; }
+    let initialized = false;
     const q = query(collection(db, "chatRooms", activeRoom.id, "messages"), orderBy("timestamp", "asc"));
     const unsub = onSnapshot(q, (snap) => {
-      // WAŻNE: NIE sortujemy kliencko! snap.docs jest JUŻ posortowane przez Firestore orderBy.
-      // Kliencki localeCompare mógł zmieniać kolejność wiadomości (bug "nadpisywania").
-      const newMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      if (prevMsgCountRef.current > 0 && newMsgs.length > prevMsgCountRef.current) {
-        const latest = newMsgs[newMsgs.length - 1];
-        if (latest.senderId !== currentUser.uid) playNotifSound();
+      if (!initialized) {
+        // Pierwsze załadowanie: użyj kolejności Firestore
+        const allMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        prevMsgCountRef.current = allMsgs.length;
+        setMessages(allMsgs);
+        initialized = true;
+        return;
       }
-      prevMsgCountRef.current = newMsgs.length;
-      setMessages(newMsgs);
+      // Dźwięk dla nowych wiadomości od innych
+      const added = snap.docChanges().filter(c => c.type === "added");
+      if (added.length > 0) {
+        const lastAdded = added[added.length - 1].doc.data();
+        if (lastAdded.senderId !== currentUser.uid) playNotifSound();
+      }
+      // Aktualizacja przyrostowa — NIE zamieniamy całej listy
+      setMessages(prev => {
+        const prevIds = new Set(prev.map(m => m.id));
+        const serverMap = new Map();
+        snap.docs.forEach(d => serverMap.set(d.id, { id: d.id, ...d.data() }));
+        // Istniejące wiadomości: zachowaj POZYCJĘ, aktualizuj DANE (edycja, reakcje, usunięcie)
+        const kept = prev.filter(m => serverMap.has(m.id)).map(m => serverMap.get(m.id));
+        // Nowe wiadomości: ZAWSZE na końcu (nigdy nie wstawiamy w środek)
+        const fresh = snap.docs.filter(d => !prevIds.has(d.id)).map(d => ({ id: d.id, ...d.data() }));
+        const result = [...kept, ...fresh];
+        prevMsgCountRef.current = result.length;
+        return result;
+      });
     });
     return () => { unsub(); prevMsgCountRef.current = 0; };
   }, [activeRoom?.id]);
