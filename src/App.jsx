@@ -2908,7 +2908,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     : messages;
 
   return (
-    <div className="flex h-full rounded-xl overflow-hidden" style={{ minHeight: 0, background: '#fff' }}>
+    <div className="flex h-full rounded-xl overflow-hidden" style={{ minHeight: 0, maxHeight: '100%', background: '#fff' }}>
       {/* ── LISTA POKOJÓW ── */}
       <div className={`${activeRoom ? "hidden md:flex" : "flex"} flex-col w-full md:w-72`} style={{ background: '#f8fafc', borderRight: '1px solid #e2e8f0' }}>
         <div className="p-4 flex items-center justify-between" style={{ borderBottom: '1px solid #e2e8f0' }}>
@@ -3088,7 +3088,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
             )}
 
             {/* Wiadomości */}
-            <div ref={chatContainerRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-1" style={{ background: '#fafbfc' }} onClick={() => setContextMenu(null)}>
+            <div ref={chatContainerRef} className="flex-1 overflow-y-auto px-2 sm:px-3 py-3 space-y-1" style={{ background: '#fafbfc' }} onClick={() => setContextMenu(null)}>
               {filteredMessages.length === 0 && <div className="text-center text-sm py-12" style={{ color: '#94a3b8' }}>{searchQuery ? "Brak wyników" : "Brak wiadomości. Napisz pierwszą!"}</div>}
               {filteredMessages.map((m, i) => {
                 const isMine = m.senderId === currentUser.uid;
@@ -3096,14 +3096,14 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
                 const showAvatar = i === 0 || filteredMessages[i - 1]?.senderId !== m.senderId;
                 const isDeleted = m.deleted;
                 return (
-                  <div key={m.id} className={`flex items-end gap-1.5 ${isMine ? "flex-row-reverse" : ""} group`}>
-                    {/* Small avatar */}
+                  <div key={m.id} className={`flex items-end gap-1 sm:gap-1.5 ${isMine ? "flex-row-reverse" : ""} group`}>
+                    {/* Small avatar — hidden on very small screens */}
                     {showAvatar ? (
-                      <div className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0" style={{ background: isMine ? 'linear-gradient(135deg, #3b82f6, #6366f1)' : 'linear-gradient(135deg, #22c55e, #14b8a6)' }}>
+                      <div className="hidden sm:flex w-6 h-6 rounded-md items-center justify-center text-white text-[9px] font-bold flex-shrink-0" style={{ background: isMine ? 'linear-gradient(135deg, #3b82f6, #6366f1)' : 'linear-gradient(135deg, #22c55e, #14b8a6)' }}>
                         {(m.senderName || m.senderEmail?.split("@")[0] || "?").slice(0, 2).toUpperCase()}
                       </div>
-                    ) : <div className="w-6 flex-shrink-0"/>}
-                    <div className={`max-w-[70%] relative`}>
+                    ) : <div className="hidden sm:block w-6 flex-shrink-0"/>}
+                    <div className="max-w-[85%] sm:max-w-[70%] relative">
                       {showSender && <div className="text-xs mb-0.5 ml-2" style={{ fontSize: '11px', fontWeight: 600, color: '#64748b' }}>{m.senderName || m.senderEmail?.split("@")[0]}</div>}
 
                       {/* Reply quote */}
@@ -3204,25 +3204,25 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
             )}
 
             {/* Input */}
-            <div className="px-4 py-3 bg-white" style={{ borderTop: '1px solid #e2e8f0' }}>
-              <div className="flex items-center gap-3">
+            <div className="px-2 sm:px-4 py-2 sm:py-3 bg-white flex-shrink-0" style={{ borderTop: '1px solid #e2e8f0', paddingBottom: 'max(8px, env(safe-area-inset-bottom, 0px))' }}>
+              <div className="flex items-center gap-2">
                 <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
                 <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
-                  className="flex items-center justify-center transition-colors disabled:opacity-50" style={{ width: '38px', height: '38px', borderRadius: '10px', color: '#94a3b8', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Dodaj plik">
+                  className="flex items-center justify-center flex-shrink-0 transition-colors disabled:opacity-50" style={{ width: '36px', height: '36px', borderRadius: '10px', color: '#94a3b8', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Dodaj plik">
                   {uploading
-                    ? <svg width="20" height="20" viewBox="0 0 24 24" className="animate-spin" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v4m0 12v4m-7.07-3.93l2.83-2.83m8.48-8.48l2.83-2.83M2 12h4m12 0h4m-3.93 7.07l-2.83-2.83M7.76 7.76L4.93 4.93"/></svg>
-                    : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>}
+                    ? <svg width="18" height="18" viewBox="0 0 24 24" className="animate-spin" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v4m0 12v4m-7.07-3.93l2.83-2.83m8.48-8.48l2.83-2.83M2 12h4m12 0h4m-3.93 7.07l-2.83-2.83M7.76 7.76L4.93 4.93"/></svg>
+                    : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>}
                 </button>
                 <input ref={msgInputRef} type="text" value={msgText}
                   onChange={e => { setMsgText(e.target.value); handleTyping(); }}
                   onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(msgText); } }}
                   placeholder="Napisz wiadomość..."
-                  className="flex-1 text-sm outline-none" style={{ padding: '12px 18px', borderRadius: '14px', border: '1.5px solid #e2e8f0', background: '#fafbfc', fontFamily: 'inherit', transition: 'border-color 0.2s' }}
+                  className="flex-1 min-w-0 text-sm outline-none" style={{ padding: '10px 14px', borderRadius: '14px', border: '1.5px solid #e2e8f0', background: '#fafbfc', fontFamily: 'inherit', transition: 'border-color 0.2s' }}
                   onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.background = '#fff'; }}
                   onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.background = '#fafbfc'; }} />
                 <button onClick={() => sendMessage(msgText)} disabled={!msgText.trim()}
-                  className="flex items-center justify-center text-white transition-transform disabled:opacity-30" style={{ width: '44px', height: '44px', borderRadius: '12px', background: 'linear-gradient(135deg, #3b82f6, #2563eb)', border: 'none', cursor: 'pointer' }}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                  className="flex items-center justify-center flex-shrink-0 text-white transition-transform disabled:opacity-30" style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'linear-gradient(135deg, #3b82f6, #2563eb)', border: 'none', cursor: 'pointer' }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
                 </button>
               </div>
             </div>
