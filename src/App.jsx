@@ -2315,18 +2315,22 @@ function App({ user, role, appUsers = [] }) {
       {/* FLOATING CHAT BUBBLE — widoczna gdy czat nie jest otwarty */}
       {!chatFloat && tab !== "chat" && (
         <button onClick={() => setChatFloat(true)}
-          className="fixed z-40 shadow-lg hover:shadow-xl transition-all hover:scale-105 active:scale-95"
+          className={`fixed z-40 shadow-lg hover:shadow-xl transition-all hover:scale-105 active:scale-95 ${chatUnreadCount > 0 ? "animate-bounce" : ""}`}
           style={{
             bottom: window.innerWidth < 768 ? "calc(70px + env(safe-area-inset-bottom, 0px))" : "24px",
             right: "20px",
             width: "56px", height: "56px", borderRadius: "50%",
-            background: "linear-gradient(135deg, #3b82f6, #1d4ed8)",
+            background: chatUnreadCount > 0 ? "linear-gradient(135deg, #ef4444, #dc2626)" : "linear-gradient(135deg, #3b82f6, #1d4ed8)",
             display: "flex", alignItems: "center", justifyContent: "center",
+            animationIterationCount: chatUnreadCount > 0 ? 3 : 0,
           }}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-          {chatUnreadCount > 0 && (
-            <span className="absolute -top-1 -right-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-500 text-white min-w-[20px] text-center">{chatUnreadCount}</span>
-          )}
+          {chatUnreadCount > 0 && (<>
+            {/* Pulsujący ping */}
+            <span className="absolute inset-0 rounded-full animate-ping opacity-30" style={{ background: "#ef4444" }}/>
+            {/* Badge z liczbą */}
+            <span className="absolute -top-1 -right-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-500 text-white min-w-[20px] text-center shadow-md">{chatUnreadCount}</span>
+          </>)}
         </button>
       )}
 
