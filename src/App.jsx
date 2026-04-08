@@ -215,7 +215,7 @@ const SEED_VEHICLES = [
 const SEED_CATEGORIES = [
   { id: "paliwo",        label: "Paliwo",             color: "#f59e0b", icon: "⛽" },
   { id: "leasing",       label: "Leasing",             color: "#6366f1", icon: "🏦" },
-  { id: "naprawa",       label: "Naprawa",             color: "#ef4444", icon: "🔧" },
+  { id: "serwis",        label: "Serwis",              color: "#ef4444", icon: "🔧" },
   { id: "ubezpieczenie", label: "Ubezpieczenie",       color: "#10b981", icon: "🛡️" },
   { id: "opony",         label: "Opony",               color: "#3b82f6", icon: "🔄" },
   { id: "oplaty",        label: "Opłaty drogowe",      color: "#8b5cf6", icon: "🛣️" },
@@ -940,7 +940,36 @@ function App({ user, role, appUsers = [] }) {
   // ── ACTIONS ──
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2500); };
 
-  const addCost      = (entry) => { setCosts((p) => [...p, { ...entry, id: uid() }]); showToast("✅ Koszt zapisany"); setShowAddCost(false); };
+  const addCost = async (entry) => {
+    const costId = uid();
+    setCosts((p) => [...p, { ...entry, id: costId }]);
+    setShowAddCost(false);
+    // Serwis bez kwoty → utwórz sprawę automatycznie
+    if (entry.pendingSerwis) {
+      const veh = vehicles.find(v => v.id === entry.vehicleId);
+      const vehLabel = veh ? `${veh.plate} — ${veh.brand}` : entry.vehicleId;
+      try {
+        await addDoc(collection(db, "sprawy"), {
+          typ: "serwis",
+          status: "otwarta",
+          klient: vehLabel,
+          uwagi: entry.note || "",
+          kwota: "",
+          waluta: entry.currency || "EUR",
+          vehicleId: entry.vehicleId,
+          linkedCostId: costId,
+          dataUtworzenia: new Date().toISOString(),
+          zdarzenia: [],
+        });
+        showToast("🔧 Serwis zapisany — sprawa utworzona");
+      } catch (e) {
+        console.error("Auto-sprawa serwis error:", e);
+        showToast("✅ Koszt zapisany (błąd tworzenia sprawy)");
+      }
+    } else {
+      showToast("✅ Koszt zapisany");
+    }
+  };
   const deleteCost   = (id)    => { setCosts((p) => p.filter((c) => c.id !== id)); showToast("Usunięto wpis"); };
   const updateCost   = (updated) => { setCosts((p) => p.map((c) => c.id === updated.id ? updated : c)); showToast("✅ Koszt zaktualizowany"); setEditCostId(null); };
   const addVehicle   = (v)     => { setVehicles((p) => [...p, { ...v, id: uid(), driverHistory: v.driverHistory || [] }]); showToast("Pojazd dodany"); setShowAddVehicle(false); };
@@ -964,7 +993,8 @@ function App({ user, role, appUsers = [] }) {
     myto:          { label: "Opłaty drogowe",   color: "#8b5cf6", icon: "🛣️" },
     nego:          { label: "Opłaty drogowe",   color: "#8b5cf6", icon: "🛣️" },
     etoll:         { label: "Opłaty drogowe",   color: "#8b5cf6", icon: "🛣️" },
-    naprawa:       { label: "Naprawa",          color: "#ef4444", icon: "🔧" },
+    naprawa:       { label: "Serwis",           color: "#ef4444", icon: "🔧" },
+    serwis:        { label: "Serwis",           color: "#ef4444", icon: "🔧" },
     paliwo:        { label: "Paliwo",           color: "#f59e0b", icon: "⛽" },
     leasing:       { label: "Leasing",          color: "#6366f1", icon: "🏦" },
     inne:          { label: "Inne",             color: "#94a3b8", icon: "📋" },
@@ -2233,6 +2263,8 @@ function App({ user, role, appUsers = [] }) {
             <SprawyTab
               sprawyList={sprawyList}
               vehicles={vehicles}
+              costs={costs}
+              updateCost={updateCost}
               currentUser={user}
               appUsers={appUsers}
               eurRate={eurRate}
@@ -3256,6 +3288,7 @@ const SPRAWA_TYPY = [
   { id: "nota",          label: "Nota obciążeniowa",  icon: "📋", color: "#f97316" },
   { id: "reklamacja",    label: "Reklamacja",          icon: "⚠️", color: "#eab308" },
   { id: "spor",          label: "Spór",               icon: "⚖️", color: "#8b5cf6" },
+  { id: "serwis",        label: "Serwis pojazdu",     icon: "🔧", color: "#ef4444" },
   { id: "inne",          label: "Inne",               icon: "📌", color: "#6b7280" },
 ];
 
@@ -3376,7 +3409,7 @@ function NowaSprawaModal({ allTypy, vehicles, appUsers = [], onSave, onClose }) 
   );
 }
 
-function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpdate, onDelete, onBack, showToast }) {
+function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUser, appUsers, onUpdate, onDelete, onBack, showToast }) {
   const [showAddZdarzenie, setShowAddZdarzenie] = useState(false);
   const [zdType, setZdType] = useState("notatka");
   const [zdTresc, setZdTresc] = useState("");
@@ -3391,6 +3424,11 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
   const [przypomnienieOpis, setPrzypomnienieOpis] = useState("");
   const [editMode, setEditMode] = useState(false);
   const [editData, setEditData] = useState({...sprawa});
+  // Serwis finalizacja
+  const [serwisKwota, setSerwisKwota] = useState("");
+  const [serwisWaluta, setSerwisWaluta] = useState(sprawa.waluta || "EUR");
+  const linkedCost = sprawa.linkedCostId && costs ? costs.find(c => c.id === sprawa.linkedCostId) : null;
+  const isSerwisOpen = sprawa.typ === "serwis" && sprawa.linkedCostId && linkedCost?.pendingSerwis && (sprawa.status === "otwarta" || sprawa.status === "w_toku");
   // Synchronizuj editData gdy sprawa się zmieni (np. po onSnapshot)
   useEffect(() => { if (!editMode) setEditData({...sprawa}); }, [sprawa, editMode]);
 
@@ -3449,6 +3487,56 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
           </button>
         </div>
       </div>
+
+      {/* SERWIS — FINALIZACJA KOSZTU */}
+      {isSerwisOpen && (
+        <div className="mb-5 p-5 rounded-xl border-2 border-orange-300" style={{ background: '#fff7ed' }}>
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-lg">🔧</span>
+            <h3 className="font-bold text-orange-800">Serwis w toku — uzupełnij koszt</h3>
+          </div>
+          <div className="text-sm text-orange-700 mb-3">
+            {linkedCost?.note && <span>Notatka: <strong>{linkedCost.note}</strong></span>}
+            {vehicle && <span className="ml-2">· {vehicle.plate} — {vehicle.brand}</span>}
+          </div>
+          <div className="flex items-end gap-3 flex-wrap">
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">Kwota końcowa</label>
+              <input type="number" value={serwisKwota} onChange={e => setSerwisKwota(e.target.value)}
+                placeholder="0.00" className="px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none focus:border-orange-400 w-36" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">Waluta</label>
+              <select value={serwisWaluta} onChange={e => setSerwisWaluta(e.target.value)}
+                className="px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none bg-white">
+                <option value="EUR">EUR</option>
+                <option value="PLN">PLN</option>
+              </select>
+            </div>
+            <button onClick={() => {
+              if (!serwisKwota || parseFloat(serwisKwota) <= 0) { showToast("Podaj kwotę"); return; }
+              const amt = parseFloat(serwisKwota);
+              const updatedCost = { ...linkedCost, pendingSerwis: false };
+              if (serwisWaluta === "EUR") {
+                updatedCost.amountEUR = amt;
+                updatedCost.amountPLN = Math.round(amt * 4.27 * 100) / 100;
+                updatedCost.currency = "EUR";
+              } else {
+                updatedCost.amountPLN = amt;
+                updatedCost.amountEUR = Math.round(amt / 4.27 * 100) / 100;
+                updatedCost.currency = "PLN";
+              }
+              updateCost(updatedCost);
+              onUpdate({ status: "zamknieta", kwota: String(amt), waluta: serwisWaluta });
+              showToast("✅ Serwis zakończony — koszt zapisany, sprawa zamknięta");
+            }}
+              className="px-5 py-2 rounded-xl text-sm font-bold text-white hover:opacity-90 transition-all"
+              style={{ background: '#16a34a' }}>
+              Zakończ serwis
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* DANE SPRAWY */}
       {!editMode ? (
@@ -3771,7 +3859,7 @@ function SprawaDetail({ sprawa, vehicles, allTypy, currentUser, appUsers, onUpda
   );
 }
 
-function SprawyTab({ sprawyList, vehicles, currentUser, appUsers, eurRate, eurRateDate, showToast, onAdd, onUpdate, onDelete }) {
+function SprawyTab({ sprawyList, vehicles, costs, updateCost, currentUser, appUsers, eurRate, eurRateDate, showToast, onAdd, onUpdate, onDelete }) {
   const [view, setView] = useState("lista");
   const [selectedId, setSelectedId] = useState(null);
   const [showNewSprawa, setShowNewSprawa] = useState(false);
@@ -3809,6 +3897,8 @@ function SprawyTab({ sprawyList, vehicles, currentUser, appUsers, eurRate, eurRa
     return <SprawaDetail
       sprawa={selected}
       vehicles={vehicles}
+      costs={costs}
+      updateCost={updateCost}
       allTypy={allTypy}
       currentUser={currentUser}
       appUsers={appUsers}
@@ -5664,18 +5754,25 @@ function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, 
     setNewCat({ label: "", icon: "📋", color: PALETTE[0] });
   };
 
+  const isSerwis = form.category === "serwis" || form.category === "naprawa";
+  const hasAmount = form.amountPLN || form.amountEUR;
+
   const handleSave = () => {
-    if (!form.vehicleId || (!form.amountPLN && !form.amountEUR)) return;
-    onSave({
+    if (!form.vehicleId) return;
+    // Serwis pozwala na zapis bez kwoty (kwota = 0, pendingSerwis = true)
+    if (!isSerwis && !hasAmount) return;
+    const entry = {
       vehicleId: form.vehicleId,
       category:  form.category,
       currency:  form.currency,
-      amountPLN: form.amountPLN ? parseFloat(form.amountPLN) : (toPLN(parseFloat(form.amountEUR)) || 0),
-      amountEUR: form.amountEUR ? parseFloat(form.amountEUR) : (toEUR(parseFloat(form.amountPLN)) || null),
+      amountPLN: form.amountPLN ? parseFloat(form.amountPLN) : (hasAmount ? (toPLN(parseFloat(form.amountEUR)) || 0) : 0),
+      amountEUR: form.amountEUR ? parseFloat(form.amountEUR) : (hasAmount ? (toEUR(parseFloat(form.amountPLN)) || null) : 0),
       date:      form.date,
       note:      form.note,
       liters:    form.liters ? parseFloat(form.liters) : undefined,
-    });
+    };
+    if (isSerwis && !hasAmount) entry.pendingSerwis = true;
+    onSave(entry);
   };
 
   return (
@@ -5790,23 +5887,32 @@ function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, 
             </p>
           )}
 
-          {/* LITRY */}
-          <MF label="Litry (opcjonalnie, dla paliwa)">
-            <MInput type="number" placeholder="np. 450" value={form.liters} onChange={(v) => set("liters", v)} />
-          </MF>
+          {/* LITRY — tylko dla Paliwo */}
+          {form.category === "paliwo" && (
+            <MF label="Litry (opcjonalnie)">
+              <MInput type="number" placeholder="np. 450" value={form.liters} onChange={(v) => set("liters", v)} />
+            </MF>
+          )}
 
           {/* OPIS */}
-          <MF label="Opis / notatka">
-            <MInput placeholder="np. tankowanie DE–PL" value={form.note} onChange={(v) => set("note", v)} />
+          <MF label={isSerwis ? "Opis serwisu (co naprawiasz?)" : "Opis / notatka"}>
+            <MInput placeholder={isSerwis ? "np. wymiana klocków, olej, filtry" : "np. tankowanie DE–PL"} value={form.note} onChange={(v) => set("note", v)} />
           </MF>
+
+          {/* Informacja o serwisie bez kwoty */}
+          {isSerwis && !hasAmount && (
+            <div className="p-3 rounded-xl text-xs" style={{ background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412' }}>
+              <strong>Nie znasz jeszcze kwoty?</strong> Możesz zapisać serwis bez kwoty — trafi do Spraw jako otwarta sprawa. Po odebraniu auta uzupełnisz kwotę i zamkniesz sprawę.
+            </div>
+          )}
         </div>
 
         <div className="px-6 pb-6 sticky bottom-0 bg-white pt-2 border-t border-gray-50">
           <button onClick={handleSave}
-            disabled={!form.vehicleId || (!form.amountPLN && !form.amountEUR)}
+            disabled={!form.vehicleId || (!isSerwis && !hasAmount)}
             className="w-full py-3 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-95 disabled:opacity-30"
-            style={{ background: "#111827" }}>
-            {editRecord ? "Zapisz zmiany" : "Zapisz koszt"}
+            style={{ background: isSerwis && !hasAmount ? "#ea580c" : "#111827" }}>
+            {editRecord ? "Zapisz zmiany" : isSerwis && !hasAmount ? "🔧 Zapisz serwis (uzupełnisz kwotę później)" : "Zapisz koszt"}
           </button>
         </div>
       </div>
