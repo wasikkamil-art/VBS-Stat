@@ -2488,18 +2488,14 @@ function MobileChatOverlay({ children, hasActiveRoom }) {
 
     const update = () => {
       el.style.height = `${vv.height}px`;
-      el.style.top = `${vv.offsetTop}px`;
     };
 
     update();
     vv.addEventListener('resize', update);
-    vv.addEventListener('scroll', update);
 
     return () => {
       vv.removeEventListener('resize', update);
-      vv.removeEventListener('scroll', update);
       el.style.height = '';
-      el.style.top = '0px';
     };
   }, [hasActiveRoom]);
 
