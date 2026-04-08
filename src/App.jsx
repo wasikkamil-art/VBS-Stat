@@ -723,6 +723,7 @@ function App({ user, role, appUsers = [] }) {
   const canEdit      = isAdmin || isDyspozytor;  // może edytować
   const canFinance   = isAdmin || isDyspozytor;  // widzi finanse
   const [tab, setTab]               = useState("dashboard");
+  const [chatFloat, setChatFloat]   = useState(false); // floating chat popup (widoczny na innych zakładkach)
   const [vehicles, setVehicles]     = useState([]);
   const [costs, setCosts]           = useState([]);
   const [categories, setCategories] = useState([]);
@@ -2222,7 +2223,9 @@ function App({ user, role, appUsers = [] }) {
           )}
 
           {tab === "chat" && (
-            <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} />
+            <div style={{ height: "calc(100vh - 2rem)" }}>
+              <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} />
+            </div>
           )}
 
           {tab === "sprawy" && (isAdmin || isDyspozytor) && (
@@ -2253,6 +2256,59 @@ function App({ user, role, appUsers = [] }) {
 
         </main>
       </div>
+
+      {/* ═══ FLOATING CHAT POPUP ═══ */}
+      {chatFloat && tab !== "chat" && (
+        <div className="fixed z-40" style={{
+          bottom: "env(safe-area-inset-bottom, 0px)",
+          right: 0,
+          width: "100%",
+          maxWidth: "420px",
+          height: "min(75vh, 600px)",
+          marginBottom: window.innerWidth < 768 ? "60px" : "0px",
+        }}>
+          <div className="flex flex-col h-full bg-white rounded-t-2xl md:rounded-2xl md:mr-4 md:mb-4 shadow-2xl border border-gray-200 overflow-hidden">
+            {/* Header z przyciskami minimize/maximize/close */}
+            <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50 border-b border-gray-100 flex-shrink-0">
+              <span className="font-semibold text-sm text-gray-800 flex items-center gap-2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                Czat
+                {chatUnreadCount > 0 && <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-500 text-white">{chatUnreadCount}</span>}
+              </span>
+              <div className="flex items-center gap-1">
+                <button onClick={() => { setTab("chat"); setChatFloat(false); }} className="p-1.5 rounded-lg hover:bg-gray-200 transition-colors text-gray-400 hover:text-gray-600" title="Otwórz na pełnym ekranie">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                </button>
+                <button onClick={() => setChatFloat(false)} className="p-1.5 rounded-lg hover:bg-gray-200 transition-colors text-gray-400 hover:text-gray-600" title="Zamknij">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+            </div>
+            {/* ChatTab w kompaktowym trybie */}
+            <div className="flex-1 overflow-hidden">
+              <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FLOATING CHAT BUBBLE — widoczna gdy czat nie jest otwarty */}
+      {!chatFloat && tab !== "chat" && (
+        <button onClick={() => setChatFloat(true)}
+          className="fixed z-40 shadow-lg hover:shadow-xl transition-all hover:scale-105 active:scale-95"
+          style={{
+            bottom: window.innerWidth < 768 ? "calc(70px + env(safe-area-inset-bottom, 0px))" : "24px",
+            right: "20px",
+            width: "56px", height: "56px", borderRadius: "50%",
+            background: "linear-gradient(135deg, #3b82f6, #1d4ed8)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          {chatUnreadCount > 0 && (
+            <span className="absolute -top-1 -right-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-500 text-white min-w-[20px] text-center">{chatUnreadCount}</span>
+          )}
+        </button>
+      )}
 
       {/* MOBILE BOTTOM NAV */}
       <div className="fixed bottom-0 left-0 right-0 md:hidden bg-white border-t border-gray-100 safe-area-pb"
@@ -2756,7 +2812,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     : messages;
 
   return (
-    <div className="flex h-[calc(100vh-2rem)] bg-white rounded-xl border border-gray-100 overflow-hidden">
+    <div className="flex h-full bg-white rounded-xl border border-gray-100 overflow-hidden" style={{ minHeight: 0 }}>
       {/* ── LISTA POKOJÓW ── */}
       <div className={`${activeRoom ? "hidden md:flex" : "flex"} flex-col w-full md:w-72 border-r border-gray-100 bg-gray-50/50`}>
         <div className="p-4 border-b border-gray-100 flex items-center justify-between">
