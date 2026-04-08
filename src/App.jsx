@@ -8269,14 +8269,16 @@ function AddVehicleModal({ onSave, onClose }) {
 
   return (
     <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center p-0 sm:p-4"
-      style={{ background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)" }}>
-      <div className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl"
-        style={{ fontFamily: "'DM Sans', sans-serif" }}>
-        <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100">
+      style={{ background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col"
+        style={{ fontFamily: "'DM Sans', sans-serif", maxHeight: "90vh" }}
+        onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100 flex-shrink-0">
           <h3 className="text-base font-bold text-gray-900">Nowy pojazd</h3>
           <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs">✕</button>
         </div>
-        <div className="px-6 py-5 space-y-4">
+        <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
           <div className="grid grid-cols-2 gap-3">
             <MF label="Rejestracja (główna)"><MInput placeholder="WGM 0000X" value={form.plate} onChange={(v) => set("plate", v.toUpperCase())} /></MF>
             <MF label="Rejestracja przyczepy"><MInput placeholder="np. TK 760AP" value={form.plate2} onChange={(v) => set("plate2", v.toUpperCase())} /></MF>
@@ -8376,7 +8378,7 @@ function AddVehicleModal({ onSave, onClose }) {
             </div>
           </div>
         </div>
-        <div className="px-6 pb-6">
+        <div className="px-6 pb-6 pt-3 border-t border-gray-100 flex-shrink-0">
           <button onClick={handleSave} disabled={!form.plate}
             className="w-full py-3 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-95 disabled:opacity-30"
             style={{ background: "#111827" }}>
