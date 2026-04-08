@@ -125,6 +125,15 @@ if (messaging) {
 }
 
 // ─── SECURITY: walidacja URL (chroni przed javascript: / data: injection) ───
+// Helper: normalizuj timestamp (Firestore Timestamp / string ISO / null) do milisekund
+const tsToMs = (ts) => {
+  if (!ts) return 0;
+  if (typeof ts === "object" && ts.seconds) return ts.seconds * 1000 + (ts.nanoseconds || 0) / 1e6;
+  if (typeof ts === "object" && ts.toDate) return ts.toDate().getTime();
+  const d = new Date(ts);
+  return isNaN(d.getTime()) ? 0 : d.getTime();
+};
+
 const safeHref = (url) => {
   if (!url || typeof url !== "string") return "#";
   try {
@@ -833,10 +842,10 @@ function App({ user, role, appUsers = [] }) {
       const rooms = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       const myRooms = rooms.filter(r => r.type === "channel" || (r.members || []).includes(user.uid));
       const unread = myRooms.filter(r => {
-        if (r.type === "self") return false; // notatki do siebie — nie licz jako nieprzeczytane
+        if (r.type === "self") return false;
         if (!r.lastMessageAt || r.lastSender === user.email) return false;
         const myRead = r.lastRead?.[user.uid];
-        return !myRead || r.lastMessageAt > myRead;
+        return !myRead || tsToMs(r.lastMessageAt) > tsToMs(myRead);
       }).length;
       setChatUnreadCount(unread);
     }, () => {});
@@ -2353,11 +2362,14 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     const q = query(collection(db, "chatRooms"), orderBy("lastMessageAt", "desc"));
     const unsub = onSnapshot(q, (snap) => {
       const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const myRooms = all.filter(r => r.type === "channel" || (r.members || []).includes(currentUser.uid));
+      const myRooms = all.filter(r => r.type === "channel" || (r.members || []).includes(currentUser.uid))
+        .sort((a, b) => tsToMs(b.lastMessageAt) - tsToMs(a.lastMessageAt)); // desc — najnowsze na górze
       myRooms.forEach(r => {
         const prev = lastRoomTimestamps.current[r.id];
-        if (prev && r.lastMessageAt > prev && r.lastSender !== currentUser.email && r.id !== activeRoomIdRef.current) playNotifSound();
-        lastRoomTimestamps.current[r.id] = r.lastMessageAt || "";
+        const curMs = tsToMs(r.lastMessageAt);
+        const prevMs = prev || 0;
+        if (prevMs > 0 && curMs > prevMs && r.lastSender !== currentUser.email && r.id !== activeRoomIdRef.current) playNotifSound();
+        lastRoomTimestamps.current[r.id] = curMs;
       });
       setRooms(myRooms);
       // NIE aktualizujemy activeRoom z rooms listenera — to powodowało kaskadę re-renderów
@@ -2380,9 +2392,10 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     if (!activeRoom) { setMessages([]); return; }
     const q = query(collection(db, "chatRooms", activeRoom.id, "messages"), orderBy("timestamp", "asc"));
     const unsub = onSnapshot(q, (snap) => {
-      // snap.docs jest w kolejności Firestore orderBy("timestamp","asc") — ZAWSZE chronologicznie
-      // NIE sortujemy client-side — ufamy Firestore
-      const newMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // Firestore orderBy nie sortuje poprawnie gdy mamy mix typów (Timestamp vs string)
+      // Normalizujemy i sortujemy client-side
+      const newMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => tsToMs(a.timestamp) - tsToMs(b.timestamp));
       // Dźwięk tylko gdy przybyła nowa wiadomość od kogoś innego
       if (prevMsgCountRef.current > 0 && newMsgs.length > prevMsgCountRef.current) {
         const added = snap.docChanges().filter(c => c.type === "added");
@@ -2703,7 +2716,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
           {rooms.length === 0 && <div className="p-6 text-center text-gray-400 text-sm">Brak pokojów. Utwórz pierwszy!</div>}
           {rooms.map(r => {
             const myRead = r.lastRead?.[currentUser.uid];
-            const hasUnread = r.lastMessageAt && r.lastSender !== currentUser.email && (!myRead || r.lastMessageAt > myRead);
+            const hasUnread = r.lastMessageAt && r.lastSender !== currentUser.email && (!myRead || tsToMs(r.lastMessageAt) > tsToMs(myRead));
             return (
               <button key={r.id} onClick={() => { setActiveRoom(r); setShowSearch(false); setSearchQuery(""); setContextMenu(null); }}
                 className="w-full text-left px-4 py-3 border-b border-gray-50 hover:bg-gray-100/80 transition-colors"
