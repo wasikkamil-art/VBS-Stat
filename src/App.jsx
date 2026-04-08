@@ -839,13 +839,20 @@ function App({ user, role, appUsers = [] }) {
     if (!user) { setChatUnreadCount(0); return; }
     const q = query(collection(db, "chatRooms"), orderBy("lastMessageAt", "desc"));
     const unsub = onSnapshot(q, (snap) => {
+      const norm = (v) => {
+        if (!v || typeof v !== "object") return v;
+        if (typeof v.toDate === "function") return v.toDate().toISOString();
+        if (typeof v.seconds === "number") return new Date(v.seconds * 1000).toISOString();
+        return v;
+      };
       const rooms = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       const myRooms = rooms.filter(r => r.type === "channel" || (r.members || []).includes(user.uid));
       const unread = myRooms.filter(r => {
         if (r.type === "self") return false;
         if (!r.lastMessageAt || r.lastSender === user.email) return false;
-        const myRead = r.lastRead?.[user.uid];
-        return !myRead || tsToMs(r.lastMessageAt) > tsToMs(myRead);
+        const myRead = norm(r.lastRead?.[user.uid]);
+        const lma = norm(r.lastMessageAt);
+        return !myRead || tsToMs(lma) - tsToMs(myRead) > 5000;
       }).length;
       setChatUnreadCount(unread);
     }, () => {});
@@ -2409,10 +2416,18 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     const unsub = onSnapshot(q, (snap) => {
       const all = snap.docs.map(d => {
         const data = { id: d.id, ...d.data() };
-        // Normalizuj lastMessageAt: serverTimestamp() zwraca Firestore Timestamp
-        const lma = data.lastMessageAt;
-        if (lma && typeof lma === "object" && typeof lma.toDate === "function") data.lastMessageAt = lma.toDate().toISOString();
-        else if (lma && typeof lma === "object" && typeof lma.seconds === "number") data.lastMessageAt = new Date(lma.seconds * 1000).toISOString();
+        // Normalizuj serverTimestamp() pola: Firestore Timestamp → ISO string
+        const norm = (v) => {
+          if (!v || typeof v !== "object") return v;
+          if (typeof v.toDate === "function") return v.toDate().toISOString();
+          if (typeof v.seconds === "number") return new Date(v.seconds * 1000).toISOString();
+          return v;
+        };
+        data.lastMessageAt = norm(data.lastMessageAt);
+        // Normalizuj lastRead map values
+        if (data.lastRead) {
+          for (const uid of Object.keys(data.lastRead)) { data.lastRead[uid] = norm(data.lastRead[uid]); }
+        }
         return data;
       });
       const myRooms = all.filter(r => r.type === "channel" || (r.members || []).includes(currentUser.uid))
@@ -2535,18 +2550,12 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     const lastMsg = messages[messages.length - 1];
     const ts = lastMsg?.timestamp;
     if (!ts) return;
-    // Porównanie: Firestore Timestamp (object z seconds) lub string ISO
-    const tsKey = typeof ts === "object" && ts.seconds ? `${ts.seconds}` : String(ts);
+    const tsKey = String(ts);
     if (tsKey === lastReadTsRef.current) return;
     lastReadTsRef.current = tsKey;
-    // Zawsze zapisuj jako ISO string (normalizacja mixed types)
-    const isoTs = typeof ts === "object" && ts.seconds
-      ? new Date(ts.seconds * 1000).toISOString()
-      : typeof ts === "object" && ts.toDate
-        ? ts.toDate().toISOString()
-        : typeof ts === "string" ? ts : new Date(ts).toISOString();
+    // Używamy serverTimestamp() — ten sam zegar co lastMessageAt, eliminuje rozbieżności
     updateDoc(doc(db, "chatRooms", activeRoom.id), {
-      [`lastRead.${currentUser.uid}`]: isoTs
+      [`lastRead.${currentUser.uid}`]: serverTimestamp()
     }).catch(() => {});
   }, [activeRoom?.id, messages]);
 
@@ -2800,7 +2809,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
           {rooms.length === 0 && <div className="p-6 text-center text-gray-400 text-sm">Brak pokojów. Utwórz pierwszy!</div>}
           {rooms.map(r => {
             const myRead = r.lastRead?.[currentUser.uid];
-            const hasUnread = r.lastMessageAt && r.lastSender !== currentUser.email && (!myRead || tsToMs(r.lastMessageAt) > tsToMs(myRead));
+            const hasUnread = r.lastMessageAt && r.lastSender !== currentUser.email && (!myRead || tsToMs(r.lastMessageAt) - tsToMs(myRead) > 5000);
             return (
               <button key={r.id} onClick={() => { setActiveRoom(r); setShowSearch(false); setSearchQuery(""); setContextMenu(null); }}
                 className="w-full text-left px-4 py-3 border-b border-gray-50 hover:bg-gray-100/80 transition-colors"
