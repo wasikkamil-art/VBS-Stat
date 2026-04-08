@@ -776,6 +776,7 @@ function App({ user, role, appUsers = [] }) {
           if (cost.category === "myto") return { ...cost, category: "oplaty" };
           if (cost.category === "nego") return { ...cost, category: "oplaty" };
           if (cost.category === "etoll") return { ...cost, category: "oplaty" };
+          if (cost.category === "naprawa") return { ...cost, category: "serwis" };
           return cost;
         });
         setCosts(patchedCosts);
@@ -789,8 +790,12 @@ function App({ user, role, appUsers = [] }) {
         ];
         const mergedCats = [...loadedCats].map(cat => {
           if (cat.id === "wyplata") return { ...cat, label: "Wynagrodzenie", icon: "👤", color: "#f43f5e" };
+          // Migracja: naprawa → serwis
+          if (cat.id === "naprawa") return { ...cat, id: "serwis", label: "Serwis", icon: "🔧", color: "#ef4444" };
           return cat;
         });
+        // Dodaj serwis jeśli brak (ani naprawa ani serwis)
+        if (!mergedCats.find(c => c.id === "serwis")) mergedCats.push({ id: "serwis", label: "Serwis", color: "#ef4444", icon: "🔧" });
         REQUIRED_CATS.forEach(req => {
           if (!mergedCats.find(c => c.id === req.id)) mergedCats.push(req);
         });
