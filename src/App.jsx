@@ -5,7 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 // ─── FIREBASE CONFIG ────────────────────────────────────────────────────────
 // 👇 WKLEJ TUTAJ SWÓJ firebaseConfig z Firebase Console
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, orderBy, arrayUnion, serverTimestamp } from "firebase/firestore";
+import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, orderBy, arrayUnion, serverTimestamp, writeBatch } from "firebase/firestore";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
@@ -2346,6 +2346,49 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
 
   const lastRoomTimestamps = useRef({});
 
+  // ── MIGRACJA TIMESTAMPÓW (admin-only, jednorazowa) ──
+  const [migrateStatus, setMigrateStatus] = useState(null); // null | "running" | "done" | "error"
+  const [migrateLog, setMigrateLog] = useState("");
+  const isAdminChat = appUsers.find(u => u.uid === currentUser.uid)?.role === "admin";
+
+  const runTimestampMigration = async (dryRun = true) => {
+    setMigrateStatus("running");
+    setMigrateLog("");
+    const addLog = (msg) => setMigrateLog(prev => prev + msg + "\n");
+    const mode = dryRun ? "DRY RUN" : "PRODUKCJA";
+    addLog(`${"=".repeat(50)}\n  MIGRACJA — ${mode}\n${"=".repeat(50)}`);
+    let totalRooms = 0, totalMsgs = 0, migratedMsgs = 0, migratedFields = 0;
+    const isFTS = (v) => v && typeof v === "object" && (typeof v.seconds === "number" || typeof v.toDate === "function");
+    const toI = (v) => typeof v.toDate === "function" ? v.toDate().toISOString() : typeof v.seconds === "number" ? new Date(v.seconds * 1000 + (v.nanoseconds||0)/1e6).toISOString() : null;
+    try {
+      const roomsSnap = await getDocs(collection(db, "chatRooms"));
+      totalRooms = roomsSnap.size;
+      addLog(`\n📦 ${totalRooms} pokojów\n`);
+      for (const rd of roomsSnap.docs) {
+        const rData = rd.data(), rName = rData.name || rd.id, updates = {};
+        if (isFTS(rData.lastMessageAt)) { updates.lastMessageAt = toI(rData.lastMessageAt); addLog(`  🔄 [${rName}] lastMessageAt`); }
+        if (rData.lastRead) for (const [u,v] of Object.entries(rData.lastRead)) { if (isFTS(v)) { updates[`lastRead.${u}`] = toI(v); addLog(`  🔄 [${rName}] lastRead.${u}`); } }
+        if (rData.typing) for (const [u,v] of Object.entries(rData.typing)) { if (isFTS(v)) { updates[`typing.${u}`] = toI(v); } }
+        if (Object.keys(updates).length > 0) { migratedFields += Object.keys(updates).length; if (!dryRun) await updateDoc(doc(db, "chatRooms", rd.id), updates); }
+        const msgsSnap = await getDocs(collection(db, "chatRooms", rd.id, "messages"));
+        totalMsgs += msgsSnap.size;
+        let rm = 0, batch = writeBatch(db), bc = 0;
+        for (const md of msgsSnap.docs) {
+          if (isFTS(md.data().timestamp)) {
+            if (!dryRun) { batch.update(doc(db, "chatRooms", rd.id, "messages", md.id), { timestamp: toI(md.data().timestamp) }); bc++; }
+            rm++; migratedMsgs++;
+            if (bc >= 450) { if (!dryRun) { await batch.commit(); batch = writeBatch(db); } bc = 0; }
+          }
+        }
+        if (!dryRun && bc > 0) await batch.commit();
+        addLog(rm > 0 ? `  ✅ [${rName}] ${rm}/${msgsSnap.size} msg, ${Object.keys(updates).length} pól` : `  ⏭️  [${rName}] ${msgsSnap.size} msg — OK`);
+      }
+      addLog(`\n${"=".repeat(50)}\n  Pokoje: ${totalRooms} | Msg: ${totalMsgs} | Zmigr. msg: ${migratedMsgs} | Pola: ${migratedFields}\n${"=".repeat(50)}`);
+      setMigrateStatus("done");
+      if (!dryRun && migratedMsgs > 0) showToast(`✅ Zmigrowano ${migratedMsgs} wiadomości`);
+    } catch (e) { addLog(`\n❌ BŁĄD: ${e.message}`); setMigrateStatus("error"); }
+  };
+
   // ── Auto-rejestracja push tokena — rejestruj w tle i ukryj przycisk jeśli sukces ──
   useEffect(() => {
     if (!currentUser?.uid) return;
@@ -2719,6 +2762,23 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
             {pushDiag.isIOS && !pushDiag.isStandalone && (
               <div className="mt-1 text-amber-700 font-medium">📱 Dodaj stronę do ekranu głównego (Share → Dodaj do ekranu głównego)</div>
             )}
+          </div>
+        )}
+        {/* Migracja timestampów — admin only, jednorazowa */}
+        {isAdminChat && !localStorage.getItem("tsMigrationDone") && (
+          <div className="mx-3 mt-2 mb-1 p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs">
+            <div className="font-semibold text-amber-800 mb-1">🔧 Migracja timestampów</div>
+            {!migrateStatus && (
+              <div className="flex gap-2">
+                <button onClick={() => runTimestampMigration(true)} className="px-3 py-1.5 rounded-lg bg-amber-500 text-white font-medium hover:bg-amber-600 transition-colors">Dry Run</button>
+                <button onClick={() => { if(confirm("Uruchomić migrację? Zmieni dane w Firestore.")) runTimestampMigration(false); }} className="px-3 py-1.5 rounded-lg bg-green-500 text-white font-medium hover:bg-green-600 transition-colors">Migruj</button>
+                <button onClick={() => { localStorage.setItem("tsMigrationDone","1"); setMigrateStatus("hidden"); }} className="px-2 py-1.5 rounded-lg text-gray-400 hover:text-gray-600" title="Ukryj">✕</button>
+              </div>
+            )}
+            {migrateStatus === "running" && <div className="text-amber-700 font-medium">⏳ Trwa migracja...</div>}
+            {migrateStatus === "done" && <div className="text-green-700 font-medium">✅ Zakończono! <button onClick={() => { localStorage.setItem("tsMigrationDone","1"); setMigrateStatus("hidden"); }} className="underline ml-1">Ukryj</button></div>}
+            {migrateStatus === "error" && <div className="text-red-600 font-medium">❌ Błąd — sprawdź log</div>}
+            {migrateLog && <pre className="mt-2 p-2 bg-gray-900 text-green-300 rounded-lg text-[10px] max-h-48 overflow-y-auto whitespace-pre-wrap">{migrateLog}</pre>}
           </div>
         )}
         <div className="flex-1 overflow-y-auto">
