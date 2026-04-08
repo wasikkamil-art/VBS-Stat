@@ -2297,12 +2297,10 @@ function App({ user, role, appUsers = [] }) {
 
           {tab === "chat" && (() => {
             const isMob = typeof window !== 'undefined' && window.innerWidth < 768;
-            const mobileActiveRoom = isMob && chatHasActiveRoom;
-            return mobileActiveRoom ? null : (
-              <div style={isMob ? {
-                height: 'calc(100dvh - 60px)',
-                background: '#fff',
-              } : { height: "calc(100vh - 2rem)" }}>
+            // Na mobile chat renderuje się w overlay poniżej
+            if (isMob) return null;
+            return (
+              <div style={{ height: "calc(100vh - 2rem)" }}>
                 <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} onActiveRoomChange={setChatHasActiveRoom} />
               </div>
             );
@@ -2458,8 +2456,8 @@ function App({ user, role, appUsers = [] }) {
       </div>
 
       {/* ── MOBILE FULLSCREEN CHAT OVERLAY ── */}
-      {tab === "chat" && chatHasActiveRoom && typeof window !== 'undefined' && window.innerWidth < 768 && (
-        <MobileChatOverlay>
+      {tab === "chat" && typeof window !== 'undefined' && window.innerWidth < 768 && (
+        <MobileChatOverlay hasActiveRoom={chatHasActiveRoom}>
           <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} onActiveRoomChange={setChatHasActiveRoom} />
         </MobileChatOverlay>
       )}
@@ -2470,33 +2468,29 @@ function App({ user, role, appUsers = [] }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // MOBILE CHAT OVERLAY — uses visualViewport to perfectly match keyboard
 // ═══════════════════════════════════════════════════════════════════════════════
-function MobileChatOverlay({ children }) {
+function MobileChatOverlay({ children, hasActiveRoom }) {
   const ref = useRef(null);
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     const vv = window.visualViewport;
+    if (!vv) return;
 
     const update = () => {
-      if (!vv) return;
       // Set height to exactly the visible viewport (excludes keyboard)
       el.style.height = `${vv.height}px`;
       // Offset top to match viewport scroll position (iOS scrolls the page behind keyboard)
       el.style.top = `${vv.offsetTop}px`;
     };
 
-    if (vv) {
-      update();
-      vv.addEventListener('resize', update);
-      vv.addEventListener('scroll', update);
-    }
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
 
     return () => {
-      if (vv) {
-        vv.removeEventListener('resize', update);
-        vv.removeEventListener('scroll', update);
-      }
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
     };
   }, []);
 
@@ -2511,7 +2505,8 @@ function MobileChatOverlay({ children }) {
       display: 'flex',
       flexDirection: 'column',
       background: '#fff',
-      paddingTop: 'env(safe-area-inset-top, 0px)',
+      paddingTop: hasActiveRoom ? 'env(safe-area-inset-top, 0px)' : '0px',
+      paddingBottom: hasActiveRoom ? '0px' : 'calc(60px + env(safe-area-inset-bottom, 0px))',
       overflow: 'hidden',
     }}>
       {children}
