@@ -2471,16 +2471,16 @@ function App({ user, role, appUsers = [] }) {
 function MobileChatOverlay({ children, hasActiveRoom }) {
   const ref = useRef(null);
 
+  // Only track visualViewport when in active room (keyboard may appear)
   useEffect(() => {
+    if (!hasActiveRoom) return;
     const el = ref.current;
     if (!el) return;
     const vv = window.visualViewport;
     if (!vv) return;
 
     const update = () => {
-      // Set height to exactly the visible viewport (excludes keyboard)
       el.style.height = `${vv.height}px`;
-      // Offset top to match viewport scroll position (iOS scrolls the page behind keyboard)
       el.style.top = `${vv.offsetTop}px`;
     };
 
@@ -2491,8 +2491,11 @@ function MobileChatOverlay({ children, hasActiveRoom }) {
     return () => {
       vv.removeEventListener('resize', update);
       vv.removeEventListener('scroll', update);
+      // Reset to CSS values when leaving active room
+      el.style.height = '';
+      el.style.top = '0px';
     };
-  }, []);
+  }, [hasActiveRoom]);
 
   return (
     <div ref={ref} style={{
@@ -2505,9 +2508,9 @@ function MobileChatOverlay({ children, hasActiveRoom }) {
       display: 'flex',
       flexDirection: 'column',
       background: '#fff',
-      paddingTop: hasActiveRoom ? 'env(safe-area-inset-top, 0px)' : '0px',
+      paddingTop: 'env(safe-area-inset-top, 0px)',
       paddingBottom: hasActiveRoom ? '0px' : 'calc(60px + env(safe-area-inset-bottom, 0px))',
-      overflow: 'hidden',
+      overflow: hasActiveRoom ? 'hidden' : 'auto',
     }}>
       {children}
     </div>
