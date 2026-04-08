@@ -2293,7 +2293,7 @@ function App({ user, role, appUsers = [] }) {
           )}
 
           {tab === "chat" && (
-            <div style={{ height: "calc(100vh - 2rem)" }}>
+            <div style={{ height: "calc(100dvh - 2rem)", maxHeight: "calc(100vh - 2rem)" }}>
               <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} />
             </div>
           )}
@@ -2458,6 +2458,16 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
   const [activeRoom, setActiveRoom] = useState(null);
   const [messages, setMessages] = useState([]);
   const [msgText, setMsgText] = useState("");
+  const [viewportH, setViewportH] = useState(null);
+
+  // iOS keyboard: dynamicznie dostosuj wysokość gdy klawiatura się pojawia
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onResize = () => setViewportH(vv.height);
+    vv.addEventListener("resize", onResize);
+    return () => vv.removeEventListener("resize", onResize);
+  }, []);
   const [showNewRoom, setShowNewRoom] = useState(false);
   const [newRoomName, setNewRoomName] = useState("");
   const [newRoomType, setNewRoomType] = useState("channel");
@@ -2909,7 +2919,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     : messages;
 
   return (
-    <div className="flex h-full rounded-xl overflow-hidden" style={{ minHeight: 0, maxHeight: '100%', background: '#fff' }}>
+    <div className="flex rounded-xl overflow-hidden" style={{ minHeight: 0, height: viewportH ? `${viewportH}px` : '100%', maxHeight: '100%', background: '#fff', transition: 'height 0.1s ease-out' }}>
       {/* ── LISTA POKOJÓW ── */}
       <div className={`${activeRoom ? "hidden md:flex" : "flex"} flex-col w-full md:w-72`} style={{ background: '#f8fafc', borderRight: '1px solid #e2e8f0' }}>
         <div className="p-4 flex items-center justify-between" style={{ borderBottom: '1px solid #e2e8f0' }}>
@@ -3219,7 +3229,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
                   onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(msgText); } }}
                   placeholder="Napisz wiadomość..."
                   className="flex-1 min-w-0 text-sm outline-none" style={{ padding: '10px 14px', borderRadius: '14px', border: '1.5px solid #e2e8f0', background: '#fafbfc', fontFamily: 'inherit', transition: 'border-color 0.2s' }}
-                  onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.background = '#fff'; }}
+                  onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.background = '#fff'; setTimeout(() => { e.target.scrollIntoView({ behavior: 'smooth', block: 'end' }); messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, 400); }}
                   onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.background = '#fafbfc'; }} />
                 <button onClick={() => sendMessage(msgText)} disabled={!msgText.trim()}
                   className="flex items-center justify-center flex-shrink-0 text-white transition-transform disabled:opacity-30" style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'linear-gradient(135deg, #3b82f6, #2563eb)', border: 'none', cursor: 'pointer' }}>
