@@ -2332,20 +2332,21 @@ function App({ user, role, appUsers = [] }) {
       {/* ═══ FLOATING CHAT POPUP ═══ */}
       {chatFloat && tab !== "chat" && (() => {
         const isMobile = window.innerWidth < 768;
+        // Na mobile → redirect do pełnego czatu zamiast floating popup
+        if (isMobile) { setChatFloat(false); setTab("chat"); return null; }
         const sizes = {
-          normal: { w: isMobile ? "100%" : "min(650px, 52vw)", h: isMobile ? "min(75vh, 500px)" : "min(72vh, 600px)" },
-          large:  { w: isMobile ? "100%" : "min(850px, 68vw)", h: isMobile ? "min(85vh, 600px)" : "min(88vh, 780px)" },
+          normal: { w: "min(650px, 52vw)", h: "min(72vh, 600px)" },
+          large:  { w: "min(850px, 68vw)", h: "min(88vh, 780px)" },
         };
         const s = sizes[chatSize] || sizes.normal;
         return (
         <div className="fixed z-40" style={{
-          bottom: isMobile ? 0 : 12, right: isMobile ? 0 : 16,
+          bottom: 12, right: 16,
           width: s.w, height: s.h,
-          marginBottom: isMobile ? "60px" : "0px",
-          borderRadius: isMobile ? undefined : "16px",
+          borderRadius: "16px",
           transition: "width 0.3s ease, height 0.3s ease",
         }}>
-          <div className="flex flex-col h-full shadow-2xl overflow-hidden" style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: isMobile ? '16px 16px 0 0' : '16px' }}>
+          <div className="flex flex-col h-full shadow-2xl overflow-hidden" style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '16px' }}>
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-2 flex-shrink-0" style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
               <span className="font-semibold text-sm flex items-center gap-2" style={{ color: '#1e293b' }}>
@@ -2386,7 +2387,7 @@ function App({ user, role, appUsers = [] }) {
 
       {/* FLOATING CHAT BUBBLE — widoczna gdy czat nie jest otwarty */}
       {!chatFloat && tab !== "chat" && (
-        <button onClick={() => setChatFloat(true)}
+        <button onClick={() => { if (window.innerWidth < 768) { setTab("chat"); } else { setChatFloat(true); } }}
           className={`fixed z-40 shadow-lg hover:shadow-xl transition-all hover:scale-105 active:scale-95 ${chatUnreadCount > 0 ? "animate-bounce" : ""}`}
           style={{
             bottom: window.innerWidth < 768 ? "calc(70px + env(safe-area-inset-bottom, 0px))" : "24px",
