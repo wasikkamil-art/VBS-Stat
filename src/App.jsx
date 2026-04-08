@@ -2273,19 +2273,21 @@ function App({ user, role, appUsers = [] }) {
           marginBottom: isMobile ? "60px" : "0px",
           transition: "width 0.3s ease, height 0.3s ease",
         }}>
-          <div className="flex flex-col h-full bg-white rounded-t-2xl md:rounded-tl-2xl md:rounded-tr-none shadow-2xl border border-gray-200 overflow-hidden">
+          <div className="flex flex-col h-full rounded-t-2xl md:rounded-tl-2xl md:rounded-tr-none shadow-2xl overflow-hidden" style={{ background: '#fff', border: '1px solid #e2e8f0' }}>
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-100 flex-shrink-0">
-              <span className="font-semibold text-sm text-gray-800 flex items-center gap-2">
+            <div className="flex items-center justify-between px-4 py-2 flex-shrink-0" style={{ background: 'linear-gradient(135deg, #1e293b, #0f172a)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+              <span className="font-semibold text-sm text-white flex items-center gap-2">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                 Czat
-                {chatUnreadCount > 0 && <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-500 text-white">{chatUnreadCount}</span>}
+                {chatUnreadCount > 0 && <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold" style={{ background: '#3b82f6', color: '#fff' }}>{chatUnreadCount}</span>}
               </span>
               <div className="flex items-center gap-1">
                 {/* Przełącznik rozmiaru */}
                 {!isMobile && (
                   <button onClick={() => setChatSize(chatSize === "normal" ? "large" : "normal")}
-                    className="p-1.5 rounded-lg hover:bg-gray-200 transition-colors text-gray-400 hover:text-gray-600"
+                    className="p-1.5 rounded-lg transition-colors" style={{ color: '#94a3b8' }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = '#e2e8f0'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#94a3b8'; }}
                     title={chatSize === "normal" ? "Powiększ" : "Pomniejsz"}>
                     {chatSize === "normal"
                       ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/></svg>
@@ -2294,11 +2296,15 @@ function App({ user, role, appUsers = [] }) {
                   </button>
                 )}
                 {/* Pełny ekran */}
-                <button onClick={() => { setTab("chat"); setChatFloat(false); }} className="p-1.5 rounded-lg hover:bg-gray-200 transition-colors text-gray-400 hover:text-gray-600" title="Pełny ekran">
+                <button onClick={() => { setTab("chat"); setChatFloat(false); }} className="p-1.5 rounded-lg transition-colors" style={{ color: '#94a3b8' }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = '#e2e8f0'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#94a3b8'; }} title="Pełny ekran">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
                 </button>
                 {/* Zamknij */}
-                <button onClick={() => setChatFloat(false)} className="p-1.5 rounded-lg hover:bg-gray-200 transition-colors text-gray-400 hover:text-gray-600" title="Zamknij">
+                <button onClick={() => setChatFloat(false)} className="p-1.5 rounded-lg transition-colors" style={{ color: '#94a3b8' }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = '#e2e8f0'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#94a3b8'; }} title="Zamknij">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
               </div>
@@ -2836,12 +2842,14 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     : messages;
 
   return (
-    <div className="flex h-full bg-white rounded-xl border border-gray-100 overflow-hidden" style={{ minHeight: 0 }}>
+    <div className="flex h-full rounded-xl overflow-hidden" style={{ minHeight: 0, background: '#fff' }}>
       {/* ── LISTA POKOJÓW ── */}
-      <div className={`${activeRoom ? "hidden md:flex" : "flex"} flex-col w-full md:w-72 border-r border-gray-100 bg-gray-50/50`}>
-        <div className="p-4 border-b border-gray-100 flex items-center justify-between">
-          <h2 className="font-semibold text-gray-800">Czat</h2>
-          <button onClick={() => setShowNewRoom(true)} className="p-1.5 rounded-lg hover:bg-gray-200 transition-colors text-gray-500" title="Nowy pokój">
+      <div className={`${activeRoom ? "hidden md:flex" : "flex"} flex-col w-full md:w-72`} style={{ background: 'linear-gradient(180deg, #1e293b 0%, #0f172a 100%)', borderRight: '1px solid rgba(255,255,255,0.08)' }}>
+        <div className="p-4 flex items-center justify-between" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+          <h2 className="font-bold text-white flex items-center gap-2" style={{ fontSize: '18px' }}>Czat <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: '#3b82f6', color: '#fff', fontSize: '12px' }}>{rooms.length}</span></h2>
+          <button onClick={() => setShowNewRoom(true)} className="p-1.5 rounded-lg transition-colors" style={{ color: '#94a3b8' }} title="Nowy pokój"
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; e.currentTarget.style.color = '#e2e8f0'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#94a3b8'; }}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           </button>
         </div>
@@ -2852,17 +2860,17 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
             const result = await registerFCMToken(currentUser.uid);
             setPushStatus(result);
             if (result.success) { setPushRegistered(true); try { localStorage.setItem("pushRegistered", "1"); } catch {} showToast("Powiadomienia push włączone!"); }
-          }} className="mx-3 mt-2 mb-1 px-4 py-2.5 rounded-xl bg-blue-500 text-white text-sm font-medium flex items-center gap-2 hover:bg-blue-600 active:bg-blue-700 transition-colors shadow-sm"
-            style={{ minHeight: 44 }}>
+          }} className="mx-3 mt-2 mb-1 px-4 py-2.5 rounded-xl text-white text-sm font-medium flex items-center gap-2 transition-colors shadow-sm"
+            style={{ minHeight: 44, background: 'linear-gradient(135deg, #3b82f6, #6366f1)' }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
             {pushStatus === "checking" ? "Rejestracja..." : "Włącz powiadomienia push"}
           </button>
         )}
         {/* Push status info */}
         {pushStatus && pushStatus !== "checking" && !pushStatus.success && (
-          <div className="mx-3 mt-1 mb-1 px-4 py-2 rounded-xl bg-red-50 text-xs">
-            <div className="text-red-600 font-medium">Błąd: {pushStatus.error}</div>
-            <div className="text-gray-500">Krok: {pushStatus.step}</div>
+          <div className="mx-3 mt-1 mb-1 px-4 py-2 rounded-xl text-xs" style={{ background: 'rgba(239,68,68,0.15)' }}>
+            <div className="font-medium" style={{ color: '#fca5a5' }}>Błąd: {pushStatus.error}</div>
+            <div style={{ color: '#94a3b8' }}>Krok: {pushStatus.step}</div>
             {pushDiag.isIOS && !pushDiag.isStandalone && (
               <div className="mt-1 text-amber-700 font-medium">📱 Dodaj stronę do ekranu głównego (Share → Dodaj do ekranu głównego)</div>
             )}
@@ -2870,8 +2878,8 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
         )}
         {/* Migracja timestampów — admin only, jednorazowa */}
         {isAdminChat && !localStorage.getItem("tsMigrationDone") && (
-          <div className="mx-3 mt-2 mb-1 p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs">
-            <div className="font-semibold text-amber-800 mb-1">🔧 Migracja timestampów</div>
+          <div className="mx-3 mt-2 mb-1 p-3 rounded-xl text-xs" style={{ background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.3)' }}>
+            <div className="font-semibold mb-1" style={{ color: '#fbbf24' }}>🔧 Migracja timestampów</div>
             {!migrateStatus && (
               <div className="flex gap-2">
                 <button onClick={() => runTimestampMigration(true)} className="px-3 py-1.5 rounded-lg bg-amber-500 text-white font-medium hover:bg-amber-600 transition-colors">Dry Run</button>
@@ -2886,28 +2894,38 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
           </div>
         )}
         <div className="flex-1 overflow-y-auto">
-          {rooms.length === 0 && <div className="p-6 text-center text-gray-400 text-sm">Brak pokojów. Utwórz pierwszy!</div>}
-          {rooms.map(r => {
+          {rooms.length === 0 && <div className="p-6 text-center text-sm" style={{ color: '#64748b' }}>Brak pokojów. Utwórz pierwszy!</div>}
+          {rooms.map((r, ri) => {
             const myRead = r.lastRead?.[currentUser.uid];
             // Aktywny pokój = czytany (nie czekamy na serverTimestamp round-trip)
             const hasUnread = r.id !== activeRoom?.id && r.lastMessageAt && r.lastSender !== currentUser.email && (!myRead || tsToMs(r.lastMessageAt) - tsToMs(myRead) > 5000);
+            const isActive = activeRoom?.id === r.id;
+            const avatarColors = ['linear-gradient(135deg, #3b82f6, #6366f1)', 'linear-gradient(135deg, #22c55e, #14b8a6)', 'linear-gradient(135deg, #f59e0b, #ef4444)', 'linear-gradient(135deg, #8b5cf6, #ec4899)'];
+            const avatarBg = avatarColors[ri % avatarColors.length];
+            const initials = roomDisplayName(r).slice(0, 2).toUpperCase();
             return (
               <button key={r.id} onClick={() => { setActiveRoom(r); setShowSearch(false); setSearchQuery(""); setContextMenu(null); }}
-                className="w-full text-left px-4 py-3 border-b border-gray-50 hover:bg-gray-100/80 transition-colors"
-                style={{ background: activeRoom?.id === r.id ? "#eff6ff" : "transparent" }}>
-                <div className="flex items-center gap-2">
-                  <span className="text-gray-400">{roomIcon(r)}</span>
-                  <span className={`text-sm truncate ${hasUnread ? "font-bold text-gray-900" : "font-medium text-gray-800"}`}>{roomDisplayName(r)}</span>
-                  {hasUnread && <span className="ml-auto w-2.5 h-2.5 rounded-full bg-blue-500 flex-shrink-0"/>}
-                </div>
-                {r.lastMessage && (
-                  <div className="mt-1 flex items-center gap-1">
-                    <span className={`text-xs truncate max-w-[160px] ${hasUnread ? "text-gray-600 font-medium" : "text-gray-400"}`}>
-                      {r.lastSender ? `${r.lastSender.split("@")[0]}: ` : ""}{r.lastMessage}
-                    </span>
-                    <span className="text-xs text-gray-300 ml-auto flex-shrink-0">{fmtTime(r.lastMessageAt)}</span>
+                className="w-full text-left px-4 py-3 flex items-center gap-3 transition-colors"
+                style={{ background: isActive ? 'rgba(59,130,246,0.15)' : 'transparent', borderLeft: isActive ? '3px solid #3b82f6' : '3px solid transparent' }}
+                onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
+                onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}>
+                {/* Avatar */}
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm flex-shrink-0" style={{ background: avatarBg }}>{initials}</div>
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className={`text-sm truncate ${hasUnread ? "font-bold" : "font-semibold"}`} style={{ color: hasUnread ? '#fff' : '#f1f5f9' }}>{roomDisplayName(r)}</span>
+                    <span className="text-xs flex-shrink-0 ml-2" style={{ color: '#475569' }}>{fmtTime(r.lastMessageAt)}</span>
                   </div>
-                )}
+                  {r.lastMessage && (
+                    <div className="mt-0.5 flex items-center gap-1">
+                      <span className={`text-xs truncate max-w-[160px]`} style={{ color: hasUnread ? '#94a3b8' : '#64748b' }}>
+                        {r.lastSender ? `${r.lastSender.split("@")[0]}: ` : ""}{r.lastMessage}
+                      </span>
+                      {hasUnread && <span className="ml-auto px-1.5 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0" style={{ background: '#3b82f6', color: '#fff' }}>1</span>}
+                    </div>
+                  )}
+                </div>
               </button>
             );
           })}
@@ -2919,29 +2937,34 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
         {activeRoom ? (
           <>
             {/* Header */}
-            <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3 bg-white">
-              <button onClick={() => setActiveRoom(null)} className="md:hidden p-1 text-gray-400">
+            <div className="px-4 py-3 flex items-center gap-3" style={{ borderBottom: '1px solid #e2e8f0', background: '#fff' }}>
+              <button onClick={() => setActiveRoom(null)} className="md:hidden p-1" style={{ color: '#64748b' }}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
               </button>
-              <span className="text-gray-400">{roomIcon(activeRoom)}</span>
-              <h3 className="font-semibold text-gray-800">{roomDisplayName(activeRoom)}</h3>
-              <span className="text-xs text-gray-400">{activeRoom.type === "channel" ? "kanał" : activeRoom.type === "dm" ? "prywatna" : activeRoom.type === "self" ? "notatki" : "grupa"}</span>
-              <div className="ml-auto flex items-center gap-1">
-                <button onClick={() => { setShowSearch(!showSearch); setSearchQuery(""); }} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400" title="Szukaj">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-xs flex-shrink-0" style={{ background: 'linear-gradient(135deg, #22c55e, #14b8a6)' }}>{roomDisplayName(activeRoom).slice(0, 2).toUpperCase()}</div>
+              <div>
+                <h3 className="font-semibold" style={{ fontSize: '15px', color: '#1e293b' }}>{roomDisplayName(activeRoom)}</h3>
+                <div className="flex items-center gap-1" style={{ fontSize: '12px', color: '#22c55e' }}>
+                  <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: '#22c55e' }}/> online
+                </div>
+              </div>
+              <div className="ml-auto flex items-center gap-1.5">
+                <button onClick={() => { setShowSearch(!showSearch); setSearchQuery(""); }} className="flex items-center justify-center" style={{ width: '34px', height: '34px', borderRadius: '10px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', cursor: 'pointer' }} title="Szukaj">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                 </button>
-                <button onClick={() => { setShowRoomSettings(!showRoomSettings); setEditRoomName(activeRoom.name); setShowMembers(false); }} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400" title="Ustawienia pokoju">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                <button onClick={() => { setShowRoomSettings(!showRoomSettings); setEditRoomName(activeRoom.name); setShowMembers(false); }} className="flex items-center justify-center" style={{ width: '34px', height: '34px', borderRadius: '10px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', cursor: 'pointer' }} title="Ustawienia pokoju">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
                 </button>
               </div>
             </div>
 
             {/* Wyszukiwanie */}
             {showSearch && (
-              <div className="px-4 py-2 border-b border-gray-100 bg-gray-50">
+              <div className="px-4 py-2" style={{ borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
                 <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Szukaj w wiadomościach..."
-                  className="w-full px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:border-blue-400" autoFocus />
-                {searchQuery && <div className="text-xs text-gray-400 mt-1">Znaleziono: {filteredMessages.length}</div>}
+                  className="w-full text-sm outline-none" style={{ padding: '8px 14px', borderRadius: '10px', border: '1.5px solid #e2e8f0', background: '#fff' }}
+                  onFocus={e => e.target.style.borderColor = '#3b82f6'} onBlur={e => e.target.style.borderColor = '#e2e8f0'} autoFocus />
+                {searchQuery && <div className="text-xs mt-1" style={{ color: '#94a3b8' }}>Znaleziono: {filteredMessages.length}</div>}
               </div>
             )}
 
@@ -3003,28 +3026,38 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
             )}
 
             {/* Wiadomości */}
-            <div ref={chatContainerRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-1" onClick={() => setContextMenu(null)}>
-              {filteredMessages.length === 0 && <div className="text-center text-gray-300 text-sm py-12">{searchQuery ? "Brak wyników" : "Brak wiadomości. Napisz pierwszą!"}</div>}
+            <div ref={chatContainerRef} className="flex-1 overflow-y-auto px-6 py-4 space-y-1" style={{ background: '#fafbfc' }} onClick={() => setContextMenu(null)}>
+              {filteredMessages.length === 0 && <div className="text-center text-sm py-12" style={{ color: '#94a3b8' }}>{searchQuery ? "Brak wyników" : "Brak wiadomości. Napisz pierwszą!"}</div>}
               {filteredMessages.map((m, i) => {
                 const isMine = m.senderId === currentUser.uid;
                 const showSender = !isMine && (i === 0 || filteredMessages[i - 1]?.senderId !== m.senderId);
+                const showAvatar = i === 0 || filteredMessages[i - 1]?.senderId !== m.senderId;
                 const isDeleted = m.deleted;
                 return (
-                  <div key={m.id} className={`flex ${isMine ? "justify-end" : "justify-start"} group`}>
-                    <div className={`max-w-[75%] relative ${isMine ? "order-1" : ""}`}>
-                      {showSender && <div className="text-xs text-gray-400 mb-0.5 ml-1">{m.senderName || m.senderEmail?.split("@")[0]}</div>}
+                  <div key={m.id} className={`flex items-end gap-2 ${isMine ? "flex-row-reverse" : ""} group`}>
+                    {/* Small avatar */}
+                    {showAvatar ? (
+                      <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0" style={{ background: isMine ? 'linear-gradient(135deg, #3b82f6, #6366f1)' : 'linear-gradient(135deg, #22c55e, #14b8a6)' }}>
+                        {(m.senderName || m.senderEmail?.split("@")[0] || "?").slice(0, 2).toUpperCase()}
+                      </div>
+                    ) : <div className="w-7 flex-shrink-0"/>}
+                    <div className={`max-w-[75%] relative`}>
+                      {showSender && <div className="text-xs mb-0.5 ml-2" style={{ fontSize: '11px', fontWeight: 600, color: '#64748b' }}>{m.senderName || m.senderEmail?.split("@")[0]}</div>}
 
                       {/* Reply quote */}
                       {m.replyTo && !isDeleted && (
-                        <div className={`text-xs px-2 py-1 mb-0.5 rounded-t-lg border-l-2 ${isMine ? "bg-blue-400/30 border-blue-300 text-blue-100" : "bg-gray-200 border-gray-400 text-gray-600"}`}>
+                        <div className={`text-xs px-2 py-1 mb-0.5 rounded-t-lg border-l-2 ${isMine ? "border-blue-300 text-blue-100" : "border-gray-400 text-gray-600"}`} style={{ background: isMine ? 'rgba(59,130,246,0.2)' : '#e2e8f0' }}>
                           <span className="font-medium">{m.replyTo.senderName}</span>: {m.replyTo.text}
                         </div>
                       )}
 
-                      <div className={`px-3 py-2 rounded-2xl text-sm relative ${
-                        isDeleted ? "bg-gray-100 text-gray-400 italic" :
-                        isMine ? "bg-blue-500 text-white rounded-br-md" : "bg-gray-100 text-gray-800 rounded-bl-md"
-                      }`}
+                      <div className={`px-4 py-2.5 text-sm relative`} style={{
+                        borderRadius: '18px',
+                        ...(isDeleted ? { background: '#f1f5f9', color: '#94a3b8', fontStyle: 'italic' } :
+                          isMine ? { background: 'linear-gradient(135deg, #3b82f6, #2563eb)', color: '#fff', borderBottomRightRadius: '6px' } :
+                          { background: '#f1f5f9', color: '#1e293b', borderBottomLeftRadius: '6px' }),
+                        lineHeight: '1.5',
+                      }}
                         onContextMenu={(e) => { if (!isDeleted) { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, msg: m }); } }}
                         onClick={(e) => { if (!isDeleted && e.detail === 2) { setContextMenu({ x: e.clientX, y: e.clientY, msg: m }); } }}>
                         {isDeleted ? "Wiadomość usunięta" : (
@@ -3058,7 +3091,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
                         </div>
                       )}
 
-                      <div className={`text-xs text-gray-300 mt-0.5 flex items-center gap-1 ${isMine ? "justify-end mr-1" : "ml-1"}`}>
+                      <div className={`text-xs mt-1 flex items-center gap-1 ${isMine ? "justify-end mr-2" : "ml-2"}`} style={{ color: '#94a3b8', fontSize: '10px' }}>
                         <span>{fmtTime(m.timestamp)}</span>
                         {isMine && !isDeleted && (() => {
                           const readers = Object.entries(lastReadMap).filter(([uid, ts]) => uid !== currentUser.uid && ts >= m.timestamp).map(([uid]) => uid);
@@ -3108,31 +3141,33 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
             )}
 
             {/* Input */}
-            <div className="px-4 py-3 border-t border-gray-100 bg-white">
-              <div className="flex items-center gap-2">
+            <div className="px-4 py-3 bg-white" style={{ borderTop: '1px solid #e2e8f0' }}>
+              <div className="flex items-center gap-3">
                 <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
                 <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
-                  className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors disabled:opacity-50" title="Dodaj plik">
+                  className="flex items-center justify-center transition-colors disabled:opacity-50" style={{ width: '38px', height: '38px', borderRadius: '10px', color: '#94a3b8', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Dodaj plik">
                   {uploading
-                    ? <svg width="18" height="18" viewBox="0 0 24 24" className="animate-spin" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v4m0 12v4m-7.07-3.93l2.83-2.83m8.48-8.48l2.83-2.83M2 12h4m12 0h4m-3.93 7.07l-2.83-2.83M7.76 7.76L4.93 4.93"/></svg>
-                    : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>}
+                    ? <svg width="20" height="20" viewBox="0 0 24 24" className="animate-spin" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v4m0 12v4m-7.07-3.93l2.83-2.83m8.48-8.48l2.83-2.83M2 12h4m12 0h4m-3.93 7.07l-2.83-2.83M7.76 7.76L4.93 4.93"/></svg>
+                    : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>}
                 </button>
                 <input ref={msgInputRef} type="text" value={msgText}
                   onChange={e => { setMsgText(e.target.value); handleTyping(); }}
                   onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(msgText); } }}
                   placeholder="Napisz wiadomość..."
-                  className="flex-1 px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100" />
+                  className="flex-1 text-sm outline-none" style={{ padding: '12px 18px', borderRadius: '14px', border: '1.5px solid #e2e8f0', background: '#fafbfc', fontFamily: 'inherit', transition: 'border-color 0.2s' }}
+                  onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.background = '#fff'; }}
+                  onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.background = '#fafbfc'; }} />
                 <button onClick={() => sendMessage(msgText)} disabled={!msgText.trim()}
-                  className="p-2 rounded-xl bg-blue-500 text-white hover:bg-blue-600 transition-colors disabled:opacity-30">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                  className="flex items-center justify-center text-white transition-transform disabled:opacity-30" style={{ width: '44px', height: '44px', borderRadius: '12px', background: 'linear-gradient(135deg, #3b82f6, #2563eb)', border: 'none', cursor: 'pointer' }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
                 </button>
               </div>
             </div>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-gray-300">
-            <div className="text-center">
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mx-auto mb-3 opacity-30"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <div className="flex-1 flex items-center justify-center" style={{ background: '#fafbfc' }}>
+            <div className="text-center" style={{ color: '#94a3b8' }}>
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mx-auto mb-3" style={{ opacity: 0.3 }}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
               <div className="text-sm">Wybierz pokój lub utwórz nowy</div>
             </div>
           </div>
@@ -3141,7 +3176,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
 
       {/* ── CONTEXT MENU (prawy klik / double tap) ── */}
       {contextMenu && (
-        <div className="fixed z-50 bg-white rounded-xl shadow-xl border border-gray-200 py-1 min-w-[180px]"
+        <div className="fixed z-50 rounded-xl shadow-xl py-1 min-w-[180px]" style={{ background: '#fff', border: '1px solid #e2e8f0' }}
           style={{ top: Math.min(contextMenu.y, window.innerHeight - 280), left: Math.min(contextMenu.x, window.innerWidth - 200) }}>
           {/* Reakcje */}
           <div className="flex gap-1 px-3 py-2 border-b border-gray-100">
