@@ -456,63 +456,78 @@ exports.onNewChatMessage = onDocumentCreated(
   { document: "chatRooms/{roomId}/messages/{msgId}", region: "europe-west1" },
   async (event) => {
     const msgData = event.data?.data();
-    if (!msgData) return;
+    if (!msgData) { console.log("❌ No message data"); return; }
 
     const roomId = event.params.roomId;
     const senderId = msgData.senderId;
     const senderName = msgData.senderName || msgData.senderEmail?.split("@")[0] || "Ktoś";
     const text = msgData.deleted ? "Wiadomość usunięta" : (msgData.text || "📎 Plik");
 
+    console.log(`📨 New msg in room ${roomId} from ${senderName} (${senderId}): "${text.slice(0, 50)}"`);
+
     const db = getFirestore();
 
     // 1. Pobierz dane pokoju (członkowie, nazwa)
     const roomSnap = await db.doc(`chatRooms/${roomId}`).get();
-    if (!roomSnap.exists) return;
+    if (!roomSnap.exists) { console.log("❌ Room not found:", roomId); return; }
     const room = roomSnap.data();
     const roomName = room.name || "Czat";
     const members = room.members || [];
 
+    console.log(`📋 Room "${roomName}" type=${room.type} members=[${members.join(", ")}]`);
+
     // 2. Pobierz FCM tokeny członków (oprócz nadawcy)
-    // Tokeny zapisane jako {uid}_{tokenHash} — szukamy po polu uid
     const recipientUids = members.filter(uid => uid !== senderId);
-    if (recipientUids.length === 0) return;
+    if (recipientUids.length === 0) { console.log("⚠️ No recipients (sender is only member)"); return; }
+
+    console.log(`👥 Recipients: [${recipientUids.join(", ")}]`);
 
     // Pobierz WSZYSTKIE tokeny dla odbiorców (wiele urządzeń per user)
     const allTokenSnaps = await db.collection("fcmTokens")
-      .where("uid", "in", recipientUids.slice(0, 30)) // Firestore limit: 30 per "in"
+      .where("uid", "in", recipientUids.slice(0, 30))
       .get();
     const tokens = allTokenSnaps.docs
       .filter(d => d.data().token)
-      .map(d => ({ docId: d.id, uid: d.data().uid, token: d.data().token }));
+      .map(d => ({ docId: d.id, uid: d.data().uid, token: d.data().token, platform: d.data().platform || "unknown" }));
 
-    if (tokens.length === 0) return;
+    console.log(`🔑 Found ${tokens.length} tokens: ${tokens.map(t => `${t.platform}(${t.token.slice(0,8)}...)`).join(", ")}`);
 
-    // 3. Wyślij push notifications
+    if (tokens.length === 0) { console.log("⚠️ No FCM tokens found for recipients"); return; }
+
+    // 3. Wyślij push notifications (DATA-ONLY — iOS Safari PWA wymaga tego)
+    const pushTitle = room.type === "dm" ? senderName : `${roomName}`;
+    const pushBody = room.type === "dm" ? text : `${senderName}: ${text}`;
     const messaging = getMessaging();
     const results = await Promise.allSettled(
       tokens.map(({ token }) =>
         messaging.send({
           token,
-          notification: {
-            title: room.type === "dm" ? senderName : `${roomName}`,
-            body: room.type === "dm" ? text : `${senderName}: ${text}`,
+          // BEZ notification — data-only message wymusza obsługę przez Service Worker push event
+          data: {
+            title: pushTitle,
+            body: pushBody,
+            roomId,
+            senderId,
+            type: "chat",
+            icon: "/icon-192.png",
           },
-          data: { roomId, senderId, type: "chat" },
           webpush: {
-            fcmOptions: { link: "https://fleetstat.pl" },
-            notification: {
-              icon: "/icon-192.png",
-              badge: "/icon-192.png",
-              tag: roomId,
-              renotify: true,
-              vibrate: [200, 100, 200],
-            },
+            headers: { Urgency: "high", TTL: "86400" },
           },
         })
       )
     );
 
-    // 4. Usuń nieaktywne tokeny
+    // 4. Loguj wyniki per token
+    results.forEach((r, i) => {
+      if (r.status === "fulfilled") {
+        console.log(`✅ Push OK → ${tokens[i].platform} (${tokens[i].token.slice(0,8)}...)`);
+      } else {
+        console.log(`❌ Push FAIL → ${tokens[i].platform} (${tokens[i].token.slice(0,8)}...): ${r.reason?.code || r.reason?.message || r.reason}`);
+      }
+    });
+
+    // 5. Usuń nieaktywne tokeny
     const failedDocIds = [];
     results.forEach((r, i) => {
       if (r.status === "rejected" && r.reason?.code === "messaging/registration-token-not-registered") {
@@ -520,10 +535,11 @@ exports.onNewChatMessage = onDocumentCreated(
       }
     });
     if (failedDocIds.length > 0) {
+      console.log(`🗑️ Removing ${failedDocIds.length} invalid tokens`);
       await Promise.all(failedDocIds.map(id => db.doc(`fcmTokens/${id}`).delete()));
     }
 
     const sent = results.filter(r => r.status === "fulfilled").length;
-    console.log(`✅ Push sent: ${sent}/${tokens.length} for room ${roomName}`);
+    console.log(`📊 Push sent: ${sent}/${tokens.length} for room ${roomName}`);
   }
 );
