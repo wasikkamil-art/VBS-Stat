@@ -2442,6 +2442,8 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
       // Normalizujemy i sortujemy client-side
       const newMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() }))
         .sort((a, b) => tsToMs(a.timestamp) - tsToMs(b.timestamp));
+      // DEBUG: loguj surowe timestampy (usunąć po naprawie)
+      console.table(newMsgs.map(m => ({ sender: m.senderName || m.senderEmail, text: (m.text||"").slice(0,20), timestamp: m.timestamp, tsMs: tsToMs(m.timestamp), type: typeof m.timestamp })));
       // Dźwięk tylko gdy przybyła nowa wiadomość od kogoś innego
       if (prevMsgCountRef.current > 0 && newMsgs.length > prevMsgCountRef.current) {
         const added = snap.docChanges().filter(c => c.type === "added");
