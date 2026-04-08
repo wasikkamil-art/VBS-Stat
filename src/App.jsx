@@ -2471,6 +2471,13 @@ function App({ user, role, appUsers = [] }) {
 function MobileChatOverlay({ children, hasActiveRoom }) {
   const ref = useRef(null);
 
+  // Lock body scroll when overlay is mounted
+  useEffect(() => {
+    const orig = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = orig; };
+  }, []);
+
   // Only track visualViewport when in active room (keyboard may appear)
   useEffect(() => {
     if (!hasActiveRoom) return;
@@ -2491,7 +2498,6 @@ function MobileChatOverlay({ children, hasActiveRoom }) {
     return () => {
       vv.removeEventListener('resize', update);
       vv.removeEventListener('scroll', update);
-      // Reset to CSS values when leaving active room
       el.style.height = '';
       el.style.top = '0px';
     };
@@ -2511,6 +2517,8 @@ function MobileChatOverlay({ children, hasActiveRoom }) {
       paddingTop: 'env(safe-area-inset-top, 0px)',
       paddingBottom: hasActiveRoom ? '0px' : 'calc(60px + env(safe-area-inset-bottom, 0px))',
       overflow: hasActiveRoom ? 'hidden' : 'auto',
+      overscrollBehavior: 'contain',
+      WebkitOverflowScrolling: 'touch',
     }}>
       {children}
     </div>
