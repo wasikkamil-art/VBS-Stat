@@ -3156,7 +3156,8 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
                       <div className={`text-xs mt-1 flex items-center gap-1 ${isMine ? "justify-end mr-2" : "ml-2"}`} style={{ color: '#94a3b8', fontSize: '10px' }}>
                         <span>{fmtTime(m.timestamp)}</span>
                         {isMine && !isDeleted && (() => {
-                          const readers = Object.entries(lastReadMap).filter(([uid, ts]) => uid !== currentUser.uid && ts >= m.timestamp).map(([uid]) => uid);
+                          const msgMs = tsToMs(m.timestamp);
+                          const readers = Object.entries(lastReadMap).filter(([uid, ts]) => uid !== currentUser.uid && tsToMs(ts) >= msgMs).map(([uid]) => uid);
                           if (readers.length === 0) return <span title="Wysłano"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>;
                           const names = readers.map(uid => appUsers.find(u => u.uid === uid)?.email?.split("@")[0] || "?").join(", ");
                           return <span title={`Przeczytane: ${names}`} className="cursor-default"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 6 7 17 2 12"/><polyline points="22 6 11 17"/></svg></span>;
