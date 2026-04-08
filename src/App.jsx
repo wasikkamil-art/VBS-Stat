@@ -755,6 +755,12 @@ function App({ user, role, appUsers = [] }) {
   const [filterYear, setCostFilterYear]       = useState(String(new Date().getFullYear()));
   const [filterNote, setFilterNote]           = useState("all");
 
+  // ── TAB TITLE — pokaż liczbę nieprzeczytanych w tytule zakładki ──
+  useEffect(() => {
+    const base = "FleetStat";
+    document.title = chatUnreadCount > 0 ? `(${chatUnreadCount}) ${base}` : base;
+  }, [chatUnreadCount]);
+
   // ── LOAD — real-time onSnapshot ──
   useEffect(() => {
     const unsub = onSnapshot(DATA_REF(), (snap) => {
