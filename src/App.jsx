@@ -2299,11 +2299,10 @@ function App({ user, role, appUsers = [] }) {
             const isMob = typeof window !== 'undefined' && window.innerWidth < 768;
             return (
               <div style={isMob ? {
-                position: 'fixed', top: 0, left: 0, right: 0,
-                bottom: chatHasActiveRoom ? 0 : '60px',
-                paddingTop: 'env(safe-area-inset-top, 0px)',
-                paddingBottom: chatHasActiveRoom ? 'env(safe-area-inset-bottom, 0px)' : '0px',
-                zIndex: 20, background: '#fff',
+                height: chatHasActiveRoom ? '100dvh' : 'calc(100dvh - 60px)',
+                marginTop: chatHasActiveRoom ? 'calc(-1 * (env(safe-area-inset-top, 0px) + 1.5rem + 1px))' : '0',
+                paddingTop: chatHasActiveRoom ? 'env(safe-area-inset-top, 0px)' : '0',
+                background: '#fff',
               } : { height: "calc(100vh - 2rem)" }}>
                 <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} onActiveRoomChange={setChatHasActiveRoom} />
               </div>
@@ -3230,11 +3229,12 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
                     : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>}
                 </button>
                 <input ref={msgInputRef} type="text" value={msgText}
+                  enterKeyHint="send" autoComplete="off" autoCorrect="off" spellCheck="false"
                   onChange={e => { setMsgText(e.target.value); handleTyping(); }}
                   onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(msgText); } }}
                   placeholder="Napisz wiadomość..."
-                  className="flex-1 min-w-0 text-sm outline-none" style={{ padding: '10px 14px', borderRadius: '14px', border: '1.5px solid #e2e8f0', background: '#fafbfc', fontFamily: 'inherit', transition: 'border-color 0.2s' }}
-                  onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.background = '#fff'; }}
+                  className="flex-1 min-w-0 text-sm outline-none" style={{ padding: '10px 14px', borderRadius: '14px', border: '1.5px solid #e2e8f0', background: '#fafbfc', fontFamily: 'inherit', fontSize: '16px', transition: 'border-color 0.2s' }}
+                  onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.background = '#fff'; setTimeout(() => window.scrollTo(0, document.body.scrollHeight), 300); }}
                   onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.background = '#fafbfc'; }} />
                 <button onClick={() => sendMessage(msgText)} disabled={!msgText.trim()}
                   className="flex items-center justify-center flex-shrink-0 text-white transition-transform disabled:opacity-30" style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'linear-gradient(135deg, #3b82f6, #2563eb)', border: 'none', cursor: 'pointer' }}>
