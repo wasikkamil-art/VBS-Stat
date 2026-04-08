@@ -2809,7 +2809,8 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
           {rooms.length === 0 && <div className="p-6 text-center text-gray-400 text-sm">Brak pokojów. Utwórz pierwszy!</div>}
           {rooms.map(r => {
             const myRead = r.lastRead?.[currentUser.uid];
-            const hasUnread = r.lastMessageAt && r.lastSender !== currentUser.email && (!myRead || tsToMs(r.lastMessageAt) - tsToMs(myRead) > 5000);
+            // Aktywny pokój = czytany (nie czekamy na serverTimestamp round-trip)
+            const hasUnread = r.id !== activeRoom?.id && r.lastMessageAt && r.lastSender !== currentUser.email && (!myRead || tsToMs(r.lastMessageAt) - tsToMs(myRead) > 5000);
             return (
               <button key={r.id} onClick={() => { setActiveRoom(r); setShowSearch(false); setSearchQuery(""); setContextMenu(null); }}
                 className="w-full text-left px-4 py-3 border-b border-gray-50 hover:bg-gray-100/80 transition-colors"
