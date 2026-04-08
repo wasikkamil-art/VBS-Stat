@@ -724,6 +724,7 @@ function App({ user, role, appUsers = [] }) {
   const canFinance   = isAdmin || isDyspozytor;  // widzi finanse
   const [tab, setTab]               = useState("dashboard");
   const [chatFloat, setChatFloat]   = useState(false); // floating chat popup (widoczny na innych zakładkach)
+  const [chatSize, setChatSize]     = useState("normal"); // "normal" | "large"
   const [vehicles, setVehicles]     = useState([]);
   const [costs, setCosts]           = useState([]);
   const [categories, setCategories] = useState([]);
@@ -2258,41 +2259,58 @@ function App({ user, role, appUsers = [] }) {
       </div>
 
       {/* ═══ FLOATING CHAT POPUP ═══ */}
-      {chatFloat && tab !== "chat" && (
+      {chatFloat && tab !== "chat" && (() => {
+        const isMobile = window.innerWidth < 768;
+        const sizes = {
+          normal: { w: isMobile ? "100%" : "min(550px, 45vw)", h: isMobile ? "min(75vh, 500px)" : "min(70vh, 580px)" },
+          large:  { w: isMobile ? "100%" : "min(800px, 65vw)", h: isMobile ? "min(85vh, 600px)" : "min(88vh, 780px)" },
+        };
+        const s = sizes[chatSize] || sizes.normal;
+        return (
         <div className="fixed z-40" style={{
           bottom: 0, right: 0,
-          /* Mobile: pełna szerokość, Desktop: duży popup */
-          width: window.innerWidth < 768 ? "100%" : "min(700px, 50vw)",
-          height: window.innerWidth < 768 ? "min(80vh, 550px)" : "min(85vh, 700px)",
-          marginBottom: window.innerWidth < 768 ? "60px" : "0px",
+          width: s.w, height: s.h,
+          marginBottom: isMobile ? "60px" : "0px",
+          transition: "width 0.3s ease, height 0.3s ease",
         }}>
-          <div className="flex flex-col h-full bg-white rounded-t-2xl md:rounded-tl-2xl md:rounded-tr-none shadow-2xl border border-gray-200 overflow-hidden"
-            style={{ resize: window.innerWidth >= 768 ? "both" : "none", overflow: "hidden", direction: "rtl" }}>
-            <div style={{ direction: "ltr", display: "flex", flexDirection: "column", height: "100%" }}>
-              {/* Header */}
-              <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-100 flex-shrink-0">
-                <span className="font-semibold text-sm text-gray-800 flex items-center gap-2">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                  Czat
-                  {chatUnreadCount > 0 && <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-500 text-white">{chatUnreadCount}</span>}
-                </span>
-                <div className="flex items-center gap-1">
-                  <button onClick={() => { setTab("chat"); setChatFloat(false); }} className="p-1.5 rounded-lg hover:bg-gray-200 transition-colors text-gray-400 hover:text-gray-600" title="Pełny ekran">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+          <div className="flex flex-col h-full bg-white rounded-t-2xl md:rounded-tl-2xl md:rounded-tr-none shadow-2xl border border-gray-200 overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-100 flex-shrink-0">
+              <span className="font-semibold text-sm text-gray-800 flex items-center gap-2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                Czat
+                {chatUnreadCount > 0 && <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-500 text-white">{chatUnreadCount}</span>}
+              </span>
+              <div className="flex items-center gap-1">
+                {/* Przełącznik rozmiaru */}
+                {!isMobile && (
+                  <button onClick={() => setChatSize(chatSize === "normal" ? "large" : "normal")}
+                    className="p-1.5 rounded-lg hover:bg-gray-200 transition-colors text-gray-400 hover:text-gray-600"
+                    title={chatSize === "normal" ? "Powiększ" : "Pomniejsz"}>
+                    {chatSize === "normal"
+                      ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/></svg>
+                      : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/></svg>
+                    }
                   </button>
-                  <button onClick={() => setChatFloat(false)} className="p-1.5 rounded-lg hover:bg-gray-200 transition-colors text-gray-400 hover:text-gray-600" title="Zamknij">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                  </button>
-                </div>
+                )}
+                {/* Pełny ekran */}
+                <button onClick={() => { setTab("chat"); setChatFloat(false); }} className="p-1.5 rounded-lg hover:bg-gray-200 transition-colors text-gray-400 hover:text-gray-600" title="Pełny ekran">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                </button>
+                {/* Zamknij */}
+                <button onClick={() => setChatFloat(false)} className="p-1.5 rounded-lg hover:bg-gray-200 transition-colors text-gray-400 hover:text-gray-600" title="Zamknij">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
               </div>
-              {/* ChatTab */}
-              <div className="flex-1 overflow-hidden">
-                <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} />
-              </div>
+            </div>
+            {/* ChatTab */}
+            <div className="flex-1 overflow-hidden">
+              <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} />
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* FLOATING CHAT BUBBLE — widoczna gdy czat nie jest otwarty */}
       {!chatFloat && tab !== "chat" && (
