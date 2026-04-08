@@ -2407,7 +2407,14 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
   useEffect(() => {
     const q = query(collection(db, "chatRooms"), orderBy("lastMessageAt", "desc"));
     const unsub = onSnapshot(q, (snap) => {
-      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const all = snap.docs.map(d => {
+        const data = { id: d.id, ...d.data() };
+        // Normalizuj lastMessageAt: serverTimestamp() zwraca Firestore Timestamp
+        const lma = data.lastMessageAt;
+        if (lma && typeof lma === "object" && typeof lma.toDate === "function") data.lastMessageAt = lma.toDate().toISOString();
+        else if (lma && typeof lma === "object" && typeof lma.seconds === "number") data.lastMessageAt = new Date(lma.seconds * 1000).toISOString();
+        return data;
+      });
       const myRooms = all.filter(r => r.type === "channel" || (r.members || []).includes(currentUser.uid))
         .sort((a, b) => tsToMs(b.lastMessageAt) - tsToMs(a.lastMessageAt)); // desc — najnowsze na górze
       myRooms.forEach(r => {
@@ -2438,12 +2445,18 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     if (!activeRoom) { setMessages([]); return; }
     const q = query(collection(db, "chatRooms", activeRoom.id, "messages"), orderBy("timestamp", "asc"));
     const unsub = onSnapshot(q, (snap) => {
-      // Firestore orderBy nie sortuje poprawnie gdy mamy mix typów (Timestamp vs string)
-      // Normalizujemy i sortujemy client-side
-      const newMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => tsToMs(a.timestamp) - tsToMs(b.timestamp));
-      // DEBUG: loguj surowe timestampy (usunąć po naprawie)
-      console.table(newMsgs.map(m => ({ sender: m.senderName || m.senderEmail, text: (m.text||"").slice(0,20), timestamp: m.timestamp, tsMs: tsToMs(m.timestamp), type: typeof m.timestamp })));
+      // Normalizacja: serverTimestamp() zwraca null w pending write, potem Firestore Timestamp
+      // Konwertujemy wszystko na ISO string i sortujemy client-side
+      const nowISO = new Date().toISOString();
+      const newMsgs = snap.docs.map(d => {
+        const data = { id: d.id, ...d.data() };
+        const ts = data.timestamp;
+        // Normalizuj timestamp: Firestore Timestamp → ISO, null (pending) → teraz
+        if (!ts) { data.timestamp = nowISO; }
+        else if (typeof ts === "object" && typeof ts.toDate === "function") { data.timestamp = ts.toDate().toISOString(); }
+        else if (typeof ts === "object" && typeof ts.seconds === "number") { data.timestamp = new Date(ts.seconds * 1000).toISOString(); }
+        return data;
+      }).sort((a, b) => tsToMs(a.timestamp) - tsToMs(b.timestamp));
       // Dźwięk tylko gdy przybyła nowa wiadomość od kogoś innego
       if (prevMsgCountRef.current > 0 && newMsgs.length > prevMsgCountRef.current) {
         const added = snap.docChanges().filter(c => c.type === "added");
@@ -2546,7 +2559,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
       senderId: currentUser.uid,
       senderEmail: currentUser.email,
       senderName: appUsers.find(u => u.uid === currentUser.uid)?.email?.split("@")[0] || currentUser.email,
-      timestamp: new Date().toISOString(),
+      timestamp: serverTimestamp(), // Czas serwera Firebase — niezależny od zegara urządzenia
     };
     if (fileUrl) { msg.fileUrl = fileUrl; msg.fileName = fileName; }
     if (replyTo) { msg.replyTo = { id: replyTo.id, text: replyTo.text?.slice(0, 100) || "📎 Plik", senderName: replyTo.senderName || replyTo.senderEmail?.split("@")[0] }; }
@@ -2556,7 +2569,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
       clearTimeout(typingTimeoutRef.current);
       await updateDoc(doc(db, "chatRooms", activeRoom.id), {
         lastMessage: text?.trim() || fileName || "📎 Plik",
-        lastMessageAt: new Date().toISOString(),
+        lastMessageAt: serverTimestamp(),
         lastSender: currentUser.email,
         [`typing.${currentUser.uid}`]: null,
       });
