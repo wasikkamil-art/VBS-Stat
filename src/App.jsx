@@ -2275,9 +2275,9 @@ function App({ user, role, appUsers = [] }) {
         }}>
           <div className="flex flex-col h-full rounded-t-2xl md:rounded-tl-2xl md:rounded-tr-none shadow-2xl overflow-hidden" style={{ background: '#fff', border: '1px solid #e2e8f0' }}>
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-2 flex-shrink-0" style={{ background: 'linear-gradient(135deg, #1e293b, #0f172a)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-              <span className="font-semibold text-sm text-white flex items-center gap-2">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <div className="flex items-center justify-between px-4 py-2 flex-shrink-0" style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+              <span className="font-semibold text-sm flex items-center gap-2" style={{ color: '#1e293b' }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                 Czat
                 {chatUnreadCount > 0 && <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold" style={{ background: '#3b82f6', color: '#fff' }}>{chatUnreadCount}</span>}
               </span>
@@ -2285,9 +2285,7 @@ function App({ user, role, appUsers = [] }) {
                 {/* Przełącznik rozmiaru */}
                 {!isMobile && (
                   <button onClick={() => setChatSize(chatSize === "normal" ? "large" : "normal")}
-                    className="p-1.5 rounded-lg transition-colors" style={{ color: '#94a3b8' }}
-                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = '#e2e8f0'; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#94a3b8'; }}
+                    className="p-1.5 rounded-lg transition-colors text-gray-400 hover:bg-gray-200 hover:text-gray-600"
                     title={chatSize === "normal" ? "Powiększ" : "Pomniejsz"}>
                     {chatSize === "normal"
                       ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/></svg>
@@ -2296,15 +2294,11 @@ function App({ user, role, appUsers = [] }) {
                   </button>
                 )}
                 {/* Pełny ekran */}
-                <button onClick={() => { setTab("chat"); setChatFloat(false); }} className="p-1.5 rounded-lg transition-colors" style={{ color: '#94a3b8' }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = '#e2e8f0'; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#94a3b8'; }} title="Pełny ekran">
+                <button onClick={() => { setTab("chat"); setChatFloat(false); }} className="p-1.5 rounded-lg transition-colors text-gray-400 hover:bg-gray-200 hover:text-gray-600" title="Pełny ekran">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
                 </button>
                 {/* Zamknij */}
-                <button onClick={() => setChatFloat(false)} className="p-1.5 rounded-lg transition-colors" style={{ color: '#94a3b8' }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = '#e2e8f0'; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#94a3b8'; }} title="Zamknij">
+                <button onClick={() => setChatFloat(false)} className="p-1.5 rounded-lg transition-colors text-gray-400 hover:bg-gray-200 hover:text-gray-600" title="Zamknij">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
               </div>
@@ -2844,12 +2838,10 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
   return (
     <div className="flex h-full rounded-xl overflow-hidden" style={{ minHeight: 0, background: '#fff' }}>
       {/* ── LISTA POKOJÓW ── */}
-      <div className={`${activeRoom ? "hidden md:flex" : "flex"} flex-col w-full md:w-72`} style={{ background: 'linear-gradient(180deg, #1e293b 0%, #0f172a 100%)', borderRight: '1px solid rgba(255,255,255,0.08)' }}>
-        <div className="p-4 flex items-center justify-between" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-          <h2 className="font-bold text-white flex items-center gap-2" style={{ fontSize: '18px' }}>Czat <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: '#3b82f6', color: '#fff', fontSize: '12px' }}>{rooms.length}</span></h2>
-          <button onClick={() => setShowNewRoom(true)} className="p-1.5 rounded-lg transition-colors" style={{ color: '#94a3b8' }} title="Nowy pokój"
-            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; e.currentTarget.style.color = '#e2e8f0'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#94a3b8'; }}>
+      <div className={`${activeRoom ? "hidden md:flex" : "flex"} flex-col w-full md:w-72`} style={{ background: '#f8fafc', borderRight: '1px solid #e2e8f0' }}>
+        <div className="p-4 flex items-center justify-between" style={{ borderBottom: '1px solid #e2e8f0' }}>
+          <h2 className="font-bold flex items-center gap-2" style={{ fontSize: '18px', color: '#1e293b' }}>Czat <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: '#3b82f6', color: '#fff', fontSize: '12px' }}>{rooms.length}</span></h2>
+          <button onClick={() => setShowNewRoom(true)} className="p-1.5 rounded-lg transition-colors hover:bg-gray-100" style={{ color: '#64748b' }} title="Nowy pokój">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           </button>
         </div>
@@ -2860,17 +2852,17 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
             const result = await registerFCMToken(currentUser.uid);
             setPushStatus(result);
             if (result.success) { setPushRegistered(true); try { localStorage.setItem("pushRegistered", "1"); } catch {} showToast("Powiadomienia push włączone!"); }
-          }} className="mx-3 mt-2 mb-1 px-4 py-2.5 rounded-xl text-white text-sm font-medium flex items-center gap-2 transition-colors shadow-sm"
-            style={{ minHeight: 44, background: 'linear-gradient(135deg, #3b82f6, #6366f1)' }}>
+          }} className="mx-3 mt-2 mb-1 px-4 py-2.5 rounded-xl text-white text-sm font-medium flex items-center gap-2 hover:opacity-90 transition-colors shadow-sm"
+            style={{ minHeight: 44, background: 'linear-gradient(135deg, #3b82f6, #2563eb)' }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
             {pushStatus === "checking" ? "Rejestracja..." : "Włącz powiadomienia push"}
           </button>
         )}
         {/* Push status info */}
         {pushStatus && pushStatus !== "checking" && !pushStatus.success && (
-          <div className="mx-3 mt-1 mb-1 px-4 py-2 rounded-xl text-xs" style={{ background: 'rgba(239,68,68,0.15)' }}>
-            <div className="font-medium" style={{ color: '#fca5a5' }}>Błąd: {pushStatus.error}</div>
-            <div style={{ color: '#94a3b8' }}>Krok: {pushStatus.step}</div>
+          <div className="mx-3 mt-1 mb-1 px-4 py-2 rounded-xl text-xs" style={{ background: '#fef2f2' }}>
+            <div className="font-medium" style={{ color: '#dc2626' }}>Błąd: {pushStatus.error}</div>
+            <div style={{ color: '#6b7280' }}>Krok: {pushStatus.step}</div>
             {pushDiag.isIOS && !pushDiag.isStandalone && (
               <div className="mt-1 text-amber-700 font-medium">📱 Dodaj stronę do ekranu głównego (Share → Dodaj do ekranu głównego)</div>
             )}
@@ -2878,8 +2870,8 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
         )}
         {/* Migracja timestampów — admin only, jednorazowa */}
         {isAdminChat && !localStorage.getItem("tsMigrationDone") && (
-          <div className="mx-3 mt-2 mb-1 p-3 rounded-xl text-xs" style={{ background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.3)' }}>
-            <div className="font-semibold mb-1" style={{ color: '#fbbf24' }}>🔧 Migracja timestampów</div>
+          <div className="mx-3 mt-2 mb-1 p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs">
+            <div className="font-semibold text-amber-800 mb-1">🔧 Migracja timestampów</div>
             {!migrateStatus && (
               <div className="flex gap-2">
                 <button onClick={() => runTimestampMigration(true)} className="px-3 py-1.5 rounded-lg bg-amber-500 text-white font-medium hover:bg-amber-600 transition-colors">Dry Run</button>
@@ -2894,7 +2886,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
           </div>
         )}
         <div className="flex-1 overflow-y-auto">
-          {rooms.length === 0 && <div className="p-6 text-center text-sm" style={{ color: '#64748b' }}>Brak pokojów. Utwórz pierwszy!</div>}
+          {rooms.length === 0 && <div className="p-6 text-center text-sm text-gray-400">Brak pokojów. Utwórz pierwszy!</div>}
           {rooms.map((r, ri) => {
             const myRead = r.lastRead?.[currentUser.uid];
             // Aktywny pokój = czytany (nie czekamy na serverTimestamp round-trip)
@@ -2905,21 +2897,19 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
             const initials = roomDisplayName(r).slice(0, 2).toUpperCase();
             return (
               <button key={r.id} onClick={() => { setActiveRoom(r); setShowSearch(false); setSearchQuery(""); setContextMenu(null); }}
-                className="w-full text-left px-4 py-3 flex items-center gap-3 transition-colors"
-                style={{ background: isActive ? 'rgba(59,130,246,0.15)' : 'transparent', borderLeft: isActive ? '3px solid #3b82f6' : '3px solid transparent' }}
-                onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
-                onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}>
+                className="w-full text-left px-4 py-3 flex items-center gap-3 transition-colors hover:bg-gray-100/60"
+                style={{ background: isActive ? '#eff6ff' : 'transparent', borderLeft: isActive ? '3px solid #3b82f6' : '3px solid transparent' }}>
                 {/* Avatar */}
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm flex-shrink-0" style={{ background: avatarBg }}>{initials}</div>
                 {/* Info */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between">
-                    <span className={`text-sm truncate ${hasUnread ? "font-bold" : "font-semibold"}`} style={{ color: hasUnread ? '#fff' : '#f1f5f9' }}>{roomDisplayName(r)}</span>
-                    <span className="text-xs flex-shrink-0 ml-2" style={{ color: '#475569' }}>{fmtTime(r.lastMessageAt)}</span>
+                    <span className={`text-sm truncate ${hasUnread ? "font-bold text-gray-900" : "font-semibold text-gray-700"}`}>{roomDisplayName(r)}</span>
+                    <span className="text-xs flex-shrink-0 ml-2 text-gray-400">{fmtTime(r.lastMessageAt)}</span>
                   </div>
                   {r.lastMessage && (
                     <div className="mt-0.5 flex items-center gap-1">
-                      <span className={`text-xs truncate max-w-[160px]`} style={{ color: hasUnread ? '#94a3b8' : '#64748b' }}>
+                      <span className={`text-xs truncate max-w-[160px] ${hasUnread ? "text-gray-600 font-medium" : "text-gray-400"}`}>
                         {r.lastSender ? `${r.lastSender.split("@")[0]}: ` : ""}{r.lastMessage}
                       </span>
                       {hasUnread && <span className="ml-auto px-1.5 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0" style={{ background: '#3b82f6', color: '#fff' }}>1</span>}
