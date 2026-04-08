@@ -2297,11 +2297,10 @@ function App({ user, role, appUsers = [] }) {
 
           {tab === "chat" && (() => {
             const isMob = typeof window !== 'undefined' && window.innerWidth < 768;
-            return (
+            const mobileActiveRoom = isMob && chatHasActiveRoom;
+            return mobileActiveRoom ? null : (
               <div style={isMob ? {
-                height: chatHasActiveRoom ? '100dvh' : 'calc(100dvh - 60px)',
-                marginTop: chatHasActiveRoom ? 'calc(-1 * (env(safe-area-inset-top, 0px) + 1.5rem + 1px))' : '0',
-                paddingTop: chatHasActiveRoom ? 'env(safe-area-inset-top, 0px)' : '0',
+                height: 'calc(100dvh - 60px)',
                 background: '#fff',
               } : { height: "calc(100vh - 2rem)" }}>
                 <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} onActiveRoomChange={setChatHasActiveRoom} />
@@ -2457,6 +2456,65 @@ function App({ user, role, appUsers = [] }) {
           ))}
         </div>
       </div>
+
+      {/* ── MOBILE FULLSCREEN CHAT OVERLAY ── */}
+      {tab === "chat" && chatHasActiveRoom && typeof window !== 'undefined' && window.innerWidth < 768 && (
+        <MobileChatOverlay>
+          <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} onActiveRoomChange={setChatHasActiveRoom} />
+        </MobileChatOverlay>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MOBILE CHAT OVERLAY — uses visualViewport to perfectly match keyboard
+// ═══════════════════════════════════════════════════════════════════════════════
+function MobileChatOverlay({ children }) {
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const vv = window.visualViewport;
+
+    const update = () => {
+      if (!vv) return;
+      // Set height to exactly the visible viewport (excludes keyboard)
+      el.style.height = `${vv.height}px`;
+      // Offset top to match viewport scroll position (iOS scrolls the page behind keyboard)
+      el.style.top = `${vv.offsetTop}px`;
+    };
+
+    if (vv) {
+      update();
+      vv.addEventListener('resize', update);
+      vv.addEventListener('scroll', update);
+    }
+
+    return () => {
+      if (vv) {
+        vv.removeEventListener('resize', update);
+        vv.removeEventListener('scroll', update);
+      }
+    };
+  }, []);
+
+  return (
+    <div ref={ref} style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      zIndex: 50,
+      display: 'flex',
+      flexDirection: 'column',
+      background: '#fff',
+      paddingTop: 'env(safe-area-inset-top, 0px)',
+      overflow: 'hidden',
+    }}>
+      {children}
     </div>
   );
 }
@@ -3219,7 +3277,7 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
             )}
 
             {/* Input */}
-            <div className="px-2 sm:px-4 py-2 sm:py-3 bg-white flex-shrink-0" style={{ borderTop: '1px solid #e2e8f0', paddingBottom: 'max(8px, env(safe-area-inset-bottom, 0px))' }}>
+            <div className="px-2 sm:px-4 py-2 sm:py-3 bg-white flex-shrink-0" style={{ borderTop: '1px solid #e2e8f0', paddingBottom: '8px' }}>
               <div className="flex items-center gap-2">
                 <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
                 <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
@@ -3234,7 +3292,7 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
                   onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(msgText); } }}
                   placeholder="Napisz wiadomość..."
                   className="flex-1 min-w-0 text-sm outline-none" style={{ padding: '10px 14px', borderRadius: '14px', border: '1.5px solid #e2e8f0', background: '#fafbfc', fontFamily: 'inherit', fontSize: '16px', transition: 'border-color 0.2s' }}
-                  onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.background = '#fff'; setTimeout(() => window.scrollTo(0, document.body.scrollHeight), 300); }}
+                  onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.background = '#fff'; setTimeout(() => { if (chatContainerRef.current) chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight; }, 300); }}
                   onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.background = '#fafbfc'; }} />
                 <button onClick={() => sendMessage(msgText)} disabled={!msgText.trim()}
                   className="flex items-center justify-center flex-shrink-0 text-white transition-transform disabled:opacity-30" style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'linear-gradient(135deg, #3b82f6, #2563eb)', border: 'none', cursor: 'pointer' }}>
