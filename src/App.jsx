@@ -2346,13 +2346,16 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
 
   const lastRoomTimestamps = useRef({});
 
-  // ── Auto-rejestracja push tokena — rejestruj w tle ale NIE ukrywaj przycisku ──
+  // ── Auto-rejestracja push tokena — rejestruj w tle i ukryj przycisk jeśli sukces ──
   useEffect(() => {
     if (!currentUser?.uid) return;
     if (typeof Notification !== "undefined" && Notification.permission === "granted") {
       registerFCMToken(currentUser.uid).then(r => {
         console.log("Push auto-reg result:", r);
-        // NIE ustawiamy pushRegistered — przycisk zniknie dopiero po ręcznym kliknięciu
+        if (r.success) {
+          setPushRegistered(true);
+          try { localStorage.setItem("pushRegistered", "1"); } catch {}
+        }
       });
     }
   }, [currentUser?.uid]);
@@ -2478,8 +2481,14 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     const tsKey = typeof ts === "object" && ts.seconds ? `${ts.seconds}` : String(ts);
     if (tsKey === lastReadTsRef.current) return;
     lastReadTsRef.current = tsKey;
+    // Zawsze zapisuj jako ISO string (normalizacja mixed types)
+    const isoTs = typeof ts === "object" && ts.seconds
+      ? new Date(ts.seconds * 1000).toISOString()
+      : typeof ts === "object" && ts.toDate
+        ? ts.toDate().toISOString()
+        : typeof ts === "string" ? ts : new Date(ts).toISOString();
     updateDoc(doc(db, "chatRooms", activeRoom.id), {
-      [`lastRead.${currentUser.uid}`]: ts
+      [`lastRead.${currentUser.uid}`]: isoTs
     }).catch(() => {});
   }, [activeRoom?.id, messages]);
 
