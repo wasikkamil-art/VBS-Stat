@@ -1268,11 +1268,13 @@ function App({ user, role, appUsers = [] }) {
         {/* ── MAIN ──────────────────────────────────────────────────────── */}
         <main className="flex-1 px-4 py-6 md:px-8 md:py-8 pb-32 md:pb-8 overflow-y-auto">
 
-          {/* Mobile header */}
-          <div className="flex md:hidden items-center mb-4" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
-            <img src="/icon-192.png" alt="FS" className="w-8 h-8 rounded-lg mr-2" />
-            <span className="font-bold text-base text-gray-900">FleetStat</span>
-          </div>
+          {/* Mobile header — ukryty w zakładce czat */}
+          {tab !== "chat" && (
+            <div className="flex md:hidden items-center mb-4" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
+              <img src="/icon-192.png" alt="FS" className="w-8 h-8 rounded-lg mr-2" />
+              <span className="font-bold text-base text-gray-900">FleetStat</span>
+            </div>
+          )}
 
           {/* ══ DASHBOARD — TABLICA DYSPOZYTORSKA ═══════════════════════════ */}
           {tab === "dashboard" && (
@@ -2293,13 +2295,13 @@ function App({ user, role, appUsers = [] }) {
           )}
 
           {tab === "chat" && (() => {
-            const isMob = window.innerWidth < 768;
-            return isMob ? (
-              <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 30, background: '#fff' }}>
-                <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} />
-              </div>
-            ) : (
-              <div style={{ height: "calc(100vh - 2rem)" }}>
+            const isMob = typeof window !== 'undefined' && window.innerWidth < 768;
+            return (
+              <div style={isMob ? {
+                position: 'fixed', top: 0, left: 0, right: 0, bottom: '60px',
+                paddingTop: 'env(safe-area-inset-top, 0px)',
+                zIndex: 20, background: '#fff',
+              } : { height: "calc(100vh - 2rem)" }}>
                 <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} />
               </div>
             );
