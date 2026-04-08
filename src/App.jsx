@@ -2379,18 +2379,8 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
     const q = query(collection(db, "chatRooms", activeRoom.id, "messages"), orderBy("timestamp", "asc"));
     const unsub = onSnapshot(q, (snap) => {
       // snap.docs jest w kolejności Firestore orderBy("timestamp","asc") — ZAWSZE chronologicznie
-      // Wiadomości z serverTimestamp() mają pending timestamp=null — dajemy je na koniec
-      const newMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => {
-          const ta = a.timestamp || a.clientTimestamp || "9999";
-          const tb = b.timestamp || b.clientTimestamp || "9999";
-          if (typeof ta === "object" && ta.seconds) {
-            if (typeof tb === "object" && tb.seconds) return ta.seconds - tb.seconds;
-            return -1;
-          }
-          if (typeof tb === "object" && tb.seconds) return 1;
-          return String(ta).localeCompare(String(tb));
-        });
+      // NIE sortujemy client-side — ufamy Firestore
+      const newMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       // Dźwięk tylko gdy przybyła nowa wiadomość od kogoś innego
       if (prevMsgCountRef.current > 0 && newMsgs.length > prevMsgCountRef.current) {
         const added = snap.docChanges().filter(c => c.type === "added");
@@ -2487,8 +2477,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
       senderId: currentUser.uid,
       senderEmail: currentUser.email,
       senderName: appUsers.find(u => u.uid === currentUser.uid)?.email?.split("@")[0] || currentUser.email,
-      timestamp: serverTimestamp(),
-      clientTimestamp: new Date().toISOString(), // fallback do sortowania zanim serwer nada czas
+      timestamp: new Date().toISOString(),
     };
     if (fileUrl) { msg.fileUrl = fileUrl; msg.fileName = fileName; }
     if (replyTo) { msg.replyTo = { id: replyTo.id, text: replyTo.text?.slice(0, 100) || "📎 Plik", senderName: replyTo.senderName || replyTo.senderEmail?.split("@")[0] }; }
@@ -2498,7 +2487,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
       clearTimeout(typingTimeoutRef.current);
       await updateDoc(doc(db, "chatRooms", activeRoom.id), {
         lastMessage: text?.trim() || fileName || "📎 Plik",
-        lastMessageAt: serverTimestamp(),
+        lastMessageAt: new Date().toISOString(),
         lastSender: currentUser.email,
         [`typing.${currentUser.uid}`]: null,
       });
@@ -2640,7 +2629,17 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
   // ── HELPERS ──
   const fmtTime = (ts) => {
     if (!ts) return "";
-    const d = new Date(ts), now = new Date();
+    // Obsługa Firestore Timestamp (object z seconds) i string ISO
+    let d;
+    if (typeof ts === "object" && ts.seconds) {
+      d = new Date(ts.seconds * 1000);
+    } else if (typeof ts === "object" && ts.toDate) {
+      d = ts.toDate();
+    } else {
+      d = new Date(ts);
+    }
+    if (isNaN(d.getTime())) return "";
+    const now = new Date();
     const time = d.toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
     return d.toDateString() === now.toDateString() ? time : `${d.toLocaleDateString("pl-PL", { day: "numeric", month: "short" })} ${time}`;
   };
