@@ -2262,18 +2262,19 @@ function App({ user, role, appUsers = [] }) {
       {chatFloat && tab !== "chat" && (() => {
         const isMobile = window.innerWidth < 768;
         const sizes = {
-          normal: { w: isMobile ? "100%" : "min(550px, 45vw)", h: isMobile ? "min(75vh, 500px)" : "min(70vh, 580px)" },
-          large:  { w: isMobile ? "100%" : "min(800px, 65vw)", h: isMobile ? "min(85vh, 600px)" : "min(88vh, 780px)" },
+          normal: { w: isMobile ? "100%" : "min(650px, 52vw)", h: isMobile ? "min(75vh, 500px)" : "min(72vh, 600px)" },
+          large:  { w: isMobile ? "100%" : "min(850px, 68vw)", h: isMobile ? "min(85vh, 600px)" : "min(88vh, 780px)" },
         };
         const s = sizes[chatSize] || sizes.normal;
         return (
         <div className="fixed z-40" style={{
-          bottom: 0, right: 0,
+          bottom: isMobile ? 0 : 12, right: isMobile ? 0 : 16,
           width: s.w, height: s.h,
           marginBottom: isMobile ? "60px" : "0px",
+          borderRadius: isMobile ? undefined : "16px",
           transition: "width 0.3s ease, height 0.3s ease",
         }}>
-          <div className="flex flex-col h-full rounded-t-2xl md:rounded-tl-2xl md:rounded-tr-none shadow-2xl overflow-hidden" style={{ background: '#fff', border: '1px solid #e2e8f0' }}>
+          <div className="flex flex-col h-full shadow-2xl overflow-hidden" style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: isMobile ? '16px 16px 0 0' : '16px' }}>
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-2 flex-shrink-0" style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
               <span className="font-semibold text-sm flex items-center gap-2" style={{ color: '#1e293b' }}>
