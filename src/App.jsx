@@ -724,6 +724,7 @@ function App({ user, role, appUsers = [] }) {
   const canFinance   = isAdmin || isDyspozytor;  // widzi finanse
   const [tab, setTab]               = useState("dashboard");
   const [chatFloat, setChatFloat]   = useState(false); // floating chat popup (widoczny na innych zakładkach)
+  const [chatHasActiveRoom, setChatHasActiveRoom] = useState(false); // czy w czacie jest otwarty pokój
   const [chatSize, setChatSize]     = useState("normal"); // "normal" | "large"
   const [vehicles, setVehicles]     = useState([]);
   const [costs, setCosts]           = useState([]);
@@ -2298,11 +2299,13 @@ function App({ user, role, appUsers = [] }) {
             const isMob = typeof window !== 'undefined' && window.innerWidth < 768;
             return (
               <div style={isMob ? {
-                position: 'fixed', top: 0, left: 0, right: 0, bottom: '60px',
+                position: 'fixed', top: 0, left: 0, right: 0,
+                bottom: chatHasActiveRoom ? 0 : '60px',
                 paddingTop: 'env(safe-area-inset-top, 0px)',
+                paddingBottom: chatHasActiveRoom ? 'env(safe-area-inset-bottom, 0px)' : '0px',
                 zIndex: 20, background: '#fff',
               } : { height: "calc(100vh - 2rem)" }}>
-                <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} />
+                <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} onActiveRoomChange={setChatHasActiveRoom} />
               </div>
             );
           })()}
@@ -2416,8 +2419,8 @@ function App({ user, role, appUsers = [] }) {
         </button>
       )}
 
-      {/* MOBILE BOTTOM NAV */}
-      <div className="fixed bottom-0 left-0 right-0 md:hidden bg-white border-t border-gray-100 safe-area-pb"
+      {/* MOBILE BOTTOM NAV — ukryty gdy czat z otwartą rozmową (mobile fullscreen) */}
+      <div className={`fixed bottom-0 left-0 right-0 md:hidden bg-white border-t border-gray-100 safe-area-pb ${tab === "chat" && chatHasActiveRoom ? "hidden" : ""}`}
         style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
         <div className="flex overflow-x-auto px-2 py-1.5 gap-1 no-scrollbar">
           {[
@@ -2462,9 +2465,12 @@ function App({ user, role, appUsers = [] }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // CHAT TAB — pełna wersja z edycją, usuwaniem, reply, reakcjami, zarządzaniem pokojami
 // ═══════════════════════════════════════════════════════════════════════════════
-function ChatTab({ currentUser, appUsers = [], showToast }) {
+function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) {
   const [rooms, setRooms] = useState([]);
   const [activeRoom, setActiveRoom] = useState(null);
+
+  // Powiadom rodzica o zmianie aktywnego pokoju (mobile nav)
+  useEffect(() => { if (onActiveRoomChange) onActiveRoomChange(!!activeRoom); }, [activeRoom]);
   const [messages, setMessages] = useState([]);
   const [msgText, setMsgText] = useState("");
   const [showNewRoom, setShowNewRoom] = useState(false);
