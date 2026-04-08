@@ -5,7 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 // ─── FIREBASE CONFIG ────────────────────────────────────────────────────────
 // 👇 WKLEJ TUTAJ SWÓJ firebaseConfig z Firebase Console
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, orderBy, arrayUnion, serverTimestamp, writeBatch } from "firebase/firestore";
+import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, orderBy, arrayUnion, serverTimestamp, writeBatch, limit } from "firebase/firestore";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
@@ -733,7 +733,8 @@ function App({ user, role, appUsers = [] }) {
   const [rentRecords, setRentRecords] = useState([]);
   const [frachtyList, setFrachtyList] = useState([]);
   const [sprawyList, setSprawyList] = useState([]);
-  const [chatUnreadCount, setChatUnreadCount] = useState(0);
+  const [chatUnreadCount, setChatUnreadCount] = useState(0);      // ile pokojów z nieprzeczytanymi
+  const [chatUnreadMsgCount, setChatUnreadMsgCount] = useState(0); // ile wiadomości łącznie nieprzeczytanych
   const [operacyjne, setOperacyjne] = useState([]);
   const [pauzy, setPauzy] = useState([]);
   const [loaded, setLoaded]         = useState(false);
@@ -758,8 +759,14 @@ function App({ user, role, appUsers = [] }) {
   // ── TAB TITLE — pokaż liczbę nieprzeczytanych w tytule zakładki ──
   useEffect(() => {
     const base = "FleetStat";
-    document.title = chatUnreadCount > 0 ? `(${chatUnreadCount}) ${base}` : base;
-  }, [chatUnreadCount]);
+    if (chatUnreadCount > 0 && chatUnreadMsgCount > 0) {
+      document.title = `(${chatUnreadCount}/${chatUnreadMsgCount}) ${base}`;
+    } else if (chatUnreadCount > 0) {
+      document.title = `(${chatUnreadCount}) ${base}`;
+    } else {
+      document.title = base;
+    }
+  }, [chatUnreadCount, chatUnreadMsgCount]);
 
   // ── LOAD — real-time onSnapshot ──
   useEffect(() => {
@@ -860,14 +867,35 @@ function App({ user, role, appUsers = [] }) {
       };
       const rooms = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       const myRooms = rooms.filter(r => r.type === "channel" || (r.members || []).includes(user.uid));
-      const unread = myRooms.filter(r => {
+      const unreadRooms = myRooms.filter(r => {
         if (r.type === "self") return false;
         if (!r.lastMessageAt || r.lastSender === user.email) return false;
         const myRead = norm(r.lastRead?.[user.uid]);
         const lma = norm(r.lastMessageAt);
         return !myRead || tsToMs(lma) - tsToMs(myRead) > 5000;
-      }).length;
-      setChatUnreadCount(unread);
+      });
+      setChatUnreadCount(unreadRooms.length);
+      // Policz łączną liczbę nieprzeczytanych wiadomości
+      if (unreadRooms.length > 0) {
+        Promise.all(unreadRooms.map(async (r) => {
+          try {
+            const myRead = norm(r.lastRead?.[user.uid]);
+            const myReadMs = myRead ? tsToMs(myRead) : 0;
+            const msgsRef = collection(db, "chatRooms", r.id, "messages");
+            const msgsSnap = await getDocs(query(msgsRef, orderBy("timestamp", "desc"), limit(50)));
+            return msgsSnap.docs.filter(d => {
+              const data = d.data();
+              if (data.senderId === user.uid) return false;
+              const ts = norm(data.timestamp);
+              return ts && tsToMs(ts) > myReadMs + 5000;
+            }).length;
+          } catch { return 0; }
+        })).then(counts => {
+          setChatUnreadMsgCount(counts.reduce((a, b) => a + b, 0));
+        });
+      } else {
+        setChatUnreadMsgCount(0);
+      }
     }, () => {});
     return () => unsub();
   }, [user?.uid]);
