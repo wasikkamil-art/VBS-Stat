@@ -3016,7 +3016,7 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
             )}
 
             {/* Wiadomości */}
-            <div ref={chatContainerRef} className="flex-1 overflow-y-auto px-6 py-4 space-y-1" style={{ background: '#fafbfc' }} onClick={() => setContextMenu(null)}>
+            <div ref={chatContainerRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-1" style={{ background: '#fafbfc' }} onClick={() => setContextMenu(null)}>
               {filteredMessages.length === 0 && <div className="text-center text-sm py-12" style={{ color: '#94a3b8' }}>{searchQuery ? "Brak wyników" : "Brak wiadomości. Napisz pierwszą!"}</div>}
               {filteredMessages.map((m, i) => {
                 const isMine = m.senderId === currentUser.uid;
@@ -3024,14 +3024,14 @@ function ChatTab({ currentUser, appUsers = [], showToast }) {
                 const showAvatar = i === 0 || filteredMessages[i - 1]?.senderId !== m.senderId;
                 const isDeleted = m.deleted;
                 return (
-                  <div key={m.id} className={`flex items-end gap-2 ${isMine ? "flex-row-reverse" : ""} group`}>
+                  <div key={m.id} className={`flex items-end gap-1.5 ${isMine ? "flex-row-reverse" : ""} group`}>
                     {/* Small avatar */}
                     {showAvatar ? (
-                      <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0" style={{ background: isMine ? 'linear-gradient(135deg, #3b82f6, #6366f1)' : 'linear-gradient(135deg, #22c55e, #14b8a6)' }}>
+                      <div className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0" style={{ background: isMine ? 'linear-gradient(135deg, #3b82f6, #6366f1)' : 'linear-gradient(135deg, #22c55e, #14b8a6)' }}>
                         {(m.senderName || m.senderEmail?.split("@")[0] || "?").slice(0, 2).toUpperCase()}
                       </div>
-                    ) : <div className="w-7 flex-shrink-0"/>}
-                    <div className={`max-w-[75%] relative`}>
+                    ) : <div className="w-6 flex-shrink-0"/>}
+                    <div className={`max-w-[70%] relative`}>
                       {showSender && <div className="text-xs mb-0.5 ml-2" style={{ fontSize: '11px', fontWeight: 600, color: '#64748b' }}>{m.senderName || m.senderEmail?.split("@")[0]}</div>}
 
                       {/* Reply quote */}
