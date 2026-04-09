@@ -1351,6 +1351,52 @@ function App({ user, role, appUsers = [] }) {
     showToast(`✅ Import z Rentowności ${year}: ${newCosts.length} wpisów (${Math.round(totalEUR).toLocaleString("pl-PL")} €)`);
   };
 
+  // ── FIX 2025 FRACHTY FROM EXCEL (Total25 → Podsumowanie total) ──
+  const fix2025Frachty = () => {
+    // Exact frachty values from "Auta VBS 2025 (15).xlsx" → Total25 sheet
+    // Index = month (0=Sty, 1=Lut, ..., 11=Gru), values in EUR
+    const EXCEL_FRACHTY = {
+      v3: [4930,11530,8594,10060,11200,10685,0,7720,8600,8280,9815,6100],     // WGM 5367K, sum=97514
+      v4: [7494,6245,5870,8230,9450,7480,9580,3580,6130,1900,3900,7150],      // TK 314CL,  sum=77009
+      v6: [8950,1150,4850,9350,0,0,0,0,0,0,0,0],                              // TK 315CL,  sum=24300
+      v2: [7870,6190,5650,1130,990,11050,4280,7079,4020,7050,8000,4780],      // TK 130EF,  sum=68089
+      v5: [8250,6203,8165,11635,9420,11820,11010,7400,8930,10380,7590,8104],  // WGM 0507M, sum=108907
+      v1: [0,0,0,3100,8150,10310,9280,6680,9000,6320,5755,8050],              // WGM 0475M, sum=66645
+    };
+    // Total: 442,464 EUR
+
+    if (!window.confirm(
+      "Napraw frachty 2025 z Excela (Total25)?\n\n" +
+      "To zaktualizuje wartości frachtów w Rentowności za 2025\n" +
+      "na dokładne wartości z arkusza Excel.\n\n" +
+      "Łączna wartość frachtów: 442 464 €"
+    )) return;
+
+    let updated = 0;
+    let created = 0;
+
+    setRentRecords(prev => {
+      let records = [...prev];
+      Object.entries(EXCEL_FRACHTY).forEach(([vid, monthlyFrachty]) => {
+        monthlyFrachty.forEach((frachty, month) => {
+          const existing = records.find(r => r.vehicleId === vid && r.year === 2025 && r.month === month);
+          if (existing) {
+            if (existing.frachty !== frachty) {
+              records = records.map(r => r.id === existing.id ? { ...r, frachty } : r);
+              updated++;
+            }
+          } else if (frachty > 0) {
+            records = [...records, { id: uid(), vehicleId: vid, year: 2025, month, frachty, costs: {} }];
+            created++;
+          }
+        });
+      });
+      return records;
+    });
+
+    showToast(`✅ Frachty 2025 naprawione z Excela (${updated} zaktualizowanych, ${created} nowych)`);
+  };
+
   const deleteCost   = (id)    => { setCosts((p) => p.filter((c) => c.id !== id)); showToast("Usunięto wpis"); };
   const updateCost   = (updated) => { setCosts((p) => p.map((c) => c.id === updated.id ? updated : c)); showToast("✅ Koszt zaktualizowany"); setEditCostId(null); };
   const addVehicle   = (v)     => { setVehicles((p) => [...p, { ...v, id: uid(), driverHistory: v.driverHistory || [] }]); showToast("Pojazd dodany"); setShowAddVehicle(false); };
@@ -2143,6 +2189,10 @@ function App({ user, role, appUsers = [] }) {
                   <button onClick={() => importFromRent(2025)}
                     className="px-4 py-2 rounded-lg text-sm font-semibold border border-green-200 bg-green-50 hover:bg-green-100 text-green-700 flex items-center gap-2">
                     📋 Import 2025 z Rent.
+                  </button>
+                  <button onClick={fix2025Frachty}
+                    className="px-4 py-2 rounded-lg text-sm font-semibold border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-700 flex items-center gap-2">
+                    🔧 Fix Frachty 2025
                   </button>
                   <button onClick={() => setShowAddCost(true)}
                     className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
