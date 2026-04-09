@@ -1277,7 +1277,7 @@ function App({ user, role, appUsers = [] }) {
         setRentRecords(p => {
           const existing = p.find(r => r.vehicleId === vid && r.year === 2026 && r.month === month);
           if (existing) {
-            return p.map(r => r.id === existing.id ? { ...r, costs: { ...r.costs, ...rounded } } : r);
+            return p.map(r => r.id === existing.id ? { ...r, costs: rounded } : r);
           }
           return [...p, { id: uid(), vehicleId: vid, year: 2026, month, frachty: 0, costs: rounded }];
         });
@@ -2601,6 +2601,7 @@ function App({ user, role, appUsers = [] }) {
               records={rentRecords}
               frachtyList={frachtyList}
               costs={costs}
+              eurRate={eurRate}
               operacyjne={operacyjne}
               onSaveOperacyjne={async (id, data) => {
                 try { await updateDoc(doc(db, "operacyjne", id), data); }
@@ -6437,7 +6438,7 @@ const MONTHS_PL = ["Styczeń","Luty","Marzec","Kwiecień","Maj","Czerwiec","Lipi
 
 function rentKey(vehicleId, year, month) { return `${vehicleId}_${year}_${month}`; }
 
-function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operacyjne = [], onSaveOperacyjne, onAdd, onUpdate, onDelete }) {
+function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRate, operacyjne = [], onSaveOperacyjne, onAdd, onUpdate, onDelete }) {
   const [view, setView]           = useState("flota");
   const [selVehicle, setSelVehicle] = useState(null);
   const [selYear, setSelYear]     = useState(new Date().getFullYear());
@@ -6463,6 +6464,34 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
     przyczepa: "inne",
     inne: "inne",
   };
+
+  // ── Dynamic data index: compute frachty & costs from raw data ──
+  // This ensures the fleet view always reflects current costs/frachty,
+  // even when rentRecords haven't been manually regenerated.
+  const dynData = useMemo(() => {
+    const map = {};
+    // Index frachty by vehicle+month
+    frachtyList.forEach(f => {
+      const date = f.dataZaladunku || f.dataZlecenia || "";
+      const ym = date.slice(0, 7); // "YYYY-MM"
+      if (!ym) return;
+      const key = `${f.vehicleId}_${ym}`;
+      if (!map[key]) map[key] = { frachty: 0, costs: {} };
+      map[key].frachty += parseFloat(f.cenaEur) || 0;
+    });
+    // Index costs by vehicle+month
+    costs.forEach(c => {
+      const date = c.date || "";
+      const ym = date.slice(0, 7);
+      if (!ym) return;
+      const key = `${c.vehicleId}_${ym}`;
+      if (!map[key]) map[key] = { frachty: 0, costs: {} };
+      const rentCat = CAT_TO_RENT[c.category] || "inne";
+      const eur = c.amountEUR ? parseFloat(c.amountEUR) : (c.amountPLN && eurRate ? c.amountPLN / eurRate : 0);
+      map[key].costs[rentCat] = (map[key].costs[rentCat] || 0) + eur;
+    });
+    return map;
+  }, [frachtyList, costs, eurRate]);
 
   // Generuj wpisy z frachtów i kosztów dla wybranego miesiąca
   const generateFromData = (year, month) => {
@@ -6492,11 +6521,32 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
     });
   };
 
-  // find record for vehicle+year+month
-  const getRecord = (vid, y, m) => records.find(r => r.vehicleId === vid && r.year === y && r.month === m) || null;
+  // ── Record lookup: merges dynamic data with stored records ──
+  // Dynamic frachty (from frachtyList) preferred if > 0, else fall back to record.
+  // Dynamic costs (from costs array) preferred if available, else fall back to record.
+  const getRecord = (vid, y, m) => {
+    const existing = records.find(r => r.vehicleId === vid && r.year === y && r.month === m);
+    const monthStr = `${y}-${String(m+1).padStart(2,"0")}`;
+    const dyn = dynData[`${vid}_${monthStr}`];
+
+    if (!existing && !dyn) return null;
+
+    const frachty = dyn?.frachty > 0 ? Math.round(dyn.frachty) : (existing?.frachty || 0);
+    const hasDynCosts = dyn?.costs && Object.keys(dyn.costs).length > 0;
+    const dynCostsRounded = hasDynCosts
+      ? Object.fromEntries(Object.entries(dyn.costs).map(([k,v]) => [k, Math.round(v)]))
+      : {};
+
+    return {
+      id: existing?.id,
+      vehicleId: vid, year: y, month: m,
+      frachty,
+      costs: hasDynCosts ? dynCostsRounded : (existing?.costs || {}),
+    };
+  };
 
   const totalFrachty = (vid, y) => MONTHS_PL.reduce((s,_,m) => { const r = getRecord(vid,y,m); return s + (r?.frachty||0); }, 0);
-  const totalKoszt   = (vid, y) => MONTHS_PL.reduce((s,_,m) => { const r = getRecord(vid,y,m); return s + Object.values(r?.costs||{}).reduce((s,v)=>s+(v||0),0); }, 0);
+  const totalKoszt   = (vid, y) => MONTHS_PL.reduce((s,_,m) => { const r = getRecord(vid,y,m); return s + Object.values(r?.costs||{}).reduce((a,v)=>a+(v||0),0); }, 0);
   const totalZysk    = (vid, y) => totalFrachty(vid,y) - totalKoszt(vid,y);
 
   const fleetFrachty = (y) => vehicles.reduce((s,v) => s + totalFrachty(v.id,y), 0);
@@ -6621,7 +6671,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
                         );
                       })}
                       <td className="text-right px-4 py-2 font-bold text-sm" style={{ color: zyskColor(totalZysk(v.id,selYear)) }}>
-                        {records.some(r=>r.vehicleId===v.id&&r.year===selYear) ? fmtS(totalZysk(v.id,selYear)) : <span className="text-gray-300">—</span>}
+                        {MONTHS_PL.some((_,mi) => getRecord(v.id,selYear,mi)) ? fmtS(totalZysk(v.id,selYear)) : <span className="text-gray-300">—</span>}
                       </td>
                     </tr>
                   ))}
@@ -6655,7 +6705,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
               const k = totalKoszt(v.id, selYear);
               const z = f - k;
               const marza = f > 0 ? (z / f * 100) : 0;
-              const hasData = records.some(r => r.vehicleId === v.id && r.year === selYear);
+              const hasData = MONTHS_PL.some((_,mi) => getRecord(v.id,selYear,mi));
               return (
                 <div key={v.id} className="grid grid-cols-12 px-5 py-3.5 border-b border-gray-50 items-center hover:bg-gray-50 transition-colors">
                   <div className="col-span-3">
