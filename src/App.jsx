@@ -6598,9 +6598,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
   // Fleet monthly total costs from Excel Podsumowanie (includes fleet-level costs like ocpd+polisa+imi)
   const EXCEL_FLEET_COSTS_2025 = [29015,29193,33853,32276,32000,36107,29367,30692,30327,29508,35937,32007];
 
-  // ── 2026 fleet cost corrections (from updated Excel screenshot) ──
-  // Only for months with confirmed data: {month_index: fleet_total_cost}
-  const EXCEL_FLEET_COSTS_2026 = { 0: 30638, 1: 21783, 2: 27892 }; // Jan, Feb, Mar
+  // 2026: koszty zaciągane bezpośrednio z systemu (bez korekty fleetowej)
 
   // ── Record lookup: merges dynamic data with stored records ──
   const getRecord = (vid, y, m) => {
@@ -6645,26 +6643,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
       }
     }
 
-    // For 2026: scale costs to match confirmed Excel fleet totals (proportional per vehicle)
-    if (y === 2026 && EXCEL_FLEET_COSTS_2026[m] !== undefined) {
-      const currentTotal = Object.values(costsObj).reduce((s, v) => s + (v || 0), 0);
-      if (currentTotal > 0) {
-        // We need fleet sum of all vehicles' current costs to compute the proportional target
-        // Use a simple scaling approach: compute this vehicle's share of fleet target
-        // by getting all vehicles' costs for this month
-        const allVehCosts = vehicles.map(v2 => {
-          const d2 = dynData[`${v2.id}_${monthStr}`];
-          const e2 = records.find(r2 => r2.vehicleId === v2.id && r2.year === y && r2.month === m);
-          const hd = d2?.costs && Object.keys(d2.costs).length > 0;
-          return hd ? Object.values(d2.costs).reduce((s,v3)=>s+Math.round(v3),0) : Object.values(e2?.costs||{}).reduce((s,v3)=>s+(v3||0),0);
-        });
-        const fleetCurrentTotal = allVehCosts.reduce((s,v3)=>s+v3,0);
-        if (fleetCurrentTotal > 0) {
-          const factor = EXCEL_FLEET_COSTS_2026[m] / fleetCurrentTotal;
-          costsObj = Object.fromEntries(Object.entries(costsObj).map(([k, v3]) => [k, Math.round(v3 * factor)]));
-        }
-      }
-    }
+    // 2026: koszty bez korekty — zaciągane z systemu
 
     return {
       id: existing?.id,
