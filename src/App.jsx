@@ -1194,12 +1194,20 @@ function App({ user, role, appUsers = [] }) {
       {v:"v4",c:"ocpd",e:104,d:"2026-03-15",n:"Import Excel Total_26"},
     ];
 
-    // Check if already imported — look for any "Import Excel Total_26" notes
-    const alreadyImported = costs.some(c => (c.note || "").includes("Import Excel Total_26"));
-    if (alreadyImported) {
-      if (!window.confirm("Dane z Excel Total_26 już zostały zaimportowane.\nCzy chcesz zaimportować ponownie? (istniejące wpisy zostaną zastąpione)")) return;
-      // Remove old imported costs
-      setCosts(p => p.filter(c => !(c.note || "").includes("Import Excel Total_26")));
+    // Determine which vehicle+month combos the import covers
+    const IMPORT_VIDS = ["v1", "v3", "v4", "v5"];
+    const IMPORT_MONTHS = ["2026-01", "2026-02", "2026-03"];
+
+    const existingCount = costs.filter(c =>
+      IMPORT_VIDS.includes(c.vehicleId) &&
+      IMPORT_MONTHS.some(m => (c.date || "").startsWith(m))
+    ).length;
+
+    if (existingCount > 0) {
+      if (!window.confirm(
+        `W systemie jest już ${existingCount} wpisów kosztowych za sty-mar 2026 dla importowanych pojazdów.\n` +
+        `Import ZASTĄPI wszystkie te wpisy danymi z Excel Total_26.\n\nKontynuować?`
+      )) return;
     }
 
     // Build new cost entries
@@ -1214,7 +1222,11 @@ function App({ user, role, appUsers = [] }) {
       note: r.n,
     }));
 
-    setCosts(p => [...p, ...newCosts]);
+    // Remove ALL existing costs for imported vehicles+months, then add new ones
+    setCosts(p => [
+      ...p.filter(c => !(IMPORT_VIDS.includes(c.vehicleId) && IMPORT_MONTHS.some(m => (c.date || "").startsWith(m)))),
+      ...newCosts,
+    ]);
 
     // Also update rentRecords for all 3 months
     const CAT_TO_RENT_MAP = {
