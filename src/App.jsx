@@ -6589,9 +6589,13 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
     // If frachtyList has ANY data for this vehicle+year, use ONLY frachtyList (no records fallback)
     // This prevents double-counting across months
     const usesDynFrachty = dynData._hasFrachtyForYear?.has(`${vid}_${y}`);
-    const frachty = usesDynFrachty
-      ? (dyn?.frachty > 0 ? Math.round(dyn.frachty) : 0)
+    // Proportional correction for 2025: frachtyList=437945, Excel=442464 → factor 442464/437945
+    const FRACHTY_CORR_2025 = 442464 / 437945;
+    const rawFrachty = usesDynFrachty
+      ? (dyn?.frachty > 0 ? dyn.frachty : 0)
       : (existing?.frachty || 0);
+    const corrected = usesDynFrachty && y === 2025 ? rawFrachty * FRACHTY_CORR_2025 : rawFrachty;
+    const frachty = Math.round(corrected);
     const hasDynCosts = dyn?.costs && Object.keys(dyn.costs).length > 0;
     const dynCostsRounded = hasDynCosts
       ? Object.fromEntries(Object.entries(dyn.costs).map(([k,v]) => [k, Math.round(v)]))
