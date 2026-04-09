@@ -2486,8 +2486,17 @@ function MobileChatOverlay({ children, hasActiveRoom }) {
     const vv = window.visualViewport;
     if (!vv) return;
 
+    let prevHeight = vv.height;
     const update = () => {
       el.style.height = `${vv.height}px`;
+      // Keyboard opened (viewport shrank) — scroll chat to bottom
+      if (vv.height < prevHeight) {
+        setTimeout(() => {
+          const scrollable = el.querySelector('[data-chat-messages]');
+          if (scrollable) scrollable.scrollTop = scrollable.scrollHeight;
+        }, 50);
+      }
+      prevHeight = vv.height;
     };
 
     update();
@@ -3163,7 +3172,7 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
             )}
 
             {/* Wiadomości */}
-            <div ref={chatContainerRef} className="flex-1 overflow-y-auto px-2 sm:px-3 py-3 space-y-1" style={{ background: '#fafbfc' }} onClick={() => setContextMenu(null)}>
+            <div ref={chatContainerRef} data-chat-messages className="flex-1 overflow-y-auto px-2 sm:px-3 py-3 space-y-1" style={{ background: '#fafbfc' }} onClick={() => setContextMenu(null)}>
               {filteredMessages.length === 0 && <div className="text-center text-sm py-12" style={{ color: '#94a3b8' }}>{searchQuery ? "Brak wyników" : "Brak wiadomości. Napisz pierwszą!"}</div>}
               {filteredMessages.map((m, i) => {
                 const isMine = m.senderId === currentUser.uid;
