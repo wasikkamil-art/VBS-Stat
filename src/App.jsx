@@ -6576,8 +6576,17 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
     });
   };
 
-  // ── 2025 Excel correction data ──
-  // Per-vehicle monthly total costs from Excel Total25 sheet (positive EUR)
+  // ── 2025 Excel correction data (from Total25 sheet) ──
+  // Per-vehicle monthly frachty from Excel (EUR)
+  const EXCEL_VEH_FRACHTY_2025 = {
+    v1:[0,0,0,3100,8150,10310,9280,6680,9000,6320,5755,8050],
+    v2:[7870,6190,5650,1130,990,11050,4280,7079,4020,7050,8000,4780],
+    v3:[4930,11530,8594,10060,11200,10685,0,7720,8600,8280,9815,6100],
+    v4:[7494,6245,5870,8230,9450,7480,9580,3580,6130,1900,3900,7150],
+    v5:[8250,6203,8165,11635,9420,11820,11010,7400,8930,10380,7590,8104],
+    v6:[8950,1150,4850,9350,0,0,0,0,0,0,0,0],
+  };
+  // Per-vehicle monthly total costs from Excel (positive EUR)
   const EXCEL_VEH_COSTS_2025 = {
     v1:[1658,1658,1658,2362,6916,6772,6723,6732,6043,6764,5998,6440],
     v2:[4062,5702,5050,3571,1866,6839,4133,4816,3415,4975,6190,5772],
@@ -6600,13 +6609,17 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
     if (!existing && !dyn && !hasExcel2025) return null;
 
     // ── Frachty ──
-    const usesDynFrachty = dynData._hasFrachtyForYear?.has(`${vid}_${y}`);
-    const FRACHTY_CORR_2025 = 442464 / 437945;
-    const rawFrachty = usesDynFrachty
-      ? (dyn?.frachty > 0 ? dyn.frachty : 0)
-      : (existing?.frachty || 0);
-    const correctedFrachty = usesDynFrachty && y === 2025 ? rawFrachty * FRACHTY_CORR_2025 : rawFrachty;
-    const frachty = Math.round(correctedFrachty);
+    let frachty;
+    if (y === 2025 && EXCEL_VEH_FRACHTY_2025[vid]) {
+      // For 2025: use exact Excel per-vehicle per-month frachty
+      frachty = EXCEL_VEH_FRACHTY_2025[vid][m];
+    } else {
+      const usesDynFrachty = dynData._hasFrachtyForYear?.has(`${vid}_${y}`);
+      const rawFrachty = usesDynFrachty
+        ? (dyn?.frachty > 0 ? Math.round(dyn.frachty) : 0)
+        : (existing?.frachty || 0);
+      frachty = rawFrachty;
+    }
 
     // ── Costs ──
     const hasDynCosts = dyn?.costs && Object.keys(dyn.costs).length > 0;
