@@ -6520,6 +6520,9 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
   // even when rentRecords haven't been manually regenerated.
   const dynData = useMemo(() => {
     const map = {};
+    // Track which vehicle+year combos have frachty entries in frachtyList
+    // to avoid mixing frachtyList and records (which causes double-counting)
+    const hasFrachtyForYear = new Set();
     // Index frachty by vehicle+month
     frachtyList.forEach(f => {
       const date = f.dataZaladunku || f.dataZlecenia || "";
@@ -6528,6 +6531,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
       const key = `${f.vehicleId}_${ym}`;
       if (!map[key]) map[key] = { frachty: 0, costs: {} };
       map[key].frachty += parseFloat(f.cenaEur) || 0;
+      hasFrachtyForYear.add(`${f.vehicleId}_${ym.slice(0,4)}`);
     });
     // Index costs by vehicle+month
     costs.forEach(c => {
@@ -6540,6 +6544,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
       const eur = c.amountEUR ? parseFloat(c.amountEUR) : (c.amountPLN && eurRate ? c.amountPLN / eurRate : 0);
       map[key].costs[rentCat] = (map[key].costs[rentCat] || 0) + eur;
     });
+    map._hasFrachtyForYear = hasFrachtyForYear;
     return map;
   }, [frachtyList, costs, eurRate]);
 
@@ -6581,7 +6586,12 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
 
     if (!existing && !dyn) return null;
 
-    const frachty = dyn?.frachty > 0 ? Math.round(dyn.frachty) : (existing?.frachty || 0);
+    // If frachtyList has ANY data for this vehicle+year, use ONLY frachtyList (no records fallback)
+    // This prevents double-counting across months
+    const usesDynFrachty = dynData._hasFrachtyForYear?.has(`${vid}_${y}`);
+    const frachty = usesDynFrachty
+      ? (dyn?.frachty > 0 ? Math.round(dyn.frachty) : 0)
+      : (existing?.frachty || 0);
     const hasDynCosts = dyn?.costs && Object.keys(dyn.costs).length > 0;
     const dynCostsRounded = hasDynCosts
       ? Object.fromEntries(Object.entries(dyn.costs).map(([k,v]) => [k, Math.round(v)]))
