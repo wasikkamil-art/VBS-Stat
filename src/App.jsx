@@ -1287,6 +1287,70 @@ function App({ user, role, appUsers = [] }) {
     showToast(`✅ Import Excel Total_26: dodano ${newCosts.length} wpisów kosztów (sty-mar 2026)`);
   };
 
+  // ── IMPORT COSTS FROM RENTOWNOŚĆ (rent→costs) for a given year ──
+  const importFromRent = (year) => {
+    // Reverse mapping: RENT_COSTS category → costs category
+    const RENT_TO_COST = {
+      paliwo:"paliwo", leasing:"leasing", wyplata:"wyplata", zus:"zus",
+      serwis:"serwis", polisa:"polisa", etoll:"oplaty", nego:"oplaty",
+      hotele:"hotele", mandaty:"mandaty", slickshift:"slickshift",
+      telefon:"telefon", uruchomienie:"uruchomienie", imi:"imi", ocpd:"ocpd",
+      telepass:"oplaty", inne:"inne",
+    };
+
+    const yearRecords = rentRecords.filter(r => r.year === year);
+    if (yearRecords.length === 0) {
+      showToast(`⚠️ Brak danych w Rentowności za ${year}`);
+      return;
+    }
+
+    // Check how many cost entries already exist for this year
+    const yearPrefix = `${year}-`;
+    const existingCount = costs.filter(c => (c.date || "").startsWith(yearPrefix)).length;
+
+    if (existingCount > 0) {
+      if (!window.confirm(
+        `W rejestrze kosztów jest już ${existingCount} wpisów za ${year}.\n` +
+        `Import ZASTĄPI je danymi z Rentowności (${yearRecords.length} rekordów).\n\nKontynuować?`
+      )) return;
+    }
+
+    const newCosts = [];
+    yearRecords.forEach(rec => {
+      if (!rec.costs) return;
+      const monthStr = `${year}-${String(rec.month + 1).padStart(2, "0")}`;
+      Object.entries(rec.costs).forEach(([rentCat, value]) => {
+        const eur = parseFloat(value) || 0;
+        if (eur <= 0) return;
+        const costCat = RENT_TO_COST[rentCat] || "inne";
+        newCosts.push({
+          id: uid(),
+          vehicleId: rec.vehicleId,
+          category: costCat,
+          amountPLN: null,
+          amountEUR: eur,
+          currency: "EUR",
+          date: `${monthStr}-15`,
+          note: `Import z Rentowności ${year} (${rentCat})`,
+        });
+      });
+    });
+
+    if (newCosts.length === 0) {
+      showToast(`⚠️ Brak kosztów w Rentowności za ${year}`);
+      return;
+    }
+
+    // Remove existing costs for this year, add new ones
+    setCosts(p => [
+      ...p.filter(c => !(c.date || "").startsWith(yearPrefix)),
+      ...newCosts,
+    ]);
+
+    const totalEUR = newCosts.reduce((s, c) => s + (c.amountEUR || 0), 0);
+    showToast(`✅ Import z Rentowności ${year}: ${newCosts.length} wpisów (${Math.round(totalEUR).toLocaleString("pl-PL")} €)`);
+  };
+
   const deleteCost   = (id)    => { setCosts((p) => p.filter((c) => c.id !== id)); showToast("Usunięto wpis"); };
   const updateCost   = (updated) => { setCosts((p) => p.map((c) => c.id === updated.id ? updated : c)); showToast("✅ Koszt zaktualizowany"); setEditCostId(null); };
   const addVehicle   = (v)     => { setVehicles((p) => [...p, { ...v, id: uid(), driverHistory: v.driverHistory || [] }]); showToast("Pojazd dodany"); setShowAddVehicle(false); };
@@ -2074,7 +2138,11 @@ function App({ user, role, appUsers = [] }) {
                   </button>
                   <button onClick={importAllCosts}
                     className="px-4 py-2 rounded-lg text-sm font-semibold border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-700 flex items-center gap-2">
-                    📊 Import Total_26
+                    📊 Import 2026
+                  </button>
+                  <button onClick={() => importFromRent(2025)}
+                    className="px-4 py-2 rounded-lg text-sm font-semibold border border-green-200 bg-green-50 hover:bg-green-100 text-green-700 flex items-center gap-2">
+                    📋 Import 2025 z Rent.
                   </button>
                   <button onClick={() => setShowAddCost(true)}
                     className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
