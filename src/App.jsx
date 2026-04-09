@@ -2501,6 +2501,7 @@ function MobileChatOverlay({ children, hasActiveRoom }) {
     const update = () => {
       if (vv) {
         el.style.height = `${vv.height}px`;
+        el.style.top = `${vv.offsetTop}px`;
       }
       updateDebug();
       // Scroll chat to bottom
@@ -2511,7 +2512,10 @@ function MobileChatOverlay({ children, hasActiveRoom }) {
     };
 
     update();
-    if (vv) vv.addEventListener('resize', update);
+    if (vv) {
+      vv.addEventListener('resize', update);
+      vv.addEventListener('scroll', update);
+    }
     // Also track focus/blur to catch keyboard
     const onFocus = () => setTimeout(update, 500);
     const onBlur = () => setTimeout(update, 300);
@@ -2519,10 +2523,14 @@ function MobileChatOverlay({ children, hasActiveRoom }) {
     el.addEventListener('focusout', onBlur);
 
     return () => {
-      if (vv) vv.removeEventListener('resize', update);
+      if (vv) {
+        vv.removeEventListener('resize', update);
+        vv.removeEventListener('scroll', update);
+      }
       el.removeEventListener('focusin', onFocus);
       el.removeEventListener('focusout', onBlur);
       el.style.height = '';
+      el.style.top = '0px';
     };
   }, [hasActiveRoom]);
 
