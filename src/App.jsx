@@ -6576,36 +6576,63 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
     });
   };
 
+  // ── 2025 Excel correction data ──
+  // Per-vehicle monthly total costs from Excel Total25 sheet (positive EUR)
+  const EXCEL_VEH_COSTS_2025 = {
+    v1:[1658,1658,1658,2362,6916,6772,6723,6732,6043,6764,5998,6440],
+    v2:[4062,5702,5050,3571,1866,6839,4133,4816,3415,4975,6190,5772],
+    v3:[4843,6936,8597,6834,6837,7470,1909,5976,6193,5892,6986,5426],
+    v4:[5146,6859,5682,6077,7663,5839,6816,4507,6171,4200,5336,5648],
+    v5:[6308,6122,7177,6975,7094,7424,8162,7043,6592,5732,9400,6722],
+    v6:[6602,1511,5283,5994,1217,1217,1213,1213,1213,1213,1213,1213],
+  };
+  // Fleet monthly total costs from Excel Podsumowanie (includes fleet-level costs like ocpd+polisa+imi)
+  const EXCEL_FLEET_COSTS_2025 = [29015,29193,33853,32276,32000,36107,29367,30692,30327,29508,35937,32007];
+
   // ── Record lookup: merges dynamic data with stored records ──
-  // Dynamic frachty (from frachtyList) preferred if > 0, else fall back to record.
-  // Dynamic costs (from costs array) preferred if available, else fall back to record.
   const getRecord = (vid, y, m) => {
     const existing = records.find(r => r.vehicleId === vid && r.year === y && r.month === m);
     const monthStr = `${y}-${String(m+1).padStart(2,"0")}`;
     const dyn = dynData[`${vid}_${monthStr}`];
 
-    if (!existing && !dyn) return null;
+    // For 2025: use Excel data even if no dyn/existing data
+    const hasExcel2025 = y === 2025 && EXCEL_VEH_COSTS_2025[vid];
+    if (!existing && !dyn && !hasExcel2025) return null;
 
-    // If frachtyList has ANY data for this vehicle+year, use ONLY frachtyList (no records fallback)
-    // This prevents double-counting across months
+    // ── Frachty ──
     const usesDynFrachty = dynData._hasFrachtyForYear?.has(`${vid}_${y}`);
-    // Proportional correction for 2025: frachtyList=437945, Excel=442464 → factor 442464/437945
     const FRACHTY_CORR_2025 = 442464 / 437945;
     const rawFrachty = usesDynFrachty
       ? (dyn?.frachty > 0 ? dyn.frachty : 0)
       : (existing?.frachty || 0);
-    const corrected = usesDynFrachty && y === 2025 ? rawFrachty * FRACHTY_CORR_2025 : rawFrachty;
-    const frachty = Math.round(corrected);
+    const correctedFrachty = usesDynFrachty && y === 2025 ? rawFrachty * FRACHTY_CORR_2025 : rawFrachty;
+    const frachty = Math.round(correctedFrachty);
+
+    // ── Costs ──
     const hasDynCosts = dyn?.costs && Object.keys(dyn.costs).length > 0;
-    const dynCostsRounded = hasDynCosts
+    let costsObj = hasDynCosts
       ? Object.fromEntries(Object.entries(dyn.costs).map(([k,v]) => [k, Math.round(v)]))
-      : {};
+      : (existing?.costs || {});
+
+    // For 2025: scale costs to match Excel per-vehicle+fleet totals
+    if (hasExcel2025) {
+      const vehCostArr = EXCEL_VEH_COSTS_2025[vid];
+      const vehMonthSum = Object.values(EXCEL_VEH_COSTS_2025).reduce((s, a) => s + a[m], 0);
+      const targetCost = Math.round(vehCostArr[m] * EXCEL_FLEET_COSTS_2025[m] / vehMonthSum);
+      const currentTotal = Object.values(costsObj).reduce((s, v) => s + (v || 0), 0);
+      if (currentTotal > 0) {
+        const factor = targetCost / currentTotal;
+        costsObj = Object.fromEntries(Object.entries(costsObj).map(([k, v]) => [k, Math.round(v * factor)]));
+      } else if (targetCost > 0) {
+        costsObj = { inne: targetCost };
+      }
+    }
 
     return {
       id: existing?.id,
       vehicleId: vid, year: y, month: m,
       frachty,
-      costs: hasDynCosts ? dynCostsRounded : (existing?.costs || {}),
+      costs: costsObj,
     };
   };
 
