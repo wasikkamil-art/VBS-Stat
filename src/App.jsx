@@ -2470,6 +2470,7 @@ function App({ user, role, appUsers = [] }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 function MobileChatOverlay({ children, hasActiveRoom }) {
   const ref = useRef(null);
+  const debugRef = useRef(null);
 
   // Lock body scroll when overlay is mounted
   useEffect(() => {
@@ -2478,32 +2479,49 @@ function MobileChatOverlay({ children, hasActiveRoom }) {
     return () => { document.body.style.overflow = orig; };
   }, []);
 
-  // Only track visualViewport when in active room (keyboard may appear)
+  // Debug + visualViewport tracking
   useEffect(() => {
     if (!hasActiveRoom) return;
     const el = ref.current;
     if (!el) return;
     const vv = window.visualViewport;
-    if (!vv) return;
 
-    let prevHeight = vv.height;
-    const update = () => {
-      el.style.height = `${vv.height}px`;
-      // Keyboard opened (viewport shrank) — scroll chat to bottom
-      if (vv.height < prevHeight) {
-        setTimeout(() => {
-          const scrollable = el.querySelector('[data-chat-messages]');
-          if (scrollable) scrollable.scrollTop = scrollable.scrollHeight;
-        }, 50);
+    const updateDebug = () => {
+      if (debugRef.current) {
+        debugRef.current.textContent = [
+          `vv: ${vv ? Math.round(vv.height) : 'N/A'}`,
+          `ih: ${window.innerHeight}`,
+          `oh: ${document.documentElement.clientHeight}`,
+          `el: ${Math.round(el.getBoundingClientRect().height)}`,
+          `offT: ${vv ? Math.round(vv.offsetTop) : 'N/A'}`,
+        ].join(' | ');
       }
-      prevHeight = vv.height;
+    };
+
+    const update = () => {
+      if (vv) {
+        el.style.height = `${vv.height}px`;
+      }
+      updateDebug();
+      // Scroll chat to bottom
+      setTimeout(() => {
+        const scrollable = el.querySelector('[data-chat-messages]');
+        if (scrollable) scrollable.scrollTop = scrollable.scrollHeight;
+      }, 50);
     };
 
     update();
-    vv.addEventListener('resize', update);
+    if (vv) vv.addEventListener('resize', update);
+    // Also track focus/blur to catch keyboard
+    const onFocus = () => setTimeout(update, 500);
+    const onBlur = () => setTimeout(update, 300);
+    el.addEventListener('focusin', onFocus);
+    el.addEventListener('focusout', onBlur);
 
     return () => {
-      vv.removeEventListener('resize', update);
+      if (vv) vv.removeEventListener('resize', update);
+      el.removeEventListener('focusin', onFocus);
+      el.removeEventListener('focusout', onBlur);
       el.style.height = '';
     };
   }, [hasActiveRoom]);
@@ -2525,6 +2543,14 @@ function MobileChatOverlay({ children, hasActiveRoom }) {
       overscrollBehavior: 'contain',
       WebkitOverflowScrolling: 'touch',
     }}>
+      {/* DEBUG BANNER — tymczasowy */}
+      {hasActiveRoom && (
+        <div ref={debugRef} style={{
+          position: 'absolute', top: 40, left: 0, right: 0, zIndex: 999,
+          background: 'rgba(255,0,0,0.85)', color: '#fff', fontSize: '11px',
+          padding: '4px 8px', textAlign: 'center', fontFamily: 'monospace',
+        }}>loading...</div>
+      )}
       {children}
     </div>
   );
