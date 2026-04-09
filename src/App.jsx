@@ -1192,10 +1192,35 @@ function App({ user, role, appUsers = [] }) {
       {v:"v4",c:"uruchomienie",e:250,d:"2026-03-15",n:"Import Excel Total_26"},
       {v:"v4",c:"imi",e:13,d:"2026-03-15",n:"Import Excel Total_26"},
       {v:"v4",c:"ocpd",e:104,d:"2026-03-15",n:"Import Excel Total_26"},
+
+      // ── v2 / TK 130EF (Mykola) ──
+      // Styczeń
+      {v:"v2",c:"paliwo",e:1040.08,d:"2026-01-15",n:"Import Excel Total_26"},
+      {v:"v2",c:"wyplata",e:1200,d:"2026-01-15",n:"Import Excel Total_26"},
+      {v:"v2",c:"zus",e:400,d:"2026-01-15",n:"Import Excel Total_26"},
+      {v:"v2",c:"serwis",e:518,d:"2026-01-15",n:"Import Excel Total_26"},
+      {v:"v2",c:"polisa",e:147.92,d:"2026-01-15",n:"Import Excel Total_26"},
+      {v:"v2",c:"oplaty",e:9.41,d:"2026-01-15",n:"Import Excel Total_26 (Nego)"},
+      {v:"v2",c:"inne",e:750,d:"2026-01-15",n:"Import Excel Total_26"},
+      {v:"v2",c:"slickshift",e:15,d:"2026-01-15",n:"Import Excel Total_26"},
+      {v:"v2",c:"telefon",e:10,d:"2026-01-15",n:"Import Excel Total_26"},
+      {v:"v2",c:"mandaty",e:1068,d:"2026-01-15",n:"Import Excel Total_26"},
+      {v:"v2",c:"przyczepa",e:110,d:"2026-01-15",n:"Import Excel Total_26"},
+      {v:"v2",c:"uruchomienie",e:250,d:"2026-01-15",n:"Import Excel Total_26"},
+      {v:"v2",c:"imi",e:13,d:"2026-01-15",n:"Import Excel Total_26"},
+      {v:"v2",c:"ocpd",e:104,d:"2026-01-15",n:"Import Excel Total_26"},
+      // Luty
+      {v:"v2",c:"polisa",e:147.92,d:"2026-02-15",n:"Import Excel Total_26"},
+      {v:"v2",c:"slickshift",e:15,d:"2026-02-15",n:"Import Excel Total_26"},
+      {v:"v2",c:"telefon",e:10,d:"2026-02-15",n:"Import Excel Total_26"},
+      {v:"v2",c:"imi",e:13,d:"2026-02-15",n:"Import Excel Total_26"},
+      {v:"v2",c:"ocpd",e:104,d:"2026-02-15",n:"Import Excel Total_26"},
+      // Marzec
+      {v:"v2",c:"telefon",e:10,d:"2026-03-15",n:"Import Excel Total_26"},
     ];
 
     // Determine which vehicle+month combos the import covers
-    const IMPORT_VIDS = ["v1", "v3", "v4", "v5"];
+    const IMPORT_VIDS = ["v1", "v2", "v3", "v4", "v5"];
     const IMPORT_MONTHS = ["2026-01", "2026-02", "2026-03"];
 
     const existingCount = costs.filter(c =>
