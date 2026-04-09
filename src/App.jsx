@@ -218,7 +218,7 @@ const SEED_CATEGORIES = [
   { id: "serwis",        label: "Serwis",              color: "#ef4444", icon: "🔧" },
   { id: "ubezpieczenie", label: "Ubezpieczenie",       color: "#10b981", icon: "🛡️" },
   { id: "opony",         label: "Opony",               color: "#3b82f6", icon: "🔄" },
-  { id: "oplaty",        label: "Opłaty drogowe",      color: "#8b5cf6", icon: "🛣️" },
+  { id: "oplaty",        label: "E-toll / Autostrady",  color: "#8b5cf6", icon: "🛣️" },
   { id: "wyplata",       label: "Wynagrodzenie",       color: "#f43f5e", icon: "👤" },
   { id: "inne",          label: "Inne",                color: "#94a3b8", icon: "📋" },
 ];
@@ -676,7 +676,7 @@ function exportCostsToExcel(costs, vehicles, categories, filterYear, filterMonth
   const CAT_FALLBACKS = {
     wyplata:'Wynagrodzenie', zus:'ZUS + podatki', paliwo:'Paliwo',
     leasing:'Leasing', naprawa:'Naprawa', ubezpieczenie:'Ubezpieczenie',
-    oplaty:'Oplaty drogowe', mandaty:'Mandaty', slickshift:'SlickShift',
+    oplaty:'E-toll / Autostrady', mandaty:'Mandaty', slickshift:'SlickShift',
     telefon:'Telefon', hotele:'Hotele', przyczepa:'Przyczepa',
     ocpd:'OCPD', uruchomienie:'Koszt uruchomienia', imi_spisi:'IMI/SIPSI',
     inne:'Inne', opony:'Opony',
@@ -1010,6 +1010,72 @@ function App({ user, role, appUsers = [] }) {
       showToast("✅ Koszt zapisany");
     }
   };
+  // ── IMPORT NEGOMETAL: sync rent→costs for sty-luty + add march data ──
+  const importNegometal = () => {
+    const PLATE_TO_VID = {};
+    vehicles.forEach(v => { PLATE_TO_VID[v.plate] = v.id; });
+    let added = 0;
+
+    // 1) Sty-Luty: pobierz dane etoll+nego z rentRecords i dodaj do costs jeśli brakuje
+    [0, 1].forEach(month => { // 0=sty, 1=luty
+      const monthStr = `2026-${String(month + 1).padStart(2, "0")}`;
+      vehicles.filter(v => !v.archived).forEach(v => {
+        const rec = rentRecords.find(r => r.vehicleId === v.id && r.year === 2026 && r.month === month);
+        if (!rec) return;
+        const etollVal = parseFloat(rec.costs?.etoll) || 0;
+        const negoVal = parseFloat(rec.costs?.nego) || 0;
+        const totalEUR = etollVal + negoVal;
+        if (totalEUR <= 0) return;
+        // Check if already exists
+        const exists = costs.some(c => c.vehicleId === v.id && (c.date || "").startsWith(monthStr) && (c.category === "oplaty" || c.category === "etoll" || c.category === "nego") && c.note?.includes("Negometal"));
+        if (exists) return;
+        setCosts(p => [...p, {
+          id: uid(), vehicleId: v.id, category: "oplaty",
+          amountPLN: null, amountEUR: totalEUR, currency: "EUR",
+          date: `${monthStr}-15`, note: `Negometal E-toll / Autostrady ${monthStr}`,
+        }]);
+        added++;
+      });
+    });
+
+    // 2) Marzec: dane z pliku Negometal
+    const marchData = [
+      { plate: "TK 314CL",   eur: 184.30, note: "Negometal marzec — FR, ES (17 transakcji)" },
+      { plate: "WGM 0475M",  eur: 185.41, note: "Negometal marzec — FR, BE, DE, IT (21 transakcji)" },
+      { plate: "WGM 0507M",  eur: 291.69, note: "Negometal marzec — FR, ES, DE, BE, PL (25 transakcji, 2xPLN→EUR@4.2793)" },
+      { plate: "WGM 5367K",  eur: 185.50, note: "Negometal marzec — BE, DE (11 transakcji)" },
+    ];
+    marchData.forEach(({ plate, eur, note }) => {
+      const vid = PLATE_TO_VID[plate];
+      if (!vid) return;
+      const exists = costs.some(c => c.vehicleId === vid && (c.date || "").startsWith("2026-03") && c.note?.includes("Negometal"));
+      if (exists) return;
+      setCosts(p => [...p, {
+        id: uid(), vehicleId: vid, category: "oplaty",
+        amountPLN: null, amountEUR: eur, currency: "EUR",
+        date: "2026-03-15", note,
+      }]);
+      added++;
+    });
+
+    // 3) Marzec: zaktualizuj też rentRecords
+    marchData.forEach(({ plate, eur }) => {
+      const vid = PLATE_TO_VID[plate];
+      if (!vid) return;
+      const existing = rentRecords.find(r => r.vehicleId === vid && r.year === 2026 && r.month === 2);
+      if (existing) {
+        const curEtoll = parseFloat(existing.costs?.etoll) || 0;
+        if (curEtoll === 0 || curEtoll !== Math.round(eur)) {
+          setRentRecords(p => p.map(r => r.id === existing.id ? { ...r, costs: { ...r.costs, etoll: Math.round(eur) } } : r));
+        }
+      } else {
+        setRentRecords(p => [...p, { id: uid(), vehicleId: vid, year: 2026, month: 2, frachty: 0, costs: { etoll: Math.round(eur) } }]);
+      }
+    });
+
+    showToast(added > 0 ? `✅ Import Negometal: dodano ${added} wpisów` : "ℹ️ Dane Negometal już istnieją w kosztach");
+  };
+
   const deleteCost   = (id)    => { setCosts((p) => p.filter((c) => c.id !== id)); showToast("Usunięto wpis"); };
   const updateCost   = (updated) => { setCosts((p) => p.map((c) => c.id === updated.id ? updated : c)); showToast("✅ Koszt zaktualizowany"); setEditCostId(null); };
   const addVehicle   = (v)     => { setVehicles((p) => [...p, { ...v, id: uid(), driverHistory: v.driverHistory || [] }]); showToast("Pojazd dodany"); setShowAddVehicle(false); };
@@ -1029,10 +1095,10 @@ function App({ user, role, appUsers = [] }) {
     wyplata:       { label: "Wynagrodzenie",    color: "#f43f5e", icon: "👤" },
     ubezpieczenie: { label: "Ubezpieczenie",    color: "#10b981", icon: "🛡️" },
     opony:         { label: "Opony",            color: "#3b82f6", icon: "🔄" },
-    oplaty:        { label: "Opłaty drogowe",   color: "#8b5cf6", icon: "🛣️" },
-    myto:          { label: "Opłaty drogowe",   color: "#8b5cf6", icon: "🛣️" },
-    nego:          { label: "Opłaty drogowe",   color: "#8b5cf6", icon: "🛣️" },
-    etoll:         { label: "Opłaty drogowe",   color: "#8b5cf6", icon: "🛣️" },
+    oplaty:        { label: "E-toll / Autostrady",   color: "#8b5cf6", icon: "🛣️" },
+    myto:          { label: "E-toll / Autostrady",   color: "#8b5cf6", icon: "🛣️" },
+    nego:          { label: "E-toll / Autostrady",   color: "#8b5cf6", icon: "🛣️" },
+    etoll:         { label: "E-toll / Autostrady",   color: "#8b5cf6", icon: "🛣️" },
     naprawa:       { label: "Serwis",           color: "#ef4444", icon: "🔧" },
     serwis:        { label: "Serwis",           color: "#ef4444", icon: "🔧" },
     paliwo:        { label: "Paliwo",           color: "#f59e0b", icon: "⛽" },
@@ -1785,6 +1851,10 @@ function App({ user, role, appUsers = [] }) {
                     className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 flex items-center gap-2">
                     📊 Exportuj Excel
                   </button>
+                  <button onClick={importNegometal}
+                    className="px-4 py-2 rounded-lg text-sm font-semibold border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-700 flex items-center gap-2">
+                    🛣️ Import Negometal
+                  </button>
                   <button onClick={() => setShowAddCost(true)}
                     className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
                     style={{ background: "#111827" }}>
@@ -1843,7 +1913,7 @@ function App({ user, role, appUsers = [] }) {
                 let allCats = [...categories];
                 if (!allCats.find(c => c.id === "wyplata")) allCats.push({ id:"wyplata", label:"Wynagrodzenie", color:"#f43f5e", icon:"👤" });
                 if (!allCats.find(c => c.id === "ubezpieczenie")) allCats.push({ id:"ubezpieczenie", label:"Ubezpieczenie", color:"#10b981", icon:"🛡️" });
-                if (!allCats.find(c => c.id === "oplaty")) allCats.push({ id:"oplaty", label:"Opłaty drogowe", color:"#8b5cf6", icon:"🛣️" });
+                if (!allCats.find(c => c.id === "oplaty")) allCats.push({ id:"oplaty", label:"E-toll / Autostrady", color:"#8b5cf6", icon:"🛣️" });
                 allCats = allCats.filter(c => c.id !== "myto" && c.id !== "nego" && c.id !== "etoll");
                 const byCat = allCats.map(cat => ({
                   ...cat,
@@ -6097,7 +6167,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], operac
     wyplata: "wyplata", zus: "zus",
     naprawa: "serwis", serwis: "serwis",
     ubezpieczenie: "polisa",
-    oplaty: "etoll", etoll: "etoll", myto: "etoll", nego: "nego",
+    oplaty: "etoll", etoll: "etoll", myto: "etoll", nego: "etoll",
     inne: "inne",
   };
 
