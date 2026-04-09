@@ -2470,7 +2470,6 @@ function App({ user, role, appUsers = [] }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 function MobileChatOverlay({ children, hasActiveRoom }) {
   const ref = useRef(null);
-  const debugRef = useRef(null);
 
   // Lock body scroll when overlay is mounted
   useEffect(() => {
@@ -2479,56 +2478,30 @@ function MobileChatOverlay({ children, hasActiveRoom }) {
     return () => { document.body.style.overflow = orig; };
   }, []);
 
-  // Debug + visualViewport tracking
+  // visualViewport tracking — only resize (keyboard open/close), no scroll
   useEffect(() => {
     if (!hasActiveRoom) return;
     const el = ref.current;
     if (!el) return;
     const vv = window.visualViewport;
+    if (!vv) return;
 
-    const updateDebug = () => {
-      if (debugRef.current) {
-        debugRef.current.textContent = [
-          `vv: ${vv ? Math.round(vv.height) : 'N/A'}`,
-          `ih: ${window.innerHeight}`,
-          `oh: ${document.documentElement.clientHeight}`,
-          `el: ${Math.round(el.getBoundingClientRect().height)}`,
-          `offT: ${vv ? Math.round(vv.offsetTop) : 'N/A'}`,
-        ].join(' | ');
-      }
-    };
-
-    const update = () => {
-      if (vv) {
-        el.style.height = `${vv.height}px`;
-        el.style.top = `${vv.offsetTop}px`;
-      }
-      updateDebug();
-      // Scroll chat to bottom
+    const onResize = () => {
+      el.style.height = `${vv.height}px`;
+      // Delayed offsetTop — iOS updates it after resize animation
       setTimeout(() => {
+        el.style.top = `${vv.offsetTop}px`;
+        // Scroll chat to bottom
         const scrollable = el.querySelector('[data-chat-messages]');
         if (scrollable) scrollable.scrollTop = scrollable.scrollHeight;
-      }, 50);
+      }, 100);
     };
 
-    update();
-    if (vv) {
-      vv.addEventListener('resize', update);
-      vv.addEventListener('scroll', update);
-    }
-    // Also track focus/blur to catch keyboard
-    const onFocus = () => setTimeout(update, 500);
-    const onBlur = () => setTimeout(update, 300);
-    el.addEventListener('focusin', onFocus);
-    el.addEventListener('focusout', onBlur);
+    onResize();
+    vv.addEventListener('resize', onResize);
 
     return () => {
-      if (vv) {
-        vv.removeEventListener('resize', update);
-        vv.removeEventListener('scroll', update);
-      }
-      el.removeEventListener('focusin', onFocus);
-      el.removeEventListener('focusout', onBlur);
+      vv.removeEventListener('resize', onResize);
       el.style.height = '';
       el.style.top = '0px';
     };
@@ -2551,14 +2524,6 @@ function MobileChatOverlay({ children, hasActiveRoom }) {
       overscrollBehavior: 'contain',
       WebkitOverflowScrolling: 'touch',
     }}>
-      {/* DEBUG BANNER — tymczasowy */}
-      {hasActiveRoom && (
-        <div ref={debugRef} style={{
-          position: 'absolute', top: 40, left: 0, right: 0, zIndex: 999,
-          background: 'rgba(255,0,0,0.85)', color: '#fff', fontSize: '11px',
-          padding: '4px 8px', textAlign: 'center', fontFamily: 'monospace',
-        }}>loading...</div>
-      )}
       {children}
     </div>
   );
