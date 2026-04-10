@@ -5512,13 +5512,14 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
   const [dayModal, setDayModal] = useState(null); // klik w dzień kalendarza (ISO date)
 
   // ── Okno: 6 miesięcy wstecz, 18 w przód (dla generatora cyklicznych) ──
+  // Używamy "T12:00:00" (południe lokalne) żeby uniknąć problemów ze strefą czasową
   const windowStart = useMemo(() => {
-    const d = new Date(cursorYM + "-01");
+    const d = new Date(cursorYM + "-01T12:00:00");
     d.setMonth(d.getMonth() - 6);
     return d.toISOString().slice(0,10);
   }, [cursorYM]);
   const windowEnd = useMemo(() => {
-    const d = new Date(cursorYM + "-01");
+    const d = new Date(cursorYM + "-01T12:00:00");
     d.setMonth(d.getMonth() + 18);
     return d.toISOString().slice(0,10);
   }, [cursorYM]);
@@ -5611,8 +5612,17 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
   // ── Nawigacja miesięcy ──
   const [curYear, curMon] = cursorYM.split("-").map(Number);
   const monthLabel = new Date(curYear, curMon-1, 1).toLocaleDateString("pl-PL", { year: "numeric", month: "long" });
-  const prevMonth = () => { const d = new Date(curYear, curMon-2, 1); setCursorYM(d.toISOString().slice(0,7)); };
-  const nextMonth = () => { const d = new Date(curYear, curMon, 1); setCursorYM(d.toISOString().slice(0,7)); };
+  // UWAGA: nie używamy Date.toISOString() (strefa czasowa przesuwa miesiąc!) — składamy YM ręcznie
+  const prevMonth = () => {
+    let y = curYear, m = curMon - 1;
+    if (m < 1) { m = 12; y -= 1; }
+    setCursorYM(`${y}-${String(m).padStart(2,"0")}`);
+  };
+  const nextMonth = () => {
+    let y = curYear, m = curMon + 1;
+    if (m > 12) { m = 1; y += 1; }
+    setCursorYM(`${y}-${String(m).padStart(2,"0")}`);
+  };
 
   // ── Kalendarz: siatka dni ──
   const daysInMonth = new Date(curYear, curMon, 0).getDate();
@@ -5930,6 +5940,7 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
             </div>
             <div className="p-5 space-y-3 text-sm">
               <Row label="Kontrahent"   value={detail.contractor} />
+              <Row label="NIP"          value={detail.sellerNip} />
               <Row label="Numer FV"     value={detail.invoiceNumber} />
               <Row label="Opis"         value={detail.description} />
               <Row label="Kategoria"    value={PAY_CATEGORIES.find(c=>c.id===detail.category)?.label} />
@@ -5937,6 +5948,18 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
               <Row label="Termin"       value={detail.dueDate} />
               <Row label="Netto"        value={fmtMoney(detail.netto, detail.currency)} />
               <Row label="Brutto"       value={fmtMoney(detail.brutto, detail.currency)} />
+              {detail.bankAccount && (
+                <div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wide">Numer konta</div>
+                  <div className="flex items-center gap-2">
+                    <div className="font-mono text-sm text-gray-900 flex-1 break-all">{detail.bankAccount}</div>
+                    <button type="button"
+                      onClick={() => { navigator.clipboard?.writeText(detail.bankAccount); showToast("📋 Skopiowano"); }}
+                      className="px-2 py-1 rounded text-xs font-semibold border border-gray-200 hover:bg-gray-50 flex-shrink-0"
+                      title="Kopiuj">📋</button>
+                  </div>
+                </div>
+              )}
               {detail.split?.enabled && (
                 <>
                   <Row label="Udział firmy" value={`${detail.split.companyPct}% = ${fmtMoney((Number(detail.brutto)||0)*(Number(detail.split.companyPct)||100)/100, detail.currency)}`} />
@@ -5992,6 +6015,7 @@ const PAYMENT_AI_PROMPT = `Jesteś asystentem księgowym. Przeczytaj załączon�
 
 {
   "contractor": "nazwa kontrahenta / sprzedawcy (string)",
+  "sellerNip": "NIP / VAT-ID sprzedawcy (string, same cyfry lub z myślnikami jak na fakturze)",
   "invoiceNumber": "numer faktury (string, np. FV/2026/04/123)",
   "description": "krótki opis czego dotyczy faktura (string, max 80 znaków)",
   "category": "jedna z: leasing | ubezpieczenie | paliwo | czesci | uslugi | inne",
@@ -6000,6 +6024,7 @@ const PAYMENT_AI_PROMPT = `Jesteś asystentem księgowym. Przeczytaj załączon�
   "brutto": liczba (bez walut i separatorów tysięcy, kropka jako separator dziesiętny),
   "issueDate": "data wystawienia w formacie YYYY-MM-DD",
   "dueDate":   "termin płatności w formacie YYYY-MM-DD",
+  "bankAccount": "numer konta bankowego do zapłaty (IBAN lub 26-cyfrowy NRB, string; jeśli jest kilka — wybierz ten w walucie faktury)",
   "note": "opcjonalna notatka (string) lub pusty string"
 }
 
@@ -6007,6 +6032,7 @@ Reguły:
 - Jeśli jakieś pole nie jest widoczne na fakturze, wstaw pusty string "" lub 0 dla liczb.
 - Jeśli waluta to PLN, użyj "PLN" nawet jeśli na fakturze jest "zł" lub "PLN".
 - Kategorię zgadnij na podstawie opisu/pozycji (np. "olej napędowy" → paliwo, "polisa OC" → ubezpieczenie, "rata leasingowa" → leasing, "klocki hamulcowe" → czesci, "naprawa" lub "usługa" → uslugi).
+- bankAccount zwracaj bez spacji (np. "PL12345678901234567890123456" lub "12345678901234567890123456").
 - Zwracaj POPRAWNY JSON bez dodatkowego tekstu.`;
 
 function PaymentForm({ initial, onSave, onClose }) {
@@ -6016,6 +6042,7 @@ function PaymentForm({ initial, onSave, onClose }) {
 
   const [f, setF] = useState(() => ({
     contractor:    initial?.contractor    || "",
+    sellerNip:     initial?.sellerNip     || "",
     invoiceNumber: initial?.invoiceNumber || "",
     description:   initial?.description   || "",
     category:      initial?.category      || "inne",
@@ -6024,6 +6051,7 @@ function PaymentForm({ initial, onSave, onClose }) {
     brutto:        initial?.brutto        || "",
     issueDate:     initial?.issueDate     || todayISO(),
     dueDate:       initial?.dueDate       || todayISO(),
+    bankAccount:   initial?.bankAccount   || "",
     status:        initial?.status        || "topay",
     note:          initial?.note          || "",
     recurring: {
@@ -6085,6 +6113,7 @@ function PaymentForm({ initial, onSave, onClose }) {
       setF(prev => ({
         ...prev,
         contractor:    parsed.contractor    || prev.contractor,
+        sellerNip:     parsed.sellerNip     || prev.sellerNip,
         invoiceNumber: parsed.invoiceNumber || prev.invoiceNumber,
         description:   parsed.description   || prev.description,
         category:      parsed.category && PAY_CATEGORIES.some(c=>c.id===parsed.category) ? parsed.category : prev.category,
@@ -6093,6 +6122,7 @@ function PaymentForm({ initial, onSave, onClose }) {
         brutto:        parsed.brutto || prev.brutto,
         issueDate:     parsed.issueDate || prev.issueDate,
         dueDate:       parsed.dueDate   || prev.dueDate,
+        bankAccount:   (parsed.bankAccount || "").replace(/\s+/g,"") || prev.bankAccount,
         note:          parsed.note  || prev.note,
       }));
       setAiFilled(true);
@@ -6114,6 +6144,7 @@ function PaymentForm({ initial, onSave, onClose }) {
     }
     const data = {
       contractor:    f.contractor.trim(),
+      sellerNip:     (f.sellerNip || "").trim(),
       invoiceNumber: f.invoiceNumber.trim(),
       description:   f.description.trim(),
       category:      f.category,
@@ -6122,6 +6153,7 @@ function PaymentForm({ initial, onSave, onClose }) {
       brutto:        Number(f.brutto) || 0,
       issueDate:     f.issueDate,
       dueDate:       f.dueDate,
+      bankAccount:   (f.bankAccount || "").replace(/\s+/g,""),
       status:        f.status,
       note:          f.note.trim(),
       recurring:     f.recurring.enabled ? {
@@ -6185,11 +6217,15 @@ function PaymentForm({ initial, onSave, onClose }) {
               <input value={f.contractor} onChange={e=>upd("contractor", e.target.value)}
                 className="w-full px-3 py-2 rounded-lg border border-gray-200" placeholder="np. Leasing Mercedes" />
             </Field>
-            <Field label="Numer FV">
-              <input value={f.invoiceNumber} onChange={e=>upd("invoiceNumber", e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-gray-200" />
+            <Field label="NIP kontrahenta">
+              <input value={f.sellerNip} onChange={e=>upd("sellerNip", e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200" placeholder="np. 1234567890" />
             </Field>
           </div>
+          <Field label="Numer FV">
+            <input value={f.invoiceNumber} onChange={e=>upd("invoiceNumber", e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-gray-200" />
+          </Field>
           <Field label="Opis">
             <input value={f.description} onChange={e=>upd("description", e.target.value)}
               className="w-full px-3 py-2 rounded-lg border border-gray-200" placeholder="np. Felgi do Forda / Rata leasingu ST12345" />
@@ -6228,6 +6264,20 @@ function PaymentForm({ initial, onSave, onClose }) {
                 className="w-full px-3 py-2 rounded-lg border border-gray-200" />
             </Field>
           </div>
+          <Field label="Numer konta (IBAN / NRB)">
+            <div className="flex gap-2">
+              <input value={f.bankAccount}
+                onChange={e=>upd("bankAccount", e.target.value.replace(/\s+/g,""))}
+                className="flex-1 px-3 py-2 rounded-lg border border-gray-200 font-mono text-sm"
+                placeholder="PL00 0000 0000 0000 0000 0000 0000" />
+              {f.bankAccount && (
+                <button type="button"
+                  onClick={() => { navigator.clipboard?.writeText(f.bankAccount); }}
+                  className="px-3 py-2 rounded-lg text-xs font-semibold border border-gray-200 hover:bg-gray-50"
+                  title="Kopiuj numer konta">📋</button>
+              )}
+            </div>
+          </Field>
 
           {/* ── CYKLICZNA ── */}
           <div className="rounded-lg border border-gray-200 p-3 bg-gray-50">
