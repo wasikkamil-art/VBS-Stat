@@ -5509,6 +5509,7 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
   const [showForm, setShowForm] = useState(false);
   const [editRec, setEditRec] = useState(null);
   const [detail, setDetail] = useState(null); // klik w chip/wiersz
+  const [dayModal, setDayModal] = useState(null); // klik w dzień kalendarza (ISO date)
 
   // ── Okno: 6 miesięcy wstecz, 18 w przód (dla generatora cyklicznych) ──
   const windowStart = useMemo(() => {
@@ -5716,16 +5717,33 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
               const iso = `${curYear}-${String(curMon).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
               const dayItems = filtered.filter(x => x.dueDate === iso);
               const isToday = iso === todayISO();
+              const hasItems = dayItems.length > 0;
+              // Podsumowanie statusu dla "obwódki" dnia
+              const nOverdue = dayItems.filter(x => statusOf(x)==="overdue").length;
+              const nTopay   = dayItems.filter(x => statusOf(x)==="topay").length;
+              const nPaid    = dayItems.filter(x => statusOf(x)==="paid").length;
+              const dayBorder = nOverdue>0 ? "#ef4444" : nTopay>0 ? "#f59e0b" : nPaid>0 ? "#10b981" : "#f3f4f6";
               return (
-                <div key={day} className="min-h-[90px] rounded-lg border border-gray-100 p-1.5 flex flex-col gap-1"
-                  style={{ background: isToday ? "#fef9c3" : "#fff" }}>
-                  <div className="text-xs font-bold text-gray-500">{day}</div>
-                  {dayItems.slice(0,3).map((x, idx) => {
+                <div key={day}
+                  onClick={() => hasItems && setDayModal(iso)}
+                  className={"min-h-[90px] rounded-lg p-1.5 flex flex-col gap-1 "+(hasItems?"cursor-pointer hover:shadow-md transition-shadow":"")}
+                  style={{ background: isToday ? "#fef9c3" : "#fff", border: `2px solid ${dayBorder}` }}>
+                  <div className="flex items-center justify-between">
+                    <div className={"text-xs font-bold "+(isToday?"text-gray-900":"text-gray-500")}>{day}</div>
+                    {hasItems && (
+                      <div className="text-[10px] font-bold px-1.5 rounded-full"
+                        style={{background:"#111827", color:"#fff", minWidth:"18px", textAlign:"center"}}>
+                        {dayItems.length}
+                      </div>
+                    )}
+                  </div>
+                  {dayItems.slice(0,2).map((x, idx) => {
                     const st = statusOf(x);
                     const companyPct = x.split?.enabled ? (Number(x.split.companyPct)||100) : 100;
                     const share = (Number(x.brutto)||0) * companyPct / 100;
                     return (
-                      <button key={idx} onClick={() => setDetail(x)}
+                      <button key={idx}
+                        onClick={(e) => { e.stopPropagation(); setDetail(x); }}
                         className="text-left px-1.5 py-1 rounded text-[10px] truncate border hover:opacity-80"
                         style={{
                           background: STATUS_META[st].bg,
@@ -5738,10 +5756,10 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
                       </button>
                     );
                   })}
-                  {dayItems.length > 3 && (
-                    <button onClick={() => { setFilterStatus("all"); setView("list"); }}
-                      className="text-[10px] text-gray-500 hover:underline text-left pl-1">
-                      +{dayItems.length-3} więcej
+                  {dayItems.length > 2 && (
+                    <button onClick={(e) => { e.stopPropagation(); setDayModal(iso); }}
+                      className="text-[10px] text-blue-600 font-semibold hover:underline text-left pl-1">
+                      +{dayItems.length-2} więcej →
                     </button>
                   )}
                 </div>
@@ -5820,6 +5838,86 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
           )}
         </div>
       )}
+
+      {/* ── MODAL DNIA (wszystkie faktury na dany dzień) ── */}
+      {dayModal && (() => {
+        const items = filtered.filter(x => x.dueDate === dayModal);
+        const dayLabel = new Date(dayModal).toLocaleDateString("pl-PL", { weekday:"long", day:"numeric", month:"long", year:"numeric" });
+        // Sumy dnia per waluta per status
+        const daySums = {};
+        items.forEach(x => {
+          const cur = x.currency || "PLN";
+          if (!daySums[cur]) daySums[cur] = { topay: 0, paid: 0, overdue: 0 };
+          const companyPct = x.split?.enabled ? (Number(x.split.companyPct)||100) : 100;
+          daySums[cur][statusOf(x)] += (Number(x.brutto)||0) * companyPct / 100;
+        });
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setDayModal(null)}>
+            <div className="absolute inset-0 bg-black/40"></div>
+            <div className="relative bg-white rounded-xl max-w-3xl w-full max-h-[85vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+              <div className="p-5 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white z-10">
+                <div>
+                  <div className="font-bold text-lg capitalize">{dayLabel}</div>
+                  <div className="text-xs text-gray-500 mt-0.5">{items.length} {items.length===1?"faktura":"faktur"} do obsłużenia</div>
+                </div>
+                <button onClick={() => setDayModal(null)} className="w-8 h-8 rounded-lg hover:bg-gray-100 text-gray-500">✕</button>
+              </div>
+
+              {/* sumy dnia */}
+              <div className="px-5 py-3 bg-gray-50 border-b border-gray-200 flex flex-wrap gap-4 text-xs">
+                {Object.entries(daySums).map(([cur, s]) => (
+                  <div key={cur} className="flex gap-2 items-center">
+                    <div className="font-bold text-gray-700">{cur}:</div>
+                    {s.overdue > 0 && <span style={{color: STATUS_META.overdue.color}} className="font-semibold">przeterm. {fmtMoney(s.overdue,cur)}</span>}
+                    {s.topay   > 0 && <span style={{color: STATUS_META.topay.color}}   className="font-semibold">do zapł. {fmtMoney(s.topay,cur)}</span>}
+                    {s.paid    > 0 && <span style={{color: STATUS_META.paid.color}}    className="font-semibold">zapł. {fmtMoney(s.paid,cur)}</span>}
+                  </div>
+                ))}
+              </div>
+
+              <div className="p-4 space-y-2">
+                {items.map((x, idx) => {
+                  const st = statusOf(x);
+                  const companyPct = x.split?.enabled ? (Number(x.split.companyPct)||100) : 100;
+                  const share = (Number(x.brutto)||0) * companyPct / 100;
+                  const cat = PAY_CATEGORIES.find(c => c.id === x.category);
+                  return (
+                    <div key={idx} className="flex items-center gap-3 p-3 rounded-lg border hover:bg-gray-50"
+                      style={{ borderColor: STATUS_META[st].border, background: st==="paid" ? "#f9fafb" : "#fff" }}>
+                      <input type="checkbox" checked={st==="paid"} onChange={() => togglePaid(x)}
+                        className="w-5 h-5 cursor-pointer flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <div className={"font-semibold text-sm truncate "+(st==="paid"?"line-through text-gray-400":"")}>
+                            {x.contractor || "—"}
+                          </div>
+                          {cat && <span className="px-2 py-0.5 rounded text-[10px] font-semibold" style={{background: cat.color+"22", color: cat.color}}>{cat.label}</span>}
+                          {x.isInstance && <span className="text-[10px] text-gray-400">(cykliczna)</span>}
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold border"
+                            style={{background: STATUS_META[st].bg, borderColor: STATUS_META[st].border, color: STATUS_META[st].color}}>
+                            {STATUS_META[st].label}
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-500 truncate">
+                          {x.invoiceNumber ? `${x.invoiceNumber} · ` : ""}{x.description || ""}
+                        </div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <div className="font-bold text-sm tabular-nums">{fmtMoney(x.brutto, x.currency)}</div>
+                        {x.split?.enabled && <div className="text-[10px] text-gray-500">firma: {fmtMoney(share, x.currency)}</div>}
+                      </div>
+                      <button onClick={() => { setDetail(x); setDayModal(null); }}
+                        className="px-2 py-1 rounded text-[11px] font-semibold border border-gray-200 hover:bg-white flex-shrink-0">
+                        Szczegóły
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── PANEL BOCZNY: DETAIL ── */}
       {detail && (
@@ -6183,6 +6281,9 @@ function PaymentForm({ initial, onSave, onClose }) {
             )}
           </div>
 
+          {/* ── STATUS PŁATNOŚCI ── */}
+          <PaymentStatusBlock f={f} setF={setF} />
+
           <Field label="Notatka">
             <textarea value={f.note} onChange={e=>upd("note", e.target.value)} rows={2}
               className="w-full px-3 py-2 rounded-lg border border-gray-200" />
@@ -6196,6 +6297,124 @@ function PaymentForm({ initial, onSave, onClose }) {
             style={{background: "#111827"}}>Zapisz</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Blok statusu płatności w formularzu ──
+// Ad-hoc: prosty toggle Zapłacone/Do zapłaty (f.status)
+// Cykliczna: lista instancji z checkboxami (f.paidInstances)
+function PaymentStatusBlock({ f, setF }) {
+  const instances = useMemo(() => {
+    if (!f.recurring.enabled || !f.recurring.startDate) return [];
+    const out = [];
+    const start = new Date(f.recurring.startDate + "T00:00:00");
+    const end = f.recurring.endDate ? new Date(f.recurring.endDate + "T00:00:00") : null;
+    const now = new Date();
+    // Okno: od startu do max(endDate, +24m od dziś)
+    const hardEnd = end || new Date(now.getFullYear(), now.getMonth()+24, 1);
+    if (f.recurring.frequency === "monthly") {
+      let d = new Date(start.getFullYear(), start.getMonth(), 1);
+      let guard = 0;
+      while (d <= hardEnd && guard++ < 120) {
+        const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+        out.push({ key, label: d.toLocaleDateString("pl-PL", {month:"long", year:"numeric"}) });
+        d = new Date(d.getFullYear(), d.getMonth()+1, 1);
+      }
+    } else if (f.recurring.frequency === "yearly") {
+      let d = new Date(start.getFullYear(), start.getMonth(), 1);
+      let guard = 0;
+      while (d <= hardEnd && guard++ < 30) {
+        const key = `${d.getFullYear()}`;
+        out.push({ key, label: String(d.getFullYear()) });
+        d = new Date(d.getFullYear()+1, d.getMonth(), 1);
+      }
+    }
+    return out;
+  }, [f.recurring.enabled, f.recurring.startDate, f.recurring.endDate, f.recurring.frequency]);
+
+  if (!f.recurring.enabled) {
+    // AD-HOC: prosty toggle
+    const isPaid = f.status === "paid";
+    return (
+      <div className="rounded-lg border border-gray-200 p-3 bg-gray-50">
+        <div className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">Status płatności</div>
+        <div className="flex gap-2">
+          <button type="button"
+            onClick={() => setF(p => ({ ...p, status: "topay" }))}
+            className="flex-1 px-3 py-2 rounded-lg text-sm font-semibold border-2 transition-all"
+            style={{
+              background: !isPaid ? "#fef3c7" : "#fff",
+              borderColor: !isPaid ? "#f59e0b" : "#e5e7eb",
+              color: !isPaid ? "#92400e" : "#6b7280",
+            }}>
+            ⏰ Do zapłaty
+          </button>
+          <button type="button"
+            onClick={() => setF(p => ({ ...p, status: "paid" }))}
+            className="flex-1 px-3 py-2 rounded-lg text-sm font-semibold border-2 transition-all"
+            style={{
+              background: isPaid ? "#dcfce7" : "#fff",
+              borderColor: isPaid ? "#10b981" : "#e5e7eb",
+              color: isPaid ? "#065f46" : "#6b7280",
+            }}>
+            ✅ Zapłacone
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // CYKLICZNA: lista instancji
+  const paidSet = new Set(f.paidInstances || []);
+  const toggleInst = (key) => {
+    setF(p => {
+      const set = new Set(p.paidInstances || []);
+      if (set.has(key)) set.delete(key);
+      else set.add(key);
+      return { ...p, paidInstances: Array.from(set) };
+    });
+  };
+  const markAll = () => setF(p => ({ ...p, paidInstances: instances.map(i => i.key) }));
+  const clearAll = () => setF(p => ({ ...p, paidInstances: [] }));
+
+  return (
+    <div className="rounded-lg border border-gray-200 p-3 bg-gray-50">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+          Status per instancja ({paidSet.size}/{instances.length} zapłacone)
+        </div>
+        <div className="flex gap-1">
+          <button type="button" onClick={markAll}
+            className="text-[10px] px-2 py-0.5 rounded border border-gray-300 hover:bg-white">wszystkie ✓</button>
+          <button type="button" onClick={clearAll}
+            className="text-[10px] px-2 py-0.5 rounded border border-gray-300 hover:bg-white">wyczyść</button>
+        </div>
+      </div>
+      {instances.length === 0 ? (
+        <div className="text-xs text-gray-400 py-2">Ustaw datę startu, aby zobaczyć instancje</div>
+      ) : (
+        <div className="max-h-48 overflow-y-auto border border-gray-200 rounded bg-white">
+          {instances.map(inst => {
+            const paid = paidSet.has(inst.key);
+            return (
+              <label key={inst.key}
+                className="flex items-center gap-2 px-3 py-1.5 border-b border-gray-100 last:border-b-0 hover:bg-gray-50 cursor-pointer text-sm">
+                <input type="checkbox" checked={paid} onChange={() => toggleInst(inst.key)}
+                  className="w-4 h-4 cursor-pointer" />
+                <span className={"capitalize "+(paid?"line-through text-gray-400":"text-gray-700")}>{inst.label}</span>
+                <span className="ml-auto text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                  style={{
+                    background: paid ? "#dcfce7" : "#fef3c7",
+                    color: paid ? "#065f46" : "#92400e",
+                  }}>
+                  {paid ? "zapłacone" : "do zapłaty"}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
