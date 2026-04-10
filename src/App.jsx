@@ -1445,9 +1445,16 @@ function App({ user, role, appUsers = [] }) {
       const midDate = `2025-${monthStr}-15`;
       const vehMonthSum = Object.values(EXCEL_VEH_C).reduce((s, a) => s + a[m], 0);
 
-      Object.keys(EXCEL_FR).forEach(vid => {
+      // Iterujemy po WSZYSTKICH pojazdach (łącznie z archiwalnymi),
+      // nie tylko v1-v6 z Excela. Dla pojazdów spoza Excela target = 0,
+      // żeby ich frachty/koszty 2025 zostały wyzerowane korektą.
+      const allVehicleIds = [...new Set([
+        ...vehicles.map(v => v.id),
+        ...Object.keys(EXCEL_FR),
+      ])];
+      allVehicleIds.forEach(vid => {
         // Frachty — używamy tej samej logiki co dynData (dataZaladunku || dataZlecenia)
-        const targetFr = EXCEL_FR[vid][m];
+        const targetFr = EXCEL_FR[vid] ? EXCEL_FR[vid][m] : 0;
         const currFr = cleanFr
           .filter(f => {
             if (f.vehicleId !== vid) return false;
@@ -1470,9 +1477,9 @@ function App({ user, role, appUsers = [] }) {
           frCount++;
         }
 
-        // Koszty (scaled to match fleet total)
-        const vehCost = EXCEL_VEH_C[vid][m];
-        const targetC = vehMonthSum > 0
+        // Koszty (scaled to match fleet total) — target=0 dla pojazdów spoza Excela
+        const vehCost = EXCEL_VEH_C[vid] ? EXCEL_VEH_C[vid][m] : 0;
+        const targetC = vehMonthSum > 0 && EXCEL_VEH_C[vid]
           ? Math.round(vehCost * EXCEL_FLEET_C[m] / vehMonthSum)
           : vehCost;
         const currC = cleanC
