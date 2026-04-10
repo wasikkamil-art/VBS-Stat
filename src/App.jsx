@@ -733,7 +733,7 @@ function exportCostsToExcel(costs, vehicles, categories, filterYear, filterMonth
 
 // ── Per-role default tab access (fallback kiedy user nie ma jeszcze allowedTabs) ──
 const DEFAULT_TABS_BY_ROLE = {
-  admin:      ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","users","email","sprawy","chat"],
+  admin:      ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","payments","users","email","sprawy","chat"],
   dyspozytor: ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","sprawy","chat"],
   podglad:    ["dashboard","frachty","vehicles","serwis","docs","imi","chat"],
 };
@@ -777,6 +777,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   const [rentRecords, setRentRecords] = useState([]);
   const [frachtyList, setFrachtyList] = useState([]);
   const [sprawyList, setSprawyList] = useState([]);
+  const [payments, setPayments] = useState([]);
   const [chatUnreadCount, setChatUnreadCount] = useState(0);      // ile pokojów z nieprzeczytanymi
   const [chatUnreadMsgCount, setChatUnreadMsgCount] = useState(0); // ile wiadomości łącznie nieprzeczytanych
   const [operacyjne, setOperacyjne] = useState([]);
@@ -895,6 +896,14 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     const unsub = onSnapshot(q, (snap) => {
       setSprawyList(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }, (err) => console.error("sprawy onSnapshot error", err));
+    return () => unsub();
+  }, []);
+
+  // ── PŁATNOŚCI — osobna kolekcja (moduł księgowy, niezależny od Rejestru kosztów) ──
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "payments"), (snap) => {
+      setPayments(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error("payments onSnapshot error", err));
     return () => unsub();
   }, []);
 
@@ -1958,13 +1967,14 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             {[
               { id: "dashboard", label: "Przegląd", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></svg> },
               { id: "frachty", label: "Frachty", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 17V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a1 1 0 0 0 1 1h1.5"/><path d="M13 8h4l4 4v4h-1.5"/><circle cx="7.5" cy="17.5" r="2.5"/><circle cx="17" cy="17.5" r="2.5"/><path d="M10 17.5h4.5"/></svg> },
-              { id: "fv", label: "FV / Płatności", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 8h6"/><path d="M14 12c0-1.5-3-1.5-3 0s3 1.5 3 0"/><path d="M9 17h3"/></svg> },
+              { id: "fv", label: "Faktury sprzedaży", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 8h6"/><path d="M14 12c0-1.5-3-1.5-3 0s3 1.5 3 0"/><path d="M9 17h3"/></svg> },
               { id: "costs", label: "Koszty", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="13" rx="2.5"/><path d="M2 10h20"/><path d="M6 15h4"/></svg> },
               { id: "vehicles", label: "Pojazdy", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="6" width="11" height="10" rx="2"/><path d="M14 10h3.5l3 3v3a1 1 0 0 1-1 1h-1"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M9 17h6"/><path d="M3 16h1.5"/></svg> },
               { id: "serwis", label: "Serwis", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> },
               { id: "rent", label: "Rentowność", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg> },
               { id: "docs", label: "Dokumenty", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> },
               { id: "imi", label: "IMI / SIPSI", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> },
+              { id: "payments", label: "Płatności", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/></svg> },
               { id: "users", label: "Użytkownicy", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
               { id: "email", label: "Email statusy", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> },
               { id: "sprawy", label: "Sprawy", badge: sprawyList.filter(s => !['zamknieta','wygrana','przegrana'].includes(s.status) && (s.przypisani||[]).includes(user?.email)).length || null, icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v6"/><line x1="7" y1="13" x2="12" y2="13"/><line x1="7" y1="17" x2="10" y2="17"/></svg> },
@@ -3042,6 +3052,14 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               vehicles={vehicles}
               onAdd={(r) => setImiRecords(p => [...p, { ...r, id: uid() }])}
               onDelete={(id) => setImiRecords(p => p.filter(r => r.id !== id))}
+            />
+          )}
+
+          {tab === "payments" && canSeeTab("payments") && (
+            <PaymentsTab
+              payments={payments}
+              showToast={showToast}
+              isAdmin={isAdmin}
             />
           )}
 
@@ -5172,13 +5190,14 @@ function EmailStatusTab({ showToast }) {
 const ASSIGNABLE_TABS = [
   { id: "dashboard", label: "Przegląd",      icon: "📊" },
   { id: "frachty",   label: "Frachty",       icon: "🚛" },
-  { id: "fv",        label: "FV / Płatności",icon: "💰" },
+  { id: "fv",        label: "Faktury sprzedaży", icon: "💰" },
   { id: "costs",     label: "Koszty",        icon: "💳" },
   { id: "vehicles",  label: "Pojazdy",       icon: "🚚" },
   { id: "serwis",    label: "Serwis",        icon: "🔧" },
   { id: "rent",      label: "Rentowność",    icon: "📈" },
   { id: "docs",      label: "Dokumenty",     icon: "📄" },
   { id: "imi",       label: "IMI / SIPSI",   icon: "🌍" },
+  { id: "payments",  label: "Płatności",     icon: "🗓️" },
   { id: "sprawy",    label: "Sprawy",        icon: "📋" },
   { id: "chat",      label: "Czat",          icon: "💬" },
 ];
@@ -5404,6 +5423,669 @@ function UsersTab({ currentUid, showToast }) {
       <div className="mt-4 px-1 text-xs text-gray-400">
         💡 Nowy użytkownik pojawi się na liście po pierwszym zalogowaniu. Domyślnie otrzymuje rolę <strong>Podgląd</strong>.
       </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PAYMENTS TAB — moduł płatności (oddzielny od Rejestru kosztów)
+// ═══════════════════════════════════════════════════════════════════════════════
+const PAY_CATEGORIES = [
+  { id: "leasing",      label: "Leasing",       color: "#6366f1" },
+  { id: "ubezpieczenie",label: "Ubezpieczenie", color: "#0ea5e9" },
+  { id: "paliwo",       label: "Paliwo",        color: "#f59e0b" },
+  { id: "czesci",       label: "Części",        color: "#10b981" },
+  { id: "uslugi",       label: "Usługi",        color: "#ec4899" },
+  { id: "inne",         label: "Inne",          color: "#64748b" },
+];
+const PAY_CURRENCIES = ["PLN", "EUR", "USD"];
+const PAY_FREQUENCIES = [
+  { id: "monthly", label: "Co miesiąc" },
+  { id: "yearly",  label: "Co rok" },
+];
+const fmtMoney = (n, cur) => `${(Number(n)||0).toLocaleString("pl-PL",{minimumFractionDigits:2,maximumFractionDigits:2})} ${cur||""}`.trim();
+const todayISO = () => new Date().toISOString().slice(0,10);
+const addMonthsISO = (iso, n) => { const d = new Date(iso); d.setMonth(d.getMonth()+n); return d.toISOString().slice(0,10); };
+const addYearsISO  = (iso, n) => { const d = new Date(iso); d.setFullYear(d.getFullYear()+n); return d.toISOString().slice(0,10); };
+const monthKey = (iso) => iso.slice(0,7);     // "YYYY-MM"
+const yearKey  = (iso) => iso.slice(0,4);     // "YYYY"
+
+// Z jednego dokumentu (ad-hoc albo szablon cykliczny) buduje listę "instancji widocznych"
+// — pojedynczy wpis zwraca 1 instancję, szablon cykliczny zwraca N wg częstotliwości.
+function expandPayment(p, windowStartISO, windowEndISO) {
+  if (!p?.recurring?.enabled) {
+    // Ad-hoc: jedna instancja
+    return [{
+      ...p,
+      instanceKey: "one",
+      dueDate: p.dueDate || p.issueDate,
+      isInstance: false,
+    }];
+  }
+  const { startDate, endDate, frequency } = p.recurring;
+  if (!startDate) return [];
+  const step = frequency === "yearly" ? addYearsISO : addMonthsISO;
+  const out = [];
+  let cursor = startDate;
+  const hardEnd = endDate || addYearsISO(startDate, 5); // bezpiecznik
+  let guard = 0;
+  while (cursor <= hardEnd && guard < 240) {
+    // obcinamy do okna widoczności
+    if (cursor >= windowStartISO && cursor <= windowEndISO) {
+      const key = frequency === "yearly" ? yearKey(cursor) : monthKey(cursor);
+      out.push({
+        ...p,
+        instanceKey: key,
+        dueDate: cursor,
+        isInstance: true,
+        // status instancji czyta z p.paidInstances
+        instanceStatus: (p.paidInstances || []).includes(key) ? "paid" : "topay",
+      });
+    }
+    cursor = step(cursor, 1);
+    guard++;
+  }
+  return out;
+}
+
+function statusOf(inst) {
+  const base = inst.isInstance ? inst.instanceStatus : (inst.status || "topay");
+  if (base === "paid") return "paid";
+  if (inst.dueDate && inst.dueDate < todayISO()) return "overdue";
+  return "topay";
+}
+const STATUS_META = {
+  topay:   { label: "Do zapłaty",     bg: "#eff6ff", border: "#bfdbfe", color: "#1d4ed8" },
+  paid:    { label: "Zapłacone",      bg: "#f0fdf4", border: "#bbf7d0", color: "#15803d" },
+  overdue: { label: "Przeterminowane",bg: "#fef2f2", border: "#fecaca", color: "#b91c1c" },
+};
+
+function PaymentsTab({ payments, showToast, isAdmin }) {
+  const [view, setView] = useState("calendar"); // "calendar" | "list"
+  const [cursorYM, setCursorYM] = useState(() => new Date().toISOString().slice(0,7));
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterCurrency, setFilterCurrency] = useState("all");
+  const [filterCategory, setFilterCategory] = useState("all");
+  const [showForm, setShowForm] = useState(false);
+  const [editRec, setEditRec] = useState(null);
+  const [detail, setDetail] = useState(null); // klik w chip/wiersz
+
+  // ── Okno: 6 miesięcy wstecz, 18 w przód (dla generatora cyklicznych) ──
+  const windowStart = useMemo(() => {
+    const d = new Date(cursorYM + "-01");
+    d.setMonth(d.getMonth() - 6);
+    return d.toISOString().slice(0,10);
+  }, [cursorYM]);
+  const windowEnd = useMemo(() => {
+    const d = new Date(cursorYM + "-01");
+    d.setMonth(d.getMonth() + 18);
+    return d.toISOString().slice(0,10);
+  }, [cursorYM]);
+
+  // ── Ekspansja wszystkich rekordów do instancji ──
+  const allInstances = useMemo(() => {
+    return payments.flatMap(p => expandPayment(p, windowStart, windowEnd));
+  }, [payments, windowStart, windowEnd]);
+
+  // ── Instancje widoczne w bieżącym miesiącu (dla sum + kalendarza) ──
+  const monthInstances = useMemo(() => {
+    return allInstances.filter(i => i.dueDate && i.dueDate.slice(0,7) === cursorYM);
+  }, [allInstances, cursorYM]);
+
+  // ── Sumy per waluta (liczymy udział firmy po splicie) ──
+  const sums = useMemo(() => {
+    const acc = {}; // { currency: { topay, paid, overdue } }
+    monthInstances.forEach(i => {
+      const cur = i.currency || "PLN";
+      if (!acc[cur]) acc[cur] = { topay: 0, paid: 0, overdue: 0 };
+      const total = Number(i.brutto) || 0;
+      const companyPct = i.split?.enabled ? (Number(i.split.companyPct)||100) : 100;
+      const share = total * companyPct / 100;
+      acc[cur][statusOf(i)] += share;
+    });
+    return acc;
+  }, [monthInstances]);
+
+  // ── Filtrowanie dla listy i kalendarza ──
+  const filtered = useMemo(() => {
+    return monthInstances.filter(i => {
+      if (filterStatus !== "all" && statusOf(i) !== filterStatus) return false;
+      if (filterCurrency !== "all" && (i.currency||"PLN") !== filterCurrency) return false;
+      if (filterCategory !== "all" && i.category !== filterCategory) return false;
+      return true;
+    }).sort((a,b) => (a.dueDate||"").localeCompare(b.dueDate||""));
+  }, [monthInstances, filterStatus, filterCurrency, filterCategory]);
+
+  // ── Mark as paid / unpaid ──
+  async function togglePaid(inst) {
+    try {
+      if (inst.isInstance) {
+        // Cykliczna: dopisz/usuń klucz instancji z paidInstances szablonu
+        const current = payments.find(p => p.id === inst.id);
+        const set = new Set(current?.paidInstances || []);
+        if (set.has(inst.instanceKey)) set.delete(inst.instanceKey);
+        else set.add(inst.instanceKey);
+        await updateDoc(doc(db, "payments", inst.id), { paidInstances: Array.from(set) });
+      } else {
+        // Ad-hoc: zmień status na doc
+        const newStatus = statusOf(inst) === "paid" ? "topay" : "paid";
+        await updateDoc(doc(db, "payments", inst.id), { status: newStatus });
+      }
+      showToast("✅ Zaktualizowano");
+    } catch(e) {
+      console.error("togglePaid", e);
+      showToast("❌ Błąd aktualizacji");
+    }
+  }
+
+  async function saveForm(data) {
+    try {
+      if (editRec) {
+        await updateDoc(doc(db, "payments", editRec.id), data);
+        showToast("✅ Zapisano zmiany");
+      } else {
+        await addDoc(collection(db, "payments"), { ...data, createdAt: new Date().toISOString() });
+        showToast("✅ Dodano fakturę");
+      }
+      setShowForm(false);
+      setEditRec(null);
+    } catch(e) {
+      console.error("savePayment", e);
+      showToast("❌ Błąd zapisu");
+    }
+  }
+
+  async function deleteRec(id) {
+    if (!confirm("Usunąć tę fakturę?\n(Dla faktury cyklicznej usunie cały szablon — wszystkie instancje znikną)")) return;
+    try {
+      await deleteDoc(doc(db, "payments", id));
+      showToast("✅ Usunięto");
+      setDetail(null);
+    } catch(e) {
+      console.error("deletePayment", e);
+      showToast("❌ Błąd usuwania");
+    }
+  }
+
+  // ── Nawigacja miesięcy ──
+  const [curYear, curMon] = cursorYM.split("-").map(Number);
+  const monthLabel = new Date(curYear, curMon-1, 1).toLocaleDateString("pl-PL", { year: "numeric", month: "long" });
+  const prevMonth = () => { const d = new Date(curYear, curMon-2, 1); setCursorYM(d.toISOString().slice(0,7)); };
+  const nextMonth = () => { const d = new Date(curYear, curMon, 1); setCursorYM(d.toISOString().slice(0,7)); };
+
+  // ── Kalendarz: siatka dni ──
+  const daysInMonth = new Date(curYear, curMon, 0).getDate();
+  const firstDow = new Date(curYear, curMon-1, 1).getDay(); // 0=nd
+  const offset = (firstDow + 6) % 7; // tak żeby pon=0
+
+  return (
+    <div>
+      {/* ── HEADER ── */}
+      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+        <div>
+          <PageTitle>Płatności</PageTitle>
+          <div className="text-xs text-gray-500 mt-1">Kalendarz faktur do zapłaty · moduł niezależny od Rejestru kosztów</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+            <button onClick={() => setView("calendar")} className="px-3 py-2 text-sm font-semibold"
+              style={{background: view==="calendar"?"#111827":"#fff", color: view==="calendar"?"#fff":"#6b7280"}}>🗓️ Kalendarz</button>
+            <button onClick={() => setView("list")} className="px-3 py-2 text-sm font-semibold"
+              style={{background: view==="list"?"#111827":"#fff", color: view==="list"?"#fff":"#6b7280"}}>📋 Lista</button>
+          </div>
+          <button onClick={() => { setEditRec(null); setShowForm(true); }}
+            className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+            style={{ background: "#111827" }}>+ Dodaj fakturę</button>
+        </div>
+      </div>
+
+      {/* ── NAWIGACJA MIESIĄCA + SUMY ── */}
+      <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-3">
+            <button onClick={prevMonth} className="w-9 h-9 rounded-lg border border-gray-200 hover:bg-gray-50 text-lg">←</button>
+            <div className="text-lg font-bold text-gray-900 capitalize min-w-[180px] text-center">{monthLabel}</div>
+            <button onClick={nextMonth} className="w-9 h-9 rounded-lg border border-gray-200 hover:bg-gray-50 text-lg">→</button>
+            <button onClick={() => setCursorYM(new Date().toISOString().slice(0,7))}
+              className="ml-2 px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-200 hover:bg-gray-50">Dziś</button>
+          </div>
+          <div className="text-xs text-gray-500">{monthInstances.length} pozycji</div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {["topay","overdue","paid"].map(st => (
+            <div key={st} className="rounded-lg p-3 border"
+              style={{ background: STATUS_META[st].bg, borderColor: STATUS_META[st].border }}>
+              <div className="text-xs font-semibold uppercase tracking-wide mb-2" style={{color: STATUS_META[st].color}}>
+                {STATUS_META[st].label}
+              </div>
+              <div className="space-y-1">
+                {PAY_CURRENCIES.map(cur => {
+                  const v = sums[cur]?.[st] || 0;
+                  if (!v) return null;
+                  return (
+                    <div key={cur} className="text-sm font-semibold" style={{color: STATUS_META[st].color}}>
+                      {fmtMoney(v, cur)}
+                    </div>
+                  );
+                })}
+                {!PAY_CURRENCIES.some(cur => sums[cur]?.[st]) && (
+                  <div className="text-sm text-gray-400">—</div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── FILTRY ── */}
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}
+          className="px-3 py-2 rounded-lg text-sm border border-gray-200 bg-white">
+          <option value="all">Wszystkie statusy</option>
+          <option value="topay">Do zapłaty</option>
+          <option value="overdue">Przeterminowane</option>
+          <option value="paid">Zapłacone</option>
+        </select>
+        <select value={filterCurrency} onChange={e=>setFilterCurrency(e.target.value)}
+          className="px-3 py-2 rounded-lg text-sm border border-gray-200 bg-white">
+          <option value="all">Wszystkie waluty</option>
+          {PAY_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select value={filterCategory} onChange={e=>setFilterCategory(e.target.value)}
+          className="px-3 py-2 rounded-lg text-sm border border-gray-200 bg-white">
+          <option value="all">Wszystkie kategorie</option>
+          {PAY_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+        </select>
+      </div>
+
+      {/* ── KALENDARZ ── */}
+      {view === "calendar" && (
+        <div className="bg-white border border-gray-200 rounded-xl p-4">
+          <div className="grid grid-cols-7 gap-1 mb-2">
+            {["Pn","Wt","Śr","Cz","Pt","Sb","Nd"].map(d => (
+              <div key={d} className="text-xs font-bold text-gray-500 text-center py-2">{d}</div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 gap-1">
+            {Array.from({length: offset}).map((_,i) => (
+              <div key={"e"+i} className="min-h-[90px] rounded-lg bg-gray-50/50"></div>
+            ))}
+            {Array.from({length: daysInMonth}).map((_,i) => {
+              const day = i+1;
+              const iso = `${curYear}-${String(curMon).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+              const dayItems = filtered.filter(x => x.dueDate === iso);
+              const isToday = iso === todayISO();
+              return (
+                <div key={day} className="min-h-[90px] rounded-lg border border-gray-100 p-1.5 flex flex-col gap-1"
+                  style={{ background: isToday ? "#fef9c3" : "#fff" }}>
+                  <div className="text-xs font-bold text-gray-500">{day}</div>
+                  {dayItems.slice(0,3).map((x, idx) => {
+                    const st = statusOf(x);
+                    const companyPct = x.split?.enabled ? (Number(x.split.companyPct)||100) : 100;
+                    const share = (Number(x.brutto)||0) * companyPct / 100;
+                    return (
+                      <button key={idx} onClick={() => setDetail(x)}
+                        className="text-left px-1.5 py-1 rounded text-[10px] truncate border hover:opacity-80"
+                        style={{
+                          background: STATUS_META[st].bg,
+                          borderColor: STATUS_META[st].border,
+                          color: STATUS_META[st].color,
+                        }}
+                        title={`${x.contractor} · ${fmtMoney(x.brutto,x.currency)}${x.split?.enabled?` (firma ${companyPct}%)`:""}`}>
+                        <div className="font-semibold truncate">{x.contractor || "—"}</div>
+                        <div className="opacity-80 truncate">{fmtMoney(share, x.currency)}</div>
+                      </button>
+                    );
+                  })}
+                  {dayItems.length > 3 && (
+                    <button onClick={() => { setFilterStatus("all"); setView("list"); }}
+                      className="text-[10px] text-gray-500 hover:underline text-left pl-1">
+                      +{dayItems.length-3} więcej
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── LISTA ── */}
+      {view === "list" && (
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          {filtered.length === 0 ? (
+            <div className="p-8 text-center text-gray-400 text-sm">Brak faktur w tym miesiącu przy wybranych filtrach</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-600">
+                  <th className="text-left px-3 py-2 font-semibold">Termin</th>
+                  <th className="text-left px-3 py-2 font-semibold">Kontrahent</th>
+                  <th className="text-left px-3 py-2 font-semibold">Nr FV</th>
+                  <th className="text-left px-3 py-2 font-semibold">Kategoria</th>
+                  <th className="text-right px-3 py-2 font-semibold">Netto</th>
+                  <th className="text-right px-3 py-2 font-semibold">Brutto</th>
+                  <th className="text-right px-3 py-2 font-semibold">Udział firmy</th>
+                  <th className="text-center px-3 py-2 font-semibold">Status</th>
+                  <th className="text-center px-3 py-2 font-semibold">Akcje</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((x, i) => {
+                  const st = statusOf(x);
+                  const companyPct = x.split?.enabled ? (Number(x.split.companyPct)||100) : 100;
+                  const share = (Number(x.brutto)||0) * companyPct / 100;
+                  const cat = PAY_CATEGORIES.find(c => c.id === x.category);
+                  return (
+                    <tr key={x.id+"-"+x.instanceKey} className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
+                      onClick={() => setDetail(x)}>
+                      <td className="px-3 py-2">{x.dueDate}</td>
+                      <td className="px-3 py-2 font-medium">
+                        {x.contractor || "—"}
+                        {x.isInstance && <span className="ml-1 text-[10px] text-gray-400">(cykliczna)</span>}
+                      </td>
+                      <td className="px-3 py-2 text-gray-600">{x.invoiceNumber || "—"}</td>
+                      <td className="px-3 py-2">
+                        {cat && <span className="px-2 py-0.5 rounded text-[10px] font-semibold" style={{background: cat.color+"22", color: cat.color}}>{cat.label}</span>}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(x.netto, x.currency)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums font-semibold">{fmtMoney(x.brutto, x.currency)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {x.split?.enabled ? (
+                          <div>
+                            <div className="font-semibold">{fmtMoney(share, x.currency)}</div>
+                            <div className="text-[10px] text-gray-500">{companyPct}% · {x.split.partnerName||"partner"} {100-companyPct}%</div>
+                          </div>
+                        ) : fmtMoney(x.brutto, x.currency)}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold border"
+                          style={{background: STATUS_META[st].bg, borderColor: STATUS_META[st].border, color: STATUS_META[st].color}}>
+                          {STATUS_META[st].label}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <button onClick={(e) => { e.stopPropagation(); togglePaid(x); }}
+                          className="px-2 py-1 rounded text-[11px] font-semibold border hover:bg-gray-50"
+                          style={{borderColor: "#d1d5db"}}>
+                          {st === "paid" ? "↩ Cofnij" : "✓ Zapłacone"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* ── PANEL BOCZNY: DETAIL ── */}
+      {detail && (
+        <div className="fixed inset-0 z-50 flex justify-end" onClick={() => setDetail(null)}>
+          <div className="absolute inset-0 bg-black/30"></div>
+          <div className="relative w-full max-w-md bg-white h-full overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white z-10">
+              <div className="font-bold text-lg">Szczegóły faktury</div>
+              <button onClick={() => setDetail(null)} className="w-8 h-8 rounded-lg hover:bg-gray-100 text-gray-500">✕</button>
+            </div>
+            <div className="p-5 space-y-3 text-sm">
+              <Row label="Kontrahent"   value={detail.contractor} />
+              <Row label="Numer FV"     value={detail.invoiceNumber} />
+              <Row label="Opis"         value={detail.description} />
+              <Row label="Kategoria"    value={PAY_CATEGORIES.find(c=>c.id===detail.category)?.label} />
+              <Row label="Data wyst."   value={detail.issueDate} />
+              <Row label="Termin"       value={detail.dueDate} />
+              <Row label="Netto"        value={fmtMoney(detail.netto, detail.currency)} />
+              <Row label="Brutto"       value={fmtMoney(detail.brutto, detail.currency)} />
+              {detail.split?.enabled && (
+                <>
+                  <Row label="Udział firmy" value={`${detail.split.companyPct}% = ${fmtMoney((Number(detail.brutto)||0)*(Number(detail.split.companyPct)||100)/100, detail.currency)}`} />
+                  <Row label="Partner" value={`${detail.split.partnerName||"—"} (${100-(Number(detail.split.companyPct)||100)}%)`} />
+                </>
+              )}
+              {detail.recurring?.enabled && (
+                <Row label="Cykl" value={`${PAY_FREQUENCIES.find(f=>f.id===detail.recurring.frequency)?.label || "cykl"} · ${detail.recurring.startDate} → ${detail.recurring.endDate || "∞"}`} />
+              )}
+              {detail.note && <Row label="Notatka" value={detail.note} />}
+              <div className="pt-3 flex gap-2">
+                <button onClick={() => togglePaid(detail)}
+                  className="flex-1 px-3 py-2 rounded-lg text-sm font-semibold text-white"
+                  style={{background: statusOf(detail)==="paid" ? "#64748b" : "#10b981"}}>
+                  {statusOf(detail)==="paid" ? "↩ Cofnij zapłacone" : "✓ Oznacz zapłacone"}
+                </button>
+                <button onClick={() => { setEditRec(payments.find(p=>p.id===detail.id)); setShowForm(true); setDetail(null); }}
+                  className="px-3 py-2 rounded-lg text-sm font-semibold border border-gray-200 hover:bg-gray-50">Edytuj</button>
+                <button onClick={() => deleteRec(detail.id)}
+                  className="px-3 py-2 rounded-lg text-sm font-semibold border border-red-200 text-red-600 hover:bg-red-50">Usuń</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── FORMULARZ ── */}
+      {showForm && (
+        <PaymentForm
+          initial={editRec}
+          onSave={saveForm}
+          onClose={() => { setShowForm(false); setEditRec(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Mały helper-wiersz w panelu detalu
+function Row({ label, value }) {
+  if (!value) return null;
+  return (
+    <div>
+      <div className="text-xs text-gray-500 uppercase tracking-wide">{label}</div>
+      <div className="font-medium text-gray-900">{value}</div>
+    </div>
+  );
+}
+
+// Formularz dodawania / edycji faktury
+function PaymentForm({ initial, onSave, onClose }) {
+  const [f, setF] = useState(() => ({
+    contractor:    initial?.contractor    || "",
+    invoiceNumber: initial?.invoiceNumber || "",
+    description:   initial?.description   || "",
+    category:      initial?.category      || "inne",
+    currency:      initial?.currency      || "PLN",
+    netto:         initial?.netto         || "",
+    brutto:        initial?.brutto        || "",
+    issueDate:     initial?.issueDate     || todayISO(),
+    dueDate:       initial?.dueDate       || todayISO(),
+    status:        initial?.status        || "topay",
+    note:          initial?.note          || "",
+    recurring: {
+      enabled:    !!initial?.recurring?.enabled,
+      startDate:  initial?.recurring?.startDate || todayISO(),
+      endDate:    initial?.recurring?.endDate   || "",
+      frequency:  initial?.recurring?.frequency || "monthly",
+    },
+    split: {
+      enabled:      !!initial?.split?.enabled,
+      companyPct:   initial?.split?.companyPct ?? 100,
+      partnerName:  initial?.split?.partnerName || "",
+    },
+    paidInstances: initial?.paidInstances || [],
+  }));
+  const upd = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const updSub = (sub, k, v) => setF(p => ({ ...p, [sub]: { ...p[sub], [k]: v } }));
+
+  function submit() {
+    if (!f.contractor.trim()) { alert("Uzupełnij kontrahenta"); return; }
+    if (!f.brutto) { alert("Uzupełnij kwotę brutto"); return; }
+    if (f.split.enabled) {
+      const pct = Number(f.split.companyPct);
+      if (isNaN(pct) || pct < 0 || pct > 100) { alert("Udział firmy musi być między 0 a 100"); return; }
+    }
+    const data = {
+      contractor:    f.contractor.trim(),
+      invoiceNumber: f.invoiceNumber.trim(),
+      description:   f.description.trim(),
+      category:      f.category,
+      currency:      f.currency,
+      netto:         Number(f.netto) || 0,
+      brutto:        Number(f.brutto) || 0,
+      issueDate:     f.issueDate,
+      dueDate:       f.dueDate,
+      status:        f.status,
+      note:          f.note.trim(),
+      recurring:     f.recurring.enabled ? {
+        enabled: true,
+        startDate: f.recurring.startDate,
+        endDate:   f.recurring.endDate || null,
+        frequency: f.recurring.frequency,
+      } : { enabled: false },
+      split: f.split.enabled ? {
+        enabled: true,
+        companyPct: Number(f.split.companyPct) || 100,
+        partnerName: f.split.partnerName.trim(),
+        partnerPct: 100 - (Number(f.split.companyPct) || 100),
+      } : { enabled: false },
+      paidInstances: f.paidInstances,
+    };
+    onSave(data);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40"></div>
+      <div className="relative bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="p-5 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white z-10">
+          <div className="font-bold text-lg">{initial ? "Edycja faktury" : "Nowa faktura"}</div>
+          <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-gray-100 text-gray-500">✕</button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Kontrahent *">
+              <input value={f.contractor} onChange={e=>upd("contractor", e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200" placeholder="np. Leasing Mercedes" />
+            </Field>
+            <Field label="Numer FV">
+              <input value={f.invoiceNumber} onChange={e=>upd("invoiceNumber", e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200" />
+            </Field>
+          </div>
+          <Field label="Opis">
+            <input value={f.description} onChange={e=>upd("description", e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-gray-200" placeholder="np. Felgi do Forda / Rata leasingu ST12345" />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Kategoria">
+              <select value={f.category} onChange={e=>upd("category", e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200">
+                {PAY_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </select>
+            </Field>
+            <Field label="Waluta">
+              <select value={f.currency} onChange={e=>upd("currency", e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200">
+                {PAY_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Netto">
+              <input type="number" step="0.01" value={f.netto} onChange={e=>upd("netto", e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200" />
+            </Field>
+            <Field label="Brutto *">
+              <input type="number" step="0.01" value={f.brutto} onChange={e=>upd("brutto", e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200" />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Data wystawienia">
+              <input type="date" value={f.issueDate} onChange={e=>upd("issueDate", e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200" />
+            </Field>
+            <Field label="Termin płatności">
+              <input type="date" value={f.dueDate} onChange={e=>upd("dueDate", e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200" />
+            </Field>
+          </div>
+
+          {/* ── CYKLICZNA ── */}
+          <div className="rounded-lg border border-gray-200 p-3 bg-gray-50">
+            <label className="flex items-center gap-2 mb-2 cursor-pointer">
+              <input type="checkbox" checked={f.recurring.enabled}
+                onChange={e => updSub("recurring","enabled", e.target.checked)} />
+              <span className="font-semibold text-sm">Faktura cykliczna (leasing, ubezpieczenie...)</span>
+            </label>
+            {f.recurring.enabled && (
+              <div className="grid grid-cols-3 gap-3 mt-2">
+                <Field label="Częstotliwość">
+                  <select value={f.recurring.frequency} onChange={e=>updSub("recurring","frequency", e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white">
+                    {PAY_FREQUENCIES.map(fr => <option key={fr.id} value={fr.id}>{fr.label}</option>)}
+                  </select>
+                </Field>
+                <Field label="Start">
+                  <input type="date" value={f.recurring.startDate} onChange={e=>updSub("recurring","startDate", e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200" />
+                </Field>
+                <Field label="Koniec (opcjonalnie)">
+                  <input type="date" value={f.recurring.endDate} onChange={e=>updSub("recurring","endDate", e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200" />
+                </Field>
+              </div>
+            )}
+          </div>
+
+          {/* ── SPLIT ── */}
+          <div className="rounded-lg border border-gray-200 p-3 bg-gray-50">
+            <label className="flex items-center gap-2 mb-2 cursor-pointer">
+              <input type="checkbox" checked={f.split.enabled}
+                onChange={e => updSub("split","enabled", e.target.checked)} />
+              <span className="font-semibold text-sm">Udział w koszcie (split)</span>
+            </label>
+            {f.split.enabled && (
+              <div className="grid grid-cols-2 gap-3 mt-2">
+                <Field label="Udział firmy (%)">
+                  <input type="number" min="0" max="100" value={f.split.companyPct}
+                    onChange={e=>updSub("split","companyPct", e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200" />
+                </Field>
+                <Field label="Nazwa partnera">
+                  <input value={f.split.partnerName} onChange={e=>updSub("split","partnerName", e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200" placeholder="np. Jan Kowalski" />
+                </Field>
+                <div className="col-span-2 text-xs text-gray-500">
+                  Partner pokrywa {100 - (Number(f.split.companyPct)||0)}%. Sumy miesięczne liczone tylko z udziału firmy.
+                </div>
+              </div>
+            )}
+          </div>
+
+          <Field label="Notatka">
+            <textarea value={f.note} onChange={e=>upd("note", e.target.value)} rows={2}
+              className="w-full px-3 py-2 rounded-lg border border-gray-200" />
+          </Field>
+        </div>
+        <div className="p-4 border-t border-gray-200 flex justify-end gap-2 sticky bottom-0 bg-white">
+          <button onClick={onClose}
+            className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 hover:bg-gray-50">Anuluj</button>
+          <button onClick={submit}
+            className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+            style={{background: "#111827"}}>Zapisz</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <div>
+      <div className="text-xs font-semibold text-gray-600 mb-1">{label}</div>
+      {children}
     </div>
   );
 }
