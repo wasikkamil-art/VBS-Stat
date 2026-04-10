@@ -1397,6 +1397,104 @@ function App({ user, role, appUsers = [] }) {
     showToast(`✅ Frachty 2025 naprawione z Excela (${updated} zaktualizowanych, ${created} nowych)`);
   };
 
+  // ── Jednorazowa migracja 2025: dopisuje wpisy korekcyjne do frachtyList i costs,
+  //    tak aby sumy miesięczne per pojazd zgadzały się z Excelem.
+  //    Zachowuje wszystkie istniejące granularne dane (trasy, wpisy kosztów).
+  //    Po uruchomieniu można bezpiecznie usunąć hardkody EXCEL_VEH_*_2025 z getRecord.
+  const migrate2025ToFirestore = () => {
+    const EXCEL_FR = {
+      v1:[0,0,0,3100,8150,10310,9280,6680,9000,6320,5755,8050],
+      v2:[7870,6190,5650,1130,990,11050,4280,7079,4020,7050,8000,4780],
+      v3:[4930,11530,8594,10060,11200,10685,0,7720,8600,8280,9815,6100],
+      v4:[7494,6245,5870,8230,9450,7480,9580,3580,6130,1900,3900,7150],
+      v5:[8250,6203,8165,11635,9420,11820,11010,7400,8930,10380,7590,8104],
+      v6:[8950,1150,4850,9350,0,0,0,0,0,0,0,0],
+    };
+    const EXCEL_VEH_C = {
+      v1:[1658,1658,1658,2362,6916,6772,6723,6732,6043,6764,5998,6440],
+      v2:[4062,5702,5050,3571,1866,6839,4133,4816,3415,4975,6190,5772],
+      v3:[4843,6936,8597,6834,6837,7470,1909,5976,6193,5892,6986,5426],
+      v4:[5146,6859,5682,6077,7663,5839,6816,4507,6171,4200,5336,5648],
+      v5:[6308,6122,7177,6975,7094,7424,8162,7043,6592,5732,9400,6722],
+      v6:[6602,1511,5283,5994,1217,1217,1213,1213,1213,1213,1213,1213],
+    };
+    const EXCEL_FLEET_C = [29015,29193,33853,32276,32000,36107,29367,30692,30327,29508,35937,32007];
+    const MARK = "KOREKTA_2025_EXCEL";
+
+    if (!window.confirm(
+      "Migracja danych 2025 do Firestore?\n\n" +
+      "• Usunie wcześniejsze wpisy korekcyjne (KOREKTA_2025_EXCEL)\n" +
+      "• Doda nowe korekty tak, żeby sumy miesięczne frachtów i kosztów\n" +
+      "  zgadzały się dokładnie z Excelem (per pojazd, per miesiąc)\n" +
+      "• NIE usuwa istniejących granularnych wpisów (tras, kosztów)\n\n" +
+      "Po migracji hardkody EXCEL_VEH_*_2025 zostaną usunięte z kodu."
+    )) return;
+
+    // Usuń istniejące wpisy korekcyjne
+    const cleanFr = frachtyList.filter(f => f.uwagi !== MARK);
+    const cleanC = costs.filter(c => c.note !== MARK);
+
+    const newFr = [...cleanFr];
+    const newC = [...cleanC];
+
+    let frCount = 0, cCount = 0;
+
+    for (let m = 0; m < 12; m++) {
+      const monthStr = String(m + 1).padStart(2, "0");
+      const ymPrefix = `2025-${monthStr}`;
+      const midDate = `2025-${monthStr}-15`;
+      const vehMonthSum = Object.values(EXCEL_VEH_C).reduce((s, a) => s + a[m], 0);
+
+      Object.keys(EXCEL_FR).forEach(vid => {
+        // Frachty
+        const targetFr = EXCEL_FR[vid][m];
+        const currFr = cleanFr
+          .filter(f => f.vehicleId === vid && (f.dataZaladunku || "").startsWith(ymPrefix))
+          .reduce((s, f) => s + (parseFloat(f.cenaEur) || 0), 0);
+        const delFr = Math.round((targetFr - currFr) * 100) / 100;
+        if (Math.abs(delFr) >= 0.5) {
+          newFr.push({
+            id: uid(), vehicleId: vid,
+            dataZlecenia: midDate, dataZaladunku: midDate, dataRozladunku: midDate,
+            godzZaladunku: "", godzRozladunku: "",
+            skad: "", zaladunekKod: "", dokod: "",
+            klient: "", cenaEur: delFr,
+            kmPodjazd: 0, kmLadowne: 0, kmWszystkie: 0, wagaLadunku: 0,
+            dyspozytor: "", nrFV: "", dataWyslania: "", terminPlatnosci: "",
+            uwagi: MARK,
+          });
+          frCount++;
+        }
+
+        // Koszty (scaled to match fleet total)
+        const vehCost = EXCEL_VEH_C[vid][m];
+        const targetC = vehMonthSum > 0
+          ? Math.round(vehCost * EXCEL_FLEET_C[m] / vehMonthSum)
+          : vehCost;
+        const currC = cleanC
+          .filter(c => c.vehicleId === vid && (c.date || "").startsWith(ymPrefix))
+          .reduce((s, c) => {
+            const eur = c.amountEUR ? parseFloat(c.amountEUR) : (c.amountPLN && eurRate ? c.amountPLN / eurRate : 0);
+            return s + eur;
+          }, 0);
+        const delC = Math.round((targetC - currC) * 100) / 100;
+        if (Math.abs(delC) >= 0.5) {
+          newC.push({
+            id: uid(), vehicleId: vid,
+            category: "inne", currency: "EUR",
+            amountPLN: null, amountEUR: delC,
+            date: midDate, note: MARK,
+          });
+          cCount++;
+        }
+      });
+    }
+
+    setFrachtyList(newFr);
+    setCosts(newC);
+    showToast(`✅ Migracja 2025: ${frCount} korekt frachtów, ${cCount} korekt kosztów`);
+  };
+
   const deleteCost   = (id)    => { setCosts((p) => p.filter((c) => c.id !== id)); showToast("Usunięto wpis"); };
   const updateCost   = (updated) => { setCosts((p) => p.map((c) => c.id === updated.id ? updated : c)); showToast("✅ Koszt zaktualizowany"); setEditCostId(null); };
   const addVehicle   = (v)     => { setVehicles((p) => [...p, { ...v, id: uid(), driverHistory: v.driverHistory || [] }]); showToast("Pojazd dodany"); setShowAddVehicle(false); };
@@ -2193,6 +2291,10 @@ function App({ user, role, appUsers = [] }) {
                   <button onClick={fix2025Frachty}
                     className="px-4 py-2 rounded-lg text-sm font-semibold border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-700 flex items-center gap-2">
                     🔧 Fix Frachty 2025
+                  </button>
+                  <button onClick={migrate2025ToFirestore}
+                    className="px-4 py-2 rounded-lg text-sm font-semibold border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 flex items-center gap-2">
+                    🚀 Migruj 2025 → Firestore
                   </button>
                   <button onClick={() => setShowAddCost(true)}
                     className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
