@@ -5523,6 +5523,9 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterCurrency, setFilterCurrency] = useState("all");
   const [filterCategory, setFilterCategory] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editRec, setEditRec] = useState(null);
   const [detail, setDetail] = useState(null); // klik w chip/wiersz
@@ -5536,16 +5539,22 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
 
   // ── Okno: 6 miesięcy wstecz, 18 w przód (dla generatora cyklicznych) ──
   // Używamy "T12:00:00" (południe lokalne) żeby uniknąć problemów ze strefą czasową
+  // Gdy użytkownik wprowadzi dateFrom/dateTo poza domyślnym oknem — rozszerzamy je
+  const hasSearchFilters = !!(searchQuery.trim() || dateFrom || dateTo);
   const windowStart = useMemo(() => {
     const d = new Date(cursorYM + "-01T12:00:00");
     d.setMonth(d.getMonth() - 6);
-    return d.toISOString().slice(0,10);
-  }, [cursorYM]);
+    let iso = d.toISOString().slice(0,10);
+    if (dateFrom && dateFrom < iso) iso = dateFrom;
+    return iso;
+  }, [cursorYM, dateFrom]);
   const windowEnd = useMemo(() => {
     const d = new Date(cursorYM + "-01T12:00:00");
     d.setMonth(d.getMonth() + 18);
-    return d.toISOString().slice(0,10);
-  }, [cursorYM]);
+    let iso = d.toISOString().slice(0,10);
+    if (dateTo && dateTo > iso) iso = dateTo;
+    return iso;
+  }, [cursorYM, dateTo]);
 
   // ── Ekspansja wszystkich rekordów do instancji ──
   const allInstances = useMemo(() => {
@@ -5572,14 +5581,29 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
   }, [monthInstances]);
 
   // ── Filtrowanie dla listy i kalendarza ──
+  // Gdy są aktywne filtry wyszukiwania (nr FV / klient / zakres dat) — lista pokazuje wyniki
+  // z całego okna (cross-month), a kalendarz dalej bazuje na bieżącym miesiącu.
   const filtered = useMemo(() => {
-    return monthInstances.filter(i => {
+    const source = hasSearchFilters ? allInstances : monthInstances;
+    const q = searchQuery.trim().toLowerCase();
+    return source.filter(i => {
       if (filterStatus !== "all" && statusOf(i) !== filterStatus) return false;
       if (filterCurrency !== "all" && (i.currency||"PLN") !== filterCurrency) return false;
       if (filterCategory !== "all" && i.category !== filterCategory) return false;
+      if (dateFrom && (!i.dueDate || i.dueDate < dateFrom)) return false;
+      if (dateTo   && (!i.dueDate || i.dueDate > dateTo))   return false;
+      if (q) {
+        const hay = (
+          (i.contractor || "") + " " +
+          (i.invoiceNumber || "") + " " +
+          (i.sellerNip || "") + " " +
+          (i.bankAccount || "")
+        ).toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
       return true;
     }).sort((a,b) => (a.dueDate||"").localeCompare(b.dueDate||""));
-  }, [monthInstances, filterStatus, filterCurrency, filterCategory]);
+  }, [monthInstances, allInstances, hasSearchFilters, filterStatus, filterCurrency, filterCategory, searchQuery, dateFrom, dateTo]);
 
   // ── Mark as paid / unpaid ──
   async function togglePaid(inst) {
@@ -5776,10 +5800,47 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
           <option value="all">Wszystkie kategorie</option>
           {PAY_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
         </select>
+
+        {/* Wyszukiwarka: nr FV / kontrahent / NIP */}
+        <div className="relative">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Szukaj: nr FV, klient, NIP…"
+            className="pl-8 pr-3 py-2 rounded-lg text-sm border border-gray-200 bg-white w-64"
+          />
+          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>
+        </div>
+
+        {/* Zakres dat */}
+        <div className="flex items-center gap-1 text-xs text-gray-600">
+          <span>Od</span>
+          <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)}
+            className="px-2 py-2 rounded-lg text-sm border border-gray-200 bg-white" />
+          <span>Do</span>
+          <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)}
+            className="px-2 py-2 rounded-lg text-sm border border-gray-200 bg-white" />
+        </div>
+
+        {hasSearchFilters && (
+          <button
+            onClick={() => { setSearchQuery(""); setDateFrom(""); setDateTo(""); }}
+            className="px-3 py-2 rounded-lg text-sm border border-gray-200 bg-white hover:bg-gray-50 text-gray-600"
+            title="Wyczyść wyszukiwanie">
+            ✕ Wyczyść
+          </button>
+        )}
+
+        {hasSearchFilters && (
+          <div className="text-xs text-gray-500 ml-auto">
+            Wyniki z całego okna ({filtered.length})
+          </div>
+        )}
       </div>
 
       {/* ── KALENDARZ ── */}
-      {view === "calendar" && (
+      {view === "calendar" && !hasSearchFilters && (
         <div className="bg-white border border-gray-200 rounded-xl p-4">
           <div className="grid grid-cols-7 gap-1 mb-2">
             {["Pn","Wt","Śr","Cz","Pt","Sb","Nd"].map(d => (
@@ -5851,7 +5912,9 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
       {view === "list" && (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
           {filtered.length === 0 ? (
-            <div className="p-8 text-center text-gray-400 text-sm">Brak faktur w tym miesiącu przy wybranych filtrach</div>
+            <div className="p-8 text-center text-gray-400 text-sm">
+              {hasSearchFilters ? "Brak wyników wyszukiwania" : "Brak faktur w tym miesiącu przy wybranych filtrach"}
+            </div>
           ) : (
             <table className="w-full text-sm">
               <thead>
