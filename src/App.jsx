@@ -5889,7 +5889,33 @@ function Row({ label, value }) {
 }
 
 // Formularz dodawania / edycji faktury
+// ── AI: wyciąganie danych z faktury (PDF / zdjęcie) ──
+const PAYMENT_AI_PROMPT = `Jesteś asystentem księgowym. Przeczytaj załączoną fakturę i zwróć WYŁĄCZNIE obiekt JSON (bez żadnego komentarza, bez markdown) w poniższym formacie:
+
+{
+  "contractor": "nazwa kontrahenta / sprzedawcy (string)",
+  "invoiceNumber": "numer faktury (string, np. FV/2026/04/123)",
+  "description": "krótki opis czego dotyczy faktura (string, max 80 znaków)",
+  "category": "jedna z: leasing | ubezpieczenie | paliwo | czesci | uslugi | inne",
+  "currency": "jedna z: PLN | EUR | USD",
+  "netto":  liczba (bez walut i separatorów tysięcy, kropka jako separator dziesiętny),
+  "brutto": liczba (bez walut i separatorów tysięcy, kropka jako separator dziesiętny),
+  "issueDate": "data wystawienia w formacie YYYY-MM-DD",
+  "dueDate":   "termin płatności w formacie YYYY-MM-DD",
+  "note": "opcjonalna notatka (string) lub pusty string"
+}
+
+Reguły:
+- Jeśli jakieś pole nie jest widoczne na fakturze, wstaw pusty string "" lub 0 dla liczb.
+- Jeśli waluta to PLN, użyj "PLN" nawet jeśli na fakturze jest "zł" lub "PLN".
+- Kategorię zgadnij na podstawie opisu/pozycji (np. "olej napędowy" → paliwo, "polisa OC" → ubezpieczenie, "rata leasingowa" → leasing, "klocki hamulcowe" → czesci, "naprawa" lub "usługa" → uslugi).
+- Zwracaj POPRAWNY JSON bez dodatkowego tekstu.`;
+
 function PaymentForm({ initial, onSave, onClose }) {
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [aiFilled, setAiFilled] = useState(false);
+
   const [f, setF] = useState(() => ({
     contractor:    initial?.contractor    || "",
     invoiceNumber: initial?.invoiceNumber || "",
@@ -5917,6 +5943,69 @@ function PaymentForm({ initial, onSave, onClose }) {
   }));
   const upd = (k, v) => setF(p => ({ ...p, [k]: v }));
   const updSub = (sub, k, v) => setF(p => ({ ...p, [sub]: { ...p[sub], [k]: v } }));
+
+  async function handleAiUpload(ev) {
+    const file = ev.target.files?.[0];
+    if (!file) return;
+    setAiError("");
+    setAiFilled(false);
+    setAiLoading(true);
+    try {
+      if (file.size > 10 * 1024 * 1024) throw new Error("Plik za duży (max 10 MB)");
+      const isPdf = file.type === "application/pdf";
+      const isImg = /^image\/(png|jpe?g|webp)$/.test(file.type);
+      if (!isPdf && !isImg) throw new Error("Dozwolone: PDF, PNG, JPG, WEBP");
+      const base64 = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(",")[1]);
+        r.onerror = reject;
+        r.readAsDataURL(file);
+      });
+      const msgContent = isPdf
+        ? [{ type:"document", source:{ type:"base64", media_type:"application/pdf", data: base64 } }, { type:"text", text: PAYMENT_AI_PROMPT }]
+        : [{ type:"image",    source:{ type:"base64", media_type: file.type,         data: base64 } }, { type:"text", text: PAYMENT_AI_PROMPT }];
+      const res = await fetch("/api/claude", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1500,
+          messages: [{ role: "user", content: msgContent }],
+        }),
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`API ${res.status}: ${errText.slice(0,150)}`);
+      }
+      const resp = await res.json();
+      if (resp.error) throw new Error(resp.error.message || "Błąd API");
+      const txt = resp.content?.map(c => c.text || "").join("").trim().replace(/```json|```/g,"").trim();
+      if (!txt) throw new Error("Pusta odpowiedź AI");
+      let parsed;
+      try { parsed = JSON.parse(txt); }
+      catch(e) { throw new Error("AI nie zwróciło poprawnego JSON"); }
+      setF(prev => ({
+        ...prev,
+        contractor:    parsed.contractor    || prev.contractor,
+        invoiceNumber: parsed.invoiceNumber || prev.invoiceNumber,
+        description:   parsed.description   || prev.description,
+        category:      parsed.category && PAY_CATEGORIES.some(c=>c.id===parsed.category) ? parsed.category : prev.category,
+        currency:      parsed.currency && PAY_CURRENCIES.includes(parsed.currency) ? parsed.currency : prev.currency,
+        netto:         parsed.netto  || prev.netto,
+        brutto:        parsed.brutto || prev.brutto,
+        issueDate:     parsed.issueDate || prev.issueDate,
+        dueDate:       parsed.dueDate   || prev.dueDate,
+        note:          parsed.note  || prev.note,
+      }));
+      setAiFilled(true);
+    } catch(e) {
+      console.error("AI parse error", e);
+      setAiError(e.message || "Błąd analizy");
+    } finally {
+      setAiLoading(false);
+      if (ev.target) ev.target.value = "";
+    }
+  }
 
   function submit() {
     if (!f.contractor.trim()) { alert("Uzupełnij kontrahenta"); return; }
@@ -5963,6 +6052,36 @@ function PaymentForm({ initial, onSave, onClose }) {
           <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-gray-100 text-gray-500">✕</button>
         </div>
         <div className="p-5 space-y-4">
+          {/* ── AI UPLOAD ── */}
+          <div className="rounded-lg border-2 border-dashed p-4"
+            style={{
+              borderColor: aiFilled ? "#86efac" : aiError ? "#fca5a5" : "#e5e7eb",
+              background:  aiFilled ? "#f0fdf4" : aiError ? "#fef2f2" : "#fafafa",
+            }}>
+            <div className="flex items-center gap-3">
+              <div className="text-2xl">{aiLoading ? "⏳" : aiFilled ? "✅" : aiError ? "⚠️" : "🤖"}</div>
+              <div className="flex-1">
+                <div className="font-semibold text-sm text-gray-900">
+                  {aiLoading ? "AI czyta fakturę..." :
+                   aiFilled  ? "Pola wypełnione — sprawdź i popraw w razie potrzeby" :
+                   aiError   ? "Błąd analizy — uzupełnij ręcznie" :
+                                "Wgraj fakturę — AI wypełni pola za Ciebie"}
+                </div>
+                <div className="text-xs text-gray-500 mt-0.5">
+                  {aiError
+                    ? aiError
+                    : "PDF / PNG / JPG (max 10 MB). AI wyciągnie kontrahenta, kwoty, daty i kategorię. Split i cykliczność ustawisz ręcznie poniżej."}
+                </div>
+              </div>
+              <label className={"px-3 py-2 rounded-lg text-sm font-semibold cursor-pointer "+(aiLoading?"opacity-50 pointer-events-none":"")}
+                style={{background: "#111827", color: "#fff"}}>
+                📎 Wgraj
+                <input type="file" accept=".pdf,image/png,image/jpeg,image/webp"
+                  onChange={handleAiUpload} className="hidden" disabled={aiLoading} />
+              </label>
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <Field label="Kontrahent *">
               <input value={f.contractor} onChange={e=>upd("contractor", e.target.value)}
