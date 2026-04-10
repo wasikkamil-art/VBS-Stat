@@ -9,20 +9,29 @@ sa.json
 node_modules/
 dist/
 
-# Temporary scripts
+# Temporary scripts — utility/one-shot tools, not part of the app
 *.bak
 check_*.js
+check-*.js
 clean_*.js
 cut_*.js
 delete_*.js
 fix_*.js
+fix-*.js
 migrate_*.js
 restore_*.js
+restore-*.js
 patch_*.py
 diagnose*.js
 audit-all.js
 import-*.js
+import_*.js
 fetch-*.js
+reimport_*.js
+reimport-*.js
+gen_*.js
+update_vehicles.js
+scripts/
 
 # Images - working files
 *.png
