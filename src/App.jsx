@@ -6678,74 +6678,28 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
     });
   };
 
-  // ── 2025 Excel correction data (from Total25 sheet) ──
-  // Per-vehicle monthly frachty from Excel (EUR)
-  const EXCEL_VEH_FRACHTY_2025 = {
-    v1:[0,0,0,3100,8150,10310,9280,6680,9000,6320,5755,8050],
-    v2:[7870,6190,5650,1130,990,11050,4280,7079,4020,7050,8000,4780],
-    v3:[4930,11530,8594,10060,11200,10685,0,7720,8600,8280,9815,6100],
-    v4:[7494,6245,5870,8230,9450,7480,9580,3580,6130,1900,3900,7150],
-    v5:[8250,6203,8165,11635,9420,11820,11010,7400,8930,10380,7590,8104],
-    v6:[8950,1150,4850,9350,0,0,0,0,0,0,0,0],
-  };
-  // Per-vehicle monthly total costs from Excel (positive EUR)
-  const EXCEL_VEH_COSTS_2025 = {
-    v1:[1658,1658,1658,2362,6916,6772,6723,6732,6043,6764,5998,6440],
-    v2:[4062,5702,5050,3571,1866,6839,4133,4816,3415,4975,6190,5772],
-    v3:[4843,6936,8597,6834,6837,7470,1909,5976,6193,5892,6986,5426],
-    v4:[5146,6859,5682,6077,7663,5839,6816,4507,6171,4200,5336,5648],
-    v5:[6308,6122,7177,6975,7094,7424,8162,7043,6592,5732,9400,6722],
-    v6:[6602,1511,5283,5994,1217,1217,1213,1213,1213,1213,1213,1213],
-  };
-  // Fleet monthly total costs from Excel Podsumowanie (includes fleet-level costs like ocpd+polisa+imi)
-  const EXCEL_FLEET_COSTS_2025 = [29015,29193,33853,32276,32000,36107,29367,30692,30327,29508,35937,32007];
-
-  // 2026: koszty zaciągane bezpośrednio z systemu (bez korekty fleetowej)
-
-  // ── Record lookup: merges dynamic data with stored records ──
+  // ── Record lookup: single source of truth ──
+  // Wszystkie dane (frachty + koszty) zaciągane z dynData (frachtyList + costs z Firestore).
+  // Edycja w jednym miejscu (Rejestr kosztów / Frachty) aktualizuje automatycznie
+  // wszystkie widoki: Flota, Pojazd, Trendy, YoY, Rentowność.
   const getRecord = (vid, y, m) => {
     const existing = records.find(r => r.vehicleId === vid && r.year === y && r.month === m);
     const monthStr = `${y}-${String(m+1).padStart(2,"0")}`;
     const dyn = dynData[`${vid}_${monthStr}`];
 
-    // For 2025: use Excel data even if no dyn/existing data
-    const hasExcel2025 = y === 2025 && EXCEL_VEH_COSTS_2025[vid];
-    if (!existing && !dyn && !hasExcel2025) return null;
+    if (!existing && !dyn) return null;
 
-    // ── Frachty ──
-    let frachty;
-    if (y === 2025 && EXCEL_VEH_FRACHTY_2025[vid]) {
-      // For 2025: use exact Excel per-vehicle per-month frachty
-      frachty = EXCEL_VEH_FRACHTY_2025[vid][m];
-    } else {
-      const usesDynFrachty = dynData._hasFrachtyForYear?.has(`${vid}_${y}`);
-      const rawFrachty = usesDynFrachty
-        ? (dyn?.frachty > 0 ? Math.round(dyn.frachty) : 0)
-        : (existing?.frachty || 0);
-      frachty = rawFrachty;
-    }
+    // ── Frachty ── (dynData gdy frachtyList ma dane dla tego roku, inaczej z rent records)
+    const usesDynFrachty = dynData._hasFrachtyForYear?.has(`${vid}_${y}`);
+    const frachty = usesDynFrachty
+      ? (dyn?.frachty > 0 ? Math.round(dyn.frachty) : 0)
+      : (existing?.frachty || 0);
 
-    // ── Costs ──
+    // ── Koszty ── (dynData gdy są wpisy kosztów, inaczej z rent records)
     const hasDynCosts = dyn?.costs && Object.keys(dyn.costs).length > 0;
-    let costsObj = hasDynCosts
+    const costsObj = hasDynCosts
       ? Object.fromEntries(Object.entries(dyn.costs).map(([k,v]) => [k, Math.round(v)]))
       : (existing?.costs || {});
-
-    // For 2025: scale costs to match Excel per-vehicle+fleet totals
-    if (hasExcel2025) {
-      const vehCostArr = EXCEL_VEH_COSTS_2025[vid];
-      const vehMonthSum = Object.values(EXCEL_VEH_COSTS_2025).reduce((s, a) => s + a[m], 0);
-      const targetCost = Math.round(vehCostArr[m] * EXCEL_FLEET_COSTS_2025[m] / vehMonthSum);
-      const currentTotal = Object.values(costsObj).reduce((s, v) => s + (v || 0), 0);
-      if (currentTotal > 0) {
-        const factor = targetCost / currentTotal;
-        costsObj = Object.fromEntries(Object.entries(costsObj).map(([k, v]) => [k, Math.round(v * factor)]));
-      } else if (targetCost > 0) {
-        costsObj = { inne: targetCost };
-      }
-    }
-
-    // 2026: koszty bez korekty — zaciągane z systemu
 
     return {
       id: existing?.id,
