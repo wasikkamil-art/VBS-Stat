@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Design C — Clean & Minimal (Slack-style)</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'DM Sans', sans-serif; background: #fff; height: 100vh; display: flex; }
+
+/* SIDEBAR */
+.sidebar { width: 260px; background: #f8f8f8; border-right: 1px solid #ebebeb; display: flex; flex-direction: column; }
+.sidebar-header { padding: 20px 18px 14px; }
+.sidebar-header h2 { font-size: 16px; font-weight: 700; color: #1a1a1a; letter-spacing: -0.3px; }
+.section-label { font-size: 11px; font-weight: 600; color: #999; text-transform: uppercase; letter-spacing: 0.8px; padding: 16px 18px 6px; }
+.rooms { flex: 1; overflow-y: auto; }
+.room { display: flex; align-items: center; gap: 10px; padding: 8px 18px; cursor: pointer; transition: background 0.1s; border-radius: 0; margin: 0; }
+.room:hover { background: #f0f0f0; }
+.room.active { background: #e8e8e8; }
+.room-icon { font-size: 16px; width: 24px; text-align: center; color: #888; }
+.room-name { font-size: 14px; color: #333; font-weight: 500; flex: 1; }
+.room.active .room-name { font-weight: 600; color: #111; }
+.room-badge { background: #e74c3c; color: #fff; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 10px; }
+.room-time { font-size: 11px; color: #bbb; }
+.divider { height: 1px; background: #ebebeb; margin: 8px 18px; }
+
+/* DM with avatars */
+.dm-avatar { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; flex-shrink: 0; }
+.dm-status { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.dm-status.online { background: #44b553; }
+.dm-status.offline { background: #ccc; }
+
+/* CHAT */
+.chat { flex: 1; display: flex; flex-direction: column; }
+.chat-header { padding: 14px 24px; border-bottom: 1px solid #ebebeb; display: flex; align-items: center; gap: 12px; }
+.chat-header .name { font-weight: 700; font-size: 15px; color: #1a1a1a; }
+.chat-header .desc { font-size: 12px; color: #999; margin-top: 1px; }
+.chat-header .spacer { flex: 1; }
+.chat-header button { background: none; border: none; color: #999; cursor: pointer; padding: 6px; border-radius: 6px; }
+.chat-header button:hover { background: #f5f5f5; color: #333; }
+
+/* MESSAGES - Slack-style */
+.messages { flex: 1; overflow-y: auto; padding: 16px 24px; display: flex; flex-direction: column; gap: 0; }
+.date-sep { display: flex; align-items: center; gap: 12px; padding: 16px 0 8px; }
+.date-sep::before, .date-sep::after { content: ''; flex: 1; height: 1px; background: #ebebeb; }
+.date-sep span { font-size: 12px; font-weight: 600; color: #999; white-space: nowrap; }
+
+.msg-block { display: flex; gap: 12px; padding: 8px 0; }
+.msg-block:hover { background: #fafafa; margin: 0 -24px; padding: 8px 24px; border-radius: 0; }
+.msg-block + .msg-block.same-sender { padding-top: 2px; }
+.msg-block.same-sender .msg-avatar { visibility: hidden; }
+.msg-block.same-sender .msg-name { display: none; }
+.msg-block.same-sender .msg-time-header { display: none; }
+
+.msg-avatar { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; color: #fff; flex-shrink: 0; margin-top: 2px; }
+.msg-avatar.green { background: #22c55e; }
+.msg-avatar.blue { background: #3b82f6; }
+
+.msg-content { flex: 1; min-width: 0; }
+.msg-header { display: flex; align-items: baseline; gap: 8px; }
+.msg-name { font-weight: 700; font-size: 14px; color: #1a1a1a; }
+.msg-time-header { font-size: 11px; color: #bbb; }
+.msg-text { font-size: 14px; color: #333; line-height: 1.55; margin-top: 2px; }
+
+/* Reactions */
+.reactions { display: flex; gap: 4px; margin-top: 6px; }
+.reaction { display: flex; align-items: center; gap: 3px; padding: 2px 8px; border-radius: 12px; border: 1px solid #ebebeb; background: #fafafa; font-size: 12px; cursor: pointer; transition: all 0.15s; }
+.reaction:hover { background: #f0f0f0; border-color: #ddd; }
+.reaction .emoji { font-size: 14px; }
+.reaction .count { font-size: 11px; color: #666; font-weight: 600; }
+
+/* Thread indicator */
+.thread-link { display: flex; align-items: center; gap: 6px; margin-top: 6px; padding: 4px 0; font-size: 12px; color: #1264a3; font-weight: 600; cursor: pointer; }
+.thread-link:hover { text-decoration: underline; }
+
+/* INPUT */
+.input-area { margin: 0 24px 20px; border: 1.5px solid #ddd; border-radius: 12px; overflow: hidden; transition: border-color 0.2s; }
+.input-area:focus-within { border-color: #1264a3; }
+.input-top { display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-bottom: 1px solid #f0f0f0; }
+.input-top button { background: none; border: none; padding: 6px; border-radius: 6px; color: #999; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.input-top button:hover { background: #f5f5f5; color: #333; }
+.input-main { display: flex; align-items: center; padding: 4px; }
+.input-main input { flex: 1; border: none; padding: 8px 12px; font-size: 14px; outline: none; font-family: inherit; color: #333; }
+.input-main input::placeholder { color: #bbb; }
+.send-btn { width: 34px; height: 34px; border-radius: 8px; border: none; background: #007a5a; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; margin-right: 4px; }
+.send-btn:hover { background: #006e51; }
+</style>
+</head>
+<body>
+<div class="sidebar">
+  <div class="sidebar-header"><h2>FleetStat</h2></div>
+  <div class="section-label">Kanaly</div>
+  <div class="rooms">
+    <div class="room"><span class="room-icon">#</span><span class="room-name">VBS</span><span class="room-time">7 kwi</span></div>
+    <div class="room"><span class="room-icon">#</span><span class="room-name">hallo</span></div>
+    <div class="divider"></div>
+    <div class="section-label" style="padding-top:4px">Wiadomosci</div>
+    <div class="room active">
+      <div class="dm-avatar" style="background:#22c55e">AG</div>
+      <span class="room-name">agnieszka.vbs</span>
+      <span class="dm-status online"></span>
+    </div>
+    <div class="room">
+      <div class="dm-avatar" style="background:#8b5cf6">WI</div>
+      <span class="room-name">wioletta.vbs</span>
+      <span class="room-badge">2</span>
+    </div>
+    <div class="room">
+      <div class="dm-avatar" style="background:#f59e0b">VT</div>
+      <span class="room-name">vbs.trans</span>
+      <span class="dm-status offline"></span>
+    </div>
+  </div>
+</div>
+<div class="chat">
+  <div class="chat-header">
+    <div>
+      <div class="name">agnieszka.vbs</div>
+      <div class="desc">prywatna rozmowa</div>
+    </div>
+    <div class="spacer"></div>
+    <button><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
+    <button><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>
+  </div>
+  <div class="messages">
+    <div class="date-sep"><span>Dzisiaj, 8 kwietnia</span></div>
+
+    <div class="msg-block">
+      <div class="msg-avatar green">AG</div>
+      <div class="msg-content">
+        <div class="msg-header"><span class="msg-name">agnieszka.vbs</span><span class="msg-time-header">12:30</span></div>
+        <div class="msg-text">ivan 138.40 EUR (oplaty i podatki wliczone w cene)</div>
+      </div>
+    </div>
+
+    <div class="msg-block">
+      <div class="msg-avatar blue">KW</div>
+      <div class="msg-content">
+        <div class="msg-header"><span class="msg-name">wasik.kamil</span><span class="msg-time-header">12:35</span></div>
+        <div class="msg-text">dodane do kwietnia mozna sprawdzic</div>
+        <div class="reactions"><div class="reaction"><span class="emoji">&#128077;</span><span class="count">1</span></div></div>
+      </div>
+    </div>
+
+    <div class="msg-block">
+      <div class="msg-avatar green">AG</div>
+      <div class="msg-content">
+        <div class="msg-header"><span class="msg-name">agnieszka.vbs</span><span class="msg-time-header">12:56</span></div>
+        <div class="msg-text">nie puszcza mnie na zwyklej</div>
+      </div>
+    </div>
+    <div class="msg-block same-sender">
+      <div class="msg-avatar green">AG</div>
+      <div class="msg-content">
+        <div class="msg-header"><span class="msg-name">agnieszka.vbs</span><span class="msg-time-header">12:56</span></div>
+        <div class="msg-text">wyskakuje blad</div>
+      </div>
+    </div>
+    <div class="msg-block same-sender">
+      <div class="msg-avatar green">AG</div>
+      <div class="msg-content">
+        <div class="msg-header"><span class="msg-name">agnieszka.vbs</span><span class="msg-time-header">12:57</span></div>
+        <div class="msg-text">i w telefonie tez</div>
+        <div class="thread-link"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg> 2 odpowiedzi</div>
+      </div>
+    </div>
+
+    <div class="msg-block">
+      <div class="msg-avatar blue">KW</div>
+      <div class="msg-content">
+        <div class="msg-header"><span class="msg-name">wasik.kamil</span><span class="msg-time-header">12:58</span></div>
+        <div class="msg-text">hmm</div>
+      </div>
+    </div>
+    <div class="msg-block same-sender">
+      <div class="msg-avatar blue">KW</div>
+      <div class="msg-content">
+        <div class="msg-header"><span class="msg-name">wasik.kamil</span><span class="msg-time-header">12:59</span></div>
+        <div class="msg-text">mozesz zrobic screena i wyslac</div>
+      </div>
+    </div>
+  </div>
+  <div class="input-area">
+    <div class="input-top">
+      <button><b style="font-size:14px">B</b></button>
+      <button><i style="font-size:14px">I</i></button>
+      <button><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg></button>
+      <button><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg></button>
+    </div>
+    <div class="input-main">
+      <input placeholder="Napisz do agnieszka.vbs...">
+      <button class="send-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+    </div>
+  </div>
+</div>
+</body></html>

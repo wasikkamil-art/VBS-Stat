@@ -403,3 +403,4 @@ cd ~/Desktop/VBS-Stat.nosync && node diagnose4.js
 - **Rate limiting na /api/claude** — ochrona przed nadmiernym zużyciem API
 - **npm audit** — regularne sprawdzanie podatności w zależnościach
 - **Weryfikacja kosztów sty–maj 2025** — czy stare dane są netto czy brutto
+- **Panel kierowcy z funkcją skanowania CMR** — osobny widok/panel dla kierowców z możliwością robienia zdjęć dokumentów (CMR, listy przewozowe) telefonem. Zdjęcie przetwarzane w przeglądarce (Canvas API) na formę skanu: zwiększenie kontrastu, binaryzacja, usunięcie cieni, auto-crop. Zapisywane w Firebase Storage, widoczne dla admina/dyspozytora. Opcjonalnie OCR (rozpoznawanie tekstu).

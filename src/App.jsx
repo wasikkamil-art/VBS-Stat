@@ -2534,22 +2534,12 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                     className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 flex items-center gap-2">
                     📊 Exportuj Excel
                   </button>
-                  <button onClick={importAllCosts}
-                    className="px-4 py-2 rounded-lg text-sm font-semibold border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-700 flex items-center gap-2">
-                    📊 Import 2026
-                  </button>
-                  <button onClick={() => importFromRent(2025)}
-                    className="px-4 py-2 rounded-lg text-sm font-semibold border border-green-200 bg-green-50 hover:bg-green-100 text-green-700 flex items-center gap-2">
-                    📋 Import 2025 z Rent.
-                  </button>
-                  <button onClick={fix2025Frachty}
-                    className="px-4 py-2 rounded-lg text-sm font-semibold border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-700 flex items-center gap-2">
-                    🔧 Fix Frachty 2025
-                  </button>
-                  <button onClick={migrate2025ToFirestore}
-                    className="px-4 py-2 rounded-lg text-sm font-semibold border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 flex items-center gap-2">
-                    🚀 Migruj 2025 → Firestore
-                  </button>
+                  {isAdmin && (
+                    <button onClick={importAllCosts}
+                      className="px-4 py-2 rounded-lg text-sm font-semibold border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-700 flex items-center gap-2">
+                      📊 Import 2026
+                    </button>
+                  )}
                   <button onClick={() => setShowAddCost(true)}
                     className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
                     style={{ background: "#111827" }}>

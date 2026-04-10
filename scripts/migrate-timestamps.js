@@ -5,40 +5,84 @@
  * Naprawia problem z chronologią wiadomości na czacie — Firestore orderBy
  * sortuje po typie danych (Timestamp vs string), co psuje kolejność.
  *
+ * Używa firebase-admin z folderu functions/ + credentials z Firebase CLI.
+ *
  * Użycie:
  *   cd /Users/kamilwasik/Desktop/VBS-Stat.nosync
- *   node scripts/migrate-timestamps.js [--dry-run]
- *
- * --dry-run  Tylko raportuje co zostałoby zmienione, bez zapisu
+ *   node scripts/migrate-timestamps.js --dry-run
+ *   node scripts/migrate-timestamps.js
  */
 
-const { initializeApp, cert } = require("firebase-admin/app");
-const { getFirestore, Timestamp } = require("firebase-admin/firestore");
+// Użyj firebase-admin z functions/ (tam jest zainstalowany)
+const path = require("path");
+const admin = require(path.join(__dirname, "..", "functions", "node_modules", "firebase-admin"));
 
-// ── Inicjalizacja Firebase Admin ──
-// Używa domyślnych credentials (GOOGLE_APPLICATION_CREDENTIALS env var)
-// lub application default credentials z gcloud CLI
-initializeApp({ projectId: "vbs-stats" });
-const db = getFirestore();
+// ── Credentials z Firebase CLI ──
+// Firebase CLI po `firebase login` zapisuje refresh token w ~/.config/firebase
+const os = require("os");
+const fs = require("fs");
+
+let credential;
+try {
+  // Ścieżka do tokena Firebase CLI
+  const configPath = path.join(os.homedir(), ".config", "firebase", "config.json");
+  // Alternatywna ścieżka na macOS
+  const configPathAlt = path.join(os.homedir(), ".config", "configstore", "firebase-tools.json");
+
+  let refreshToken = null;
+
+  if (fs.existsSync(configPath)) {
+    const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    refreshToken = config?.tokens?.refresh_token;
+  }
+  if (!refreshToken && fs.existsSync(configPathAlt)) {
+    const config = JSON.parse(fs.readFileSync(configPathAlt, "utf8"));
+    refreshToken = config?.tokens?.refresh_token;
+  }
+
+  if (refreshToken) {
+    credential = admin.credential.refreshToken({
+      type: "authorized_user",
+      client_id: "563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com",
+      client_secret: "j9iVZfS8kkCEFUPaAeJV0sAi",
+      refresh_token: refreshToken,
+    });
+    console.log("🔑 Używam credentials z Firebase CLI\n");
+  }
+} catch (e) {
+  // fallback
+}
+
+// Inicjalizacja
+admin.initializeApp({
+  projectId: "vbs-stats",
+  ...(credential ? { credential } : {}),
+});
+
+const db = admin.firestore();
+const Timestamp = admin.firestore.Timestamp;
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
 // Helper: sprawdź czy wartość to Firestore Timestamp
 function isFirestoreTimestamp(val) {
   if (!val || typeof val !== "object") return false;
-  return (val instanceof Timestamp) || (typeof val.seconds === "number" && typeof val.nanoseconds === "number") || (typeof val.toDate === "function");
+  return (val instanceof Timestamp)
+    || (typeof val.seconds === "number" && typeof val.nanoseconds === "number")
+    || (typeof val.toDate === "function");
 }
 
 // Helper: konwertuj Firestore Timestamp na ISO string
 function toISO(val) {
-  if (val instanceof Timestamp) return val.toDate().toISOString();
   if (typeof val.toDate === "function") return val.toDate().toISOString();
-  if (typeof val.seconds === "number") return new Date(val.seconds * 1000 + (val.nanoseconds || 0) / 1e6).toISOString();
+  if (typeof val.seconds === "number") {
+    return new Date(val.seconds * 1000 + (val.nanoseconds || 0) / 1e6).toISOString();
+  }
   return null;
 }
 
 async function migrateMessages() {
-  console.log(`\n${"=".repeat(60)}`);
+  console.log(`${"=".repeat(60)}`);
   console.log(`  MIGRACJA TIMESTAMPÓW — ${DRY_RUN ? "DRY RUN (bez zapisu)" : "PRODUKCJA (zapis!)"}`);
   console.log(`${"=".repeat(60)}\n`);
 
@@ -67,7 +111,7 @@ async function migrateMessages() {
       console.log(`  🔄 [${roomName}] lastMessageAt: Timestamp → ${iso}`);
     }
 
-    // lastRead map — każda wartość może być Timestamp
+    // lastRead map
     if (roomData.lastRead && typeof roomData.lastRead === "object") {
       for (const [uid, val] of Object.entries(roomData.lastRead)) {
         if (isFirestoreTimestamp(val)) {
@@ -78,7 +122,7 @@ async function migrateMessages() {
       }
     }
 
-    // typing map — wartości mogą być Timestamp
+    // typing map
     if (roomData.typing && typeof roomData.typing === "object") {
       for (const [uid, val] of Object.entries(roomData.typing)) {
         if (isFirestoreTimestamp(val)) {
@@ -102,7 +146,7 @@ async function migrateMessages() {
     totalMessages += messagesSnap.size;
 
     let roomMigrated = 0;
-    const batch = db.batch();
+    let batch = db.batch();
     let batchCount = 0;
 
     for (const msgDoc of messagesSnap.docs) {
@@ -119,7 +163,10 @@ async function migrateMessages() {
 
         // Firestore batch limit = 500
         if (batchCount >= 450) {
-          if (!DRY_RUN) await batch.commit();
+          if (!DRY_RUN) {
+            await batch.commit();
+            batch = db.batch();
+          }
           batchCount = 0;
         }
       }
@@ -156,6 +203,8 @@ async function migrateMessages() {
   if (!DRY_RUN && migratedMessages === 0 && migratedRoomFields === 0) {
     console.log("🎉 Brak Firestore Timestamps do migracji — wszystko jest już ISO string!\n");
   }
+
+  process.exit(0);
 }
 
 migrateMessages().catch(err => {

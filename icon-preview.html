@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Ikony bus + przyczepa</title>
+<style>
+body { font-family: system-ui; background: #f8f9fb; padding: 40px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, 220px); gap: 24px; }
+.card { background: #fff; border-radius: 16px; padding: 24px; text-align: center; border: 1px solid #e5e7eb; }
+.card svg { margin: 0 auto 12px; display: block; }
+.card .label { font-size: 13px; color: #374151; font-weight: 600; margin-bottom: 4px; }
+.card .desc { font-size: 11px; color: #9ca3af; }
+</style>
+</head>
+<body>
+<h2 style="margin-bottom: 24px; color: #111827;">Ikony: Bus z przyczepą — kabina → z PRZODU, przyczepa → z TYŁU</h2>
+
+<div class="grid">
+
+<div class="card">
+  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Przyczepa z tyłu (lewa strona) -->
+    <rect x="1" y="7" width="7" height="7" rx="1.5"/>
+    <circle cx="3.5" cy="15.5" r="1.5"/>
+    <circle cx="6.5" cy="15.5" r="1.5"/>
+    <!-- Dyszel -->
+    <line x1="8" y1="11" x2="10" y2="11"/>
+    <!-- Kabina z przodu (prawa strona) -->
+    <rect x="10" y="7" width="7" height="7" rx="2"/>
+    <path d="M17 10h3l2.5 2.5V14h-5.5"/>
+    <circle cx="13" cy="15.5" r="1.5"/>
+    <circle cx="20" cy="15.5" r="1.5"/>
+  </svg>
+  <div class="label">A — Ciężarówka + przyczepa skrzyniowa</div>
+  <div class="desc">Kabina z przodu → ładownia → dyszel → przyczepa</div>
+</div>
+
+<div class="card">
+  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Przyczepa z tyłu (lewa strona) -->
+    <rect x="1" y="6" width="8" height="8" rx="1.5"/>
+    <circle cx="3.5" cy="15.5" r="1.5"/>
+    <circle cx="7" cy="15.5" r="1.5"/>
+    <!-- Dyszel -->
+    <line x1="9" y1="11" x2="11" y2="11"/>
+    <!-- Kabina z przodu (prawa strona) -->
+    <path d="M11 8a2 2 0 0 1 2-2h4v10h-6z"/>
+    <path d="M17 9h3.5l2 2.5V14h-5.5"/>
+    <circle cx="14" cy="15.5" r="1.5"/>
+    <circle cx="20.5" cy="15.5" r="1.5"/>
+  </svg>
+  <div class="label">B — Bus dostawczy + przyczepa</div>
+  <div class="desc">Van z kabiną z przodu, przyczepa z tyłu</div>
+</div>
+
+<div class="card">
+  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Naczepa z tyłu (lewa strona) - duża -->
+    <rect x="1" y="6" width="11" height="8" rx="2"/>
+    <circle cx="4" cy="15.5" r="1.5"/>
+    <circle cx="9" cy="15.5" r="1.5"/>
+    <!-- Siodło/połączenie -->
+    <path d="M12 10v4"/>
+    <!-- Ciągnik siodłowy z przodu (prawa strona) -->
+    <rect x="12" y="8" width="5" height="6" rx="1.5"/>
+    <path d="M17 10h3.5l2 2v2h-5.5"/>
+    <circle cx="20" cy="15.5" r="1.5"/>
+  </svg>
+  <div class="label">C — Ciągnik siodłowy + naczepa</div>
+  <div class="desc">TIR — ciągnik z przodu, duża naczepa z tyłu</div>
+</div>
+
+<div class="card">
+  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Przyczepa z tyłu (lewa strona) - mała -->
+    <rect x="1" y="8" width="6" height="6" rx="1.5"/>
+    <circle cx="4" cy="15.5" r="1.5"/>
+    <!-- Dyszel -->
+    <line x1="7" y1="12" x2="9" y2="12"/>
+    <!-- Kabina + ładownia z przodu (prawa strona) -->
+    <rect x="9" y="6" width="6" height="8" rx="2"/>
+    <path d="M15 9h4l3 3v2h-7"/>
+    <circle cx="12" cy="15.5" r="1.5"/>
+    <circle cx="19.5" cy="15.5" r="1.5"/>
+    <path d="M13.5 15.5h4.5"/>
+  </svg>
+  <div class="label">D — Truck + mała przyczepa</div>
+  <div class="desc">Ciężarówka z przodu, mała przyczepa z tyłu</div>
+</div>
+
+<div class="card">
+  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Przyczepa z tyłu (lewa strona) -->
+    <rect x="1" y="7" width="7" height="7" rx="1.5"/>
+    <circle cx="4" cy="15.5" r="1.5"/>
+    <!-- Dyszel -->
+    <path d="M8 11h2.5"/>
+    <!-- Bus/van z przodu (prawa) - zaokrąglony nos -->
+    <path d="M10.5 7h5a2 2 0 0 1 2 2v5h-7z"/>
+    <path d="M17.5 10h3l2 2v2h-5"/>
+    <circle cx="13" cy="15.5" r="1.5"/>
+    <circle cx="20.5" cy="15.5" r="1.5"/>
+  </svg>
+  <div class="label">E — Van z przyczepą (kompakt)</div>
+  <div class="desc">Kompaktowy bus z przyczepą — czysty styl</div>
+</div>
+
+<div class="card">
+  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="6" width="11" height="10" rx="2"/>
+    <path d="M14 10h3.5l3 3v3a1 1 0 0 1-1 1h-1"/>
+    <circle cx="7" cy="17" r="2"/>
+    <circle cx="17" cy="17" r="2"/>
+    <path d="M9 17h6"/>
+    <path d="M3 16h1.5"/>
+  </svg>
+  <div class="label">F — Obecna ikona (Pojazdy)</div>
+  <div class="desc">Aktualna ikona w sidebarze — bez przyczepy</div>
+</div>
+
+</div>
+</body>
+</html>

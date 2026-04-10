@@ -210,17 +210,15 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
     let statusBg = "#fffbeb";
     let statusType = "wolny";
     let details = "";
-    let frachtNr = "";
 
     if (activeF) {
       statusText = "🚛 W trasie";
       statusColor = "#15803d";
       statusBg = "#f0fdf4";
       statusType = "trasa";
-      frachtNr = activeF.nrZlecenia ? `FR ${activeF.nrZlecenia}` : "";
-      const rozlKod = [activeF.dokod, activeF.dokod2, activeF.dokod3].filter(s => s && s.trim()).join(" / ") || "—";
-      details = `Rozładunek: ${fmtDate(activeF.dataRozladunku)} · ${rozlKod}`;
-      if (frachtNr) details += ` · ${frachtNr}`;
+      // Pokaż tylko ostatni kod rozładunku
+      const rozlKod = [activeF.dokod, activeF.dokod2, activeF.dokod3].filter(s => s && s.trim()).pop() || "—";
+      details = rozlKod;
     } else if (vehiclePauza) {
       const pauzaLabels = { pauza9: "Pauza 9h", pauza11: "Pauza 11h", pauza24: "Pauza 24h", pauza45: "Pauza 45h", pauzaInne: "Pauza", baza: "Baza" };
       statusText = vehiclePauza.status === "baza" ? "🏠 Baza" : `⏸️ ${pauzaLabels[vehiclePauza.status] || "Pauza"}`;
@@ -230,15 +228,15 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
       const BAZA_KOD = "PL 25-611 Kielce";
       details = `Dostępny od: ${fmtDate(vehiclePauza.end)} · ${BAZA_KOD}`;
     } else if (nextF) {
-      const nextZalMs = new Date(nextF.dataZaladunku + "T00:00:00").getTime();
-      const todayMs = new Date(todayISO + "T00:00:00").getTime();
-      const diffDays = Math.round((nextZalMs - todayMs) / 86400000);
-      const zalKod = [nextF.zaladunekKod, nextF.zaladunekKod2, nextF.zaladunekKod3].filter(s => s && s.trim()).join(" / ") || "—";
-      statusText = `📋 Załadunek za ${diffDays}d`;
-      statusColor = "#1d4ed8";
-      statusBg = "#eff6ff";
-      statusType = "planowany";
-      details = `${fmtDate(nextF.dataZaladunku)} · ${zalKod}`;
+      // Załadunek zaplanowany = traktuj jako "W trasie" (auto nie jest dostępne)
+      statusText = "🚛 W trasie";
+      statusColor = "#15803d";
+      statusBg = "#f0fdf4";
+      statusType = "trasa";
+      const lastKod = lastDoneF
+        ? ([lastDoneF.dokod, lastDoneF.dokod2, lastDoneF.dokod3].filter(s => s && s.trim()).pop() || "—")
+        : "—";
+      details = lastKod;
     } else {
       const daysSince = lastDoneF
         ? Math.round((new Date(todayISO + "T00:00:00").getTime() - new Date(lastDoneF.dataRozladunku + "T00:00:00").getTime()) / 86400000)
@@ -247,12 +245,11 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
       statusColor = "#d97706";
       statusBg = "#fffbeb";
       statusType = "wolny";
+      // Pokaż tylko ostatni kod rozładunku
       const lastKod = lastDoneF
-        ? ([lastDoneF.dokod, lastDoneF.dokod2, lastDoneF.dokod3].filter(s => s && s.trim()).join(" / ") || "—")
+        ? ([lastDoneF.dokod, lastDoneF.dokod2, lastDoneF.dokod3].filter(s => s && s.trim()).pop() || "—")
         : "—";
-      const lastNr = lastDoneF?.nrZlecenia ? `FR${lastDoneF.nrZlecenia}` : "";
-      details = lastDoneF ? `Ostatni rozł.: ${fmtDate(lastDoneF.dataRozladunku)} · ${lastKod}` : "Brak frachtów";
-      if (lastNr) details += ` · ${lastNr}`;
+      details = lastDoneF ? lastKod : "Brak frachtów";
     }
 
     return { v, driverName, vehicleInfo, plate2, statusText, statusColor, statusBg, statusType, details };
@@ -268,8 +265,8 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
     return days < INACTIVE_DAYS;
   });
 
-  // Sortuj: W trasie → Pauza/Baza → Planowany → Wolny
-  const order = { trasa: 0, pauza: 1, planowany: 2, wolny: 3 };
+  // Sortuj: W trasie → Pauza/Baza → Wolny
+  const order = { trasa: 0, pauza: 1, wolny: 2 };
   activeVehicles.sort((a, b) => (order[a.statusType] ?? 9) - (order[b.statusType] ?? 9));
 
   const rows = activeVehicles.map(({ v, vehicleInfo, plate2, statusText, statusColor, statusBg, details }) => {
@@ -324,7 +321,7 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
         <tr style="background:#f9fafb;">
           <th style="padding:12px 20px;text-align:left;font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;">Pojazd</th>
           <th style="padding:12px 16px;text-align:left;font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;">Status</th>
-          <th style="padding:12px 20px;text-align:left;font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;">Szczegóły</th>
+          <th style="padding:12px 20px;text-align:left;font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;">Kod rozładunku</th>
         </tr>
       </thead>
       <tbody>

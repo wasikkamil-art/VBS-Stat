@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trendy — podgląd final</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background:#f8fafc; padding:24px; }
+
+  .card {
+    background:#fff; border-radius:16px; border:1px solid #e5e7eb;
+    padding:20px 20px 12px; max-width:900px; margin:0 auto;
+  }
+
+  /* Symulacja wykresu — CHART_LEFT=55, margin.right=80 (TOTAL_COL) */
+  .chart-mock {
+    height:270px; position:relative; background:#fafbfc; border-radius:8px;
+  }
+  .chart-mock .y-axis {
+    position:absolute; left:0; top:10px; bottom:28px; width:55px;
+    display:flex; flex-direction:column; justify-content:space-between; align-items:flex-end;
+    padding-right:6px; font-size:10px; color:#94a3b8;
+  }
+  /* Plot area: left=55, right=80 */
+  .chart-mock .plot-area {
+    position:absolute; left:55px; right:80px; top:10px; bottom:28px;
+    border-bottom:1px solid #e2e8f0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 49px, #f1f5f9 49px, #f1f5f9 50px);
+  }
+  /* Mock line */
+  .chart-mock .plot-area::after {
+    content:''; position:absolute; left:0; right:0; top:40%; height:2px;
+    background: linear-gradient(90deg, #3b82f6 0%, #3b82f6 25%, transparent 25%);
+    border-radius:2px;
+  }
+  .chart-mock .plot-area::before {
+    content:''; position:absolute; left:0; right:0; top:55%; height:2px;
+    background: #94a3b8;
+    border-radius:2px; opacity:0.5;
+  }
+  /* X-axis labels: same area as plot (left=55, right=80) */
+  .chart-mock .x-labels {
+    position:absolute; left:55px; right:80px; bottom:4px; height:20px;
+    display:grid; grid-template-columns:repeat(12,1fr);
+    font-size:11px; color:#94a3b8; text-align:center;
+  }
+  /* Right margin area label */
+  .chart-mock .right-area {
+    position:absolute; right:0; top:10px; bottom:28px; width:80px;
+    display:flex; align-items:center; justify-content:center;
+    font-size:9px; color:#d1d5db;
+    border-left:1px dashed #e5e7eb;
+  }
+
+  /* ===== TABELA POD WYKRESEM ===== */
+  /* margin-left: 55px (CHART_LEFT), brak margin-right */
+  /* grid: repeat(12,1fr) 80px — 12 kolumn danych + 80px total */
+  .summary-table {
+    margin-left: 55px;
+    font-size: 11px;
+  }
+
+  .year-row {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr) 80px;
+    border-radius: 6px;
+    padding: 4px 0;
+    margin-top: 2px;
+    text-align: center;
+    align-items: center;
+  }
+  .year-row .cell {
+    font-variant-numeric: tabular-nums;
+  }
+  .year-row .yr-total {
+    padding-left: 8px;
+    padding-right: 4px;
+    font-weight: 700;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .diff-row {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr) 80px;
+    border-top: 1px solid #e5e7eb;
+    margin-top: 4px;
+    padding-top: 4px;
+    text-align: center;
+    align-items: center;
+  }
+  .diff-row .cell {
+    font-weight: 700;
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+  }
+  .diff-row .yr-total {
+    padding-left: 8px;
+    padding-right: 4px;
+    font-weight: 700;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .info {
+    max-width:900px; margin:16px auto; padding:10px 14px;
+    background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px;
+    font-size:12px; color:#166534; line-height:1.5;
+  }
+  .info b { color:#15803d; }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <!-- Symulacja wykresu ze zwężonym plotem (right=80px) -->
+  <div class="chart-mock">
+    <div class="y-axis"><span>30k</span><span>20k</span><span>10k</span><span>0</span></div>
+    <div class="plot-area"></div>
+    <div class="x-labels">
+      <span>Sty</span><span>Lut</span><span>Mar</span><span>Kwi</span><span>Maj</span><span>Cze</span>
+      <span>Lip</span><span>Sie</span><span>Wrz</span><span>Paź</span><span>Lis</span><span>Gru</span>
+    </div>
+    <div class="right-area">← total →</div>
+  </div>
+
+  <!-- TABELA — bez nagłówka miesięcy (są na osi X) -->
+  <div class="summary-table">
+
+    <!-- 2026 — bieżący rok (pierwszy, niebieski) -->
+    <div class="year-row" style="background:#eff6ff;">
+      <div class="cell" style="color:#3b82f6;font-weight:700">20.1k</div>
+      <div class="cell" style="color:#3b82f6;font-weight:700">23.4k</div>
+      <div class="cell" style="color:#3b82f6;font-weight:700">22.0k</div>
+      <div class="cell" style="color:#d1d5db">—</div>
+      <div class="cell" style="color:#d1d5db">—</div>
+      <div class="cell" style="color:#d1d5db">—</div>
+      <div class="cell" style="color:#d1d5db">—</div>
+      <div class="cell" style="color:#d1d5db">—</div>
+      <div class="cell" style="color:#d1d5db">—</div>
+      <div class="cell" style="color:#d1d5db">—</div>
+      <div class="cell" style="color:#d1d5db">—</div>
+      <div class="cell" style="color:#d1d5db">—</div>
+      <div class="yr-total" style="color:#3b82f6; border-left:1px solid #dbeafe;">2026: 65.5k</div>
+    </div>
+
+    <!-- 2025 — poprzedni rok (szary) -->
+    <div class="year-row" style="background:#f8fafc;">
+      <div class="cell" style="color:#64748b">18.5k</div>
+      <div class="cell" style="color:#64748b">21.3k</div>
+      <div class="cell" style="color:#64748b">19.8k</div>
+      <div class="cell" style="color:#64748b">22.1k</div>
+      <div class="cell" style="color:#64748b">24.0k</div>
+      <div class="cell" style="color:#64748b">20.5k</div>
+      <div class="cell" style="color:#64748b">23.2k</div>
+      <div class="cell" style="color:#64748b">25.1k</div>
+      <div class="cell" style="color:#64748b">21.8k</div>
+      <div class="cell" style="color:#64748b">22.9k</div>
+      <div class="cell" style="color:#64748b">19.4k</div>
+      <div class="cell" style="color:#64748b">17.2k</div>
+      <div class="yr-total" style="color:#64748b; border-left:1px solid #e5e7eb;">2025: 255.8k</div>
+    </div>
+
+    <!-- Δ różnica -->
+    <div class="diff-row">
+      <div class="cell" style="color:#15803d">+1.6k</div>
+      <div class="cell" style="color:#15803d">+2.1k</div>
+      <div class="cell" style="color:#15803d">+2.2k</div>
+      <div class="cell" style="color:#d1d5db">—</div>
+      <div class="cell" style="color:#d1d5db">—</div>
+      <div class="cell" style="color:#d1d5db">—</div>
+      <div class="cell" style="color:#d1d5db">—</div>
+      <div class="cell" style="color:#d1d5db">—</div>
+      <div class="cell" style="color:#d1d5db">—</div>
+      <div class="cell" style="color:#d1d5db">—</div>
+      <div class="cell" style="color:#d1d5db">—</div>
+      <div class="cell" style="color:#d1d5db">—</div>
+      <div class="yr-total" style="color:#15803d; border-left:1px solid #e5e7eb;">Δ: +5.9k</div>
+    </div>
+  </div>
+</div>
+
+<div class="info">
+  <b>Jak to działa:</b> Wykres ma <code>margin.right = 80px</code> (TOTAL_COL), więc oś X z miesiącami kończy się 80px od prawej krawędzi. Tabela pod spodem ma <code>grid: repeat(12, 1fr) 80px</code> — 12 kolumn danych zajmuje dokładnie tyle samo co plot area wykresu, a kolumna 80px na total mieści się w prawym marginesie wykresu. Nazwy miesięcy są tylko na osi X — bez duplikacji.
+</div>
+
+</body>
+</html>
