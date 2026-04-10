@@ -623,6 +623,23 @@ async function uploadSprawaFile(file, sprawaId, subfolder) {
   return { url, name: file.name, type: file.type, size: file.size };
 }
 
+// Upload oryginału faktury (Płatności) → Storage, zwraca metadata
+async function uploadPaymentFile(file) {
+  // Bezpieczna nazwa — usuń niebezpieczne znaki
+  const safeName = file.name.replace(/[^\w.\-]/g, "_");
+  const name = `payments/${Date.now()}_${Math.random().toString(36).slice(2,8)}_${safeName}`;
+  const ref = storageRef(storage, name);
+  await uploadBytes(ref, file);
+  const url = await getDownloadURL(ref);
+  return {
+    fileUrl:  url,
+    filePath: name,
+    fileName: file.name,
+    fileType: file.type,
+    fileSize: file.size,
+  };
+}
+
 function SprawaFileUpload({ sprawaId, subfolder, onUploaded, label = "📎 Dodaj załącznik" }) {
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef(null);
@@ -5864,7 +5881,17 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
                         {x.contractor || "—"}
                         {x.isInstance && <span className="ml-1 text-[10px] text-gray-400">(cykliczna)</span>}
                       </td>
-                      <td className="px-3 py-2 text-gray-600">{x.invoiceNumber || "—"}</td>
+                      <td className="px-3 py-2 text-gray-600">
+                        <div className="flex items-center gap-1.5">
+                          <span>{x.invoiceNumber || "—"}</span>
+                          {x.fileUrl && (
+                            <a href={x.fileUrl} target="_blank" rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-blue-600 hover:text-blue-800"
+                              title="Pobierz oryginał faktury">📎</a>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-3 py-2">
                         {cat && <span className="px-2 py-0.5 rounded text-[10px] font-semibold" style={{background: cat.color+"22", color: cat.color}}>{cat.label}</span>}
                       </td>
@@ -5967,6 +5994,11 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
                         <div className="font-bold text-sm tabular-nums">{fmtMoney(x.brutto, x.currency)}</div>
                         {x.split?.enabled && <div className="text-[10px] text-gray-500">firma: {fmtMoney(share, x.currency)}</div>}
                       </div>
+                      {x.fileUrl && (
+                        <a href={x.fileUrl} target="_blank" rel="noreferrer"
+                          className="px-2 py-1 rounded text-[11px] font-semibold border border-blue-200 text-blue-600 hover:bg-blue-50 flex-shrink-0"
+                          title="Pobierz oryginał faktury">📥</a>
+                      )}
                       <button onClick={() => { setDetail(x); setDayModal(null); }}
                         className="px-2 py-1 rounded text-[11px] font-semibold border border-gray-200 hover:bg-white flex-shrink-0">
                         Szczegóły
@@ -6009,6 +6041,20 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
                       className="px-2 py-1 rounded text-xs font-semibold border border-gray-200 hover:bg-gray-50 flex-shrink-0"
                       title="Kopiuj">📋</button>
                   </div>
+                </div>
+              )}
+              {detail.fileUrl && (
+                <div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wide">Załącznik</div>
+                  <a href={detail.fileUrl} target="_blank" rel="noreferrer"
+                    className="mt-1 flex items-center gap-2 p-2 rounded-lg border border-blue-200 bg-blue-50 hover:bg-blue-100 transition-colors">
+                    <div className="text-xl">📄</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-blue-900 truncate">{detail.fileName || "faktura"}</div>
+                      <div className="text-[10px] text-blue-700">{detail.fileSize ? `${(detail.fileSize/1024).toFixed(0)} KB` : ""} · kliknij aby pobrać</div>
+                    </div>
+                    <div className="text-blue-600 text-sm font-semibold">📥</div>
+                  </a>
                 </div>
               )}
               {detail.split?.enabled && (
@@ -6115,6 +6161,12 @@ function PaymentForm({ initial, isEdit, onSave, onClose, onSkipNext, onQueueAppe
     bankAccount:   initial?.bankAccount   || "",
     status:        initial?.status        || "topay",
     note:          initial?.note          || "",
+    // załącznik (oryginał faktury w Storage)
+    fileUrl:       initial?.fileUrl       || "",
+    filePath:      initial?.filePath      || "",
+    fileName:      initial?.fileName      || "",
+    fileType:      initial?.fileType      || "",
+    fileSize:      initial?.fileSize      || 0,
     recurring: {
       enabled:    !!initial?.recurring?.enabled,
       startDate:  initial?.recurring?.startDate || todayISO(),
@@ -6176,14 +6228,18 @@ function PaymentForm({ initial, isEdit, onSave, onClose, onSkipNext, onQueueAppe
     setAiLoading(true);
     setAiProgress({ done: 0, total: files.length });
     try {
-      // Parsuj wszystko równolegle (Promise.allSettled żeby jeden błąd nie psuł całości)
+      // Parsuj + upload równolegle — każdy plik osobno leci przez AI i do Storage
       let done = 0;
       const results = await Promise.allSettled(
-        files.map(f => parseOneInvoice(f).then(r => {
+        files.map(async (f) => {
+          const [parsed, fileMeta] = await Promise.all([
+            parseOneInvoice(f),
+            uploadPaymentFile(f).catch(e => { console.error("upload fail", f.name, e); return null; }),
+          ]);
           done++;
           setAiProgress({ done, total: files.length });
-          return r;
-        }))
+          return { ...parsed, _file: fileMeta };
+        })
       );
       const success = [];
       const failures = [];
@@ -6209,6 +6265,12 @@ function PaymentForm({ initial, isEdit, onSave, onClose, onSkipNext, onQueueAppe
         dueDate:       first.dueDate   || prev.dueDate,
         bankAccount:   (first.bankAccount || "").replace(/\s+/g,"") || prev.bankAccount,
         note:          first.note  || prev.note,
+        // metadata pliku z Firebase Storage
+        fileUrl:  first._file?.fileUrl  || prev.fileUrl,
+        filePath: first._file?.filePath || prev.filePath,
+        fileName: first._file?.fileName || prev.fileName,
+        fileType: first._file?.fileType || prev.fileType,
+        fileSize: first._file?.fileSize || prev.fileSize,
       }));
       setAiFilled(true);
 
@@ -6251,6 +6313,11 @@ function PaymentForm({ initial, isEdit, onSave, onClose, onSkipNext, onQueueAppe
       bankAccount:   (f.bankAccount || "").replace(/\s+/g,""),
       status:        f.status,
       note:          f.note.trim(),
+      fileUrl:       f.fileUrl  || "",
+      filePath:      f.filePath || "",
+      fileName:      f.fileName || "",
+      fileType:      f.fileType || "",
+      fileSize:      f.fileSize || 0,
       recurring:     f.recurring.enabled ? {
         enabled: true,
         startDate: f.recurring.startDate,
@@ -6319,6 +6386,32 @@ function PaymentForm({ initial, isEdit, onSave, onClose, onSkipNext, onQueueAppe
               </label>
             </div>
           </div>
+
+          {/* ── ZAŁĄCZNIK (oryginał faktury) ── */}
+          {f.fileUrl ? (
+            <div className="rounded-lg border border-gray-200 p-3 bg-blue-50 flex items-center gap-3">
+              <div className="text-2xl">📄</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs text-gray-500 uppercase tracking-wide">Załączony plik</div>
+                <div className="font-semibold text-sm text-gray-900 truncate">{f.fileName || "faktura"}</div>
+                <div className="text-xs text-gray-500">
+                  {f.fileType || ""}{f.fileSize ? ` · ${(f.fileSize/1024).toFixed(0)} KB` : ""}
+                </div>
+              </div>
+              <a href={f.fileUrl} target="_blank" rel="noreferrer"
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-200 bg-white hover:bg-gray-50">
+                📥 Pobierz
+              </a>
+              <button type="button"
+                onClick={() => setF(p => ({ ...p, fileUrl:"", filePath:"", fileName:"", fileType:"", fileSize:0 }))}
+                className="px-2 py-1.5 rounded-lg text-xs font-semibold text-red-600 border border-red-200 hover:bg-red-50"
+                title="Usuń załącznik z rekordu (plik zostanie w Storage)">
+                ✕
+              </button>
+            </div>
+          ) : (
+            <ManualFileAttach onAttached={(meta) => setF(p => ({ ...p, ...meta }))} />
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="Kontrahent *">
@@ -6593,6 +6686,42 @@ function Field({ label, children }) {
     <div>
       <div className="text-xs font-semibold text-gray-600 mb-1">{label}</div>
       {children}
+    </div>
+  );
+}
+
+// Ręczne dodanie załącznika (bez AI) — upload tylko do Storage, bez parsowania
+function ManualFileAttach({ onAttached }) {
+  const [uploading, setUploading] = useState(false);
+  const [err, setErr] = useState("");
+  async function handle(ev) {
+    const file = ev.target.files?.[0];
+    if (!file) return;
+    setErr("");
+    setUploading(true);
+    try {
+      if (file.size > 10 * 1024 * 1024) throw new Error("Plik za duży (max 10 MB)");
+      const meta = await uploadPaymentFile(file);
+      onAttached(meta);
+    } catch(e) {
+      console.error("manual attach error", e);
+      setErr(e.message || "Błąd uploadu");
+    } finally {
+      setUploading(false);
+      if (ev.target) ev.target.value = "";
+    }
+  }
+  return (
+    <div className="rounded-lg border border-dashed border-gray-200 p-3 bg-gray-50 flex items-center gap-3">
+      <div className="text-xl">📎</div>
+      <div className="flex-1">
+        <div className="text-sm font-semibold text-gray-700">Brak załącznika</div>
+        <div className="text-xs text-gray-500">{err || "Możesz dołączyć oryginał faktury ręcznie (PDF / PNG / JPG)"}</div>
+      </div>
+      <label className={"px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer border border-gray-200 bg-white hover:bg-gray-100 "+(uploading?"opacity-50 pointer-events-none":"")}>
+        {uploading ? "⏳ Wgrywam..." : "Dołącz plik"}
+        <input type="file" accept=".pdf,image/png,image/jpeg,image/webp" onChange={handle} className="hidden" disabled={uploading} />
+      </label>
     </div>
   );
 }
