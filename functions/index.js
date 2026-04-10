@@ -216,9 +216,10 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
       statusColor = "#15803d";
       statusBg = "#f0fdf4";
       statusType = "trasa";
-      // Pokaż tylko ostatni kod rozładunku
+      // Pokaż ostatni kod rozładunku + datę rozładunku
       const rozlKod = [activeF.dokod, activeF.dokod2, activeF.dokod3].filter(s => s && s.trim()).pop() || "—";
-      details = rozlKod;
+      const rozlDate = activeF.dataRozladunku ? fmtDate(activeF.dataRozladunku) : "";
+      details = rozlDate ? `${rozlKod} · ${rozlDate}` : rozlKod;
     } else if (vehiclePauza) {
       const pauzaLabels = { pauza9: "Pauza 9h", pauza11: "Pauza 11h", pauza24: "Pauza 24h", pauza45: "Pauza 45h", pauzaInne: "Pauza", baza: "Baza" };
       statusText = vehiclePauza.status === "baza" ? "🏠 Baza" : `⏸️ ${pauzaLabels[vehiclePauza.status] || "Pauza"}`;
@@ -233,10 +234,12 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
       statusColor = "#15803d";
       statusBg = "#f0fdf4";
       statusType = "trasa";
-      const lastKod = lastDoneF
-        ? ([lastDoneF.dokod, lastDoneF.dokod2, lastDoneF.dokod3].filter(s => s && s.trim()).pop() || "—")
-        : "—";
-      details = lastKod;
+      // Pokaż datę najbliższego załadunku — to jest teraz najbardziej relewantna data
+      const nextKod = [nextF.zaladunekKod, nextF.zaladunekKod2, nextF.zaladunekKod3].filter(s => s && s.trim())[0]
+                   || [nextF.dokod, nextF.dokod2, nextF.dokod3].filter(s => s && s.trim()).pop()
+                   || "—";
+      const nextDate = nextF.dataZaladunku ? fmtDate(nextF.dataZaladunku) : "";
+      details = nextDate ? `Załadunek: ${nextKod} · ${nextDate}` : nextKod;
     } else {
       const daysSince = lastDoneF
         ? Math.round((new Date(todayISO + "T00:00:00").getTime() - new Date(lastDoneF.dataRozladunku + "T00:00:00").getTime()) / 86400000)
@@ -245,11 +248,12 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
       statusColor = "#d97706";
       statusBg = "#fffbeb";
       statusType = "wolny";
-      // Pokaż tylko ostatni kod rozładunku
+      // Pokaż ostatni kod rozładunku + datę rozładunku
       const lastKod = lastDoneF
         ? ([lastDoneF.dokod, lastDoneF.dokod2, lastDoneF.dokod3].filter(s => s && s.trim()).pop() || "—")
         : "—";
-      details = lastDoneF ? lastKod : "Brak frachtów";
+      const lastDate = lastDoneF?.dataRozladunku ? fmtDate(lastDoneF.dataRozladunku) : "";
+      details = lastDoneF ? (lastDate ? `${lastKod} · ${lastDate}` : lastKod) : "Brak frachtów";
     }
 
     return { v, driverName, vehicleInfo, plate2, statusText, statusColor, statusBg, statusType, details };
@@ -321,7 +325,7 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
         <tr style="background:#f9fafb;">
           <th style="padding:12px 20px;text-align:left;font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;">Pojazd</th>
           <th style="padding:12px 16px;text-align:left;font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;">Status</th>
-          <th style="padding:12px 20px;text-align:left;font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;">Kod rozładunku</th>
+          <th style="padding:12px 20px;text-align:left;font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;">Kod / Termin</th>
         </tr>
       </thead>
       <tbody>
