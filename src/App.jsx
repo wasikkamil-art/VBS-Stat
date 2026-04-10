@@ -5510,6 +5510,12 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
   const [editRec, setEditRec] = useState(null);
   const [detail, setDetail] = useState(null); // klik w chip/wiersz
   const [dayModal, setDayModal] = useState(null); // klik w dzień kalendarza (ISO date)
+  // AI multi-upload queue
+  const [draftInit, setDraftInit]   = useState(null); // prefilled z AI (nowa faktura, bez id)
+  const [formKey, setFormKey]       = useState(0);    // do wymuszenia remountu formularza
+  const [aiQueue, setAiQueue]       = useState([]);   // pozostałe sparsowane faktury czekające
+  const [aiQueueTotal, setAiQueueTotal] = useState(0);
+  const [aiQueueDone, setAiQueueDone]   = useState(0);
 
   // ── Okno: 6 miesięcy wstecz, 18 w przód (dla generatora cyklicznych) ──
   // Używamy "T12:00:00" (południe lokalne) żeby uniknąć problemów ze strefą czasową
@@ -5589,12 +5595,57 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
         await addDoc(collection(db, "payments"), { ...data, createdAt: new Date().toISOString() });
         showToast("✅ Dodano fakturę");
       }
-      setShowForm(false);
       setEditRec(null);
+      // Jeśli w kolejce AI są następne faktury — otwórz kolejną bez zamykania okna
+      if (aiQueue.length > 0) {
+        const [next, ...rest] = aiQueue;
+        setDraftInit(next);
+        setAiQueue(rest);
+        setAiQueueDone(d => d + 1);
+        setFormKey(k => k + 1); // wymuś remount → świeży stan
+      } else {
+        setShowForm(false);
+        setDraftInit(null);
+        setAiQueueTotal(0);
+        setAiQueueDone(0);
+      }
     } catch(e) {
       console.error("savePayment", e);
       showToast("❌ Błąd zapisu");
     }
+  }
+
+  // Pomiń aktualną (bez zapisu) → następna w kolejce
+  function skipToNext() {
+    if (aiQueue.length > 0) {
+      const [next, ...rest] = aiQueue;
+      setDraftInit(next);
+      setAiQueue(rest);
+      setAiQueueDone(d => d + 1);
+      setFormKey(k => k + 1);
+    } else {
+      setShowForm(false);
+      setDraftInit(null);
+      setAiQueueTotal(0);
+      setAiQueueDone(0);
+    }
+  }
+
+  // Anuluj / zamknij wszystko
+  function closeFormAll() {
+    setShowForm(false);
+    setEditRec(null);
+    setDraftInit(null);
+    setAiQueue([]);
+    setAiQueueTotal(0);
+    setAiQueueDone(0);
+  }
+
+  // Dodaj sparsowane faktury z AI do kolejki (wołane z PaymentForm po multi-upload)
+  function appendToQueue(parsedList) {
+    if (!parsedList || parsedList.length === 0) return;
+    setAiQueue(q => [...q, ...parsedList]);
+    setAiQueueTotal(t => t + parsedList.length);
   }
 
   async function deleteRec(id) {
@@ -5989,9 +6040,18 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
       {/* ── FORMULARZ ── */}
       {showForm && (
         <PaymentForm
-          initial={editRec}
+          key={editRec?.id || `draft-${formKey}`}
+          initial={editRec || draftInit}
+          isEdit={!!editRec}
           onSave={saveForm}
-          onClose={() => { setShowForm(false); setEditRec(null); }}
+          onClose={closeFormAll}
+          onSkipNext={aiQueue.length > 0 ? skipToNext : null}
+          onQueueAppend={appendToQueue}
+          queueInfo={aiQueueTotal > 0 ? {
+            done: aiQueueDone,
+            total: aiQueueTotal + 1, // +1 bo aktualna nie jest w aiQueue, tylko w draftInit
+            remaining: aiQueue.length,
+          } : null}
         />
       )}
     </div>
@@ -6035,10 +6095,11 @@ Reguły:
 - bankAccount zwracaj bez spacji (np. "PL12345678901234567890123456" lub "12345678901234567890123456").
 - Zwracaj POPRAWNY JSON bez dodatkowego tekstu.`;
 
-function PaymentForm({ initial, onSave, onClose }) {
+function PaymentForm({ initial, isEdit, onSave, onClose, onSkipNext, onQueueAppend, queueInfo }) {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
-  const [aiFilled, setAiFilled] = useState(false);
+  const [aiFilled, setAiFilled] = useState(!!initial && !isEdit); // draft z AI → od razu "wypełnione"
+  const [aiProgress, setAiProgress] = useState({ done: 0, total: 0 }); // progres parsowania wielu plików
 
   const [f, setF] = useState(() => ({
     contractor:    initial?.contractor    || "",
@@ -6070,67 +6131,101 @@ function PaymentForm({ initial, onSave, onClose }) {
   const upd = (k, v) => setF(p => ({ ...p, [k]: v }));
   const updSub = (sub, k, v) => setF(p => ({ ...p, [sub]: { ...p[sub], [k]: v } }));
 
+  // Parse pojedynczej faktury przez Claude API
+  async function parseOneInvoice(file) {
+    if (file.size > 10 * 1024 * 1024) throw new Error(`${file.name}: plik za duży (max 10 MB)`);
+    const isPdf = file.type === "application/pdf";
+    const isImg = /^image\/(png|jpe?g|webp)$/.test(file.type);
+    if (!isPdf && !isImg) throw new Error(`${file.name}: nieobsługiwany format`);
+    const base64 = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result).split(",")[1]);
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+    const msgContent = isPdf
+      ? [{ type:"document", source:{ type:"base64", media_type:"application/pdf", data: base64 } }, { type:"text", text: PAYMENT_AI_PROMPT }]
+      : [{ type:"image",    source:{ type:"base64", media_type: file.type,         data: base64 } }, { type:"text", text: PAYMENT_AI_PROMPT }];
+    const res = await fetch("/api/claude", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 1500,
+        messages: [{ role: "user", content: msgContent }],
+      }),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`API ${res.status}: ${errText.slice(0,150)}`);
+    }
+    const resp = await res.json();
+    if (resp.error) throw new Error(resp.error.message || "Błąd API");
+    const txt = resp.content?.map(c => c.text || "").join("").trim().replace(/```json|```/g,"").trim();
+    if (!txt) throw new Error("Pusta odpowiedź AI");
+    try { return JSON.parse(txt); }
+    catch(e) { throw new Error(`${file.name}: niepoprawny JSON z AI`); }
+  }
+
+  // Wgraj 1..N faktur naraz — równolegle przez AI
   async function handleAiUpload(ev) {
-    const file = ev.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(ev.target.files || []);
+    if (files.length === 0) return;
     setAiError("");
     setAiFilled(false);
     setAiLoading(true);
+    setAiProgress({ done: 0, total: files.length });
     try {
-      if (file.size > 10 * 1024 * 1024) throw new Error("Plik za duży (max 10 MB)");
-      const isPdf = file.type === "application/pdf";
-      const isImg = /^image\/(png|jpe?g|webp)$/.test(file.type);
-      if (!isPdf && !isImg) throw new Error("Dozwolone: PDF, PNG, JPG, WEBP");
-      const base64 = await new Promise((resolve, reject) => {
-        const r = new FileReader();
-        r.onload = () => resolve(String(r.result).split(",")[1]);
-        r.onerror = reject;
-        r.readAsDataURL(file);
+      // Parsuj wszystko równolegle (Promise.allSettled żeby jeden błąd nie psuł całości)
+      let done = 0;
+      const results = await Promise.allSettled(
+        files.map(f => parseOneInvoice(f).then(r => {
+          done++;
+          setAiProgress({ done, total: files.length });
+          return r;
+        }))
+      );
+      const success = [];
+      const failures = [];
+      results.forEach((r, i) => {
+        if (r.status === "fulfilled") success.push(r.value);
+        else failures.push(files[i].name);
       });
-      const msgContent = isPdf
-        ? [{ type:"document", source:{ type:"base64", media_type:"application/pdf", data: base64 } }, { type:"text", text: PAYMENT_AI_PROMPT }]
-        : [{ type:"image",    source:{ type:"base64", media_type: file.type,         data: base64 } }, { type:"text", text: PAYMENT_AI_PROMPT }];
-      const res = await fetch("/api/claude", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-haiku-4-5-20251001",
-          max_tokens: 1500,
-          messages: [{ role: "user", content: msgContent }],
-        }),
-      });
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`API ${res.status}: ${errText.slice(0,150)}`);
-      }
-      const resp = await res.json();
-      if (resp.error) throw new Error(resp.error.message || "Błąd API");
-      const txt = resp.content?.map(c => c.text || "").join("").trim().replace(/```json|```/g,"").trim();
-      if (!txt) throw new Error("Pusta odpowiedź AI");
-      let parsed;
-      try { parsed = JSON.parse(txt); }
-      catch(e) { throw new Error("AI nie zwróciło poprawnego JSON"); }
+      if (success.length === 0) throw new Error("Żadna faktura nie została sparsowana");
+
+      // Pierwsza → wypełnia aktualny formularz
+      const first = success[0];
       setF(prev => ({
         ...prev,
-        contractor:    parsed.contractor    || prev.contractor,
-        sellerNip:     parsed.sellerNip     || prev.sellerNip,
-        invoiceNumber: parsed.invoiceNumber || prev.invoiceNumber,
-        description:   parsed.description   || prev.description,
-        category:      parsed.category && PAY_CATEGORIES.some(c=>c.id===parsed.category) ? parsed.category : prev.category,
-        currency:      parsed.currency && PAY_CURRENCIES.includes(parsed.currency) ? parsed.currency : prev.currency,
-        netto:         parsed.netto  || prev.netto,
-        brutto:        parsed.brutto || prev.brutto,
-        issueDate:     parsed.issueDate || prev.issueDate,
-        dueDate:       parsed.dueDate   || prev.dueDate,
-        bankAccount:   (parsed.bankAccount || "").replace(/\s+/g,"") || prev.bankAccount,
-        note:          parsed.note  || prev.note,
+        contractor:    first.contractor    || prev.contractor,
+        sellerNip:     first.sellerNip     || prev.sellerNip,
+        invoiceNumber: first.invoiceNumber || prev.invoiceNumber,
+        description:   first.description   || prev.description,
+        category:      first.category && PAY_CATEGORIES.some(c=>c.id===first.category) ? first.category : prev.category,
+        currency:      first.currency && PAY_CURRENCIES.includes(first.currency) ? first.currency : prev.currency,
+        netto:         first.netto  || prev.netto,
+        brutto:        first.brutto || prev.brutto,
+        issueDate:     first.issueDate || prev.issueDate,
+        dueDate:       first.dueDate   || prev.dueDate,
+        bankAccount:   (first.bankAccount || "").replace(/\s+/g,"") || prev.bankAccount,
+        note:          first.note  || prev.note,
       }));
       setAiFilled(true);
+
+      // Reszta → do kolejki w rodzicu (otworzą się kolejno po zapisie)
+      if (success.length > 1 && onQueueAppend) {
+        onQueueAppend(success.slice(1));
+      }
+
+      if (failures.length > 0) {
+        setAiError(`${failures.length} z ${files.length} plików nie sparsowało: ${failures.join(", ").slice(0,120)}`);
+      }
     } catch(e) {
       console.error("AI parse error", e);
       setAiError(e.message || "Błąd analizy");
     } finally {
       setAiLoading(false);
+      setAiProgress({ done: 0, total: 0 });
       if (ev.target) ev.target.value = "";
     }
   }
@@ -6178,7 +6273,15 @@ function PaymentForm({ initial, onSave, onClose }) {
       <div className="absolute inset-0 bg-black/40"></div>
       <div className="relative bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
         <div className="p-5 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white z-10">
-          <div className="font-bold text-lg">{initial ? "Edycja faktury" : "Nowa faktura"}</div>
+          <div>
+            <div className="font-bold text-lg">{isEdit ? "Edycja faktury" : "Nowa faktura"}</div>
+            {queueInfo && (
+              <div className="text-xs text-blue-700 font-semibold mt-0.5">
+                🤖 Paczka AI: faktura {queueInfo.done + 1} / {queueInfo.total}
+                {queueInfo.remaining > 0 && <span className="text-blue-500 font-normal"> · po zapisie: następna</span>}
+              </div>
+            )}
+          </div>
           <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-gray-100 text-gray-500">✕</button>
         </div>
         <div className="p-5 space-y-4">
@@ -6192,21 +6295,26 @@ function PaymentForm({ initial, onSave, onClose }) {
               <div className="text-2xl">{aiLoading ? "⏳" : aiFilled ? "✅" : aiError ? "⚠️" : "🤖"}</div>
               <div className="flex-1">
                 <div className="font-semibold text-sm text-gray-900">
-                  {aiLoading ? "AI czyta fakturę..." :
+                  {aiLoading ? `AI czyta faktury... ${aiProgress.done}/${aiProgress.total}` :
                    aiFilled  ? "Pola wypełnione — sprawdź i popraw w razie potrzeby" :
                    aiError   ? "Błąd analizy — uzupełnij ręcznie" :
-                                "Wgraj fakturę — AI wypełni pola za Ciebie"}
+                                "Wgraj 1 lub więcej faktur — AI wypełni pola za Ciebie"}
                 </div>
                 <div className="text-xs text-gray-500 mt-0.5">
                   {aiError
                     ? aiError
-                    : "PDF / PNG / JPG (max 10 MB). AI wyciągnie kontrahenta, kwoty, daty i kategorię. Split i cykliczność ustawisz ręcznie poniżej."}
+                    : "PDF / PNG / JPG (max 10 MB każda). Możesz wybrać wiele plików naraz — po zapisie otworzy się kolejna. Split i cykliczność ustawisz ręcznie."}
                 </div>
+                {aiLoading && aiProgress.total > 0 && (
+                  <div className="mt-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                    <div className="h-full bg-blue-500 transition-all" style={{width: `${(aiProgress.done/aiProgress.total)*100}%`}}></div>
+                  </div>
+                )}
               </div>
-              <label className={"px-3 py-2 rounded-lg text-sm font-semibold cursor-pointer "+(aiLoading?"opacity-50 pointer-events-none":"")}
+              <label className={"px-3 py-2 rounded-lg text-sm font-semibold cursor-pointer whitespace-nowrap "+(aiLoading?"opacity-50 pointer-events-none":"")}
                 style={{background: "#111827", color: "#fff"}}>
                 📎 Wgraj
-                <input type="file" accept=".pdf,image/png,image/jpeg,image/webp"
+                <input type="file" multiple accept=".pdf,image/png,image/jpeg,image/webp"
                   onChange={handleAiUpload} className="hidden" disabled={aiLoading} />
               </label>
             </div>
@@ -6341,10 +6449,21 @@ function PaymentForm({ initial, onSave, onClose }) {
         </div>
         <div className="p-4 border-t border-gray-200 flex justify-end gap-2 sticky bottom-0 bg-white">
           <button onClick={onClose}
-            className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 hover:bg-gray-50">Anuluj</button>
+            className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 hover:bg-gray-50">
+            {queueInfo ? "Anuluj całą paczkę" : "Anuluj"}
+          </button>
+          {onSkipNext && (
+            <button onClick={onSkipNext}
+              className="px-4 py-2 rounded-lg text-sm font-semibold border border-amber-200 text-amber-700 hover:bg-amber-50"
+              title="Pomiń tę fakturę (nie zapisuj) i przejdź do następnej">
+              Pomiń →
+            </button>
+          )}
           <button onClick={submit}
             className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
-            style={{background: "#111827"}}>Zapisz</button>
+            style={{background: "#111827"}}>
+            {queueInfo && queueInfo.remaining > 0 ? "Zapisz i dalej →" : "Zapisz"}
+          </button>
         </div>
       </div>
     </div>
