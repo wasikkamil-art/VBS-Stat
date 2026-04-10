@@ -2526,19 +2526,21 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               <div className="flex items-center justify-between mb-5">
                 <PageTitle>Rejestr kosztów</PageTitle>
                 <div className="flex gap-2">
-                  <button onClick={() => setShowCostsImport(true)}
-                    className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 flex items-center gap-2">
-                    📥 Importuj z Excel
-                  </button>
-                  <button onClick={() => setShowExportModal(true)}
-                    className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 flex items-center gap-2">
-                    📊 Exportuj Excel
-                  </button>
                   {isAdmin && (
-                    <button onClick={importAllCosts}
-                      className="px-4 py-2 rounded-lg text-sm font-semibold border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-700 flex items-center gap-2">
-                      📊 Import 2026
-                    </button>
+                    <>
+                      <button onClick={() => setShowCostsImport(true)}
+                        className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 flex items-center gap-2">
+                        📥 Importuj z Excel
+                      </button>
+                      <button onClick={() => setShowExportModal(true)}
+                        className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 flex items-center gap-2">
+                        📊 Exportuj Excel
+                      </button>
+                      <button onClick={importAllCosts}
+                        className="px-4 py-2 rounded-lg text-sm font-semibold border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-700 flex items-center gap-2">
+                        📊 Import 2026
+                      </button>
+                    </>
                   )}
                   <button onClick={() => setShowAddCost(true)}
                     className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
