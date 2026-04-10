@@ -6155,6 +6155,7 @@ function PaymentForm({ initial, isEdit, onSave, onClose, onSkipNext, onQueueAppe
   const [aiError, setAiError] = useState("");
   const [aiFilled, setAiFilled] = useState(!!initial && !isEdit); // draft z AI → od razu "wypełnione"
   const [aiProgress, setAiProgress] = useState({ done: 0, total: 0 }); // progres parsowania wielu plików
+  const [isDragging, setIsDragging] = useState(false); // highlight podczas drag-and-drop
 
   const [f, setF] = useState(() => ({
     contractor:    initial?.contractor    || "",
@@ -6228,10 +6229,9 @@ function PaymentForm({ initial, isEdit, onSave, onClose, onSkipNext, onQueueAppe
     catch(e) { throw new Error(`${file.name}: niepoprawny JSON z AI`); }
   }
 
-  // Wgraj 1..N faktur naraz — równolegle przez AI
-  async function handleAiUpload(ev) {
-    const files = Array.from(ev.target.files || []);
-    if (files.length === 0) return;
+  // Wspólna logika: przyjmuje File[] (z inputa lub dropa) i parsuje równolegle
+  async function processFiles(files) {
+    if (!files || files.length === 0) return;
     setAiError("");
     setAiFilled(false);
     setAiLoading(true);
@@ -6305,8 +6305,40 @@ function PaymentForm({ initial, isEdit, onSave, onClose, onSkipNext, onQueueAppe
     } finally {
       setAiLoading(false);
       setAiProgress({ done: 0, total: 0 });
-      if (ev.target) ev.target.value = "";
     }
+  }
+
+  // Handler dla <input type="file">
+  async function handleAiUpload(ev) {
+    const files = Array.from(ev.target.files || []);
+    await processFiles(files);
+    if (ev.target) ev.target.value = "";
+  }
+
+  // Handlery drag-and-drop (upuść plik z folderu bezpośrednio na pole)
+  function handleDragOver(ev) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (!aiLoading) setIsDragging(true);
+  }
+  function handleDragLeave(ev) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    setIsDragging(false);
+  }
+  async function handleDrop(ev) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    setIsDragging(false);
+    if (aiLoading) return;
+    const files = Array.from(ev.dataTransfer?.files || []).filter(f => {
+      return f.type === "application/pdf" || /^image\/(png|jpe?g|webp)$/.test(f.type);
+    });
+    if (files.length === 0) {
+      setAiError("Upuść plik PDF / PNG / JPG / WEBP");
+      return;
+    }
+    await processFiles(files);
   }
 
   function submit() {
@@ -6369,25 +6401,31 @@ function PaymentForm({ initial, isEdit, onSave, onClose, onSkipNext, onQueueAppe
           <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-gray-100 text-gray-500">✕</button>
         </div>
         <div className="p-5 space-y-4">
-          {/* ── AI UPLOAD ── */}
-          <div className="rounded-lg border-2 border-dashed p-4"
+          {/* ── AI UPLOAD (z drag & drop) ── */}
+          <div className="rounded-lg border-2 border-dashed p-4 transition-all"
+            onDragOver={handleDragOver}
+            onDragEnter={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
             style={{
-              borderColor: aiFilled ? "#86efac" : aiError ? "#fca5a5" : "#e5e7eb",
-              background:  aiFilled ? "#f0fdf4" : aiError ? "#fef2f2" : "#fafafa",
+              borderColor: isDragging ? "#3b82f6" : aiFilled ? "#86efac" : aiError ? "#fca5a5" : "#e5e7eb",
+              background:  isDragging ? "#dbeafe" : aiFilled ? "#f0fdf4" : aiError ? "#fef2f2" : "#fafafa",
+              transform:   isDragging ? "scale(1.01)" : "scale(1)",
             }}>
             <div className="flex items-center gap-3">
-              <div className="text-2xl">{aiLoading ? "⏳" : aiFilled ? "✅" : aiError ? "⚠️" : "🤖"}</div>
+              <div className="text-2xl">{isDragging ? "📥" : aiLoading ? "⏳" : aiFilled ? "✅" : aiError ? "⚠️" : "🤖"}</div>
               <div className="flex-1">
                 <div className="font-semibold text-sm text-gray-900">
-                  {aiLoading ? `AI czyta faktury... ${aiProgress.done}/${aiProgress.total}` :
+                  {isDragging ? "Upuść pliki tutaj..." :
+                   aiLoading ? `AI czyta faktury... ${aiProgress.done}/${aiProgress.total}` :
                    aiFilled  ? "Pola wypełnione — sprawdź i popraw w razie potrzeby" :
                    aiError   ? "Błąd analizy — uzupełnij ręcznie" :
-                                "Wgraj 1 lub więcej faktur — AI wypełni pola za Ciebie"}
+                                "Wgraj lub przeciągnij faktury — AI wypełni pola za Ciebie"}
                 </div>
                 <div className="text-xs text-gray-500 mt-0.5">
                   {aiError
                     ? aiError
-                    : "PDF / PNG / JPG (max 10 MB każda). Możesz wybrać wiele plików naraz — po zapisie otworzy się kolejna. Split i cykliczność ustawisz ręcznie."}
+                    : "PDF / PNG / JPG (max 10 MB każda). Możesz przeciągnąć pliki z folderu lub wybrać wiele naraz. Po zapisie otworzy się kolejna. Split i cykliczność ustawisz ręcznie."}
                 </div>
                 {aiLoading && aiProgress.total > 0 && (
                   <div className="mt-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
