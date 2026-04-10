@@ -6275,8 +6275,16 @@ function PaymentForm({ initial, isEdit, onSave, onClose, onSkipNext, onQueueAppe
       setAiFilled(true);
 
       // Reszta → do kolejki w rodzicu (otworzą się kolejno po zapisie)
+      // WAŻNE: spłaszczamy _file do pól top-level, bo PaymentForm czyta initial.fileUrl itd.
       if (success.length > 1 && onQueueAppend) {
-        onQueueAppend(success.slice(1));
+        onQueueAppend(success.slice(1).map(r => ({
+          ...r,
+          fileUrl:  r._file?.fileUrl  || "",
+          filePath: r._file?.filePath || "",
+          fileName: r._file?.fileName || "",
+          fileType: r._file?.fileType || "",
+          fileSize: r._file?.fileSize || 0,
+        })));
       }
 
       if (failures.length > 0) {
