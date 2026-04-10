@@ -156,6 +156,17 @@ service cloud.firestore {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // PAYMENTS — moduł płatności (faktury do zapłaty)
+    // Dostęp kontrolowany w UI przez allowedTabs (admin przyznaje
+    // ręcznie wybranym osobom). Na poziomie reguł pozwalamy każdemu
+    // zalogowanemu, zgodnie ze wzorcem operacyjne/sprawy/chat.
+    // ═══════════════════════════════════════════════════════════════
+    match /payments/{docId} {
+      allow read: if isAuth();
+      allow create, update, delete: if isAuth();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // FCM TOKENS — push notifications
     // Każdy zalogowany może zapisać/odczytać SWÓJ token
     // ═══════════════════════════════════════════════════════════════
