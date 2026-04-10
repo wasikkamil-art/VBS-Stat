@@ -1446,10 +1446,14 @@ function App({ user, role, appUsers = [] }) {
       const vehMonthSum = Object.values(EXCEL_VEH_C).reduce((s, a) => s + a[m], 0);
 
       Object.keys(EXCEL_FR).forEach(vid => {
-        // Frachty
+        // Frachty — używamy tej samej logiki co dynData (dataZaladunku || dataZlecenia)
         const targetFr = EXCEL_FR[vid][m];
         const currFr = cleanFr
-          .filter(f => f.vehicleId === vid && (f.dataZaladunku || "").startsWith(ymPrefix))
+          .filter(f => {
+            if (f.vehicleId !== vid) return false;
+            const d = f.dataZaladunku || f.dataZlecenia || "";
+            return d.startsWith(ymPrefix);
+          })
           .reduce((s, f) => s + (parseFloat(f.cenaEur) || 0), 0);
         const delFr = Math.round((targetFr - currFr) * 100) / 100;
         if (Math.abs(delFr) >= 0.5) {
