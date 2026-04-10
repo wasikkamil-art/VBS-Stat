@@ -399,6 +399,7 @@ export default function Root() {
   const [role, setRole]         = useState(null);
   const [roleLoaded, setRoleLoaded] = useState(false);
   const [appUsers, setAppUsers] = useState([]);
+  const [allowedTabs, setAllowedTabs] = useState(null); // null = fallback do roli
   const autoLogoutTimer = useRef(null);
   const lastActivity = useRef(Date.now());
   const resetAutoLogout = useRef(() => {
@@ -459,9 +460,14 @@ export default function Root() {
 
           // 3. Nasłuchuj zmian roli (claimsUpdatedAt) — kiedy admin zmieni rolę,
           //    Cloud Function zaktualizuje claimsUpdatedAt → odświeżamy token
+          //    Dodatkowo synchronizujemy allowedTabs (per-user custom tab access)
           unsubClaims = onSnapshot(doc(db, "users", u.uid), async (snap) => {
             if (!snap.exists()) return;
             const data = snap.data();
+
+            // Aktualizuj allowedTabs na żywo (jeśli admin zmieni uprawnienia)
+            setAllowedTabs(Array.isArray(data.allowedTabs) ? data.allowedTabs : null);
+
             const freshToken = await u.getIdTokenResult();
             const currentTokenRole = freshToken.claims.role;
 
@@ -499,7 +505,7 @@ export default function Root() {
   if (user === undefined) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f8f9fb",fontSize:32}}><IconTruck size={32}/></div>;
   if (!user) return <LoginScreen />;
   if (!roleLoaded) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f8f9fb",fontSize:32}}><IconTruck size={32}/></div>;
-  return <App user={user} role={role} appUsers={appUsers} />;
+  return <App user={user} role={role} appUsers={appUsers} allowedTabs={allowedTabs} />;
 }
 
 
@@ -725,14 +731,41 @@ function exportCostsToExcel(costs, vehicles, categories, filterYear, filterMonth
   XLSX.writeFile(wb, fileName);
 }
 
-function App({ user, role, appUsers = [] }) {
+// ── Per-role default tab access (fallback kiedy user nie ma jeszcze allowedTabs) ──
+const DEFAULT_TABS_BY_ROLE = {
+  admin:      ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","users","email","sprawy","chat"],
+  dyspozytor: ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","sprawy","chat"],
+  podglad:    ["dashboard","frachty","vehicles","serwis","docs","imi","chat"],
+};
+// Zakładki zawsze admin-only (nie da się ich przyznać przez checkboxy)
+const ADMIN_ONLY_TABS = ["users", "email"];
+
+function App({ user, role, appUsers = [], allowedTabs = null }) {
   const isAdmin      = role === "admin";
   const [showExportModal, setShowExportModal] = useState(false);
   const isDyspozytor = role === "dyspozytor";
   const isPodglad    = role === "podglad";
   const canEdit      = isAdmin || isDyspozytor;  // może edytować
   const canFinance   = isAdmin || isDyspozytor;  // widzi finanse
+
+  // ── Efektywna lista zakładek dla tego usera ──
+  // Admin zawsze widzi wszystko. Dla pozostałych: allowedTabs z Firestore,
+  // fallback do DEFAULT_TABS_BY_ROLE[role]. Zawsze wykluczamy ADMIN_ONLY_TABS dla non-adminów.
+  const effectiveTabs = useMemo(() => {
+    if (isAdmin) return DEFAULT_TABS_BY_ROLE.admin;
+    const base = Array.isArray(allowedTabs) && allowedTabs.length > 0
+      ? allowedTabs
+      : (DEFAULT_TABS_BY_ROLE[role] || DEFAULT_TABS_BY_ROLE.podglad);
+    return base.filter(t => !ADMIN_ONLY_TABS.includes(t));
+  }, [isAdmin, allowedTabs, role]);
+  const canSeeTab = (id) => effectiveTabs.includes(id);
   const [tab, setTab]               = useState("dashboard");
+  // Auto-switch z niedozwolonej zakładki na pierwszą dostępną (np. gdy admin odbierze dostęp)
+  useEffect(() => {
+    if (!canSeeTab(tab)) {
+      setTab(effectiveTabs[0] || "dashboard");
+    }
+  }, [effectiveTabs, tab]);
   const [chatFloat, setChatFloat]   = useState(false); // floating chat popup (widoczny na innych zakładkach)
   const [chatHasActiveRoom, setChatHasActiveRoom] = useState(false); // czy w czacie jest otwarty pokój
   const [chatSize, setChatSize]     = useState("normal"); // "normal" | "large"
@@ -1925,26 +1958,18 @@ function App({ user, role, appUsers = [] }) {
             {[
               { id: "dashboard", label: "Przegląd", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></svg> },
               { id: "frachty", label: "Frachty", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 17V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a1 1 0 0 0 1 1h1.5"/><path d="M13 8h4l4 4v4h-1.5"/><circle cx="7.5" cy="17.5" r="2.5"/><circle cx="17" cy="17.5" r="2.5"/><path d="M10 17.5h4.5"/></svg> },
-              ...(canFinance ? [
-                { id: "fv", label: "FV / Płatności", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 8h6"/><path d="M14 12c0-1.5-3-1.5-3 0s3 1.5 3 0"/><path d="M9 17h3"/></svg> },
-                { id: "costs", label: "Koszty", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="13" rx="2.5"/><path d="M2 10h20"/><path d="M6 15h4"/></svg> },
-              ] : []),
+              { id: "fv", label: "FV / Płatności", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 8h6"/><path d="M14 12c0-1.5-3-1.5-3 0s3 1.5 3 0"/><path d="M9 17h3"/></svg> },
+              { id: "costs", label: "Koszty", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="13" rx="2.5"/><path d="M2 10h20"/><path d="M6 15h4"/></svg> },
               { id: "vehicles", label: "Pojazdy", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="6" width="11" height="10" rx="2"/><path d="M14 10h3.5l3 3v3a1 1 0 0 1-1 1h-1"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M9 17h6"/><path d="M3 16h1.5"/></svg> },
               { id: "serwis", label: "Serwis", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> },
-              ...(canFinance ? [
-                { id: "rent", label: "Rentowność", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg> },
-              ] : []),
+              { id: "rent", label: "Rentowność", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg> },
               { id: "docs", label: "Dokumenty", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> },
               { id: "imi", label: "IMI / SIPSI", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> },
-              ...(isAdmin ? [
-                { id: "users", label: "Użytkownicy", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
-                { id: "email", label: "Email statusy", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> },
-              ] : []),
-              ...((isAdmin || isDyspozytor) ? [
-                { id: "sprawy", label: "Sprawy", badge: sprawyList.filter(s => !['zamknieta','wygrana','przegrana'].includes(s.status) && (s.przypisani||[]).includes(user?.email)).length || null, icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v6"/><line x1="7" y1="13" x2="12" y2="13"/><line x1="7" y1="17" x2="10" y2="17"/></svg> },
-              ] : []),
+              { id: "users", label: "Użytkownicy", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
+              { id: "email", label: "Email statusy", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> },
+              { id: "sprawy", label: "Sprawy", badge: sprawyList.filter(s => !['zamknieta','wygrana','przegrana'].includes(s.status) && (s.przypisani||[]).includes(user?.email)).length || null, icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v6"/><line x1="7" y1="13" x2="12" y2="13"/><line x1="7" y1="17" x2="10" y2="17"/></svg> },
               { id: "chat", label: "Czat", badge: chatUnreadCount || null, icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> },
-            ].map((item) => (
+            ].filter(item => canSeeTab(item.id)).map((item) => (
               <button key={item.id} onClick={() => setTab(item.id)}
                 className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm text-left transition-all"
                 style={{
@@ -2002,7 +2027,7 @@ function App({ user, role, appUsers = [] }) {
           )}
 
           {/* ══ DASHBOARD — TABLICA DYSPOZYTORSKA ═══════════════════════════ */}
-          {tab === "dashboard" && (
+          {tab === "dashboard" && canSeeTab("dashboard") && (
             <div>
               {/* NAGŁÓWEK */}
               <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
@@ -2483,7 +2508,7 @@ function App({ user, role, appUsers = [] }) {
           )}
 
           {/* ══ KOSZTY ══════════════════════════════════════════════════════ */}
-          {tab === "costs" && (
+          {tab === "costs" && canSeeTab("costs") && (
             <div>
               {showCostsImport && (
                 <CostsImportModal
@@ -2739,7 +2764,7 @@ function App({ user, role, appUsers = [] }) {
           )}
 
           {/* ══ POJAZDY ═════════════════════════════════════════════════════ */}
-          {tab === "vehicles" && (
+          {tab === "vehicles" && canSeeTab("vehicles") && (
             <div>
               <div className="flex items-center justify-between mb-5">
                 <PageTitle>Flota pojazdów</PageTitle>
@@ -2967,7 +2992,7 @@ function App({ user, role, appUsers = [] }) {
           )}
 
           {/* ══ DOKUMENTY ══════════════════════════════════════════════════ */}
-          {tab === "docs" && (
+          {tab === "docs" && canSeeTab("docs") && (
             <DocsTab
               docs={docs} vehicles={vehicles}
               onAdd={(d) => setDocs((p) => [...p, { ...d, id: uid() }])}
@@ -2976,7 +3001,7 @@ function App({ user, role, appUsers = [] }) {
             />
           )}
 
-          {tab === "rent" && (
+          {tab === "rent" && canSeeTab("rent") && (
             <RentownoscTab
               vehicles={vehicles}
               records={rentRecords}
@@ -2994,11 +3019,11 @@ function App({ user, role, appUsers = [] }) {
             />
           )}
 
-          {tab === "serwis" && (
+          {tab === "serwis" && canSeeTab("serwis") && (
             <ServisTab vehicles={vehicles} onUpdateVehicle={updateVehicle} />
           )}
 
-          {tab === "frachty" && (
+          {tab === "frachty" && canSeeTab("frachty") && (
             <FrachtyTab
               frachtyList={frachtyList}
               vehicles={vehicles}
@@ -3012,14 +3037,14 @@ function App({ user, role, appUsers = [] }) {
               }}
             />
           )}
-          {tab === "fv" && (
+          {tab === "fv" && canSeeTab("fv") && (
             <FVTab
               frachtyList={frachtyList}
               vehicles={vehicles}
               onUpdate={(id, data) => setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r))}
             />
           )}
-          {tab === "imi" && (
+          {tab === "imi" && canSeeTab("imi") && (
             <ImiTab
               imiRecords={imiRecords}
               vehicles={vehicles}
@@ -3036,7 +3061,7 @@ function App({ user, role, appUsers = [] }) {
             <EmailStatusTab showToast={showToast} />
           )}
 
-          {tab === "chat" && (() => {
+          {tab === "chat" && canSeeTab("chat") && (() => {
             const isMob = typeof window !== 'undefined' && window.innerWidth < 768;
             // Na mobile chat renderuje się w overlay poniżej
             if (isMob) return null;
@@ -3047,7 +3072,7 @@ function App({ user, role, appUsers = [] }) {
             );
           })()}
 
-          {tab === "sprawy" && (isAdmin || isDyspozytor) && (
+          {tab === "sprawy" && canSeeTab("sprawy") && (
             <SprawyTab
               sprawyList={sprawyList}
               vehicles={vehicles}
@@ -5150,9 +5175,26 @@ function EmailStatusTab({ showToast }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // USERS TAB
 // ═══════════════════════════════════════════════════════════════════════════════
+// Definicja wszystkich zakładek które admin może przyznawać userom
+// Kolejność odpowiada sidebar nav. "users" i "email" są ukryte — zawsze admin-only.
+const ASSIGNABLE_TABS = [
+  { id: "dashboard", label: "Przegląd",      icon: "📊" },
+  { id: "frachty",   label: "Frachty",       icon: "🚛" },
+  { id: "fv",        label: "FV / Płatności",icon: "💰" },
+  { id: "costs",     label: "Koszty",        icon: "💳" },
+  { id: "vehicles",  label: "Pojazdy",       icon: "🚚" },
+  { id: "serwis",    label: "Serwis",        icon: "🔧" },
+  { id: "rent",      label: "Rentowność",    icon: "📈" },
+  { id: "docs",      label: "Dokumenty",     icon: "📄" },
+  { id: "imi",       label: "IMI / SIPSI",   icon: "🌍" },
+  { id: "sprawy",    label: "Sprawy",        icon: "📋" },
+  { id: "chat",      label: "Czat",          icon: "💬" },
+];
+
 function UsersTab({ currentUid, showToast }) {
   const [users, setUsers]     = useState([]);
   const [loading, setLoading] = useState(true);
+  const [expandedUid, setExpandedUid] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -5167,6 +5209,34 @@ function UsersTab({ currentUid, showToast }) {
       }
     })();
   }, []);
+
+  // Defaulty per rola (muszą być zgodne z DEFAULT_TABS_BY_ROLE w App)
+  const DEFAULTS = {
+    admin:      ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","sprawy","chat"],
+    dyspozytor: ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","sprawy","chat"],
+    podglad:    ["dashboard","frachty","vehicles","serwis","docs","imi","chat"],
+  };
+
+  async function saveAllowedTabs(uid, newTabs, userRole) {
+    try {
+      await setDoc(doc(db, "users", uid), { allowedTabs: newTabs }, { merge: true });
+      setUsers(p => p.map(u => u.uid === uid ? { ...u, allowedTabs: newTabs } : u));
+      showToast("✅ Zapisano uprawnienia zakładek");
+    } catch(e) {
+      console.error("Błąd zapisu allowedTabs:", e);
+      showToast("❌ Błąd zapisu uprawnień");
+    }
+  }
+
+  function toggleTab(u, tabId) {
+    const current = Array.isArray(u.allowedTabs) && u.allowedTabs.length > 0
+      ? u.allowedTabs
+      : (DEFAULTS[u.role] || DEFAULTS.podglad);
+    const next = current.includes(tabId)
+      ? current.filter(t => t !== tabId)
+      : [...current, tabId];
+    saveAllowedTabs(u.uid, next, u.role);
+  }
 
   async function changeRole(uid, newRole) {
     try {
@@ -5237,44 +5307,103 @@ function UsersTab({ currentUid, showToast }) {
         {!loading && users.map((u, i) => {
           const roleInfo = ROLES.find(r => r.id === u.role) || ROLES[2];
           const isMe = u.uid === currentUid;
+          const isAdmin = u.role === "admin";
+          const effectiveAllowed = Array.isArray(u.allowedTabs) && u.allowedTabs.length > 0
+            ? u.allowedTabs
+            : (DEFAULTS[u.role] || DEFAULTS.podglad);
+          const isExpanded = expandedUid === u.uid;
+          const hasCustom = Array.isArray(u.allowedTabs);
           return (
-            <div key={u.uid}
-              className="md:grid md:grid-cols-12 flex flex-wrap gap-y-2 px-5 py-4 items-center border-b border-gray-50 hover:bg-gray-50 transition-colors"
-              style={{ borderBottomColor: i === users.length - 1 ? "transparent" : undefined }}>
+            <div key={u.uid} style={{ borderBottom: i === users.length - 1 ? "none" : "1px solid #f9fafb" }}>
+              <div className="md:grid md:grid-cols-12 flex flex-wrap gap-y-2 px-5 py-4 items-center hover:bg-gray-50 transition-colors">
 
-              <div className="col-span-5 flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                  style={{ background: "#f3f4f6", color: "#374151" }}>
-                  {(u.email||"?")[0].toUpperCase()}
+                <div className="col-span-5 flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+                    style={{ background: "#f3f4f6", color: "#374151" }}>
+                    {(u.email||"?")[0].toUpperCase()}
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-gray-800 truncate max-w-48">{u.email || "—"}</div>
+                    {isMe && <div className="text-xs text-amber-500 font-medium">to Ty</div>}
+                  </div>
                 </div>
-                <div>
-                  <div className="text-sm font-medium text-gray-800 truncate max-w-48">{u.email || "—"}</div>
-                  {isMe && <div className="text-xs text-amber-500 font-medium">to Ty</div>}
+
+                <div className="col-span-3">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold"
+                    style={{ background: roleInfo.bg, color: roleInfo.color }}>
+                    {roleInfo.icon} {roleInfo.label}
+                  </span>
+                </div>
+
+                <div className="col-span-4 flex gap-1.5 flex-wrap items-center">
+                  {ROLES.filter(r => r.id !== u.role).map(r => (
+                    <button key={r.id}
+                      onClick={() => {
+                        if (isMe && r.id !== "admin") {
+                          if (!window.confirm("Zmieniasz własną rolę — stracisz dostęp admina. Kontynuować?")) return;
+                        }
+                        changeRole(u.uid, r.id);
+                      }}
+                      className="px-3 py-1 rounded-lg text-xs font-medium border transition-all hover:opacity-80"
+                      style={{ borderColor: r.bg, background: r.bg, color: r.color }}>
+                      {r.icon} {r.label}
+                    </button>
+                  ))}
+                  {!isAdmin && (
+                    <button onClick={() => setExpandedUid(isExpanded ? null : u.uid)}
+                      className="px-2.5 py-1 rounded-lg text-xs font-medium border transition-all hover:bg-gray-100"
+                      style={{ borderColor:"#e5e7eb", color:"#374151", background:"#fff" }}
+                      title="Zakładki dostępne dla tego użytkownika">
+                      {isExpanded ? "▲" : "▼"} Zakładki ({effectiveAllowed.length})
+                    </button>
+                  )}
                 </div>
               </div>
 
-              <div className="col-span-3">
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold"
-                  style={{ background: roleInfo.bg, color: roleInfo.color }}>
-                  {roleInfo.icon} {roleInfo.label}
-                </span>
-              </div>
-
-              <div className="col-span-4 flex gap-1.5 flex-wrap">
-                {ROLES.filter(r => r.id !== u.role).map(r => (
-                  <button key={r.id}
-                    onClick={() => {
-                      if (isMe && r.id !== "admin") {
-                        if (!window.confirm("Zmieniasz własną rolę — stracisz dostęp admina. Kontynuować?")) return;
-                      }
-                      changeRole(u.uid, r.id);
-                    }}
-                    className="px-3 py-1 rounded-lg text-xs font-medium border transition-all hover:opacity-80"
-                    style={{ borderColor: r.bg, background: r.bg, color: r.color }}>
-                    {r.icon} {r.label}
-                  </button>
-                ))}
-              </div>
+              {/* Tab permissions panel — tylko dla non-adminów */}
+              {isExpanded && !isAdmin && (
+                <div className="px-5 pb-5 pt-1 bg-gray-50">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                      Dostęp do zakładek
+                      {hasCustom ? (
+                        <span className="ml-2 text-xs font-normal text-blue-600">· własne ustawienia</span>
+                      ) : (
+                        <span className="ml-2 text-xs font-normal text-gray-400">· domyślne dla roli "{u.role}"</span>
+                      )}
+                    </div>
+                    {hasCustom && (
+                      <button onClick={() => saveAllowedTabs(u.uid, [], u.role)}
+                        className="text-xs text-gray-500 hover:text-gray-800 underline">
+                        Przywróć domyślne dla roli
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {ASSIGNABLE_TABS.map(t => {
+                      const checked = effectiveAllowed.includes(t.id);
+                      return (
+                        <label key={t.id}
+                          className="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all border text-sm"
+                          style={{
+                            background: checked ? "#eff6ff" : "#fff",
+                            borderColor: checked ? "#bfdbfe" : "#e5e7eb",
+                            color: checked ? "#1d4ed8" : "#6b7280",
+                            fontWeight: checked ? 600 : 400,
+                          }}>
+                          <input type="checkbox" checked={checked} onChange={() => toggleTab(u, t.id)}
+                            className="w-4 h-4" style={{ accentColor: "#3b82f6" }} />
+                          <span>{t.icon}</span>
+                          <span className="text-xs">{t.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-3 text-xs text-gray-400">
+                    💡 Zakładki <strong>Użytkownicy</strong> i <strong>Email statusy</strong> są zawsze admin-only i nie można ich przyznać tutaj.
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
