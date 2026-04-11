@@ -273,19 +273,21 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
   const order = { trasa: 0, pauza: 1, wolny: 2 };
   activeVehicles.sort((a, b) => (order[a.statusType] ?? 9) - (order[b.statusType] ?? 9));
 
+  // Layout kartowy (mobile-friendly): 1 wiersz per pojazd, w środku nazwa + plakietka + detale.
+  // Rezygnujemy z tabeli 3-kolumnowej bo na iPhone łamała kolumny i plakietka nachodziła na tekst.
   const rows = activeVehicles.map(({ v, vehicleInfo, plate2, statusText, statusColor, statusBg, details }) => {
     return `
       <tr>
         <td style="padding:14px 20px;border-bottom:1px solid #f3f4f6;">
-          <strong style="color:#111827;font-size:14px;">${vehicleInfo || v.type || "—"}</strong>
-        </td>
-        <td style="padding:14px 16px;border-bottom:1px solid #f3f4f6;text-align:center;">
-          <span style="display:inline-block;padding:5px 14px;border-radius:20px;font-size:12px;font-weight:600;color:${statusColor};background:${statusBg};white-space:nowrap;">
-            ${statusText}
-          </span>
-        </td>
-        <td style="padding:14px 20px;border-bottom:1px solid #f3f4f6;color:#6b7280;font-size:13px;">
-          ${details}
+          <div style="font-size:15px;font-weight:700;color:#111827;line-height:1.35;margin-bottom:6px;word-break:break-word;">
+            ${vehicleInfo || v.type || "—"}
+          </div>
+          <div style="font-size:13px;color:#6b7280;line-height:1.45;word-break:break-word;">
+            <span style="display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;color:${statusColor};background:${statusBg};white-space:nowrap;vertical-align:middle;margin-right:8px;">
+              ${statusText}
+            </span>
+            ${details}
+          </div>
         </td>
       </tr>`;
   });
@@ -298,7 +300,7 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
 <html>
 <head><meta charset="utf-8"></head>
 <body style="margin:0;padding:0;background:#f8f9fb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-  <div style="max-width:800px;margin:20px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+  <div style="max-width:600px;margin:20px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
 
     <!-- HEADER -->
     <div style="background:linear-gradient(135deg,#1e293b,#334155);padding:28px 36px;color:#fff;">
@@ -314,20 +316,8 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
       </span>
     </div>
 
-    <!-- TABELA -->
-    <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
-      <colgroup>
-        <col style="width:35%;">
-        <col style="width:18%;">
-        <col style="width:47%;">
-      </colgroup>
-      <thead>
-        <tr style="background:#f9fafb;">
-          <th style="padding:12px 20px;text-align:left;font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;">Pojazd</th>
-          <th style="padding:12px 16px;text-align:left;font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;">Status</th>
-          <th style="padding:12px 20px;text-align:left;font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;">Kod / Termin</th>
-        </tr>
-      </thead>
+    <!-- LISTA POJAZDÓW -->
+    <table style="width:100%;border-collapse:collapse;">
       <tbody>
         ${rows.join("")}
       </tbody>
