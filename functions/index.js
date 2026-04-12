@@ -227,7 +227,16 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
       statusBg = vehiclePauza.status === "baza" ? "#f0f9ff" : "#faf5ff";
       statusType = "pauza";
       const BAZA_KOD = "PL 25-611 Kielce";
-      details = `Dostępny od: ${fmtDate(vehiclePauza.end)} · ${BAZA_KOD}`;
+      // Dla statusu "baza" → kod bazy; dla pauzy w trasie → ostatni kod rozładunku
+      let locationKod = BAZA_KOD;
+      if (vehiclePauza.status !== "baza") {
+        // Weź kod z ostatniego rozładowanego frachtu (tam kierowca faktycznie stoi)
+        const refF = lastDoneF || activeF;
+        if (refF) {
+          locationKod = [refF.dokod, refF.dokod2, refF.dokod3].filter(s => s && s.trim()).pop() || BAZA_KOD;
+        }
+      }
+      details = `Dostępny od: ${fmtDate(vehiclePauza.end)} · ${locationKod}`;
     } else if (nextF) {
       // Załadunek zaplanowany = traktuj jako "W trasie" (auto nie jest dostępne)
       statusText = "🚛 W trasie";
