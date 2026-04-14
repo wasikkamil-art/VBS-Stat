@@ -6477,12 +6477,14 @@ function InstanceOverrideForm({ inst, onSave }) {
 
   const handleSave = async () => {
     setSaving(true);
-    const data = {};
-    if (invoiceNumber !== (inst.invoiceNumber || "")) data.invoiceNumber = invoiceNumber;
-    if (String(netto) !== String(inst.netto || "")) data.netto = Number(netto) || 0;
-    if (String(brutto) !== String(inst.brutto || "")) data.brutto = Number(brutto) || 0;
-    if (note !== (inst.note || "")) data.note = note;
-    if (Object.keys(data).length === 0) { setSaving(false); setOpen(false); return; }
+    // Zawsze zapisz wszystkie pola — nawet jeśli wartości takie same jak szablon.
+    // Samo istnienie overrides oznacza "potwierdzone dane z realnej FV".
+    const data = {
+      invoiceNumber: invoiceNumber || "",
+      netto: Number(netto) || 0,
+      brutto: Number(brutto) || 0,
+    };
+    if (note) data.note = note;
     await onSave(data);
     setSaving(false);
     setOpen(false);
