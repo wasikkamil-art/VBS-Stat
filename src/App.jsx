@@ -1959,6 +1959,8 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     // Znajdź pojazd przypisany do tego kierowcy (szybki lookup po assignedDriver, fallback na driverHistory)
     const myVehicle = vehicles.find(v => v.assignedDriver === user.email)
       || vehicles.find(v => (v.driverHistory || []).some(d => !d.to && d.email === user.email));
+    // DEBUG: log vehicle matching
+    console.log("[DriverPanel] user.email:", user.email, "vehicles:", vehicles.length, "assignedDrivers:", vehicles.map(v => v.assignedDriver).filter(Boolean), "myVehicle:", myVehicle?.plate || "NOT FOUND");
     // Frachty przypisane do mojego pojazdu
     const myFrachty = myVehicle
       ? frachtyList.filter(f => f.vehicleId === myVehicle.id).sort((a,b) => (b.dataZaladunku||"").localeCompare(a.dataZaladunku||""))
@@ -6256,7 +6258,7 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], showToast
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet"/>
 
       {/* HEADER */}
-      <div style={{background: "linear-gradient(135deg, #1e293b, #334155)"}} className="px-4 py-5">
+      <div style={{background: "linear-gradient(135deg, #1e293b, #334155)", paddingTop: "max(env(safe-area-inset-top, 0px), 12px)"}} className="px-4 pb-5 pt-3">
         <div className="max-w-lg mx-auto">
           <div className="flex items-center justify-between">
             <div>
