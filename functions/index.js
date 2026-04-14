@@ -221,7 +221,7 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
         .filter(r => r.statusRozladunku !== "rozladowano" && r.dataRozladunku && r.dataRozladunku >= todayISO)
         .sort((a, b) => (b.dataRozladunku || "").localeCompare(a.dataRozladunku || ""));
       const lastPending = pendingFrachty[0] || activeF;
-      const rozlKod = [lastPending.dokod, lastPending.dokod2, lastPending.dokod3].filter(s => s && s.trim()).join(" / ") || "—";
+      const rozlKod = [lastPending.dokod, lastPending.dokod2, lastPending.dokod3].filter(s => s && s.trim()).pop() || "—";
       const rozlDate = lastPending.dataRozladunku ? fmtDate(lastPending.dataRozladunku) : "";
       details = rozlDate ? `${rozlKod} · ${rozlDate}` : rozlKod;
     } else if (vehiclePauza) {
@@ -237,7 +237,7 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
         // Weź kod z ostatniego rozładowanego frachtu (tam kierowca faktycznie stoi)
         const refF = lastDoneF || activeF;
         if (refF) {
-          locationKod = [refF.dokod, refF.dokod2, refF.dokod3].filter(s => s && s.trim()).join(" / ") || BAZA_KOD;
+          locationKod = [refF.dokod, refF.dokod2, refF.dokod3].filter(s => s && s.trim()).pop() || BAZA_KOD;
         }
       }
       details = `Dostępny od: ${fmtDate(vehiclePauza.end)} · ${locationKod}`;
@@ -252,7 +252,7 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
         .filter(r => r.statusRozladunku !== "rozladowano" && r.dataRozladunku && r.dataRozladunku >= todayISO)
         .sort((a, b) => (b.dataRozladunku || "").localeCompare(a.dataRozladunku || ""));
       const lastFuture = futureFrachty[0] || nextF;
-      const nextKod = [lastFuture.dokod, lastFuture.dokod2, lastFuture.dokod3].filter(s => s && s.trim()).join(" / ") || "—";
+      const nextKod = [lastFuture.dokod, lastFuture.dokod2, lastFuture.dokod3].filter(s => s && s.trim()).pop() || "—";
       const nextDate = lastFuture.dataRozladunku ? fmtDate(lastFuture.dataRozladunku) : "";
       details = nextDate ? `${nextKod} · ${nextDate}` : nextKod;
     } else {
@@ -265,7 +265,7 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
       statusType = "wolny";
       // Pokaż ostatni kod rozładunku + datę rozładunku
       const lastKod = lastDoneF
-        ? ([lastDoneF.dokod, lastDoneF.dokod2, lastDoneF.dokod3].filter(s => s && s.trim()).join(" / ") || "—")
+        ? ([lastDoneF.dokod, lastDoneF.dokod2, lastDoneF.dokod3].filter(s => s && s.trim()).pop() || "—")
         : "—";
       const lastDate = lastDoneF?.dataRozladunku ? fmtDate(lastDoneF.dataRozladunku) : "";
       details = lastDoneF ? (lastDate ? `${lastKod} · ${lastDate}` : lastKod) : "Brak frachtów";
