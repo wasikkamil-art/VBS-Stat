@@ -6050,7 +6050,7 @@ const STATUS_META = {
 // ═══════════════════════════════════════════════════════════════════
 function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEvents = [], showToast }) {
   const [selectedFracht, setSelectedFracht] = useState(null);
-  const [driverTab, setDriverTab] = useState("zlecenia"); // "zlecenia" | "pojazd" | "serwis" | "spalanie" | "czas"
+  const [driverTab, setDriverTab] = useState("home"); // "home" | "zlecenia" | "pojazd" | "serwis" | "spalanie" | "czas" | "dokumenty" | "mapa"
 
   const todayStr = new Date().toISOString().slice(0, 10);
   const today = new Date();
@@ -6350,50 +6350,181 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     );
   }
 
-  // ── Main view ──
+  // ── Main view — Dashboard z kafelkami ──
   const driverName = (vehicle?.driverHistory || []).find(d => !d.to)?.name || user.displayName || user.email;
+
+  // Najbliższy urgent serwis
+  const serwisAlert = (() => {
+    if (!vehicle) return null;
+    const checks = [
+      ["OC", vehicle.ocExpiry], ["AC", vehicle.acExpiry],
+      ["Przegląd", vehicle.inspectionExpiry], ["UDT", vehicle.udtExpiry],
+    ].filter(([,d]) => d).map(([l,d]) => ({ label: l, days: daysUntil(d) })).filter(a => a.days !== null && a.days <= 60);
+    checks.sort((a,b) => a.days - b.days);
+    return checks[0] || null;
+  })();
+
+  // Średnie spalanie
+  const avgSpalanie = (() => {
+    const w = operacyjne.filter(o => o.spalanie > 0);
+    return w.length > 0 ? (w.reduce((s,o) => s + o.spalanie, 0) / w.length).toFixed(1) : null;
+  })();
 
   const renderFrachtCard = (f) => {
     const kody = formatKody(f);
     const isDone = f.statusRozladunku === "rozladowano" || (f.dataRozladunku && f.dataRozladunku < todayStr);
+    const myEvts = driverEvents.filter(ev => ev.frachtId === f.id);
+    const hasZal = myEvts.some(e => e.type === "zaladowano") || f._driverZaladowano;
+    const hasRoz = myEvts.some(e => e.type === "rozladowano") || isDone;
     return (
       <div key={f.id} onClick={() => setSelectedFracht(f)}
-        className={"bg-white rounded-xl border p-4 cursor-pointer hover:shadow-sm transition-all " + (isDone ? "opacity-50" : "")}
-        style={{ borderColor: "#e5e7eb" }}>
-        <div className="flex items-center justify-between mb-2">
-          <div className="text-xs text-gray-500">{fmtDate(f.dataZaladunku)} → {fmtDate(f.dataRozladunku)}</div>
-          {isDone ? (
-            <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{background:"#f0fdf4",color:"#15803d"}}>Zakończone</span>
-          ) : (
-            <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{background:"#eff6ff",color:"#2563eb"}}>W trasie</span>
-          )}
+        style={{ background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", overflow: "hidden", cursor: "pointer", marginBottom: 8 }}>
+        <div style={{ background: isDone ? "#f0fdf4" : hasZal ? "#eff6ff" : "#fffbeb", padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: isDone ? "#15803d" : hasZal ? "#2563eb" : "#92400e" }}>
+            {isDone ? "✅ Zakończone" : hasZal ? "🚛 W trasie" : "📋 Oczekuje"}
+          </span>
+          {f.nrRef && <span style={{ fontSize: 11, color: "#9ca3af" }}>{f.nrRef}</span>}
         </div>
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-blue-600 font-bold">{kody.zal}</span>
-          <span className="text-gray-400">→</span>
-          <span className="text-green-600 font-bold">{kody.roz}</span>
+        <div style={{ padding: "12px 16px" }}>
+          <div className="flex items-center gap-2" style={{ marginBottom: 4 }}>
+            <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#3b82f6", flexShrink: 0 }}></div>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{kody.zal.split(" / ")[0]}</span>
+            <span style={{ fontSize: 12, color: "#9ca3af", marginLeft: "auto" }}>{fmtDate(f.dataZaladunku)}{f.godzZaladunku ? ` · ${f.godzZaladunku}` : ""}</span>
+          </div>
+          <div style={{ width: 1, height: 10, background: "#e5e7eb", marginLeft: 3 }}></div>
+          <div className="flex items-center gap-2">
+            <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#10b981", flexShrink: 0 }}></div>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{kody.roz.split(" / ")[0]}</span>
+            <span style={{ fontSize: 12, color: "#9ca3af", marginLeft: "auto" }}>{fmtDate(f.dataRozladunku)}{f.godzRozladunku ? ` · ${f.godzRozladunku}` : ""}</span>
+          </div>
         </div>
-        <div className="text-xs text-gray-500 mt-1">
-          {f.klient || "—"}
-          {f.nrZlecenia ? ` · ${f.nrZlecenia}` : ""}
-          {f.kmLadowne ? ` · ${f.kmLadowne} km` : ""}
-          {f.wagaLadunku ? ` · ${f.wagaLadunku} kg` : ""}
-        </div>
+        {(f.towarIloscPalet || f.wagaLadunku || f.zaladunekTyp) && (
+          <div style={{ padding: "0 16px 12px", display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {f.towarIloscPalet && <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: "#f3f4f6", color: "#6b7280" }}>{f.towarIloscPalet} palet</span>}
+            {f.wagaLadunku && <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: "#f3f4f6", color: "#6b7280" }}>{f.wagaLadunku} kg</span>}
+            {f.zaladunekTyp && <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: "#f3f4f6", color: "#6b7280" }}>{f.zaladunekTyp}</span>}
+          </div>
+        )}
       </div>
     );
   };
 
-  // ── Tabs config ──
-  const DRIVER_TABS = [
-    { id: "zlecenia", label: "Zlecenia", icon: "📋" },
-    { id: "pojazd",   label: "Pojazd",   icon: "🚛" },
-    { id: "serwis",   label: "Serwis",   icon: "🔧" },
-    { id: "spalanie", label: "Spalanie",  icon: "⛽" },
-    { id: "czas",     label: "Czas",      icon: "⏱" },
-  ];
+  // ── Ekran sub-view (nie home) ──
+  if (driverTab !== "home") {
+    const subTitles = { zlecenia: "Zlecenia", pojazd: "Pojazd", serwis: "Serwis", spalanie: "Tankowania", czas: "Czas pracy", dokumenty: "Dokumenty", mapa: "Mapa" };
+    return (
+      <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", paddingTop: "env(safe-area-inset-top, 0px)" }}>
+        <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet"/>
+        <div className="max-w-lg mx-auto p-4">
+          <button onClick={() => setDriverTab("home")} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-3 py-2" style={{ minHeight: 44 }}>← Powrót</button>
+          <div className="text-lg font-bold text-gray-900 mb-4">{subTitles[driverTab] || driverTab}</div>
+
+          {/* ZLECENIA */}
+          {driverTab === "zlecenia" && (
+            <div>
+              {active.length > 0 && (<><div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Aktywne ({active.length})</div>{active.map(f => renderFrachtCard(f))}</>)}
+              {upcoming.length > 0 && (<><div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-4 mb-2">Nadchodzące ({upcoming.length})</div>{upcoming.map(f => renderFrachtCard(f))}</>)}
+              {history.length > 0 && (<><div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-4 mb-2">Historia ({history.length})</div>{history.slice(0, 10).map(f => renderFrachtCard(f))}{history.length > 10 && <div className="text-xs text-gray-400 text-center mt-2">…i {history.length - 10} więcej</div>}</>)}
+              {active.length === 0 && upcoming.length === 0 && history.length === 0 && (
+                <div className="text-center py-12 text-gray-400"><div className="text-4xl mb-3">🛣️</div><div className="font-medium">Brak zleceń</div></div>
+              )}
+            </div>
+          )}
+
+          {/* POJAZD */}
+          {driverTab === "pojazd" && vehicle && (
+            <div className="space-y-4">
+              <div className="bg-white rounded-2xl border border-gray-100 p-5">
+                <div className="flex items-center gap-3 mb-4"><div className="text-3xl">🚛</div><div><div className="text-lg font-bold text-gray-900">{vehicle.plate}</div>{vehicle.plate2 && <div className="text-sm text-gray-500">Przyczepa: {vehicle.plate2}</div>}</div></div>
+                <div className="grid grid-cols-2 gap-3">
+                  {[["Marka",vehicle.brand],["Typ",vehicle.type],["Rok",vehicle.year],["Wymiary",vehicle.dimensions],["Ładowność",vehicle.maxWeight?`${vehicle.maxWeight} kg`:null],["VIN",vehicle.vin],["Przebieg",vehicle.currentKm?`${Number(vehicle.currentKm).toLocaleString("pl-PL")} km`:null]].filter(([,v])=>v).map(([l,v])=>(
+                    <div key={l} className="p-3 rounded-lg bg-gray-50 border border-gray-100"><div className="text-xs text-gray-400">{l}</div><div className="text-sm font-semibold text-gray-800">{v}</div></div>
+                  ))}
+                </div>
+              </div>
+              {((vehicle.equipment||[]).length>0||(vehicle.customEquipment||[]).length>0) && (
+                <div className="bg-white rounded-2xl border border-gray-100 p-5">
+                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Wyposażenie</div>
+                  <div className="flex flex-wrap gap-2">{[...(vehicle.equipment||[]),...(vehicle.customEquipment||[])].map(eq=>(<span key={eq} className="px-3 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100">{eq}</span>))}</div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* SERWIS */}
+          {driverTab === "serwis" && vehicle && (
+            <div className="space-y-4">
+              <div className="bg-white rounded-2xl border border-gray-100 p-5">
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Terminy i przeglądy</div>
+                <div className="space-y-2">
+                  {[["OC",vehicle.ocExpiry],["AC",vehicle.acExpiry],["Przegląd techniczny",vehicle.inspectionExpiry],["UDT ważność",vehicle.udtExpiry],["UDT przegląd",vehicle.udtNextDate],["GAP",vehicle.gapExpiry]].filter(([,d])=>d).map(([label,date])=>{
+                    const days=daysUntil(date);const urgent=days!==null&&days<=30;const warn=days!==null&&days<=60;
+                    return(<div key={label} className="flex items-center justify-between py-2 px-3 rounded-lg" style={{background:urgent?"#fef2f2":warn?"#fffbeb":"#f9fafb"}}><span className="text-sm text-gray-700">{label}</span><div className="text-right"><span className="text-sm font-semibold" style={{color:urgent?"#dc2626":warn?"#d97706":"#374151"}}>{fmtDateFull(date)}</span>{days!==null&&<span className="ml-2 text-xs" style={{color:urgent?"#dc2626":warn?"#d97706":"#9ca3af"}}>({days>0?`za ${days} dni`:days===0?"dziś!":`${Math.abs(days)} dni temu`})</span>}</div></div>);
+                  })}
+                </div>
+              </div>
+              {(vehicle.lastOilServiceKm||vehicle.oilServiceEveryKm)&&(
+                <div className="bg-white rounded-2xl border border-gray-100 p-5">
+                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Serwis olejowy</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {vehicle.lastOilServiceKm&&<div className="p-3 rounded-lg bg-gray-50 border border-gray-100"><div className="text-xs text-gray-400">Ostatni serwis</div><div className="text-sm font-semibold text-gray-800">{Number(vehicle.lastOilServiceKm).toLocaleString("pl-PL")} km</div></div>}
+                    {vehicle.oilServiceEveryKm&&<div className="p-3 rounded-lg bg-gray-50 border border-gray-100"><div className="text-xs text-gray-400">Następny co</div><div className="text-sm font-semibold text-gray-800">{Number(vehicle.oilServiceEveryKm).toLocaleString("pl-PL")} km</div></div>}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* SPALANIE / TANKOWANIA */}
+          {driverTab === "spalanie" && vehicle && (
+            <div className="bg-white rounded-2xl border border-gray-100 p-5">
+              {operacyjne.length === 0 ? (
+                <div className="text-center py-8 text-gray-400"><div className="text-3xl mb-2">⛽</div><div className="text-sm">Brak danych</div></div>
+              ) : (
+                <div>
+                  {(() => { const w=operacyjne.filter(o=>o.spalanie>0); const avg=w.length>0?(w.reduce((s,o)=>s+o.spalanie,0)/w.length).toFixed(1):null; const km=operacyjne.reduce((s,o)=>s+(o.kmLicznik||0),0); const l=operacyjne.reduce((s,o)=>s+(o.paliwoL||0),0);
+                    return(<div className="grid grid-cols-2 gap-3 mb-4">{avg&&<div className="p-4 rounded-xl bg-cyan-50 border border-cyan-100 col-span-2 text-center"><div className="text-xs text-cyan-600 font-semibold">Średnie spalanie</div><div className="text-2xl font-bold text-cyan-800">{avg} L/100km</div></div>}<div className="p-3 rounded-lg bg-gray-50 border border-gray-100"><div className="text-xs text-gray-400">Łączne km</div><div className="text-sm font-bold text-gray-800">{km.toLocaleString("pl-PL")}</div></div><div className="p-3 rounded-lg bg-gray-50 border border-gray-100"><div className="text-xs text-gray-400">Łączne litry</div><div className="text-sm font-bold text-gray-800">{l.toLocaleString("pl-PL")} L</div></div></div>);
+                  })()}
+                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Miesięcznie</div>
+                  <div className="space-y-1">{operacyjne.sort((a,b)=>(b.year*100+b.month)-(a.year*100+a.month)).slice(0,12).map(op=>{const mn=new Date(op.year,op.month-1).toLocaleDateString("pl-PL",{month:"short",year:"numeric"});return(<div key={`${op.year}-${op.month}`} className="flex items-center justify-between py-2 px-3 rounded-lg bg-gray-50 border border-gray-100"><span className="text-sm font-medium text-gray-700">{mn}</span><div className="flex items-center gap-3 text-xs">{op.spalanie>0&&<span className="font-bold text-cyan-700">{op.spalanie.toFixed(1)} L/100</span>}{op.kmLicznik>0&&<span className="text-gray-500">{op.kmLicznik.toLocaleString("pl-PL")} km</span>}{op.paliwoL>0&&<span className="text-gray-500">{op.paliwoL} L</span>}</div></div>);})}</div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* CZAS PRACY */}
+          {driverTab === "czas" && (
+            <div className="bg-white rounded-2xl border border-gray-100 p-5">
+              {pauzy.length === 0 ? (
+                <div className="text-center py-8 text-gray-400"><div className="text-3xl mb-2">⏱</div><div className="text-sm">Brak zapisanych pauz</div></div>
+              ) : (
+                <div className="space-y-2">{pauzy.sort((a,b)=>(b.date||"").localeCompare(a.date||"")).slice(0,30).map((p,i)=>(<div key={p.id||i} className="flex items-center justify-between py-2 px-3 rounded-lg bg-gray-50 border border-gray-100"><div><div className="text-sm font-medium text-gray-700">{fmtDateFull(p.date)}</div>{p.location&&<div className="text-xs text-gray-400">{p.location}</div>}</div><div className="text-right">{p.status&&<span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{background:p.status==="pauza"?"#fef3c7":"#ecfdf5",color:p.status==="pauza"?"#92400e":"#059669"}}>{p.status}</span>}{p.hours&&<div className="text-xs text-gray-500 mt-0.5">{p.hours}h</div>}</div></div>))}</div>
+              )}
+            </div>
+          )}
+
+          {/* DOKUMENTY / MAPA — placeholder */}
+          {(driverTab === "dokumenty" || driverTab === "mapa") && (
+            <div className="text-center py-16 text-gray-400">
+              <div className="text-4xl mb-3">{driverTab === "mapa" ? "🗺️" : "📄"}</div>
+              <div className="font-medium">{driverTab === "mapa" ? "Wkrótce — integracja GPS" : "Wkrótce"}</div>
+            </div>
+          )}
+
+          {!vehicle && driverTab !== "zlecenia" && (
+            <div className="text-center py-12 text-gray-400"><div className="text-4xl mb-3">🚛</div><div className="font-medium">Brak przypisanego pojazdu</div></div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── HOME — Dashboard z kafelkami ──
+  const firstActive = active[0] || upcoming[0];
+  const firstKody = firstActive ? formatKody(firstActive) : null;
 
   return (
-    <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", paddingBottom: 80 }}>
+    <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet"/>
 
       {/* HEADER */}
@@ -6408,7 +6539,7 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
               {vehicle ? (
                 <div className="text-white text-sm font-medium">{vehicle.plate}{vehicle.plate2 ? ` + ${vehicle.plate2}` : ""}</div>
               ) : (
-                <div className="text-yellow-300 text-sm">Brak przypisanego pojazdu</div>
+                <div className="text-yellow-300 text-sm">Brak pojazdu</div>
               )}
               <button onClick={() => { logAction("logout", "auth", { reason: "manual" }); signOut(auth); }}
                 className="text-xs text-gray-400 hover:text-gray-200 mt-1">Wyloguj</button>
@@ -6426,372 +6557,71 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
           </div>
         )}
 
-        {/* ═══════ ZLECENIA ═══════ */}
-        {driverTab === "zlecenia" && (
-          <div className="space-y-3">
-            {active.length > 0 && (
-              <>
-                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Aktywne ({active.length})</div>
-                {active.map(f => renderFrachtCard(f))}
-              </>
-            )}
-            {upcoming.length > 0 && (
-              <>
-                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-4">Nadchodzące ({upcoming.length})</div>
-                {upcoming.map(f => renderFrachtCard(f))}
-              </>
-            )}
-            {history.length > 0 && (
-              <>
-                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-4">Historia ({history.length})</div>
-                {history.slice(0, 10).map(f => renderFrachtCard(f))}
-                {history.length > 10 && (
-                  <div className="text-xs text-gray-400 text-center">…i {history.length - 10} więcej</div>
-                )}
-              </>
-            )}
-            {active.length === 0 && upcoming.length === 0 && history.length === 0 && (
-              <div className="text-center py-12 text-gray-400">
-                <div className="text-4xl mb-3">🛣️</div>
-                <div className="font-medium">Brak zleceń</div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ═══════ POJAZD ═══════ */}
-        {driverTab === "pojazd" && vehicle && (
-          <div className="space-y-4">
-            {/* Główne info */}
-            <div className="bg-white rounded-2xl border border-gray-100 p-5">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="text-3xl">🚛</div>
-                <div>
-                  <div className="text-lg font-bold text-gray-900">{vehicle.plate}</div>
-                  {vehicle.plate2 && <div className="text-sm text-gray-500">Przyczepa: {vehicle.plate2}</div>}
+        {/* ═══ KAFELEK: ZLECENIA (full width, duży) ═══ */}
+        <div onClick={() => setDriverTab("zlecenia")}
+          style={{ background: "#fff", borderRadius: 20, border: "1px solid #e5e7eb", overflow: "hidden", cursor: "pointer", marginBottom: 12 }}>
+          <div style={{ padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div className="flex items-center gap-3">
+              <div style={{ width: 48, height: 48, borderRadius: 14, background: "linear-gradient(135deg, #3b82f6, #2563eb)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>📋</div>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: "#111827" }}>Zlecenia</div>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>
+                  {active.length > 0 ? `${active.length} aktywne` : ""}
+                  {active.length > 0 && upcoming.length > 0 ? " · " : ""}
+                  {upcoming.length > 0 ? `${upcoming.length} nadchodzące` : ""}
+                  {active.length === 0 && upcoming.length === 0 ? "Brak zleceń" : ""}
                 </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  ["Marka", vehicle.brand],
-                  ["Typ", vehicle.type],
-                  ["Rok", vehicle.year],
-                  ["Wymiary", vehicle.dimensions],
-                  ["Ładowność", vehicle.maxWeight ? `${vehicle.maxWeight} kg` : null],
-                  ["Załadunek", vehicle.loadingType],
-                  ["VIN", vehicle.vin],
-                  ["Przebieg", vehicle.currentKm ? `${Number(vehicle.currentKm).toLocaleString("pl-PL")} km` : null],
-                ].filter(([,v]) => v).map(([label, val]) => (
-                  <div key={label} className="p-3 rounded-lg bg-gray-50 border border-gray-100">
-                    <div className="text-xs text-gray-400">{label}</div>
-                    <div className="text-sm font-semibold text-gray-800">{val}</div>
-                  </div>
-                ))}
               </div>
             </div>
-
-            {/* Wyposażenie */}
-            {((vehicle.equipment || []).length > 0 || (vehicle.customEquipment || []).length > 0) && (
-              <div className="bg-white rounded-2xl border border-gray-100 p-5">
-                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Wyposażenie</div>
-                <div className="flex flex-wrap gap-2">
-                  {[...(vehicle.equipment || []), ...(vehicle.customEquipment || [])].map(eq => (
-                    <span key={eq} className="px-3 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100">
-                      {eq}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Wymiary przyczepy */}
-            {vehicle.dimensions2 && (
-              <div className="bg-white rounded-2xl border border-gray-100 p-5">
-                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Przyczepa</div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
-                    <div className="text-xs text-gray-400">Wymiary</div>
-                    <div className="text-sm font-semibold text-gray-800">{vehicle.dimensions2}</div>
-                  </div>
-                  {vehicle.maxWeight2 && (
-                    <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
-                      <div className="text-xs text-gray-400">Ładowność</div>
-                      <div className="text-sm font-semibold text-gray-800">{vehicle.maxWeight2} kg</div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+            <div style={{ fontSize: 20, color: "#d1d5db" }}>›</div>
           </div>
-        )}
-        {driverTab === "pojazd" && !vehicle && (
-          <div className="text-center py-12 text-gray-400">
-            <div className="text-4xl mb-3">🚛</div>
-            <div className="font-medium">Brak przypisanego pojazdu</div>
-          </div>
-        )}
-
-        {/* ═══════ SERWIS ═══════ */}
-        {driverTab === "serwis" && vehicle && (
-          <div className="space-y-4">
-            {/* Daty ważności */}
-            <div className="bg-white rounded-2xl border border-gray-100 p-5">
-              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Terminy i przeglądy</div>
-              <div className="space-y-2">
-                {[
-                  ["OC", vehicle.ocExpiry],
-                  ["AC", vehicle.acExpiry],
-                  ["Przegląd techniczny", vehicle.inspectionExpiry],
-                  ["UDT ważność", vehicle.udtExpiry],
-                  ["UDT przegląd", vehicle.udtNextDate],
-                  ["GAP", vehicle.gapExpiry],
-                ].filter(([,d]) => d).map(([label, date]) => {
-                  const days = daysUntil(date);
-                  const urgent = days !== null && days <= 30;
-                  const warn = days !== null && days <= 60;
-                  return (
-                    <div key={label} className="flex items-center justify-between py-2 px-3 rounded-lg"
-                      style={{ background: urgent ? "#fef2f2" : warn ? "#fffbeb" : "#f9fafb" }}>
-                      <span className="text-sm text-gray-700">{label}</span>
-                      <div className="text-right">
-                        <span className="text-sm font-semibold" style={{ color: urgent ? "#dc2626" : warn ? "#d97706" : "#374151" }}>
-                          {fmtDateFull(date)}
-                        </span>
-                        {days !== null && (
-                          <span className="ml-2 text-xs" style={{ color: urgent ? "#dc2626" : warn ? "#d97706" : "#9ca3af" }}>
-                            ({days > 0 ? `za ${days} dni` : days === 0 ? "dziś!" : `${Math.abs(days)} dni temu`})
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+          {/* Mini preview aktywnego zlecenia */}
+          {firstActive && firstKody && (
+            <div style={{ padding: "0 20px 16px" }}>
+              <div style={{ padding: "10px 14px", borderRadius: 12,
+                background: active.length > 0 ? "#f0fdf4" : "#eff6ff",
+                border: `1px solid ${active.length > 0 ? "#bbf7d0" : "#bfdbfe"}` }}>
+                <div className="flex items-center justify-between" style={{ marginBottom: 4 }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: active.length > 0 ? "#15803d" : "#2563eb" }}>
+                    {active.length > 0 ? "🚛 W trasie" : "📋 Nadchodzące"}
+                  </span>
+                  {firstActive.nrRef && <span style={{ fontSize: 11, color: "#9ca3af" }}>{firstActive.nrRef}</span>}
+                </div>
+                <div className="flex items-center gap-2">
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#3b82f6" }}></div>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{firstKody.zal.split(" / ")[0]}</span>
+                  <span style={{ color: "#d1d5db", fontSize: 12 }}>→</span>
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981" }}></div>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{firstKody.roz.split(" / ")[0]}</span>
+                  <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: "auto" }}>{fmtDate(firstActive.dataRozladunku)}</span>
+                </div>
               </div>
             </div>
+          )}
+        </div>
 
-            {/* Olej / serwis */}
-            {(vehicle.lastOilServiceKm || vehicle.oilServiceEveryKm) && (
-              <div className="bg-white rounded-2xl border border-gray-100 p-5">
-                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Serwis olejowy</div>
-                <div className="grid grid-cols-2 gap-3">
-                  {vehicle.lastOilServiceKm && (
-                    <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
-                      <div className="text-xs text-gray-400">Ostatni serwis</div>
-                      <div className="text-sm font-semibold text-gray-800">{Number(vehicle.lastOilServiceKm).toLocaleString("pl-PL")} km</div>
-                      {vehicle.lastOilServiceDate && <div className="text-xs text-gray-400">{fmtDateFull(vehicle.lastOilServiceDate)}</div>}
-                    </div>
-                  )}
-                  {vehicle.oilServiceEveryKm && (
-                    <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
-                      <div className="text-xs text-gray-400">Następny co</div>
-                      <div className="text-sm font-semibold text-gray-800">{Number(vehicle.oilServiceEveryKm).toLocaleString("pl-PL")} km</div>
-                    </div>
-                  )}
-                  {vehicle.currentKm && vehicle.lastOilServiceKm && vehicle.oilServiceEveryKm && (() => {
-                    const kmSince = Number(vehicle.currentKm) - Number(vehicle.lastOilServiceKm);
-                    const kmLeft = Number(vehicle.oilServiceEveryKm) - kmSince;
-                    const urgent = kmLeft <= 1500;
-                    return (
-                      <div className="col-span-2 p-3 rounded-lg border"
-                        style={{ background: urgent ? "#fef2f2" : "#f0fdf4", borderColor: urgent ? "#fecaca" : "#bbf7d0" }}>
-                        <div className="text-xs text-gray-400">Do następnego serwisu</div>
-                        <div className="text-sm font-bold" style={{ color: urgent ? "#dc2626" : "#15803d" }}>
-                          {kmLeft > 0 ? `${kmLeft.toLocaleString("pl-PL")} km` : `Przekroczono o ${Math.abs(kmLeft).toLocaleString("pl-PL")} km!`}
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </div>
-              </div>
-            )}
-
-            {/* Gwarancja */}
-            {vehicle.warrantyActive && (
-              <div className="bg-white rounded-2xl border border-gray-100 p-5">
-                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Gwarancja</div>
-                <div className="grid grid-cols-2 gap-3">
-                  {vehicle.warrantyKmLimit && (
-                    <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
-                      <div className="text-xs text-gray-400">Limit km</div>
-                      <div className="text-sm font-semibold text-gray-800">{Number(vehicle.warrantyKmLimit).toLocaleString("pl-PL")}</div>
-                    </div>
-                  )}
-                  {vehicle.warrantyServiceEvery && (
-                    <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
-                      <div className="text-xs text-gray-400">Serwis co</div>
-                      <div className="text-sm font-semibold text-gray-800">{Number(vehicle.warrantyServiceEvery).toLocaleString("pl-PL")} km</div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-        {driverTab === "serwis" && !vehicle && (
-          <div className="text-center py-12 text-gray-400">
-            <div className="text-4xl mb-3">🔧</div>
-            <div className="font-medium">Brak pojazdu</div>
-          </div>
-        )}
-
-        {/* ═══════ SPALANIE ═══════ */}
-        {driverTab === "spalanie" && vehicle && (
-          <div className="space-y-4">
-            <div className="bg-white rounded-2xl border border-gray-100 p-5">
-              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Spalanie — {vehicle.plate}</div>
-              {operacyjne.length === 0 ? (
-                <div className="text-center py-8 text-gray-400">
-                  <div className="text-3xl mb-2">⛽</div>
-                  <div className="text-sm">Brak danych o spalaniu</div>
-                </div>
-              ) : (
-                <div>
-                  {/* Podsumowanie */}
-                  {(() => {
-                    const withSpalanie = operacyjne.filter(o => o.spalanie > 0);
-                    const avgSpalanie = withSpalanie.length > 0
-                      ? (withSpalanie.reduce((s, o) => s + o.spalanie, 0) / withSpalanie.length).toFixed(1)
-                      : null;
-                    const totalKm = operacyjne.reduce((s, o) => s + (o.kmLicznik || 0), 0);
-                    const totalPaliwoL = operacyjne.reduce((s, o) => s + (o.paliwoL || 0), 0);
-                    const totalDni = operacyjne.reduce((s, o) => s + (o.dni || 0), 0);
-                    return (
-                      <div className="grid grid-cols-2 gap-3 mb-4">
-                        {avgSpalanie && (
-                          <div className="p-4 rounded-xl bg-cyan-50 border border-cyan-100 col-span-2 text-center">
-                            <div className="text-xs text-cyan-600 font-semibold">Średnie spalanie</div>
-                            <div className="text-2xl font-bold text-cyan-800">{avgSpalanie} L/100km</div>
-                          </div>
-                        )}
-                        <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
-                          <div className="text-xs text-gray-400">Łączne km</div>
-                          <div className="text-sm font-bold text-gray-800">{totalKm.toLocaleString("pl-PL")}</div>
-                        </div>
-                        <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
-                          <div className="text-xs text-gray-400">Łączne litry</div>
-                          <div className="text-sm font-bold text-gray-800">{totalPaliwoL.toLocaleString("pl-PL")} L</div>
-                        </div>
-                        <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
-                          <div className="text-xs text-gray-400">Dni w trasie</div>
-                          <div className="text-sm font-bold text-gray-800">{totalDni}</div>
-                        </div>
-                        <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
-                          <div className="text-xs text-gray-400">Średnia waga</div>
-                          <div className="text-sm font-bold text-gray-800">
-                            {(() => {
-                              const withWaga = operacyjne.filter(o => o.srWaga > 0);
-                              return withWaga.length > 0
-                                ? `${Math.round(withWaga.reduce((s, o) => s + o.srWaga, 0) / withWaga.length).toLocaleString("pl-PL")} kg`
-                                : "—";
-                            })()}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {/* Tabela miesięcy */}
-                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Miesięcznie</div>
-                  <div className="space-y-1">
-                    {operacyjne
-                      .sort((a, b) => (b.year * 100 + b.month) - (a.year * 100 + a.month))
-                      .slice(0, 12)
-                      .map(op => {
-                        const monthName = new Date(op.year, op.month - 1).toLocaleDateString("pl-PL", { month: "short", year: "numeric" });
-                        return (
-                          <div key={`${op.year}-${op.month}`}
-                            className="flex items-center justify-between py-2 px-3 rounded-lg bg-gray-50 border border-gray-100">
-                            <span className="text-sm font-medium text-gray-700">{monthName}</span>
-                            <div className="flex items-center gap-4 text-xs">
-                              {op.spalanie > 0 && (
-                                <span className="font-bold text-cyan-700">{op.spalanie.toFixed(1)} L/100</span>
-                              )}
-                              {op.kmLicznik > 0 && (
-                                <span className="text-gray-500">{op.kmLicznik.toLocaleString("pl-PL")} km</span>
-                              )}
-                              {op.paliwoL > 0 && (
-                                <span className="text-gray-500">{op.paliwoL} L</span>
-                              )}
-                              {op.dni > 0 && (
-                                <span className="text-gray-400">{op.dni}d</span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                  </div>
-                </div>
-              )}
+        {/* ═══ SIATKA KAFELKÓW (2 kolumny) ═══ */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          {[
+            { id: "serwis", icon: "🔧", label: "Serwis", gradient: "linear-gradient(135deg, #f59e0b, #d97706)",
+              sub: serwisAlert ? `${serwisAlert.label} za ${serwisAlert.days}d` : "Terminy OK",
+              subStyle: serwisAlert && serwisAlert.days <= 30 ? { background: "#fef2f2", color: "#dc2626" } : null },
+            { id: "dokumenty", icon: "📄", label: "Dokumenty", gradient: "linear-gradient(135deg, #8b5cf6, #7c3aed)", sub: "CMR, zlecenia" },
+            { id: "spalanie", icon: "⛽", label: "Tankowania", gradient: "linear-gradient(135deg, #06b6d4, #0891b2)",
+              sub: avgSpalanie ? `Śr. ${avgSpalanie} L/100` : "Dane spalania" },
+            { id: "czas", icon: "⏱", label: "Czas pracy", gradient: "linear-gradient(135deg, #10b981, #059669)", sub: "Pauzy, jazda" },
+            { id: "mapa", icon: "🗺️", label: "Mapa", gradient: "linear-gradient(135deg, #ec4899, #db2777)", sub: "Wkrótce" },
+            { id: "pojazd", icon: "🚛", label: "Pojazd", gradient: "linear-gradient(135deg, #64748b, #475569)", sub: vehicle ? vehicle.brand || vehicle.type : "—" },
+          ].map(t => (
+            <div key={t.id} onClick={() => setDriverTab(t.id)}
+              style={{ background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", padding: "20px 16px", cursor: "pointer",
+                display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 12, background: t.gradient,
+                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>{t.icon}</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>{t.label}</div>
+              <div style={{ fontSize: 11, fontWeight: t.subStyle ? 600 : 400, padding: "2px 8px", borderRadius: 8,
+                background: t.subStyle?.background || "transparent", color: t.subStyle?.color || "#9ca3af" }}>{t.sub}</div>
             </div>
-          </div>
-        )}
-        {driverTab === "spalanie" && !vehicle && (
-          <div className="text-center py-12 text-gray-400">
-            <div className="text-4xl mb-3">⛽</div>
-            <div className="font-medium">Brak pojazdu</div>
-          </div>
-        )}
-
-        {/* ═══════ CZAS PRACY ═══════ */}
-        {driverTab === "czas" && (
-          <div className="space-y-4">
-            <div className="bg-white rounded-2xl border border-gray-100 p-5">
-              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Czas pracy — pauzy</div>
-              {pauzy.length === 0 ? (
-                <div className="text-center py-8 text-gray-400">
-                  <div className="text-3xl mb-2">⏱</div>
-                  <div className="text-sm">Brak zapisanych pauz</div>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {pauzy
-                    .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
-                    .slice(0, 30)
-                    .map((p, i) => (
-                      <div key={p.id || i} className="flex items-center justify-between py-2 px-3 rounded-lg bg-gray-50 border border-gray-100">
-                        <div>
-                          <div className="text-sm font-medium text-gray-700">{fmtDateFull(p.date)}</div>
-                          {p.location && <div className="text-xs text-gray-400">{p.location}</div>}
-                        </div>
-                        <div className="text-right">
-                          {p.status && (
-                            <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
-                              style={{
-                                background: p.status === "pauza" ? "#fef3c7" : p.status === "jazda" ? "#ecfdf5" : "#f3f4f6",
-                                color: p.status === "pauza" ? "#92400e" : p.status === "jazda" ? "#059669" : "#6b7280",
-                              }}>
-                              {p.status}
-                            </span>
-                          )}
-                          {p.hours && <div className="text-xs text-gray-500 mt-0.5">{p.hours}h</div>}
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* ═══════ BOTTOM NAV (mobile app style) ═══════ */}
-      <div style={{
-        position: "fixed", bottom: 0, left: 0, right: 0,
-        background: "#fff", borderTop: "1px solid #e5e7eb",
-        paddingBottom: "env(safe-area-inset-bottom, 0px)",
-        zIndex: 50,
-      }}>
-        <div className="max-w-lg mx-auto flex">
-          {DRIVER_TABS.map(t => (
-            <button key={t.id} onClick={() => setDriverTab(t.id)}
-              className="flex-1 flex flex-col items-center gap-0.5 py-2.5 transition-all"
-              style={{ color: driverTab === t.id ? "#111827" : "#9ca3af" }}>
-              <span className="text-lg">{t.icon}</span>
-              <span className="text-[10px] font-semibold">{t.label}</span>
-              {driverTab === t.id && (
-                <div style={{ width: 20, height: 2, background: "#111827", borderRadius: 1, marginTop: 1 }}></div>
-              )}
-            </button>
           ))}
         </div>
       </div>
