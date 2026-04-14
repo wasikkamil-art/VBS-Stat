@@ -1978,6 +1978,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
         frachty={myFrachty}
         pauzy={pauzy.filter(p => myVehicle && p.vehicleId === myVehicle.id)}
         operacyjne={myOperacyjne}
+        driverEvents={driverEvents}
         showToast={showToast}
       />
     );
@@ -6047,7 +6048,7 @@ const STATUS_META = {
 // ═══════════════════════════════════════════════════════════════════
 //  PANEL KIEROWCY — mobile-first, osobny layout
 // ═══════════════════════════════════════════════════════════════════
-function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], showToast }) {
+function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEvents = [], showToast }) {
   const [selectedFracht, setSelectedFracht] = useState(null);
   const [driverTab, setDriverTab] = useState("zlecenia"); // "zlecenia" | "pojazd" | "serwis" | "spalanie" | "czas"
 
@@ -6108,101 +6109,238 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], showToast
     }
   };
 
-  // ── Detail view (zlecenie) ──
+  // ── Upload zdjęcia (towar / CMR) ──
+  const uploadDriverPhoto = async (type, file) => {
+    if (!file || !selectedFracht) return;
+    try {
+      const path = `driverPhotos/${selectedFracht.id}/${type}_${Date.now()}_${file.name}`;
+      const sRef = storageRef(storage, path);
+      await uploadBytes(sRef, file);
+      const url = await getDownloadURL(sRef);
+      await addDoc(collection(db, "driverEvents"), {
+        type: type === "cmr" ? "cmr_photo" : "towar_photo",
+        frachtId: selectedFracht.id,
+        vehicleId: vehicle?.id,
+        photoUrl: url,
+        driverEmail: user.email,
+        driverName: user.displayName || user.email,
+        ts: new Date().toISOString(),
+      });
+      showToast(type === "cmr" ? "✅ Zdjęcie CMR dodane" : "✅ Zdjęcie towaru dodane");
+      return url;
+    } catch (e) {
+      console.error("Photo upload error:", e);
+      showToast("❌ Błąd wysyłania zdjęcia");
+      return null;
+    }
+  };
+
+  // ── Detail view (zlecenie) — wg mockupu ──
   if (selectedFracht) {
     const f = selectedFracht;
     const kody = formatKody(f);
+    // Sprawdź driverEvents dla tego frachtu
+    const myEvents = driverEvents.filter(ev => ev.frachtId === f.id);
+    const zalEvent = myEvents.find(e => e.type === "zaladowano");
+    const rozEvent = myEvents.find(e => e.type === "rozladowano");
+    const towarPhoto = myEvents.find(e => e.type === "towar_photo");
+    const cmrPhoto = myEvents.find(e => e.type === "cmr_photo");
+    const hasZal = !!zalEvent || !!f._driverZaladowano;
+    const hasRoz = !!rozEvent || f.statusRozladunku === "rozladowano";
+    const hasCMR = !!cmrPhoto;
+
     return (
-      <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", paddingTop: "env(safe-area-inset-top, 0px)" }}>
+      <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", paddingTop: "env(safe-area-inset-top, 0px)", paddingBottom: 40 }}>
         <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet"/>
         <div className="max-w-lg mx-auto p-4">
           <button onClick={() => setSelectedFracht(null)}
-            className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-4 py-2"
+            className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-3 py-2"
             style={{ minHeight: 44 }}>
             ← Powrót
           </button>
 
-          <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-            <div className="p-5" style={{background: "linear-gradient(135deg, #1e293b, #334155)"}}>
-              <div className="text-white text-lg font-bold">Zlecenie {f.nrZlecenia || ""}</div>
-              <div className="text-gray-300 text-sm mt-1">{f.klient || "—"}</div>
+          {/* ═══ HEADER ═══ */}
+          <div style={{background: "linear-gradient(135deg, #1e293b, #334155)", borderRadius: 16, padding: 20, marginBottom: 16}}>
+            <div className="flex items-center justify-between" style={{marginBottom: 4}}>
+              {f.nrRef && <span style={{color: "#94a3b8", fontSize: 12, fontWeight: 600}}>REF: {f.nrRef}</span>}
+              <span style={{fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 20,
+                background: hasRoz ? "rgba(34,197,94,0.2)" : hasZal ? "rgba(59,130,246,0.2)" : "rgba(251,191,36,0.2)",
+                color: hasRoz ? "#4ade80" : hasZal ? "#60a5fa" : "#fbbf24"}}>
+                {hasRoz ? "Rozładowano" : hasZal ? "W trasie" : "Oczekuje"}
+              </span>
             </div>
+            <div style={{color: "#fff", fontSize: 13, marginTop: 4}}>{f.klient || "—"}</div>
+          </div>
 
-            <div className="p-5 space-y-4">
-              <div className="flex items-start gap-3">
-                <div className="flex flex-col items-center">
-                  <div className="w-4 h-4 rounded-full bg-blue-500 border-2 border-blue-200"></div>
-                  <div className="w-0.5 h-12 bg-gray-200"></div>
-                  <div className="w-4 h-4 rounded-full bg-green-500 border-2 border-green-200"></div>
-                </div>
-                <div className="flex-1 space-y-6">
-                  <div>
-                    <div className="text-xs text-gray-500 uppercase font-semibold">Załadunek</div>
-                    <div className="text-base font-bold text-gray-900">{kody.zal}</div>
-                    <div className="text-sm text-gray-500">{fmtDate(f.dataZaladunku)}{f.godzZaladunku ? ` · ${f.godzZaladunku}` : ""}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-500 uppercase font-semibold">Rozładunek</div>
-                    <div className="text-base font-bold text-gray-900">{kody.roz}</div>
-                    <div className="text-sm text-gray-500">{fmtDate(f.dataRozladunku)}{f.godzRozladunku ? ` · ${f.godzRozladunku}` : ""}</div>
-                  </div>
-                </div>
+          {/* ═══ TRASA ═══ */}
+          <div style={{background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", overflow: "hidden", marginBottom: 16}}>
+            {/* Załadunek */}
+            <div style={{padding: "16px 16px 12px", borderBottom: "1px solid #f3f4f6"}}>
+              <div className="flex items-center gap-2" style={{marginBottom: 8}}>
+                <div style={{width: 10, height: 10, borderRadius: "50%", background: "#3b82f6", border: "2px solid #bfdbfe"}}></div>
+                <span style={{fontSize: 11, fontWeight: 700, color: "#3b82f6", textTransform: "uppercase", letterSpacing: 0.5}}>Załadunek</span>
               </div>
+              <div style={{paddingLeft: 18}}>
+                <div style={{fontSize: 16, fontWeight: 700, color: "#111827", marginBottom: 2}}>{kody.zal}</div>
+                {f.zaladunekAdres && <div style={{fontSize: 13, color: "#6b7280", marginBottom: 2}}>{f.zaladunekAdres}</div>}
+                <div style={{fontSize: 13, color: "#374151", fontWeight: 600}}>
+                  {fmtDate(f.dataZaladunku)}{f.godzZaladunku ? ` · ${f.godzZaladunku}` : ""}
+                </div>
+                {f.zaladunekTelefon && (
+                  <a href={`tel:${f.zaladunekTelefon}`} style={{fontSize: 13, color: "#3b82f6", textDecoration: "none", display: "block", marginTop: 4}}>
+                    📞 {f.zaladunekTelefon}
+                  </a>
+                )}
+              </div>
+            </div>
+            {/* Rozładunek */}
+            <div style={{padding: "12px 16px 16px"}}>
+              <div className="flex items-center gap-2" style={{marginBottom: 8}}>
+                <div style={{width: 10, height: 10, borderRadius: "50%", background: "#10b981", border: "2px solid #a7f3d0"}}></div>
+                <span style={{fontSize: 11, fontWeight: 700, color: "#10b981", textTransform: "uppercase", letterSpacing: 0.5}}>Rozładunek</span>
+              </div>
+              <div style={{paddingLeft: 18}}>
+                <div style={{fontSize: 16, fontWeight: 700, color: "#111827", marginBottom: 2}}>{kody.roz}</div>
+                {f.rozladunekAdres && <div style={{fontSize: 13, color: "#6b7280", marginBottom: 2}}>{f.rozladunekAdres}</div>}
+                <div style={{fontSize: 13, color: "#374151", fontWeight: 600}}>
+                  {fmtDate(f.dataRozladunku)}{f.godzRozladunku ? ` · ${f.godzRozladunku}` : ""}
+                </div>
+                {f.rozladunekTelefon && (
+                  <a href={`tel:${f.rozladunekTelefon}`} style={{fontSize: 13, color: "#3b82f6", textDecoration: "none", display: "block", marginTop: 4}}>
+                    📞 {f.rozladunekTelefon}
+                  </a>
+                )}
+              </div>
+            </div>
+          </div>
 
-              {/* Info operacyjne — BEZ CEN */}
-              <div className="grid grid-cols-2 gap-3">
-                {f.kmLadowne && (
-                  <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
-                    <div className="text-xs text-gray-400">KM ładowne</div>
-                    <div className="text-sm font-bold text-gray-800">{f.kmLadowne}</div>
+          {/* ═══ TOWAR ═══ */}
+          {(f.wagaLadunku || f.towarIloscPalet || f.towarPalety || f.towarOpis) && (
+            <div style={{background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", padding: 16, marginBottom: 16}}>
+              <div style={{fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 12}}>Towar</div>
+              <div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: (f.towarPalety || f.towarOpis) ? 12 : 0}}>
+                {f.towarIloscPalet && (
+                  <div style={{padding: 12, borderRadius: 12, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
+                    <div style={{fontSize: 11, color: "#9ca3af"}}>Ilość palet</div>
+                    <div style={{fontSize: 18, fontWeight: 700, color: "#111827"}}>{f.towarIloscPalet}</div>
                   </div>
                 )}
                 {f.wagaLadunku && (
-                  <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
-                    <div className="text-xs text-gray-400">Waga</div>
-                    <div className="text-sm font-bold text-gray-800">{f.wagaLadunku} kg</div>
-                  </div>
-                )}
-                {f.nrCMR && (
-                  <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
-                    <div className="text-xs text-gray-400">Nr CMR</div>
-                    <div className="text-sm font-bold text-gray-800">{f.nrCMR}</div>
-                  </div>
-                )}
-                {f.dyspozytor && (
-                  <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
-                    <div className="text-xs text-gray-400">Dyspozytor</div>
-                    <div className="text-sm font-bold text-gray-800">{f.dyspozytor}</div>
+                  <div style={{padding: 12, borderRadius: 12, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
+                    <div style={{fontSize: 11, color: "#9ca3af"}}>Waga łączna</div>
+                    <div style={{fontSize: 18, fontWeight: 700, color: "#111827"}}>{f.wagaLadunku} kg</div>
                   </div>
                 )}
               </div>
-
-              {f.uwagi && (
-                <div className="p-3 rounded-lg bg-yellow-50 border border-yellow-200">
-                  <div className="text-xs font-semibold text-yellow-800 mb-1">Uwagi od dyspozytora</div>
-                  <div className="text-sm text-yellow-900">{f.uwagi}</div>
+              {f.towarPalety && (
+                <div>
+                  <div style={{fontSize: 11, color: "#9ca3af", marginBottom: 6}}>Wymiary</div>
+                  {f.towarPalety.split("\n").filter(Boolean).map((line, i) => (
+                    <div key={i} style={{padding: "8px 12px", borderRadius: 8, background: "#f8fafc", border: "1px solid #f1f5f9", marginBottom: 4, fontSize: 13, color: "#374151", fontWeight: 500}}>
+                      {line}
+                    </div>
+                  ))}
                 </div>
               )}
+              {f.towarOpis && !f.towarPalety && (
+                <div style={{fontSize: 13, color: "#374151"}}>{f.towarOpis}</div>
+              )}
+              {f.zaladunekTyp && (
+                <div style={{marginTop: 12, padding: "8px 12px", borderRadius: 8, background: "#fffbeb", border: "1px solid #fde68a", fontSize: 13, color: "#92400e", fontWeight: 500}}>
+                  Załadunek: {f.zaladunekTyp}
+                </div>
+              )}
+            </div>
+          )}
 
-              {/* Przyciski akcji */}
-              <div className="space-y-2 pt-2">
-                {f.statusRozladunku !== "rozladowano" && (
-                  <>
-                    {!f._driverZaladowano && (
-                      <button
-                        onClick={() => updateFrachtStatus(f, "zaladowano", new Date().toISOString())}
-                        className="w-full py-3 rounded-xl text-base font-bold text-white transition-all hover:opacity-90"
-                        style={{background: "#3b82f6"}}>
-                        📦 Potwierdzam załadunek
-                      </button>
-                    )}
-                    <button
-                      onClick={() => updateFrachtStatus(f, "rozladowano", new Date().toISOString())}
-                      className="w-full py-3 rounded-xl text-base font-bold text-white transition-all hover:opacity-90"
-                      style={{background: "#10b981"}}>
-                      ✅ Potwierdzam rozładunek
-                    </button>
-                  </>
+          {/* ═══ UWAGI ═══ */}
+          {f.uwagi && (
+            <div style={{background: "#fffbeb", borderRadius: 12, border: "1px solid #fde68a", padding: "12px 16px", marginBottom: 16}}>
+              <div style={{fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 4}}>Uwagi</div>
+              <div style={{fontSize: 13, color: "#78350f"}}>{f.uwagi}</div>
+            </div>
+          )}
+
+          {/* ═══ STATUS REALIZACJI ═══ */}
+          <div style={{background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", padding: 16}}>
+            <div style={{fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 12}}>Status realizacji</div>
+
+            {/* ZAŁADUNEK */}
+            <div style={{padding: 14, borderRadius: 12, marginBottom: 8,
+              background: hasZal ? "#f0fdf4" : "#f8fafc",
+              border: `1px solid ${hasZal ? "#bbf7d0" : "#e5e7eb"}`}}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div style={{fontSize: 13, fontWeight: 600, color: hasZal ? "#15803d" : "#374151"}}>
+                    {hasZal ? "✅ Załadowano" : "📦 Załadunek"}
+                  </div>
+                  {zalEvent && <div style={{fontSize: 12, color: "#6b7280", marginTop: 2}}>
+                    {new Date(zalEvent.value || zalEvent.ts).toLocaleString("pl-PL", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
+                  </div>}
+                </div>
+                {!hasZal && (
+                  <button onClick={() => updateFrachtStatus(f, "zaladowano", new Date().toISOString())}
+                    style={{padding: "8px 16px", borderRadius: 10, border: "none", background: "#3b82f6", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer"}}>
+                    Potwierdź
+                  </button>
+                )}
+              </div>
+              {hasZal && !towarPhoto && (
+                <label style={{display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 10,
+                  padding: "10px", borderRadius: 10, border: "1px dashed #d1d5db", background: "#f9fafb",
+                  color: "#6b7280", fontSize: 13, fontWeight: 500, cursor: "pointer"}}>
+                  📷 Dodaj zdjęcie towaru
+                  <input type="file" accept="image/*" capture="environment" className="hidden"
+                    onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto("towar", file); e.target.value=""; }} />
+                </label>
+              )}
+              {towarPhoto && (
+                <div style={{marginTop: 8, display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, background: "#f0fdf4", border: "1px solid #bbf7d0"}}>
+                  <span style={{fontSize: 16}}>📸</span>
+                  <span style={{fontSize: 12, color: "#15803d", fontWeight: 500}}>Zdjęcie towaru dodane</span>
+                </div>
+              )}
+            </div>
+
+            {/* ROZŁADUNEK */}
+            <div style={{padding: 14, borderRadius: 12, marginBottom: 8, opacity: hasZal ? 1 : 0.4,
+              background: hasRoz ? "#f0fdf4" : "#f8fafc",
+              border: `1px solid ${hasRoz ? "#bbf7d0" : "#e5e7eb"}`}}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div style={{fontSize: 13, fontWeight: 600, color: hasRoz ? "#15803d" : "#374151"}}>
+                    {hasRoz ? "✅ Rozładowano" : "📦 Rozładunek"}
+                  </div>
+                  {rozEvent && <div style={{fontSize: 12, color: "#6b7280", marginTop: 2}}>
+                    {new Date(rozEvent.value || rozEvent.ts).toLocaleString("pl-PL", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
+                  </div>}
+                </div>
+                {hasZal && !hasRoz && (
+                  <button onClick={() => updateFrachtStatus(f, "rozladowano", new Date().toISOString())}
+                    style={{padding: "8px 16px", borderRadius: 10, border: "none", background: "#10b981", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer"}}>
+                    Potwierdź
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* CMR */}
+            <div style={{padding: 14, borderRadius: 12, opacity: hasRoz ? 1 : 0.4,
+              background: hasCMR ? "#f0fdf4" : "#f8fafc",
+              border: `1px solid ${hasCMR ? "#bbf7d0" : "#e5e7eb"}`}}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div style={{fontSize: 13, fontWeight: 600, color: hasCMR ? "#15803d" : "#374151"}}>
+                    {hasCMR ? "✅ CMR dodany" : "📄 CMR"}
+                  </div>
+                  {cmrPhoto && <div style={{fontSize: 12, color: "#6b7280", marginTop: 2}}>Zdjęcie CMR dodane</div>}
+                </div>
+                {hasRoz && !hasCMR && (
+                  <label style={{padding: "8px 16px", borderRadius: 10, border: "none", background: "#6366f1", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer"}}>
+                    📷 Dodaj zdjęcie
+                    <input type="file" accept="image/*" capture="environment" className="hidden"
+                      onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto("cmr", file); e.target.value=""; }} />
+                  </label>
                 )}
               </div>
             </div>
@@ -13200,7 +13338,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                             className="text-xs px-2 py-1 rounded-lg font-medium transition-all hover:bg-blue-100"
                             style={{background:"#f0fdf4", color:"#15803d"}}>📄 Otwórz</a>
                         : <ZlecenieUploadBtn frachtId={r.id}
-                            onUploaded={(url, nr) => onUpdate(r.id, { urlZlecenie: url, ...(nr ? {nrZlecenia: nr} : {}) })} />
+                            onUploaded={(url, parsed) => { const p = parsed || {}; onUpdate(r.id, { urlZlecenie: url, ...Object.fromEntries(Object.entries(p).filter(([,v]) => v != null && v !== "")) }); }} />
                       }
                       <button onClick={() => setEditFVId(r.id)}
                         className="w-6 h-6 rounded-lg flex items-center justify-center transition-all hover:bg-indigo-50 text-xs"
@@ -13632,7 +13770,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
                             className="text-xs px-2 py-1 rounded-lg font-medium transition-all hover:bg-blue-100"
                             style={{background:"#f0fdf4", color:"#15803d"}}>📄 Otwórz</a>
                         : <ZlecenieUploadBtn frachtId={r.id}
-                            onUploaded={(url, nr) => onUpdate(r.id, { urlZlecenie: url, ...(nr ? {nrZlecenia: nr} : {}) })} />
+                            onUploaded={(url, parsed) => { const p = parsed || {}; onUpdate(r.id, { urlZlecenie: url, ...Object.fromEntries(Object.entries(p).filter(([,v]) => v != null && v !== "")) }); }} />
                       }
                       <button onClick={() => { setEditId(r.id); setShowForm(true); }} className="w-6 h-6 rounded-lg flex items-center justify-center transition-all hover:bg-indigo-50 text-xs" style={{background:"#f3f4f6"}} title="Edytuj">✏️</button>
                       <button onClick={() => { if(window.confirm("Usunac?")) onDelete(r.id); }} className="w-6 h-6 rounded-lg flex items-center justify-center text-xs bg-red-50 hover:bg-red-100 text-red-400">✕</button>
@@ -13966,7 +14104,7 @@ function FVEditModal({ record, onSave, onClose }) {
 
 // ─── ZLECENIE UPLOAD BTN ─────────────────────────────────────────────────────
 function ZlecenieUploadBtn({ frachtId, onUploaded, label = "+ Dodaj zlecenie", fullWidth = false }) {
-  // onUploaded(url, nrZlecenia)
+  // onUploaded(url, parsedData) — parsedData = { nrZlecenia, nrRef, zaladunekAdres, ... }
   const [status, setStatus] = useState("idle");
   const fileRef = useRef(null);
 
@@ -13980,7 +14118,7 @@ function ZlecenieUploadBtn({ frachtId, onUploaded, label = "+ Dodaj zlecenie", f
       await uploadBytes(sRef, file);
       const url = await getDownloadURL(sRef);
 
-      // AI odczyt nr zlecenia
+      // AI parsowanie zlecenia — wyciąga pełne dane operacyjne
       setStatus("reading");
       const base64 = await new Promise((res, rej) => {
         const reader = new FileReader();
@@ -13991,12 +14129,35 @@ function ZlecenieUploadBtn({ frachtId, onUploaded, label = "+ Dodaj zlecenie", f
       const isPDF = file.type === "application/pdf";
       const body = {
         model: "claude-sonnet-4-20250514",
-        max_tokens: 500,
+        max_tokens: 1200,
         messages: [{
           role: "user",
           content: [
             { type: isPDF ? "document" : "image", source: { type: "base64", media_type: file.type, data: base64 } },
-            { type: "text", text: 'Znajdź numer zlecenia transportowego w tym dokumencie. Odpowiedz TYLKO w formacie JSON: {"nrZlecenia": "numer"} lub {"nrZlecenia": null} jeśli nie znalazłeś.' }
+            { type: "text", text: `Przeanalizuj to zlecenie transportowe i wyciągnij dane operacyjne.
+Odpowiedz TYLKO w formacie JSON (bez markdown):
+{
+  "nrZlecenia": "numer zlecenia lub null",
+  "nrRef": "numer referencyjny lub skrócony identyfikator zlecenia",
+  "dataZaladunku": "YYYY-MM-DD lub null",
+  "godzZaladunku": "HH:MM lub null",
+  "dataRozladunku": "YYYY-MM-DD lub null",
+  "godzRozladunku": "HH:MM lub null",
+  "zaladunekKod": "kod pocztowy + miasto załadunku (np. ES 46720 Villalonga)",
+  "zaladunekAdres": "pełny adres ulicy załadunku",
+  "zaladunekTelefon": "telefon kontaktowy na załadunku lub null",
+  "dokod": "kod pocztowy + miasto rozładunku (np. IT 34151 Trieste)",
+  "rozladunekAdres": "pełny adres ulicy rozładunku",
+  "rozladunekTelefon": "telefon kontaktowy na rozładunku lub null",
+  "klient": "nazwa zleceniodawcy/klienta",
+  "towarOpis": "krótki opis towaru (np. Palety, Kartony)",
+  "towarIloscPalet": "ilość palet/sztuk (cyfra)",
+  "towarPalety": "wymiary towaru, każda pozycja w nowej linii (np. 2× 240x120x240\\n1× 120x120xH240)",
+  "wagaLadunku": "waga w kg (sama cyfra)",
+  "zaladunekTyp": "typ załadunku (bok, tył, góra) lub null",
+  "uwagi": "uwagi operacyjne istotne dla kierowcy (BEZ cen, BEZ warunków płatności, BEZ danych zleceniodawcy)"
+}
+NIE podawaj cen frachtu, warunków płatności, NIP, danych spedytora ani warunków umowy.` }
           ]
         }]
       };
@@ -14007,8 +14168,8 @@ function ZlecenieUploadBtn({ frachtId, onUploaded, label = "+ Dodaj zlecenie", f
         const data = await resp.json();
         const text = data.content?.find(b => b.type === "text")?.text || "{}";
         const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
-        onUploaded(url, parsed.nrZlecenia || null);
-      } catch { onUploaded(url, null); }
+        onUploaded(url, parsed);
+      } catch { onUploaded(url, { nrZlecenia: null }); }
 
       setStatus("done");
     } catch (err) {
@@ -14036,7 +14197,7 @@ function ZlecenieUploadBtn({ frachtId, onUploaded, label = "+ Dodaj zlecenie", f
 }
 
 function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }) {
-  const empty = {dataZlecenia:"",dataZaladunku:"",dataRozladunku:"",godzZaladunku:"",godzRozladunku:"",skad:"",zaladunekKod:"",zaladunekKod2:"",zaladunekKod3:"",dokod:"",dokod2:"",dokod3:"",klient:"",cenaEur:"",kmPodjazd:"",kmLadowne:"",kmWszystkie:"",wagaLadunku:"",dyspozytor:"",nrFV:"",dataWyslania:"",terminPlatnosci:"",uwagi:"",urlZlecenie:"",nrZlecenia:"",vehicleId:defaultVehicleId};
+  const empty = {dataZlecenia:"",dataZaladunku:"",dataRozladunku:"",godzZaladunku:"",godzRozladunku:"",skad:"",zaladunekKod:"",zaladunekKod2:"",zaladunekKod3:"",zaladunekAdres:"",zaladunekTelefon:"",dokod:"",dokod2:"",dokod3:"",rozladunekAdres:"",rozladunekTelefon:"",klient:"",cenaEur:"",kmPodjazd:"",kmLadowne:"",kmWszystkie:"",wagaLadunku:"",dyspozytor:"",nrFV:"",dataWyslania:"",terminPlatnosci:"",uwagi:"",urlZlecenie:"",nrZlecenia:"",nrRef:"",towarOpis:"",towarPalety:"",towarIloscPalet:"",zaladunekTyp:"",vehicleId:defaultVehicleId};
   const [f, setF] = useState(record ? {...empty,...record} : empty);
   const set = (k,v) => setF(prev => { const next={...prev,[k]:v}; const pod=parseInt(next.kmPodjazd)||0; const lad=parseInt(next.kmLadowne)||0; next.kmWszystkie=pod+lad>0?String(pod+lad):""; return next; });
   const eurKmLad = f.kmLadowne && f.cenaEur ? (parseFloat(f.cenaEur)/parseInt(f.kmLadowne)).toFixed(2) : null;
@@ -14119,6 +14280,21 @@ function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }
               </button>
             )}
           </div>
+          {/* ADRESY + TELEFONY */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div><label className={lbl}>Adres załadunku (pełny)</label><input placeholder="ulica, miasto" value={f.zaladunekAdres||""} onChange={e => set("zaladunekAdres",e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>Telefon na załadunku</label><input placeholder="+48..." value={f.zaladunekTelefon||""} onChange={e => set("zaladunekTelefon",e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>Adres rozładunku (pełny)</label><input placeholder="ulica, miasto" value={f.rozladunekAdres||""} onChange={e => set("rozladunekAdres",e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>Telefon na rozładunku</label><input placeholder="+39..." value={f.rozladunekTelefon||""} onChange={e => set("rozladunekTelefon",e.target.value)} className={inp} /></div>
+          </div>
+          {/* TOWAR */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div><label className={lbl}>Nr referencyjny</label><input placeholder="np. ESTE-0097" value={f.nrRef||""} onChange={e => set("nrRef",e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>Towar (opis)</label><input placeholder="Palety, kartony..." value={f.towarOpis||""} onChange={e => set("towarOpis",e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>Ilość palet/szt</label><input placeholder="4" value={f.towarIloscPalet||""} onChange={e => set("towarIloscPalet",e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>Typ załadunku</label><input placeholder="Bok, tył, góra" value={f.zaladunekTyp||""} onChange={e => set("zaladunekTyp",e.target.value)} className={inp} /></div>
+          </div>
+          <div><label className={lbl}>Wymiary palet / szczegóły towaru</label><textarea rows={2} placeholder="2× 240x120x240, 1× 240x120xH200..." value={f.towarPalety||""} onChange={e => set("towarPalety",e.target.value)} className={inp+" resize-none"} /></div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div><label className={lbl}>Klient</label><input placeholder="nazwa klienta" value={f.klient} onChange={e => set("klient",e.target.value)} className={inp} /></div>
             <div><label className={lbl}>Dyspozytor</label><input placeholder="imie dyspozytora" value={f.dyspozytor} onChange={e => set("dyspozytor",e.target.value)} className={inp} /></div>
@@ -14150,14 +14326,14 @@ function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }
                 </div>
                 <ZlecenieUploadBtn
                   frachtId={record?.id || "new"}
-                  onUploaded={(url, nr) => { set("urlZlecenie", url); if(nr) set("nrZlecenia", nr); }}
+                  onUploaded={(url, parsed) => { set("urlZlecenie", url); if(parsed) Object.entries(parsed).forEach(([k,v]) => { if(v != null && v !== "") set(k, String(v)); }); }}
                   label="Zastąp"
                 />
               </div>
             ) : (
               <ZlecenieUploadBtn
                 frachtId={record?.id || "new"}
-                onUploaded={(url, nr) => { set("urlZlecenie", url); if(nr) set("nrZlecenia", nr); }}
+                onUploaded={(url, parsed) => { set("urlZlecenie", url); if(parsed) Object.entries(parsed).forEach(([k,v]) => { if(v != null && v !== "") set(k, String(v)); }); }}
                 label="📎 Wgraj zlecenie (PDF / JPG)"
                 fullWidth
               />
