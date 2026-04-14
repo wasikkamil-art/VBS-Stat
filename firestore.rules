@@ -75,7 +75,9 @@ service cloud.firestore {
     match /fleet/{docId} {
       allow read: if canRead();
       allow create: if canEdit();
-      allow update: if canEdit() && fleetDataSafe();
+      // fleetDataSafe sprawdza tylko czy NOWE dane nie nadpisują istniejących pustą tablicą.
+      // Admin może zapisać zawsze (np. naprawa po awarii), inni muszą przejść guard.
+      allow update: if isAdmin() || (canEdit() && fleetDataSafe());
       allow delete: if isAdmin();
     }
 

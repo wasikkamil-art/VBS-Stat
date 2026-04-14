@@ -819,6 +819,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   const [chatUnreadCount, setChatUnreadCount] = useState(0);      // ile pokojów z nieprzeczytanymi
   const [chatUnreadMsgCount, setChatUnreadMsgCount] = useState(0); // ile wiadomości łącznie nieprzeczytanych
   const [operacyjne, setOperacyjne] = useState([]);
+  const [driverEvents, setDriverEvents] = useState([]);
   const [pauzy, setPauzy] = useState([]);
   const [loaded, setLoaded]         = useState(false);
   const [toast, setToast]           = useState(null);
@@ -861,7 +862,13 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
       // Zapobiega race condition przy zmianie statusów
       if (!_pendingWrites.has(SK.vehicles)) {
         const v = data[SK.vehicles];
-        setVehicles(v || SEED_VEHICLES);
+        // Migracja: dodaj assignedDriver jeśli brak (sync z driverHistory)
+        const migrated = (v || SEED_VEHICLES).map(veh => {
+          if (veh.assignedDriver !== undefined) return veh;
+          const active = (veh.driverHistory || []).find(d => !d.to);
+          return { ...veh, assignedDriver: active?.email || "" };
+        });
+        setVehicles(migrated);
       }
 
       if (!_pendingWrites.has(SK.costs)) {
@@ -925,6 +932,14 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     const unsub = onSnapshot(collection(db, "operacyjne"), (snap) => {
       setOperacyjne(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }, (err) => console.error("operacyjne onSnapshot error", err));
+    return () => unsub();
+  }, []);
+
+  // ── DRIVER EVENTS — potwierdzenia załadunków/rozładunków od kierowców ──
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "driverEvents"), (snap) => {
+      setDriverEvents(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error("driverEvents onSnapshot error", err));
     return () => unsub();
   }, []);
 
@@ -1807,7 +1822,12 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
   const deleteCost   = (id)    => { setCosts((p) => p.filter((c) => c.id !== id)); logAction("delete", "costs", { id }); showToast("Usunięto wpis"); };
   const updateCost   = (updated) => { setCosts((p) => p.map((c) => c.id === updated.id ? updated : c)); logAction("update", "costs", { id: updated.id, vehicleId: updated.vehicleId }); showToast("✅ Koszt zaktualizowany"); setEditCostId(null); };
-  const addVehicle   = (v)     => { const vid = uid(); setVehicles((p) => [...p, { ...v, id: vid, driverHistory: v.driverHistory || [] }]); logAction("add", "vehicles", { id: vid, type: v.type, plate: v.plate }); showToast("Pojazd dodany"); setShowAddVehicle(false); };
+  // Sync assignedDriver from driverHistory — aktywny kierowca (bez daty 'to')
+  const syncAssignedDriver = (veh) => {
+    const active = (veh.driverHistory || []).find(d => !d.to);
+    return { ...veh, assignedDriver: active?.email || "" };
+  };
+  const addVehicle   = (v)     => { const vid = uid(); const veh = syncAssignedDriver({ ...v, id: vid, driverHistory: v.driverHistory || [] }); setVehicles((p) => [...p, veh]); logAction("add", "vehicles", { id: vid, type: v.type, plate: v.plate }); showToast("Pojazd dodany"); setShowAddVehicle(false); };
   const delVehicle   = (id, reason) => {
     const veh = vehicles.find(v => v.id === id);
     setVehicles((p) => p.map((v) => v.id !== id ? v : {
@@ -1819,7 +1839,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     logAction("delete", "vehicles", { id, plate: veh?.plate, reason });
     showToast("✅ Pojazd przeniesiony do archiwum");
   };
-  const updateVehicle= (updated) => { setVehicles((p) => p.map((v) => v.id === updated.id ? updated : v)); logAction("update", "vehicles", { id: updated.id, plate: updated.plate }); showToast("✅ Zmiany zapisane"); setEditVehicleId(null); };
+  const updateVehicle= (updated) => { const veh = syncAssignedDriver(updated); setVehicles((p) => p.map((v) => v.id === veh.id ? veh : v)); logAction("update", "vehicles", { id: veh.id, plate: veh.plate }); showToast("✅ Zmiany zapisane"); setEditVehicleId(null); };
   const addCategory  = (cat)   => setCategories((p) => [...p, cat]);
 
   const CAT_FALLBACKS = {
@@ -1850,10 +1870,17 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   const catColor = (id) => catById(id)?.color || "#94a3b8";
   const catLabel = (id) => { const c = catById(id); return c ? `${c.icon} ${c.label}` : id; };
 
-  // current active driver for a vehicle
+  // current active driver for a vehicle (assignedDriver + driverHistory)
   const currentDriver = (v) => {
     const hist = v.driverHistory || [];
-    return hist.find((d) => !d.to) || hist[hist.length - 1] || null;
+    const active = hist.find((d) => !d.to);
+    if (active) return active;
+    // fallback: szukaj po assignedDriver email
+    if (v.assignedDriver) {
+      const byEmail = hist.find(d => d.email === v.assignedDriver);
+      if (byEmail) return byEmail;
+    }
+    return hist[hist.length - 1] || null;
   };
 
   // ── GET PLN VALUE ──
@@ -1923,13 +1950,17 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
   // ─── PANEL KIEROWCY (osobny layout, mobile-first) ───────────────────────────
   if (isKierowca) {
-    // Znajdź pojazd przypisany do tego kierowcy (po emailu w driverHistory)
-    const myVehicle = vehicles.find(v =>
-      (v.driverHistory || []).some(d => !d.to && d.email === user.email)
-    );
+    // Znajdź pojazd przypisany do tego kierowcy (szybki lookup po assignedDriver, fallback na driverHistory)
+    const myVehicle = vehicles.find(v => v.assignedDriver === user.email)
+      || vehicles.find(v => (v.driverHistory || []).some(d => !d.to && d.email === user.email));
     // Frachty przypisane do mojego pojazdu
     const myFrachty = myVehicle
       ? frachtyList.filter(f => f.vehicleId === myVehicle.id).sort((a,b) => (b.dataZaladunku||"").localeCompare(a.dataZaladunku||""))
+      : [];
+
+    // Dane operacyjne (spalanie) filtrowane po pojeździe kierowcy
+    const myOperacyjne = myVehicle
+      ? operacyjne.filter(o => o.vehicleId === myVehicle.id)
       : [];
 
     return (
@@ -1938,6 +1969,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
         vehicle={myVehicle}
         frachty={myFrachty}
         pauzy={pauzy.filter(p => myVehicle && p.vehicleId === myVehicle.id)}
+        operacyjne={myOperacyjne}
         showToast={showToast}
       />
     );
@@ -3093,6 +3125,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             <FrachtyTab
               frachtyList={frachtyList}
               vehicles={vehicles}
+              driverEvents={driverEvents}
               onAdd={(r) => { const fid = uid(); setFrachtyList(p => [{ ...r, id: fid }, ...p]); logAction("add", "frachty", { id: fid, vehicleId: r.vehicleId, dokod: r.dokod }); }}
               onDelete={(id) => { setFrachtyList(p => p.filter(r => r.id !== id)); logAction("delete", "frachty", { id }); }}
               onUpdate={(id, data) => { setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r)); logAction("update", "frachty", { id }); }}
@@ -3129,7 +3162,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
           )}
 
           {tab === "users" && isAdmin && (
-            <UsersTab currentUid={user.uid} showToast={showToast} />
+            <UsersTab currentUid={user.uid} showToast={showToast} vehicles={vehicles} setVehicles={setVehicles} />
           )}
 
           {tab === "email" && isAdmin && (
@@ -5498,10 +5531,11 @@ function AuditLogTab() {
   );
 }
 
-function UsersTab({ currentUid, showToast }) {
+function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
   const [users, setUsers]     = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedUid, setExpandedUid] = useState(null);
+  const [subTab, setSubTab]   = useState("biuro"); // "biuro" | "kierowcy"
 
   useEffect(() => {
     (async () => {
@@ -5549,7 +5583,6 @@ function UsersTab({ currentUid, showToast }) {
 
   async function changeRole(uid, newRole) {
     try {
-      // Wywołaj Cloud Function (ustawia Custom Claims + aktualizuje Firestore)
       const setUserRole = httpsCallable(functions, "setUserRole");
       await setUserRole({ uid, role: newRole });
       logAction("update", "users", { targetUid: uid, newRole, method: "cloudFunction" });
@@ -5557,7 +5590,6 @@ function UsersTab({ currentUid, showToast }) {
       showToast("✅ Rola zaktualizowana (Custom Claims)");
     } catch(e) {
       console.warn("Cloud Function niedostępna, fallback na Firestore:", e);
-      // Fallback: bezpośredni zapis do Firestore (trigger onRoleChange ustawi claims)
       try {
         await setDoc(doc(db, "users", uid), { role: newRole }, { merge: true });
         logAction("update", "users", { targetUid: uid, newRole, method: "firestoreFallback" });
@@ -5569,12 +5601,57 @@ function UsersTab({ currentUid, showToast }) {
     }
   }
 
-  const ROLES = [
+  // ── Przypisanie / odpisanie kierowcy do pojazdu ──
+  function assignDriverToVehicle(driverEmail, driverName, vehicleId) {
+    if (!vehicleId || !driverEmail) return;
+    const today = new Date().toISOString().split("T")[0];
+    setVehicles(prev => prev.map(v => {
+      if (v.id === vehicleId) {
+        // Zamknij poprzedniego kierowcę jeśli jest
+        const hist = (v.driverHistory || []).map(d => !d.to ? { ...d, to: today } : d);
+        // Dodaj nowy wpis
+        const newEntry = { id: Date.now().toString(36), name: driverName || driverEmail, email: driverEmail, phone: "", from: today, to: "" };
+        return { ...v, driverHistory: [...hist, newEntry], assignedDriver: driverEmail };
+      }
+      // Jeśli ten kierowca był wcześniej przypisany do innego auta — odpisz
+      if (v.assignedDriver === driverEmail) {
+        const hist = (v.driverHistory || []).map(d => !d.to && d.email === driverEmail ? { ...d, to: today } : d);
+        return { ...v, driverHistory: hist, assignedDriver: "" };
+      }
+      return v;
+    }));
+    logAction("update", "vehicles", { vehicleId, assignedDriver: driverEmail, action: "assignDriver" });
+    showToast("✅ Kierowca przypisany do pojazdu");
+  }
+
+  function unassignDriver(driverEmail) {
+    if (!driverEmail) return;
+    const today = new Date().toISOString().split("T")[0];
+    setVehicles(prev => prev.map(v => {
+      if (v.assignedDriver === driverEmail) {
+        const hist = (v.driverHistory || []).map(d => !d.to && d.email === driverEmail ? { ...d, to: today } : d);
+        return { ...v, driverHistory: hist, assignedDriver: "" };
+      }
+      return v;
+    }));
+    logAction("update", "vehicles", { driverEmail, action: "unassignDriver" });
+    showToast("✅ Kierowca odpisany od pojazdu");
+  }
+
+  const ROLES_BIURO = [
     { id: "admin",      label: "Admin",      icon: "👑", desc: "Pełny dostęp",                      color: "#92400e", bg: "#fef3c7" },
     { id: "dyspozytor", label: "Dyspozytor", icon: "🚚", desc: "Edycja frachtów i kosztów",          color: "#1d4ed8", bg: "#eff6ff" },
-    { id: "kierowca",   label: "Kierowca",   icon: "🧑‍✈️", desc: "Panel kierowcy — zlecenia, CMR, czas pracy", color: "#059669", bg: "#ecfdf5" },
     { id: "podglad",    label: "Podgląd",    icon: "👁",  desc: "Tylko odczyt, bez finansów",        color: "#6b7280", bg: "#f3f4f6" },
   ];
+
+  const ALL_ROLES = [
+    ...ROLES_BIURO,
+    { id: "kierowca",   label: "Kierowca",   icon: "🧑‍✈️", desc: "Panel kierowcy — zlecenia, CMR, czas pracy", color: "#059669", bg: "#ecfdf5" },
+  ];
+
+  const biuroUsers   = users.filter(u => u.role !== "kierowca");
+  const driverUsers  = users.filter(u => u.role === "kierowca");
+  const activeVehicles = (vehicles || []).filter(v => !v.archived);
 
   return (
     <div>
@@ -5585,145 +5662,288 @@ function UsersTab({ currentUid, showToast }) {
         </div>
       </div>
 
-      {/* ROLE LEGEND */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
-        {ROLES.map(r => (
-          <div key={r.id} className="rounded-xl p-4 border border-gray-100 bg-white">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-lg">{r.icon}</span>
-              <span className="font-semibold text-gray-800 text-sm">{r.label}</span>
-              <span className="ml-auto px-2 py-0.5 rounded-full text-xs font-semibold"
-                style={{ background: r.bg, color: r.color }}>{r.id}</span>
-            </div>
-            <p className="text-xs text-gray-400">{r.desc}</p>
-          </div>
+      {/* SUB-TABS: Biuro / Kierowcy */}
+      <div className="flex gap-2 mb-6">
+        {[
+          { id: "biuro", label: "Biuro", icon: "🏢", count: biuroUsers.length },
+          { id: "kierowcy", label: "Kierowcy", icon: "🧑‍✈️", count: driverUsers.length },
+        ].map(t => (
+          <button key={t.id} onClick={() => setSubTab(t.id)}
+            className="px-4 py-2.5 rounded-xl text-sm font-semibold transition-all border"
+            style={{
+              background: subTab === t.id ? "#111827" : "#fff",
+              color: subTab === t.id ? "#fff" : "#6b7280",
+              borderColor: subTab === t.id ? "#111827" : "#e5e7eb",
+            }}>
+            {t.icon} {t.label} <span className="ml-1 opacity-60">({t.count})</span>
+          </button>
         ))}
       </div>
 
-      {/* USERS LIST */}
-      <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-        <div className="hidden md:grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-medium text-gray-400 uppercase tracking-wider">
-          <span className="col-span-5">Email</span>
-          <span className="col-span-3">Aktualna rola</span>
-          <span className="col-span-4">Zmień rolę</span>
-        </div>
-
-        {loading && (
-          <div className="px-5 py-10 text-center text-gray-400 text-sm">Ładowanie użytkowników…</div>
-        )}
-
-        {!loading && users.length === 0 && (
-          <div className="px-5 py-10 text-center text-gray-400 text-sm">Brak użytkowników — zaloguj się na każdym koncie aby pojawili się tutaj</div>
-        )}
-
-        {!loading && users.map((u, i) => {
-          const roleInfo = ROLES.find(r => r.id === u.role) || ROLES[2];
-          const isMe = u.uid === currentUid;
-          const isAdmin = u.role === "admin";
-          const effectiveAllowed = Array.isArray(u.allowedTabs) && u.allowedTabs.length > 0
-            ? u.allowedTabs
-            : (DEFAULTS[u.role] || DEFAULTS.podglad);
-          const isExpanded = expandedUid === u.uid;
-          const hasCustom = Array.isArray(u.allowedTabs);
-          return (
-            <div key={u.uid} style={{ borderBottom: i === users.length - 1 ? "none" : "1px solid #f9fafb" }}>
-              <div className="md:grid md:grid-cols-12 flex flex-wrap gap-y-2 px-5 py-4 items-center hover:bg-gray-50 transition-colors">
-
-                <div className="col-span-5 flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                    style={{ background: "#f3f4f6", color: "#374151" }}>
-                    {(u.email||"?")[0].toUpperCase()}
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium text-gray-800 truncate max-w-48">{u.email || "—"}</div>
-                    {isMe && <div className="text-xs text-amber-500 font-medium">to Ty</div>}
-                  </div>
+      {/* ═══════ TAB: BIURO ═══════ */}
+      {subTab === "biuro" && (
+        <div>
+          {/* ROLE LEGEND */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+            {ROLES_BIURO.map(r => (
+              <div key={r.id} className="rounded-xl p-4 border border-gray-100 bg-white">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-lg">{r.icon}</span>
+                  <span className="font-semibold text-gray-800 text-sm">{r.label}</span>
+                  <span className="ml-auto px-2 py-0.5 rounded-full text-xs font-semibold"
+                    style={{ background: r.bg, color: r.color }}>{r.id}</span>
                 </div>
-
-                <div className="col-span-3">
-                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold"
-                    style={{ background: roleInfo.bg, color: roleInfo.color }}>
-                    {roleInfo.icon} {roleInfo.label}
-                  </span>
-                </div>
-
-                <div className="col-span-4 flex gap-1.5 flex-wrap items-center">
-                  {ROLES.filter(r => r.id !== u.role).map(r => (
-                    <button key={r.id}
-                      onClick={() => {
-                        if (isMe && r.id !== "admin") {
-                          if (!window.confirm("Zmieniasz własną rolę — stracisz dostęp admina. Kontynuować?")) return;
-                        }
-                        changeRole(u.uid, r.id);
-                      }}
-                      className="px-3 py-1 rounded-lg text-xs font-medium border transition-all hover:opacity-80"
-                      style={{ borderColor: r.bg, background: r.bg, color: r.color }}>
-                      {r.icon} {r.label}
-                    </button>
-                  ))}
-                  {!isAdmin && (
-                    <button onClick={() => setExpandedUid(isExpanded ? null : u.uid)}
-                      className="px-2.5 py-1 rounded-lg text-xs font-medium border transition-all hover:bg-gray-100"
-                      style={{ borderColor:"#e5e7eb", color:"#374151", background:"#fff" }}
-                      title="Zakładki dostępne dla tego użytkownika">
-                      {isExpanded ? "▲" : "▼"} Zakładki ({effectiveAllowed.length})
-                    </button>
-                  )}
-                </div>
+                <p className="text-xs text-gray-400">{r.desc}</p>
               </div>
+            ))}
+          </div>
 
-              {/* Tab permissions panel — tylko dla non-adminów */}
-              {isExpanded && !isAdmin && (
-                <div className="px-5 pb-5 pt-1 bg-gray-50">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                      Dostęp do zakładek
-                      {hasCustom ? (
-                        <span className="ml-2 text-xs font-normal text-blue-600">· własne ustawienia</span>
-                      ) : (
-                        <span className="ml-2 text-xs font-normal text-gray-400">· domyślne dla roli "{u.role}"</span>
+          {/* BIURO USERS LIST */}
+          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+            <div className="hidden md:grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-medium text-gray-400 uppercase tracking-wider">
+              <span className="col-span-5">Email</span>
+              <span className="col-span-3">Aktualna rola</span>
+              <span className="col-span-4">Zmień rolę</span>
+            </div>
+
+            {loading && (
+              <div className="px-5 py-10 text-center text-gray-400 text-sm">Ładowanie użytkowników…</div>
+            )}
+            {!loading && biuroUsers.length === 0 && (
+              <div className="px-5 py-10 text-center text-gray-400 text-sm">Brak użytkowników biurowych</div>
+            )}
+
+            {!loading && biuroUsers.map((u, i) => {
+              const roleInfo = ALL_ROLES.find(r => r.id === u.role) || ALL_ROLES[2];
+              const isMe = u.uid === currentUid;
+              const isAdminUser = u.role === "admin";
+              const effectiveAllowed = Array.isArray(u.allowedTabs) && u.allowedTabs.length > 0
+                ? u.allowedTabs
+                : (DEFAULTS[u.role] || DEFAULTS.podglad);
+              const isExpanded = expandedUid === u.uid;
+              const hasCustom = Array.isArray(u.allowedTabs);
+              return (
+                <div key={u.uid} style={{ borderBottom: i === biuroUsers.length - 1 ? "none" : "1px solid #f9fafb" }}>
+                  <div className="md:grid md:grid-cols-12 flex flex-wrap gap-y-2 px-5 py-4 items-center hover:bg-gray-50 transition-colors">
+                    <div className="col-span-5 flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+                        style={{ background: "#f3f4f6", color: "#374151" }}>
+                        {(u.email||"?")[0].toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium text-gray-800 truncate max-w-48">{u.email || "—"}</div>
+                        {isMe && <div className="text-xs text-amber-500 font-medium">to Ty</div>}
+                      </div>
+                    </div>
+                    <div className="col-span-3">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold"
+                        style={{ background: roleInfo.bg, color: roleInfo.color }}>
+                        {roleInfo.icon} {roleInfo.label}
+                      </span>
+                    </div>
+                    <div className="col-span-4 flex gap-1.5 flex-wrap items-center">
+                      {ALL_ROLES.filter(r => r.id !== u.role).map(r => (
+                        <button key={r.id}
+                          onClick={() => {
+                            if (isMe && r.id !== "admin") {
+                              if (!window.confirm("Zmieniasz własną rolę — stracisz dostęp admina. Kontynuować?")) return;
+                            }
+                            changeRole(u.uid, r.id);
+                          }}
+                          className="px-3 py-1 rounded-lg text-xs font-medium border transition-all hover:opacity-80"
+                          style={{ borderColor: r.bg, background: r.bg, color: r.color }}>
+                          {r.icon} {r.label}
+                        </button>
+                      ))}
+                      {!isAdminUser && (
+                        <button onClick={() => setExpandedUid(isExpanded ? null : u.uid)}
+                          className="px-2.5 py-1 rounded-lg text-xs font-medium border transition-all hover:bg-gray-100"
+                          style={{ borderColor:"#e5e7eb", color:"#374151", background:"#fff" }}
+                          title="Zakładki dostępne dla tego użytkownika">
+                          {isExpanded ? "▲" : "▼"} Zakładki ({effectiveAllowed.length})
+                        </button>
                       )}
                     </div>
-                    {hasCustom && (
-                      <button onClick={() => saveAllowedTabs(u.uid, [], u.role)}
-                        className="text-xs text-gray-500 hover:text-gray-800 underline">
-                        Przywróć domyślne dla roli
-                      </button>
+                  </div>
+
+                  {isExpanded && !isAdminUser && (
+                    <div className="px-5 pb-5 pt-1 bg-gray-50">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          Dostęp do zakładek
+                          {hasCustom ? (
+                            <span className="ml-2 text-xs font-normal text-blue-600">· własne ustawienia</span>
+                          ) : (
+                            <span className="ml-2 text-xs font-normal text-gray-400">· domyślne dla roli "{u.role}"</span>
+                          )}
+                        </div>
+                        {hasCustom && (
+                          <button onClick={() => saveAllowedTabs(u.uid, [], u.role)}
+                            className="text-xs text-gray-500 hover:text-gray-800 underline">
+                            Przywróć domyślne dla roli
+                          </button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        {ASSIGNABLE_TABS.map(t => {
+                          const checked = effectiveAllowed.includes(t.id);
+                          return (
+                            <label key={t.id}
+                              className="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all border text-sm"
+                              style={{
+                                background: checked ? "#eff6ff" : "#fff",
+                                borderColor: checked ? "#bfdbfe" : "#e5e7eb",
+                                color: checked ? "#1d4ed8" : "#6b7280",
+                                fontWeight: checked ? 600 : 400,
+                              }}>
+                              <input type="checkbox" checked={checked} onChange={() => toggleTab(u, t.id)}
+                                className="w-4 h-4" style={{ accentColor: "#3b82f6" }} />
+                              <span>{t.icon}</span>
+                              <span className="text-xs">{t.label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <div className="mt-3 text-xs text-gray-400">
+                        💡 Zakładki <strong>Użytkownicy</strong> i <strong>Email statusy</strong> są zawsze admin-only i nie można ich przyznać tutaj.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-4 px-1 text-xs text-gray-400">
+            💡 Nowy użytkownik pojawi się na liście po pierwszym zalogowaniu. Domyślnie otrzymuje rolę <strong>Podgląd</strong>.
+          </div>
+        </div>
+      )}
+
+      {/* ═══════ TAB: KIEROWCY ═══════ */}
+      {subTab === "kierowcy" && (
+        <div>
+          {/* Info banner */}
+          <div className="rounded-xl p-4 border border-emerald-100 bg-emerald-50/50 mb-6">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-lg">🧑‍✈️</span>
+              <span className="font-semibold text-emerald-800 text-sm">Kierowcy</span>
+            </div>
+            <p className="text-xs text-emerald-600">
+              Kierowca widzi osobny panel mobile-first: zlecenia (bez cen), pojazd, serwis, spalanie i czas pracy.
+              Przypisz kierowcę do pojazdu żeby widział swoje dane.
+            </p>
+          </div>
+
+          {/* DRIVERS LIST */}
+          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+            <div className="hidden md:grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-medium text-gray-400 uppercase tracking-wider">
+              <span className="col-span-4">Kierowca</span>
+              <span className="col-span-4">Przypisany pojazd</span>
+              <span className="col-span-4">Akcje</span>
+            </div>
+
+            {loading && (
+              <div className="px-5 py-10 text-center text-gray-400 text-sm">Ładowanie…</div>
+            )}
+
+            {!loading && driverUsers.length === 0 && (
+              <div className="px-5 py-10 text-center text-gray-400 text-sm">
+                Brak kierowców. Zmień rolę użytkownika na <strong>Kierowca</strong> w zakładce Biuro, aby dodać go tutaj.
+              </div>
+            )}
+
+            {!loading && driverUsers.map((u, i) => {
+              const assignedVehicle = activeVehicles.find(v => v.assignedDriver === u.email);
+              const availableVehicles = activeVehicles.filter(v => !v.assignedDriver || v.assignedDriver === u.email);
+              return (
+                <div key={u.uid} className="md:grid md:grid-cols-12 flex flex-wrap gap-y-3 px-5 py-4 items-center hover:bg-gray-50 transition-colors"
+                  style={{ borderBottom: i === driverUsers.length - 1 ? "none" : "1px solid #f9fafb" }}>
+
+                  {/* Kierowca info */}
+                  <div className="col-span-4 flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full flex items-center justify-center text-base font-bold flex-shrink-0"
+                      style={{ background: "#ecfdf5", color: "#059669" }}>
+                      {(u.email||"?")[0].toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-gray-800">{u.displayName || u.email?.split("@")[0] || "—"}</div>
+                      <div className="text-xs text-gray-400 truncate max-w-48">{u.email}</div>
+                    </div>
+                  </div>
+
+                  {/* Pojazd */}
+                  <div className="col-span-4">
+                    {assignedVehicle ? (
+                      <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-100">
+                        <span className="text-sm">🚛</span>
+                        <span className="text-sm font-semibold text-emerald-800">{assignedVehicle.plate}</span>
+                        {assignedVehicle.brand && <span className="text-xs text-emerald-600">{assignedVehicle.brand}</span>}
+                      </div>
+                    ) : (
+                      <span className="text-sm text-gray-400 italic">Brak pojazdu</span>
                     )}
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                    {ASSIGNABLE_TABS.map(t => {
-                      const checked = effectiveAllowed.includes(t.id);
-                      return (
-                        <label key={t.id}
-                          className="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all border text-sm"
-                          style={{
-                            background: checked ? "#eff6ff" : "#fff",
-                            borderColor: checked ? "#bfdbfe" : "#e5e7eb",
-                            color: checked ? "#1d4ed8" : "#6b7280",
-                            fontWeight: checked ? 600 : 400,
-                          }}>
-                          <input type="checkbox" checked={checked} onChange={() => toggleTab(u, t.id)}
-                            className="w-4 h-4" style={{ accentColor: "#3b82f6" }} />
-                          <span>{t.icon}</span>
-                          <span className="text-xs">{t.label}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                  <div className="mt-3 text-xs text-gray-400">
-                    💡 Zakładki <strong>Użytkownicy</strong> i <strong>Email statusy</strong> są zawsze admin-only i nie można ich przyznać tutaj.
+
+                  {/* Akcje */}
+                  <div className="col-span-4 flex gap-2 flex-wrap items-center">
+                    {assignedVehicle ? (
+                      <button onClick={() => unassignDriver(u.email)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium border border-red-100 bg-red-50 text-red-600 hover:bg-red-100 transition-colors">
+                        Odpisz od auta
+                      </button>
+                    ) : (
+                      <select
+                        onChange={(e) => {
+                          if (e.target.value) assignDriverToVehicle(u.email, u.displayName || u.email?.split("@")[0], e.target.value);
+                          e.target.value = "";
+                        }}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium border border-emerald-200 bg-emerald-50 text-emerald-700 cursor-pointer"
+                        defaultValue="">
+                        <option value="" disabled>Przypisz do pojazdu…</option>
+                        {availableVehicles.map(v => (
+                          <option key={v.id} value={v.id}>{v.plate} {v.brand ? `(${v.brand})` : ""}</option>
+                        ))}
+                      </select>
+                    )}
+                    <button onClick={() => changeRole(u.uid, "podglad")}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-200 bg-white text-gray-500 hover:bg-gray-100 transition-colors">
+                      Zmień na Podgląd
+                    </button>
                   </div>
                 </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+              );
+            })}
+          </div>
 
-      <div className="mt-4 px-1 text-xs text-gray-400">
-        💡 Nowy użytkownik pojawi się na liście po pierwszym zalogowaniu. Domyślnie otrzymuje rolę <strong>Podgląd</strong>.
-      </div>
+          {/* Driver history summary */}
+          {!loading && driverUsers.length > 0 && (
+            <div className="mt-6 bg-white rounded-2xl border border-gray-100 p-5">
+              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Historia przypisań</div>
+              <div className="space-y-2">
+                {activeVehicles.filter(v => (v.driverHistory || []).length > 0).map(v => (
+                  <div key={v.id} className="flex items-start gap-3 py-2 border-b border-gray-50 last:border-0">
+                    <div className="text-sm font-semibold text-gray-700 min-w-24">{v.plate}</div>
+                    <div className="flex flex-wrap gap-1">
+                      {(v.driverHistory || []).slice(-5).reverse().map((d, idx) => (
+                        <span key={d.id || idx}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs"
+                          style={{
+                            background: !d.to ? "#ecfdf5" : "#f3f4f6",
+                            color: !d.to ? "#059669" : "#9ca3af",
+                            fontWeight: !d.to ? 600 : 400,
+                          }}>
+                          {d.name || d.email} · {d.from}{d.to ? ` → ${d.to}` : " → teraz"}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -5809,11 +6029,12 @@ const STATUS_META = {
 // ═══════════════════════════════════════════════════════════════════
 //  PANEL KIEROWCY — mobile-first, osobny layout
 // ═══════════════════════════════════════════════════════════════════
-function DriverPanel({ user, vehicle, frachty, pauzy, showToast }) {
+function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], showToast }) {
   const [selectedFracht, setSelectedFracht] = useState(null);
-  const [driverTab, setDriverTab] = useState("zlecenia"); // "zlecenia" | "historia"
+  const [driverTab, setDriverTab] = useState("zlecenia"); // "zlecenia" | "pojazd" | "serwis" | "spalanie" | "czas"
 
   const todayStr = new Date().toISOString().slice(0, 10);
+  const today = new Date();
 
   // Podział na aktywne / przyszłe / historia
   const active = frachty.filter(f => {
@@ -5841,14 +6062,19 @@ function DriverPanel({ user, vehicle, frachty, pauzy, showToast }) {
     catch { return d; }
   };
 
+  const fmtDateFull = (d) => {
+    if (!d) return "—";
+    try { return new Date(d + "T12:00:00").toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric" }); }
+    catch { return d; }
+  };
+
+  const daysUntil = (d) => d ? Math.ceil((new Date(d) - today) / 86400000) : null;
+
   // Aktualizacja statusu frachtu
   const updateFrachtStatus = async (fracht, field, value) => {
     try {
-      // Frachty są w config/fleet doc, nie w osobnej kolekcji → trzeba zmienić przez setFrachtyList
-      // Ale kierowca nie ma dostępu do setFrachtyList — potrzebujemy nowej kolekcji lub Cloud Function.
-      // Na razie zapiszemy zdarzenie do nowej podkolekcji `driverEvents` w Firestore.
       await addDoc(collection(db, "driverEvents"), {
-        type: field,  // "zaladowano" | "rozladowano"
+        type: field,
         frachtId: fracht.id,
         vehicleId: vehicle?.id,
         value,
@@ -5864,7 +6090,7 @@ function DriverPanel({ user, vehicle, frachty, pauzy, showToast }) {
     }
   };
 
-  // ── Detail view ──
+  // ── Detail view (zlecenie) ──
   if (selectedFracht) {
     const f = selectedFracht;
     const kody = formatKody(f);
@@ -5878,13 +6104,11 @@ function DriverPanel({ user, vehicle, frachty, pauzy, showToast }) {
           </button>
 
           <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-            {/* Header */}
             <div className="p-5" style={{background: "linear-gradient(135deg, #1e293b, #334155)"}}>
               <div className="text-white text-lg font-bold">Zlecenie {f.nrZlecenia || ""}</div>
               <div className="text-gray-300 text-sm mt-1">{f.klient || "—"}</div>
             </div>
 
-            {/* Trasa */}
             <div className="p-5 space-y-4">
               <div className="flex items-start gap-3">
                 <div className="flex flex-col items-center">
@@ -5906,15 +6130,39 @@ function DriverPanel({ user, vehicle, frachty, pauzy, showToast }) {
                 </div>
               </div>
 
+              {/* Info operacyjne — BEZ CEN */}
+              <div className="grid grid-cols-2 gap-3">
+                {f.kmLadowne && (
+                  <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
+                    <div className="text-xs text-gray-400">KM ładowne</div>
+                    <div className="text-sm font-bold text-gray-800">{f.kmLadowne}</div>
+                  </div>
+                )}
+                {f.wagaLadunku && (
+                  <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
+                    <div className="text-xs text-gray-400">Waga</div>
+                    <div className="text-sm font-bold text-gray-800">{f.wagaLadunku} kg</div>
+                  </div>
+                )}
+                {f.nrCMR && (
+                  <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
+                    <div className="text-xs text-gray-400">Nr CMR</div>
+                    <div className="text-sm font-bold text-gray-800">{f.nrCMR}</div>
+                  </div>
+                )}
+                {f.dyspozytor && (
+                  <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
+                    <div className="text-xs text-gray-400">Dyspozytor</div>
+                    <div className="text-sm font-bold text-gray-800">{f.dyspozytor}</div>
+                  </div>
+                )}
+              </div>
+
               {f.uwagi && (
                 <div className="p-3 rounded-lg bg-yellow-50 border border-yellow-200">
                   <div className="text-xs font-semibold text-yellow-800 mb-1">Uwagi od dyspozytora</div>
                   <div className="text-sm text-yellow-900">{f.uwagi}</div>
                 </div>
-              )}
-
-              {f.wagaLadunku && (
-                <div className="text-sm text-gray-600">Waga ładunku: <span className="font-semibold">{f.wagaLadunku} kg</span></div>
               )}
 
               {/* Przyciski akcji */}
@@ -5945,9 +6193,10 @@ function DriverPanel({ user, vehicle, frachty, pauzy, showToast }) {
     );
   }
 
-  // ── Main list view ──
+  // ── Main view ──
   const driverName = (vehicle?.driverHistory || []).find(d => !d.to)?.name || user.displayName || user.email;
-  const renderFrachtCard = (f, showDate = false) => {
+
+  const renderFrachtCard = (f) => {
     const kody = formatKody(f);
     const isDone = f.statusRozladunku === "rozladowano" || (f.dataRozladunku && f.dataRozladunku < todayStr);
     return (
@@ -5967,13 +6216,27 @@ function DriverPanel({ user, vehicle, frachty, pauzy, showToast }) {
           <span className="text-gray-400">→</span>
           <span className="text-green-600 font-bold">{kody.roz}</span>
         </div>
-        <div className="text-xs text-gray-500 mt-1">{f.klient || "—"}{f.nrZlecenia ? ` · ${f.nrZlecenia}` : ""}</div>
+        <div className="text-xs text-gray-500 mt-1">
+          {f.klient || "—"}
+          {f.nrZlecenia ? ` · ${f.nrZlecenia}` : ""}
+          {f.kmLadowne ? ` · ${f.kmLadowne} km` : ""}
+          {f.wagaLadunku ? ` · ${f.wagaLadunku} kg` : ""}
+        </div>
       </div>
     );
   };
 
+  // ── Tabs config ──
+  const DRIVER_TABS = [
+    { id: "zlecenia", label: "Zlecenia", icon: "📋" },
+    { id: "pojazd",   label: "Pojazd",   icon: "🚛" },
+    { id: "serwis",   label: "Serwis",   icon: "🔧" },
+    { id: "spalanie", label: "Spalanie",  icon: "⛽" },
+    { id: "czas",     label: "Czas",      icon: "⏱" },
+  ];
+
   return (
-    <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh" }}>
+    <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", paddingBottom: 80 }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet"/>
 
       {/* HEADER */}
@@ -5998,23 +6261,6 @@ function DriverPanel({ user, vehicle, frachty, pauzy, showToast }) {
       </div>
 
       <div className="max-w-lg mx-auto p-4">
-        {/* TABS */}
-        <div className="flex gap-1 mb-4 bg-white rounded-xl p-1 border border-gray-200">
-          {[
-            { id: "zlecenia", label: "Zlecenia", count: active.length + upcoming.length },
-            { id: "historia", label: "Historia", count: history.length },
-          ].map(t => (
-            <button key={t.id} onClick={() => setDriverTab(t.id)}
-              className="flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all"
-              style={{
-                background: driverTab === t.id ? "#111827" : "transparent",
-                color: driverTab === t.id ? "#fff" : "#6b7280",
-              }}>
-              {t.label} ({t.count})
-            </button>
-          ))}
-        </div>
-
         {!vehicle && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-4 text-center">
             <div className="text-2xl mb-2">🚛</div>
@@ -6023,7 +6269,7 @@ function DriverPanel({ user, vehicle, frachty, pauzy, showToast }) {
           </div>
         )}
 
-        {/* ZLECENIA */}
+        {/* ═══════ ZLECENIA ═══════ */}
         {driverTab === "zlecenia" && (
           <div className="space-y-3">
             {active.length > 0 && (
@@ -6038,26 +6284,359 @@ function DriverPanel({ user, vehicle, frachty, pauzy, showToast }) {
                 {upcoming.map(f => renderFrachtCard(f))}
               </>
             )}
-            {active.length === 0 && upcoming.length === 0 && (
+            {history.length > 0 && (
+              <>
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-4">Historia ({history.length})</div>
+                {history.slice(0, 10).map(f => renderFrachtCard(f))}
+                {history.length > 10 && (
+                  <div className="text-xs text-gray-400 text-center">…i {history.length - 10} więcej</div>
+                )}
+              </>
+            )}
+            {active.length === 0 && upcoming.length === 0 && history.length === 0 && (
               <div className="text-center py-12 text-gray-400">
                 <div className="text-4xl mb-3">🛣️</div>
-                <div className="font-medium">Brak aktywnych zleceń</div>
+                <div className="font-medium">Brak zleceń</div>
               </div>
             )}
           </div>
         )}
 
-        {/* HISTORIA */}
-        {driverTab === "historia" && (
-          <div className="space-y-2">
-            {history.length === 0 ? (
-              <div className="text-center py-12 text-gray-400">
-                <div className="text-4xl mb-3">📋</div>
-                <div className="font-medium">Brak historii</div>
+        {/* ═══════ POJAZD ═══════ */}
+        {driverTab === "pojazd" && vehicle && (
+          <div className="space-y-4">
+            {/* Główne info */}
+            <div className="bg-white rounded-2xl border border-gray-100 p-5">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="text-3xl">🚛</div>
+                <div>
+                  <div className="text-lg font-bold text-gray-900">{vehicle.plate}</div>
+                  {vehicle.plate2 && <div className="text-sm text-gray-500">Przyczepa: {vehicle.plate2}</div>}
+                </div>
               </div>
-            ) : history.map(f => renderFrachtCard(f, true))}
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  ["Marka", vehicle.brand],
+                  ["Typ", vehicle.type],
+                  ["Rok", vehicle.year],
+                  ["Wymiary", vehicle.dimensions],
+                  ["Ładowność", vehicle.maxWeight ? `${vehicle.maxWeight} kg` : null],
+                  ["Załadunek", vehicle.loadingType],
+                  ["VIN", vehicle.vin],
+                  ["Przebieg", vehicle.currentKm ? `${Number(vehicle.currentKm).toLocaleString("pl-PL")} km` : null],
+                ].filter(([,v]) => v).map(([label, val]) => (
+                  <div key={label} className="p-3 rounded-lg bg-gray-50 border border-gray-100">
+                    <div className="text-xs text-gray-400">{label}</div>
+                    <div className="text-sm font-semibold text-gray-800">{val}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Wyposażenie */}
+            {((vehicle.equipment || []).length > 0 || (vehicle.customEquipment || []).length > 0) && (
+              <div className="bg-white rounded-2xl border border-gray-100 p-5">
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Wyposażenie</div>
+                <div className="flex flex-wrap gap-2">
+                  {[...(vehicle.equipment || []), ...(vehicle.customEquipment || [])].map(eq => (
+                    <span key={eq} className="px-3 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100">
+                      {eq}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Wymiary przyczepy */}
+            {vehicle.dimensions2 && (
+              <div className="bg-white rounded-2xl border border-gray-100 p-5">
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Przyczepa</div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
+                    <div className="text-xs text-gray-400">Wymiary</div>
+                    <div className="text-sm font-semibold text-gray-800">{vehicle.dimensions2}</div>
+                  </div>
+                  {vehicle.maxWeight2 && (
+                    <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
+                      <div className="text-xs text-gray-400">Ładowność</div>
+                      <div className="text-sm font-semibold text-gray-800">{vehicle.maxWeight2} kg</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
+        {driverTab === "pojazd" && !vehicle && (
+          <div className="text-center py-12 text-gray-400">
+            <div className="text-4xl mb-3">🚛</div>
+            <div className="font-medium">Brak przypisanego pojazdu</div>
+          </div>
+        )}
+
+        {/* ═══════ SERWIS ═══════ */}
+        {driverTab === "serwis" && vehicle && (
+          <div className="space-y-4">
+            {/* Daty ważności */}
+            <div className="bg-white rounded-2xl border border-gray-100 p-5">
+              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Terminy i przeglądy</div>
+              <div className="space-y-2">
+                {[
+                  ["OC", vehicle.ocExpiry],
+                  ["AC", vehicle.acExpiry],
+                  ["Przegląd techniczny", vehicle.inspectionExpiry],
+                  ["UDT ważność", vehicle.udtExpiry],
+                  ["UDT przegląd", vehicle.udtNextDate],
+                  ["GAP", vehicle.gapExpiry],
+                ].filter(([,d]) => d).map(([label, date]) => {
+                  const days = daysUntil(date);
+                  const urgent = days !== null && days <= 30;
+                  const warn = days !== null && days <= 60;
+                  return (
+                    <div key={label} className="flex items-center justify-between py-2 px-3 rounded-lg"
+                      style={{ background: urgent ? "#fef2f2" : warn ? "#fffbeb" : "#f9fafb" }}>
+                      <span className="text-sm text-gray-700">{label}</span>
+                      <div className="text-right">
+                        <span className="text-sm font-semibold" style={{ color: urgent ? "#dc2626" : warn ? "#d97706" : "#374151" }}>
+                          {fmtDateFull(date)}
+                        </span>
+                        {days !== null && (
+                          <span className="ml-2 text-xs" style={{ color: urgent ? "#dc2626" : warn ? "#d97706" : "#9ca3af" }}>
+                            ({days > 0 ? `za ${days} dni` : days === 0 ? "dziś!" : `${Math.abs(days)} dni temu`})
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Olej / serwis */}
+            {(vehicle.lastOilServiceKm || vehicle.oilServiceEveryKm) && (
+              <div className="bg-white rounded-2xl border border-gray-100 p-5">
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Serwis olejowy</div>
+                <div className="grid grid-cols-2 gap-3">
+                  {vehicle.lastOilServiceKm && (
+                    <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
+                      <div className="text-xs text-gray-400">Ostatni serwis</div>
+                      <div className="text-sm font-semibold text-gray-800">{Number(vehicle.lastOilServiceKm).toLocaleString("pl-PL")} km</div>
+                      {vehicle.lastOilServiceDate && <div className="text-xs text-gray-400">{fmtDateFull(vehicle.lastOilServiceDate)}</div>}
+                    </div>
+                  )}
+                  {vehicle.oilServiceEveryKm && (
+                    <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
+                      <div className="text-xs text-gray-400">Następny co</div>
+                      <div className="text-sm font-semibold text-gray-800">{Number(vehicle.oilServiceEveryKm).toLocaleString("pl-PL")} km</div>
+                    </div>
+                  )}
+                  {vehicle.currentKm && vehicle.lastOilServiceKm && vehicle.oilServiceEveryKm && (() => {
+                    const kmSince = Number(vehicle.currentKm) - Number(vehicle.lastOilServiceKm);
+                    const kmLeft = Number(vehicle.oilServiceEveryKm) - kmSince;
+                    const urgent = kmLeft <= 1500;
+                    return (
+                      <div className="col-span-2 p-3 rounded-lg border"
+                        style={{ background: urgent ? "#fef2f2" : "#f0fdf4", borderColor: urgent ? "#fecaca" : "#bbf7d0" }}>
+                        <div className="text-xs text-gray-400">Do następnego serwisu</div>
+                        <div className="text-sm font-bold" style={{ color: urgent ? "#dc2626" : "#15803d" }}>
+                          {kmLeft > 0 ? `${kmLeft.toLocaleString("pl-PL")} km` : `Przekroczono o ${Math.abs(kmLeft).toLocaleString("pl-PL")} km!`}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {/* Gwarancja */}
+            {vehicle.warrantyActive && (
+              <div className="bg-white rounded-2xl border border-gray-100 p-5">
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Gwarancja</div>
+                <div className="grid grid-cols-2 gap-3">
+                  {vehicle.warrantyKmLimit && (
+                    <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
+                      <div className="text-xs text-gray-400">Limit km</div>
+                      <div className="text-sm font-semibold text-gray-800">{Number(vehicle.warrantyKmLimit).toLocaleString("pl-PL")}</div>
+                    </div>
+                  )}
+                  {vehicle.warrantyServiceEvery && (
+                    <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
+                      <div className="text-xs text-gray-400">Serwis co</div>
+                      <div className="text-sm font-semibold text-gray-800">{Number(vehicle.warrantyServiceEvery).toLocaleString("pl-PL")} km</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {driverTab === "serwis" && !vehicle && (
+          <div className="text-center py-12 text-gray-400">
+            <div className="text-4xl mb-3">🔧</div>
+            <div className="font-medium">Brak pojazdu</div>
+          </div>
+        )}
+
+        {/* ═══════ SPALANIE ═══════ */}
+        {driverTab === "spalanie" && vehicle && (
+          <div className="space-y-4">
+            <div className="bg-white rounded-2xl border border-gray-100 p-5">
+              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Spalanie — {vehicle.plate}</div>
+              {operacyjne.length === 0 ? (
+                <div className="text-center py-8 text-gray-400">
+                  <div className="text-3xl mb-2">⛽</div>
+                  <div className="text-sm">Brak danych o spalaniu</div>
+                </div>
+              ) : (
+                <div>
+                  {/* Podsumowanie */}
+                  {(() => {
+                    const withSpalanie = operacyjne.filter(o => o.spalanie > 0);
+                    const avgSpalanie = withSpalanie.length > 0
+                      ? (withSpalanie.reduce((s, o) => s + o.spalanie, 0) / withSpalanie.length).toFixed(1)
+                      : null;
+                    const totalKm = operacyjne.reduce((s, o) => s + (o.kmLicznik || 0), 0);
+                    const totalPaliwoL = operacyjne.reduce((s, o) => s + (o.paliwoL || 0), 0);
+                    const totalDni = operacyjne.reduce((s, o) => s + (o.dni || 0), 0);
+                    return (
+                      <div className="grid grid-cols-2 gap-3 mb-4">
+                        {avgSpalanie && (
+                          <div className="p-4 rounded-xl bg-cyan-50 border border-cyan-100 col-span-2 text-center">
+                            <div className="text-xs text-cyan-600 font-semibold">Średnie spalanie</div>
+                            <div className="text-2xl font-bold text-cyan-800">{avgSpalanie} L/100km</div>
+                          </div>
+                        )}
+                        <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
+                          <div className="text-xs text-gray-400">Łączne km</div>
+                          <div className="text-sm font-bold text-gray-800">{totalKm.toLocaleString("pl-PL")}</div>
+                        </div>
+                        <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
+                          <div className="text-xs text-gray-400">Łączne litry</div>
+                          <div className="text-sm font-bold text-gray-800">{totalPaliwoL.toLocaleString("pl-PL")} L</div>
+                        </div>
+                        <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
+                          <div className="text-xs text-gray-400">Dni w trasie</div>
+                          <div className="text-sm font-bold text-gray-800">{totalDni}</div>
+                        </div>
+                        <div className="p-3 rounded-lg bg-gray-50 border border-gray-100">
+                          <div className="text-xs text-gray-400">Średnia waga</div>
+                          <div className="text-sm font-bold text-gray-800">
+                            {(() => {
+                              const withWaga = operacyjne.filter(o => o.srWaga > 0);
+                              return withWaga.length > 0
+                                ? `${Math.round(withWaga.reduce((s, o) => s + o.srWaga, 0) / withWaga.length).toLocaleString("pl-PL")} kg`
+                                : "—";
+                            })()}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Tabela miesięcy */}
+                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Miesięcznie</div>
+                  <div className="space-y-1">
+                    {operacyjne
+                      .sort((a, b) => (b.year * 100 + b.month) - (a.year * 100 + a.month))
+                      .slice(0, 12)
+                      .map(op => {
+                        const monthName = new Date(op.year, op.month - 1).toLocaleDateString("pl-PL", { month: "short", year: "numeric" });
+                        return (
+                          <div key={`${op.year}-${op.month}`}
+                            className="flex items-center justify-between py-2 px-3 rounded-lg bg-gray-50 border border-gray-100">
+                            <span className="text-sm font-medium text-gray-700">{monthName}</span>
+                            <div className="flex items-center gap-4 text-xs">
+                              {op.spalanie > 0 && (
+                                <span className="font-bold text-cyan-700">{op.spalanie.toFixed(1)} L/100</span>
+                              )}
+                              {op.kmLicznik > 0 && (
+                                <span className="text-gray-500">{op.kmLicznik.toLocaleString("pl-PL")} km</span>
+                              )}
+                              {op.paliwoL > 0 && (
+                                <span className="text-gray-500">{op.paliwoL} L</span>
+                              )}
+                              {op.dni > 0 && (
+                                <span className="text-gray-400">{op.dni}d</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        {driverTab === "spalanie" && !vehicle && (
+          <div className="text-center py-12 text-gray-400">
+            <div className="text-4xl mb-3">⛽</div>
+            <div className="font-medium">Brak pojazdu</div>
+          </div>
+        )}
+
+        {/* ═══════ CZAS PRACY ═══════ */}
+        {driverTab === "czas" && (
+          <div className="space-y-4">
+            <div className="bg-white rounded-2xl border border-gray-100 p-5">
+              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Czas pracy — pauzy</div>
+              {pauzy.length === 0 ? (
+                <div className="text-center py-8 text-gray-400">
+                  <div className="text-3xl mb-2">⏱</div>
+                  <div className="text-sm">Brak zapisanych pauz</div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {pauzy
+                    .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
+                    .slice(0, 30)
+                    .map((p, i) => (
+                      <div key={p.id || i} className="flex items-center justify-between py-2 px-3 rounded-lg bg-gray-50 border border-gray-100">
+                        <div>
+                          <div className="text-sm font-medium text-gray-700">{fmtDateFull(p.date)}</div>
+                          {p.location && <div className="text-xs text-gray-400">{p.location}</div>}
+                        </div>
+                        <div className="text-right">
+                          {p.status && (
+                            <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
+                              style={{
+                                background: p.status === "pauza" ? "#fef3c7" : p.status === "jazda" ? "#ecfdf5" : "#f3f4f6",
+                                color: p.status === "pauza" ? "#92400e" : p.status === "jazda" ? "#059669" : "#6b7280",
+                              }}>
+                              {p.status}
+                            </span>
+                          )}
+                          {p.hours && <div className="text-xs text-gray-500 mt-0.5">{p.hours}h</div>}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ═══════ BOTTOM NAV (mobile app style) ═══════ */}
+      <div style={{
+        position: "fixed", bottom: 0, left: 0, right: 0,
+        background: "#fff", borderTop: "1px solid #e5e7eb",
+        paddingBottom: "env(safe-area-inset-bottom, 0px)",
+        zIndex: 50,
+      }}>
+        <div className="max-w-lg mx-auto flex">
+          {DRIVER_TABS.map(t => (
+            <button key={t.id} onClick={() => setDriverTab(t.id)}
+              className="flex-1 flex flex-col items-center gap-0.5 py-2.5 transition-all"
+              style={{ color: driverTab === t.id ? "#111827" : "#9ca3af" }}>
+              <span className="text-lg">{t.icon}</span>
+              <span className="text-[10px] font-semibold">{t.label}</span>
+              {driverTab === t.id && (
+                <div style={{ width: 20, height: 2, background: "#111827", borderRadius: 1, marginTop: 1 }}></div>
+              )}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -12713,7 +13292,17 @@ function KomentarzBaner({ frachtyList, vehicleId, onUpdate }) {
   );
 }
 
-function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAdd }) {
+function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete, onUpdate, onBulkAdd }) {
+  // Index driverEvents by frachtId for quick lookup
+  const eventsByFracht = useMemo(() => {
+    const map = {};
+    driverEvents.forEach(ev => {
+      if (!ev.frachtId) return;
+      if (!map[ev.frachtId]) map[ev.frachtId] = [];
+      map[ev.frachtId].push(ev);
+    });
+    return map;
+  }, [driverEvents]);
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
@@ -12980,6 +13569,9 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
                         problem:     { emoji:"⚠️", label:"Problem",     bg:"#fef2f2", color:"#991b1b" },
                       };
                       const c = cfg[s] || cfg.w_trasie;
+                      const evts = eventsByFracht[r.id] || [];
+                      const hasZal = evts.some(e => e.type === "zaladowano");
+                      const hasRoz = evts.some(e => e.type === "rozladowano");
                       return (
                         <div className="flex items-center gap-1">
                           <select
@@ -12993,6 +13585,12 @@ function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAd
                             <option value="rozladowano">✅ Rozładowano</option>
                             <option value="problem">⚠️ Problem</option>
                           </select>
+                          {(hasZal || hasRoz) && (
+                            <div className="flex gap-0.5 ml-1" title={evts.map(e => `${e.type === "zaladowano" ? "Załadunek" : "Rozładunek"}: ${e.driverName || e.driverEmail} ${e.value ? new Date(e.value).toLocaleString("pl-PL") : ""}`).join("\n")}>
+                              {hasZal && <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px]" style={{background:"#eff6ff",color:"#2563eb"}} title="Kierowca potwierdził załadunek">📦</span>}
+                              {hasRoz && <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px]" style={{background:"#f0fdf4",color:"#15803d"}} title="Kierowca potwierdził rozładunek">✅</span>}
+                            </div>
+                          )}
                         </div>
                       );
                     })()}
