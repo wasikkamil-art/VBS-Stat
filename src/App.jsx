@@ -6198,9 +6198,13 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
                             : <span className="ml-1 text-[10px] text-gray-400">(cykliczna)</span>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-gray-600">
+                      <td className="px-3 py-2">
                         <div className="flex items-center gap-1.5">
-                          <span>{x.invoiceNumber || "—"}</span>
+                          {x.isInstance && !x._hasOverrides ? (
+                            <span className="text-xs text-orange-500 italic">do uzupełnienia</span>
+                          ) : (
+                            <span className="text-gray-600">{x.invoiceNumber || "—"}</span>
+                          )}
                           {x.fileUrl && (
                             <a href={x.fileUrl} target="_blank" rel="noreferrer"
                               onClick={(e) => e.stopPropagation()}
@@ -6212,12 +6216,12 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
                       <td className="px-3 py-2">
                         {cat && <span className="px-2 py-0.5 rounded text-[10px] font-semibold" style={{background: cat.color+"22", color: cat.color}}>{cat.label}</span>}
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(x.netto, x.currency)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums font-semibold">{fmtMoney(x.brutto, x.currency)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">
+                      <td className={"px-3 py-2 text-right tabular-nums" + (x.isInstance && !x._hasOverrides ? " text-gray-300" : "")}>{fmtMoney(x.netto, x.currency)}</td>
+                      <td className={"px-3 py-2 text-right tabular-nums font-semibold" + (x.isInstance && !x._hasOverrides ? " text-gray-300 font-normal" : "")}>{fmtMoney(x.brutto, x.currency)}</td>
+                      <td className={"px-3 py-2 text-right tabular-nums" + (x.isInstance && !x._hasOverrides ? " text-gray-300" : "")}>
                         {x.split?.enabled ? (
                           <div>
-                            <div className="font-semibold">{fmtMoney(share, x.currency)}</div>
+                            <div className={x.isInstance && !x._hasOverrides ? "" : "font-semibold"}>{fmtMoney(share, x.currency)}</div>
                             <div className="text-[10px] text-gray-500">{companyPct}% · {x.split.partnerName||"partner"} {100-companyPct}%</div>
                           </div>
                         ) : fmtMoney(x.brutto, x.currency)}
