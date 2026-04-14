@@ -449,18 +449,21 @@ export default function Root() {
 
       if (u) {
         try {
-          // 1. Odczytaj rolę z Custom Claims (token Auth)
+          // 1. Odczytaj rolę z Custom Claims (token Auth) + Firestore
+          await u.getIdToken(true); // force refresh przy logowaniu
           const tokenResult = await u.getIdTokenResult();
           let tokenRole = tokenResult.claims.role;
 
-          // 2. Fallback: jeśli brak claims (stary user), czytaj z Firestore
-          if (!tokenRole) {
-            const snap = await getDoc(doc(db, "users", u.uid));
-            if (snap.exists()) {
-              tokenRole = snap.data().role || "podglad";
-            } else {
-              // Nowy użytkownik — Cloud Function (onNewUser) ustawi claims,
-              // ale na wszelki wypadek tworzymy dokument i fallback
+          // 2. Zawsze sprawdź Firestore — jest source of truth (Cloud Function może mieć opóźnienie)
+          const userSnap = await getDoc(doc(db, "users", u.uid));
+          if (userSnap.exists()) {
+            const firestoreRole = userSnap.data().role;
+            if (firestoreRole) {
+              tokenRole = firestoreRole; // Firestore wygrywa
+            }
+          } else {
+            // Nowy użytkownik — utwórz dokument
+            if (!tokenRole) {
               const usersSnap = await getDocs(collection(db, "users"));
               const isFirst = usersSnap.empty;
               tokenRole = isFirst ? "admin" : "podglad";
@@ -494,8 +497,11 @@ export default function Root() {
             if (data.role && data.role !== currentTokenRole) {
               await u.getIdToken(true); // force refresh
               const refreshed = await u.getIdTokenResult();
-              if (refreshed.claims.role) {
+              if (refreshed.claims.role && refreshed.claims.role !== currentTokenRole) {
                 setRole(refreshed.claims.role);
+              } else if (data.role) {
+                // Fallback: Claims nie zaktualizowane (Cloud Function problem) — użyj roli z Firestore
+                setRole(data.role);
               }
             }
           });
