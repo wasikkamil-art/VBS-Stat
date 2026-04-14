@@ -2282,7 +2282,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                       // Aktywny fracht do wyświetlenia na karcie
                       // Dla trasy: pokaż OSTATNI rozładunek w ciągu (nie pierwszy aktywny)
                       const pendingFF = vFrachty
-                        .filter(r => r.statusRozladunku !== "rozladowano" && r.dataRozladunku && r.dataRozladunku >= tISO)
+                        .filter(r => r.statusRozladunku !== "rozladowano" && r.dataRozladunku && r.dataRozladunku >= todayISO)
                         .sort((a, b) => (b.dataRozladunku || "").localeCompare(a.dataRozladunku || ""));
                       const displayF = pendingFF[0] || activeF || nextF || lastF;
 
