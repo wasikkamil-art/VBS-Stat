@@ -5,7 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 // ─── FIREBASE CONFIG ────────────────────────────────────────────────────────
 // 👇 WKLEJ TUTAJ SWÓJ firebaseConfig z Firebase Console
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, orderBy, arrayUnion, serverTimestamp, writeBatch, limit } from "firebase/firestore";
+import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, orderBy, arrayUnion, serverTimestamp, writeBatch, limit as firestoreLimit } from "firebase/firestore";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
@@ -176,6 +176,24 @@ async function dbSet(key, value) {
   }
 }
 
+// ── Audit log ──
+// Zapisuje każdą akcję CRUD do kolekcji auditLog.
+// Wywołanie fire-and-forget (nie blokuje UI, nie rzuca błędów).
+function logAction(action, module, details = {}) {
+  try {
+    const u = auth.currentUser;
+    addDoc(collection(db, "auditLog"), {
+      action,          // "add" | "update" | "delete" | "login" | "logout" | "toggleStatus" ...
+      module,          // "payments" | "sprawy" | "pauzy" | "chat" | "vehicles" | "users" | "config" ...
+      details,         // { id, name, ... } — dowolne kontekstowe dane
+      uid: u?.uid || null,
+      email: u?.email || null,
+      displayName: u?.displayName || u?.email || null,
+      ts: new Date().toISOString(),
+    }).catch(e => console.warn("auditLog write fail", e));
+  } catch(e) { console.warn("auditLog error", e); }
+}
+
 const SK = { vehicles: "fleetv2_vehicles", costs: "fleetv2_costs", categories: "fleetv2_categories", docs: "fleetv2_docs", imi: "fleetv2_imi", rent: "fleetv2_rent", frachty: "fleetv2_frachty" };
 
 // ─── SEED DATA ─────────────────────────────────────────────────────────────────
@@ -344,6 +362,7 @@ function LoginScreen() {
     setLoading(true);
     try {
       await signInWithEmailAndPassword(auth, email, password);
+      logAction("login", "auth", { email });
     } catch (err) {
       setError("Nieprawidłowy email lub hasło");
     } finally {
@@ -406,7 +425,7 @@ export default function Root() {
     lastActivity.current = Date.now();
     if (autoLogoutTimer.current) clearTimeout(autoLogoutTimer.current);
     autoLogoutTimer.current = setTimeout(() => {
-      if (Date.now() - lastActivity.current >= 30 * 60 * 1000) signOut(auth);
+      if (Date.now() - lastActivity.current >= 30 * 60 * 1000) { logAction("logout", "auth", { reason: "inactivity" }); signOut(auth); }
     }, 30 * 60 * 1000);
   });
   useEffect(() => {
@@ -750,7 +769,7 @@ function exportCostsToExcel(costs, vehicles, categories, filterYear, filterMonth
 
 // ── Per-role default tab access (fallback kiedy user nie ma jeszcze allowedTabs) ──
 const DEFAULT_TABS_BY_ROLE = {
-  admin:      ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","payments","users","email","sprawy","chat"],
+  admin:      ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","payments","users","email","logi","sprawy","chat"],
   dyspozytor: ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","sprawy","chat"],
   podglad:    ["dashboard","frachty","vehicles","serwis","docs","imi","chat"],
 };
@@ -952,7 +971,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             const myRead = norm(r.lastRead?.[user.uid]);
             const myReadMs = myRead ? tsToMs(myRead) : 0;
             const msgsRef = collection(db, "chatRooms", r.id, "messages");
-            const msgsSnap = await getDocs(query(msgsRef, orderBy("timestamp", "desc"), limit(50)));
+            const msgsSnap = await getDocs(query(msgsRef, orderBy("timestamp", "desc"), firestoreLimit(50)));
             return msgsSnap.docs.filter(d => {
               const data = d.data();
               if (data.senderId === user.uid) return false;
@@ -1052,6 +1071,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   const addCost = async (entry) => {
     const costId = uid();
     setCosts((p) => [...p, { ...entry, id: costId }]);
+    logAction("add", "costs", { id: costId, vehicleId: entry.vehicleId, category: entry.category, amount: entry.amount, currency: entry.currency });
     setShowAddCost(false);
     // Serwis bez kwoty → utwórz sprawę automatycznie
     if (entry.pendingSerwis) {
@@ -1783,19 +1803,21 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     showToast(`✅ Migracja 2025: ${frCount} korekt frachtów, ${cCount} korekt kosztów`);
   };
 
-  const deleteCost   = (id)    => { setCosts((p) => p.filter((c) => c.id !== id)); showToast("Usunięto wpis"); };
-  const updateCost   = (updated) => { setCosts((p) => p.map((c) => c.id === updated.id ? updated : c)); showToast("✅ Koszt zaktualizowany"); setEditCostId(null); };
-  const addVehicle   = (v)     => { setVehicles((p) => [...p, { ...v, id: uid(), driverHistory: v.driverHistory || [] }]); showToast("Pojazd dodany"); setShowAddVehicle(false); };
+  const deleteCost   = (id)    => { setCosts((p) => p.filter((c) => c.id !== id)); logAction("delete", "costs", { id }); showToast("Usunięto wpis"); };
+  const updateCost   = (updated) => { setCosts((p) => p.map((c) => c.id === updated.id ? updated : c)); logAction("update", "costs", { id: updated.id, vehicleId: updated.vehicleId }); showToast("✅ Koszt zaktualizowany"); setEditCostId(null); };
+  const addVehicle   = (v)     => { const vid = uid(); setVehicles((p) => [...p, { ...v, id: vid, driverHistory: v.driverHistory || [] }]); logAction("add", "vehicles", { id: vid, type: v.type, plate: v.plate }); showToast("Pojazd dodany"); setShowAddVehicle(false); };
   const delVehicle   = (id, reason) => {
+    const veh = vehicles.find(v => v.id === id);
     setVehicles((p) => p.map((v) => v.id !== id ? v : {
       ...v,
       archived: true,
       archivedDate: new Date().toISOString().slice(0,10),
       archivedReason: reason || "",
     }));
+    logAction("delete", "vehicles", { id, plate: veh?.plate, reason });
     showToast("✅ Pojazd przeniesiony do archiwum");
   };
-  const updateVehicle= (updated) => { setVehicles((p) => p.map((v) => v.id === updated.id ? updated : v)); showToast("✅ Zmiany zapisane"); setEditVehicleId(null); };
+  const updateVehicle= (updated) => { setVehicles((p) => p.map((v) => v.id === updated.id ? updated : v)); logAction("update", "vehicles", { id: updated.id, plate: updated.plate }); showToast("✅ Zmiany zapisane"); setEditVehicleId(null); };
   const addCategory  = (cat)   => setCategories((p) => [...p, cat]);
 
   const CAT_FALLBACKS = {
@@ -1930,10 +1952,10 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
           vehicle={czV}
           entries={czEntries}
           onSave={async (data) => {
-            try { await addDoc(collection(db, "pauzy"), data); showToast("Zapisano"); } catch(e) { console.error("addPauza", e); }
+            try { await addDoc(collection(db, "pauzy"), data); logAction("add", "pauzy", { vehicleId: data.vehicleId, status: data.status, start: data.start, end: data.end }); showToast("Zapisano"); } catch(e) { console.error("addPauza", e); }
           }}
           onDelete={async (id) => {
-            try { await deleteDoc(doc(db, "pauzy", id)); } catch(e) { console.error("delPauza", e); }
+            try { await deleteDoc(doc(db, "pauzy", id)); logAction("delete", "pauzy", { id }); } catch(e) { console.error("delPauza", e); }
           }}
           onClose={() => setCzasPracyVehicleId(null)}
         />;
@@ -1994,6 +2016,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               { id: "payments", label: "Płatności", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/></svg> },
               { id: "users", label: "Użytkownicy", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
               { id: "email", label: "Email statusy", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> },
+              { id: "logi", label: "Logi aktywności", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> },
               { id: "sprawy", label: "Sprawy", badge: sprawyList.filter(s => !['zamknieta','wygrana','przegrana'].includes(s.status) && (s.przypisani||[]).includes(user?.email)).length || null, icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v6"/><line x1="7" y1="13" x2="12" y2="13"/><line x1="7" y1="17" x2="10" y2="17"/></svg> },
               { id: "chat", label: "Czat", badge: chatUnreadCount || null, icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> },
             ].filter(item => canSeeTab(item.id)).map((item) => (
@@ -2033,7 +2056,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                   {isAdmin ? "👑 Admin" : isDyspozytor ? "🚚 Dyspozytor" : "👁 Podgląd"}
                 </span>
               </div>
-              <button onClick={() => signOut(auth)}
+              <button onClick={() => { logAction("logout", "auth", { reason: "manual" }); signOut(auth); }}
                 className="w-full py-2 rounded-lg text-sm font-medium transition-all hover:bg-red-50"
                 style={{ color: "#ef4444", background: "transparent" }}>
                 🚪 Wyloguj
@@ -2998,7 +3021,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                           {v.archivedReason && <div className="text-xs text-gray-500">{v.archivedReason}</div>}
                           {v.archivedDate && <div className="text-xs text-gray-300">{v.archivedDate}</div>}
                         </div>
-                        <button onClick={() => setVehicles(p => p.map(vv => vv.id===v.id ? (({archived, archivedDate, archivedReason, ...rest}) => rest)(vv) : vv))}
+                        <button onClick={() => { setVehicles(p => p.map(vv => vv.id===v.id ? (({archived, archivedDate, archivedReason, ...rest}) => rest)(vv) : vv)); logAction("update", "vehicles", { id: v.id, plate: v.plate, action: "restore" }); }}
                           className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-400 hover:text-gray-700 hover:border-gray-300 transition-all flex-shrink-0">
                           Przywróć
                         </button>
@@ -3029,8 +3052,8 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               eurRate={eurRate}
               operacyjne={operacyjne}
               onSaveOperacyjne={async (id, data) => {
-                try { await updateDoc(doc(db, "operacyjne", id), data); }
-                catch { await addDoc(collection(db, "operacyjne"), {...data, id}); }
+                try { await updateDoc(doc(db, "operacyjne", id), data); logAction("update", "operacyjne", { id }); }
+                catch { await addDoc(collection(db, "operacyjne"), {...data, id}); logAction("add", "operacyjne", { id }); }
               }}
               onAdd={(r) => setRentRecords(p => [...p, { ...r, id: uid() }])}
               onUpdate={(id, data) => setRentRecords(p => p.map(r => r.id === id ? { ...r, ...data } : r))}
@@ -3046,12 +3069,13 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             <FrachtyTab
               frachtyList={frachtyList}
               vehicles={vehicles}
-              onAdd={(r) => setFrachtyList(p => [{ ...r, id: uid() }, ...p])}
-              onDelete={(id) => setFrachtyList(p => p.filter(r => r.id !== id))}
-              onUpdate={(id, data) => setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r))}
+              onAdd={(r) => { const fid = uid(); setFrachtyList(p => [{ ...r, id: fid }, ...p]); logAction("add", "frachty", { id: fid, vehicleId: r.vehicleId, dokod: r.dokod }); }}
+              onDelete={(id) => { setFrachtyList(p => p.filter(r => r.id !== id)); logAction("delete", "frachty", { id }); }}
+              onUpdate={(id, data) => { setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r)); logAction("update", "frachty", { id }); }}
               onBulkAdd={(rows) => {
                 const withIds = rows.map(r => ({ ...r, id: uid() }));
                 setFrachtyList(p => [...p, ...withIds]);
+                logAction("bulkAdd", "frachty", { count: withIds.length });
                 showToast(`✅ Zaimportowano ${withIds.length} frachtów`);
               }}
             />
@@ -3088,6 +3112,10 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             <EmailStatusTab showToast={showToast} />
           )}
 
+          {tab === "logi" && isAdmin && (
+            <AuditLogTab />
+          )}
+
           {tab === "chat" && canSeeTab("chat") && (() => {
             const isMob = typeof window !== 'undefined' && window.innerWidth < 768;
             // Na mobile chat renderuje się w overlay poniżej
@@ -3110,7 +3138,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               eurRate={eurRate}
               eurRateDate={eurRateDate}
               showToast={showToast}
-              onAdd={async (s) => { try { await addDoc(collection(db, "sprawy"), { ...s, dataUtworzenia: new Date().toISOString() }); showToast("✅ Sprawa dodana"); } catch(e) { console.error("onAdd sprawa", e); showToast("❌ Błąd dodawania sprawy"); } }}
+              onAdd={async (s) => { try { const ref = await addDoc(collection(db, "sprawy"), { ...s, dataUtworzenia: new Date().toISOString() }); logAction("add", "sprawy", { id: ref.id, typ: s.typ, kierowca: s.kierowca }); showToast("✅ Sprawa dodana"); } catch(e) { console.error("onAdd sprawa", e); showToast("❌ Błąd dodawania sprawy"); } }}
               onUpdate={async (id, data) => {
                 try {
                   if (data._addZdarzenie) {
@@ -3118,12 +3146,14 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                     const updates = { ...rest };
                     if (Object.keys(updates).length > 0) await updateDoc(doc(db, "sprawy", id), updates);
                     await updateDoc(doc(db, "sprawy", id), { zdarzenia: arrayUnion(_addZdarzenie) });
+                    logAction("update", "sprawy", { id, addedZdarzenie: true });
                   } else {
                     await updateDoc(doc(db, "sprawy", id), data);
+                    logAction("update", "sprawy", { id });
                   }
                 } catch(e) { console.error("onUpdate sprawa", e); }
               }}
-              onDelete={async (id) => { try { await deleteDoc(doc(db, "sprawy", id)); showToast("✅ Sprawa usunięta"); } catch(e) { console.error("onDelete sprawa", e); showToast("❌ Błąd usuwania"); } }}
+              onDelete={async (id) => { try { await deleteDoc(doc(db, "sprawy", id)); logAction("delete", "sprawy", { id }); showToast("✅ Sprawa usunięta"); } catch(e) { console.error("onDelete sprawa", e); showToast("❌ Błąd usuwania"); } }}
             />
           )}
 
@@ -3697,6 +3727,7 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
     };
     try {
       const docRef = await addDoc(collection(db, "chatRooms"), room);
+      logAction("add", "chat", { roomId: docRef.id, roomName: name, type: room.type });
       setShowNewRoom(false); setNewRoomName(""); setNewRoomMembers([]);
       setActiveRoom({ id: docRef.id, ...room }); showToast("Pokój utworzony");
     } catch (e) { showToast("Błąd tworzenia"); }
@@ -3706,6 +3737,7 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
     if (!editRoomName.trim() || !activeRoom) return;
     try {
       await updateDoc(doc(db, "chatRooms", activeRoom.id), { name: editRoomName.trim() });
+      logAction("update", "chat", { roomId: activeRoom.id, action: "rename", newName: editRoomName.trim() });
       showToast("Nazwa zmieniona"); setShowRoomSettings(false);
     } catch (e) { showToast("Błąd zmiany nazwy"); }
   };
@@ -3714,6 +3746,7 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
     if (!activeRoom || !window.confirm("Usunąć pokój i wszystkie wiadomości?")) return;
     try {
       await deleteDoc(doc(db, "chatRooms", activeRoom.id));
+      logAction("delete", "chat", { roomId: activeRoom.id, roomName: activeRoom.name });
       setActiveRoom(null); setShowRoomSettings(false); showToast("Pokój usunięty");
     } catch (e) { showToast("Błąd usuwania pokoju"); }
   };
@@ -3723,6 +3756,7 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
     const newMembers = (activeRoom.members || []).filter(uid => uid !== currentUser.uid);
     try {
       await updateDoc(doc(db, "chatRooms", activeRoom.id), { members: newMembers });
+      logAction("update", "chat", { roomId: activeRoom.id, action: "leave" });
       setActiveRoom(null); setShowRoomSettings(false); showToast("Opuszczono pokój");
     } catch (e) { showToast("Błąd"); }
   };
@@ -3732,6 +3766,7 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
     const members = [...new Set([...(activeRoom.members || []), uid])];
     try {
       await updateDoc(doc(db, "chatRooms", activeRoom.id), { members });
+      logAction("update", "chat", { roomId: activeRoom.id, action: "addMember", memberUid: uid });
       showToast("Dodano członka");
     } catch (e) { showToast("Błąd"); }
   };
@@ -3741,6 +3776,7 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
     const members = (activeRoom.members || []).filter(u => u !== uid);
     try {
       await updateDoc(doc(db, "chatRooms", activeRoom.id), { members });
+      logAction("update", "chat", { roomId: activeRoom.id, action: "removeMember", memberUid: uid });
       showToast("Usunięto członka");
     } catch (e) { showToast("Błąd"); }
   };
@@ -5033,6 +5069,7 @@ function EmailStatusTab({ showToast }) {
         senderEmail: senderEmail.trim(),
         updatedAt: new Date().toISOString(),
       });
+      logAction("update", "config", { section: "email" });
       showToast("✅ Konfiguracja zapisana");
     } catch (e) {
       showToast("❌ Błąd zapisu konfiguracji");
@@ -5051,6 +5088,7 @@ function EmailStatusTab({ showToast }) {
         active: true,
         addedAt: new Date().toISOString(),
       });
+      logAction("add", "emailRecipients", { email });
       setNewEmail("");
       setNewName("");
       showToast("✅ Odbiorca dodany");
@@ -5063,6 +5101,7 @@ function EmailStatusTab({ showToast }) {
   const toggleActive = async (id, current) => {
     try {
       await updateDoc(doc(db, "emailRecipients", id), { active: !current });
+      logAction("update", "emailRecipients", { id, active: !current });
     } catch (e) { showToast("❌ Błąd"); }
   };
 
@@ -5070,6 +5109,7 @@ function EmailStatusTab({ showToast }) {
   const removeRecipient = async (id) => {
     try {
       await deleteDoc(doc(db, "emailRecipients", id));
+      logAction("delete", "emailRecipients", { id });
       showToast("Odbiorca usunięty");
     } catch (e) { showToast("❌ Błąd usuwania"); }
   };
@@ -5215,9 +5255,189 @@ const ASSIGNABLE_TABS = [
   { id: "docs",      label: "Dokumenty",     icon: "📄" },
   { id: "imi",       label: "IMI / SIPSI",   icon: "🌍" },
   { id: "payments",  label: "Płatności",     icon: "🗓️" },
+  { id: "logi",      label: "Logi aktywności", icon: "📝" },
   { id: "sprawy",    label: "Sprawy",        icon: "📋" },
   { id: "chat",      label: "Czat",          icon: "💬" },
 ];
+
+// ═══════════════════════════════════════════════════════════════════
+//  AUDIT LOG TAB — logi aktywności użytkowników (admin-only)
+// ═══════════════════════════════════════════════════════════════════
+function AuditLogTab() {
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filterModule, setFilterModule] = useState("all");
+  const [filterAction, setFilterAction] = useState("all");
+  const [filterUser, setFilterUser] = useState("all");
+  const [searchQ, setSearchQ] = useState("");
+  const [limit, setLimit] = useState(200);
+
+  useEffect(() => {
+    setLoading(true);
+    const q = query(collection(db, "auditLog"), orderBy("ts", "desc"), firestoreLimit(limit));
+    const unsub = onSnapshot(q, (snap) => {
+      setLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLoading(false);
+    }, (err) => { console.error("auditLog onSnapshot", err); setLoading(false); });
+    return () => unsub();
+  }, [limit]);
+
+  const ACTION_LABELS = {
+    add: { label: "Dodanie", color: "#16a34a", bg: "#f0fdf4" },
+    update: { label: "Edycja", color: "#2563eb", bg: "#eff6ff" },
+    delete: { label: "Usunięcie", color: "#dc2626", bg: "#fef2f2" },
+    toggleStatus: { label: "Zmiana statusu", color: "#9333ea", bg: "#faf5ff" },
+    bulkAdd: { label: "Import zbiorczy", color: "#0891b2", bg: "#ecfeff" },
+    login: { label: "Logowanie", color: "#059669", bg: "#ecfdf5" },
+    logout: { label: "Wylogowanie", color: "#6b7280", bg: "#f9fafb" },
+  };
+
+  const MODULE_LABELS = {
+    payments: "Płatności",
+    frachty: "Frachty",
+    vehicles: "Pojazdy",
+    costs: "Koszty",
+    sprawy: "Sprawy",
+    pauzy: "Pauzy",
+    chat: "Czat",
+    users: "Użytkownicy",
+    config: "Konfiguracja",
+    emailRecipients: "Odbiorcy email",
+    operacyjne: "Operacyjne",
+    auth: "Autoryzacja",
+  };
+
+  // Unikalne wartości do filtrów
+  const uniqueModules = [...new Set(logs.map(l => l.module))].sort();
+  const uniqueActions = [...new Set(logs.map(l => l.action))].sort();
+  const uniqueUsers   = [...new Set(logs.map(l => l.email).filter(Boolean))].sort();
+
+  const q = searchQ.trim().toLowerCase();
+  const filtered = logs.filter(l => {
+    if (filterModule !== "all" && l.module !== filterModule) return false;
+    if (filterAction !== "all" && l.action !== filterAction) return false;
+    if (filterUser !== "all" && l.email !== filterUser) return false;
+    if (q) {
+      const hay = (
+        (l.email || "") + " " +
+        (l.module || "") + " " +
+        (l.action || "") + " " +
+        JSON.stringify(l.details || {})
+      ).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const fmtTs = (ts) => {
+    if (!ts) return "—";
+    try {
+      const d = new Date(ts);
+      return d.toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    } catch { return ts; }
+  };
+
+  const detailStr = (details) => {
+    if (!details || typeof details !== "object") return "";
+    const parts = Object.entries(details).filter(([,v]) => v !== undefined && v !== null && v !== "").map(([k,v]) => {
+      if (typeof v === "object") return `${k}: ${JSON.stringify(v)}`;
+      return `${k}: ${v}`;
+    });
+    return parts.join(" · ");
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-xl font-bold text-gray-900">Logi aktywności</h2>
+        <div className="text-sm text-gray-500">{filtered.length} z {logs.length} wpisów</div>
+      </div>
+
+      {/* FILTRY */}
+      <div className="flex items-center gap-2 flex-wrap mb-4">
+        <select value={filterModule} onChange={e => setFilterModule(e.target.value)}
+          className="px-3 py-2 rounded-lg text-sm border border-gray-200 bg-white">
+          <option value="all">Wszystkie moduły</option>
+          {uniqueModules.map(m => <option key={m} value={m}>{MODULE_LABELS[m] || m}</option>)}
+        </select>
+        <select value={filterAction} onChange={e => setFilterAction(e.target.value)}
+          className="px-3 py-2 rounded-lg text-sm border border-gray-200 bg-white">
+          <option value="all">Wszystkie akcje</option>
+          {uniqueActions.map(a => <option key={a} value={a}>{ACTION_LABELS[a]?.label || a}</option>)}
+        </select>
+        <select value={filterUser} onChange={e => setFilterUser(e.target.value)}
+          className="px-3 py-2 rounded-lg text-sm border border-gray-200 bg-white">
+          <option value="all">Wszyscy użytkownicy</option>
+          {uniqueUsers.map(u => <option key={u} value={u}>{u}</option>)}
+        </select>
+        <div className="relative">
+          <input type="text" value={searchQ} onChange={e => setSearchQ(e.target.value)}
+            placeholder="Szukaj w logach…"
+            className="pl-8 pr-3 py-2 rounded-lg text-sm border border-gray-200 bg-white w-56" />
+          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>
+        </div>
+        {(filterModule !== "all" || filterAction !== "all" || filterUser !== "all" || searchQ) && (
+          <button onClick={() => { setFilterModule("all"); setFilterAction("all"); setFilterUser("all"); setSearchQ(""); }}
+            className="px-3 py-2 rounded-lg text-sm border border-gray-200 bg-white hover:bg-gray-50 text-gray-600">
+            ✕ Wyczyść
+          </button>
+        )}
+      </div>
+
+      {/* TABELA */}
+      {loading ? (
+        <div className="p-8 text-center text-gray-400 text-sm">Ładowanie logów…</div>
+      ) : filtered.length === 0 ? (
+        <div className="p-8 text-center text-gray-400 text-sm">Brak wpisów pasujących do filtrów</div>
+      ) : (
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-600">
+                <th className="text-left px-3 py-2 font-semibold w-40">Data / czas</th>
+                <th className="text-left px-3 py-2 font-semibold">Użytkownik</th>
+                <th className="text-left px-3 py-2 font-semibold">Akcja</th>
+                <th className="text-left px-3 py-2 font-semibold">Moduł</th>
+                <th className="text-left px-3 py-2 font-semibold">Szczegóły</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((l) => {
+                const am = ACTION_LABELS[l.action] || { label: l.action, color: "#6b7280", bg: "#f9fafb" };
+                return (
+                  <tr key={l.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                    <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{fmtTs(l.ts)}</td>
+                    <td className="px-3 py-2 text-xs font-medium text-gray-700">{l.email || l.uid || "—"}</td>
+                    <td className="px-3 py-2">
+                      <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold"
+                        style={{ color: am.color, background: am.bg }}>
+                        {am.label}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-xs text-gray-600">{MODULE_LABELS[l.module] || l.module}</td>
+                    <td className="px-3 py-2 text-xs text-gray-500 max-w-xs truncate" title={detailStr(l.details)}>
+                      {detailStr(l.details)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* WIĘCEJ */}
+      {logs.length >= limit && (
+        <div className="text-center mt-4">
+          <button onClick={() => setLimit(l => l + 200)}
+            className="px-4 py-2 rounded-lg text-sm border border-gray-200 bg-white hover:bg-gray-50 text-gray-600">
+            Załaduj więcej (aktualnie {limit})
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function UsersTab({ currentUid, showToast }) {
   const [users, setUsers]     = useState([]);
@@ -5248,6 +5468,7 @@ function UsersTab({ currentUid, showToast }) {
   async function saveAllowedTabs(uid, newTabs, userRole) {
     try {
       await setDoc(doc(db, "users", uid), { allowedTabs: newTabs }, { merge: true });
+      logAction("update", "users", { targetUid: uid, allowedTabs: newTabs });
       setUsers(p => p.map(u => u.uid === uid ? { ...u, allowedTabs: newTabs } : u));
       showToast("✅ Zapisano uprawnienia zakładek");
     } catch(e) {
@@ -5271,6 +5492,7 @@ function UsersTab({ currentUid, showToast }) {
       // Wywołaj Cloud Function (ustawia Custom Claims + aktualizuje Firestore)
       const setUserRole = httpsCallable(functions, "setUserRole");
       await setUserRole({ uid, role: newRole });
+      logAction("update", "users", { targetUid: uid, newRole, method: "cloudFunction" });
       setUsers(p => p.map(u => u.uid === uid ? { ...u, role: newRole } : u));
       showToast("✅ Rola zaktualizowana (Custom Claims)");
     } catch(e) {
@@ -5278,6 +5500,7 @@ function UsersTab({ currentUid, showToast }) {
       // Fallback: bezpośredni zapis do Firestore (trigger onRoleChange ustawi claims)
       try {
         await setDoc(doc(db, "users", uid), { role: newRole }, { merge: true });
+        logAction("update", "users", { targetUid: uid, newRole, method: "firestoreFallback" });
         setUsers(p => p.map(u => u.uid === uid ? { ...u, role: newRole } : u));
         showToast("✅ Rola zaktualizowana");
       } catch(e2) {
@@ -5615,10 +5838,12 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
         if (set.has(inst.instanceKey)) set.delete(inst.instanceKey);
         else set.add(inst.instanceKey);
         await updateDoc(doc(db, "payments", inst.id), { paidInstances: Array.from(set) });
+        logAction("toggleStatus", "payments", { id: inst.id, contractor: inst.contractor, instanceKey: inst.instanceKey });
       } else {
         // Ad-hoc: zmień status na doc
         const newStatus = statusOf(inst) === "paid" ? "topay" : "paid";
         await updateDoc(doc(db, "payments", inst.id), { status: newStatus });
+        logAction("toggleStatus", "payments", { id: inst.id, contractor: inst.contractor, newStatus });
       }
       showToast("✅ Zaktualizowano");
     } catch(e) {
@@ -5631,9 +5856,11 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
     try {
       if (editRec) {
         await updateDoc(doc(db, "payments", editRec.id), data);
+        logAction("update", "payments", { id: editRec.id, contractor: data.contractor, invoiceNumber: data.invoiceNumber });
         showToast("✅ Zapisano zmiany");
       } else {
-        await addDoc(collection(db, "payments"), { ...data, createdAt: new Date().toISOString() });
+        const ref = await addDoc(collection(db, "payments"), { ...data, createdAt: new Date().toISOString() });
+        logAction("add", "payments", { id: ref.id, contractor: data.contractor, invoiceNumber: data.invoiceNumber, brutto: data.brutto, currency: data.currency });
         showToast("✅ Dodano fakturę");
       }
       setEditRec(null);
@@ -5692,7 +5919,9 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
   async function deleteRec(id) {
     if (!confirm("Usunąć tę fakturę?\n(Dla faktury cyklicznej usunie cały szablon — wszystkie instancje znikną)")) return;
     try {
+      const rec = payments.find(p => p.id === id);
       await deleteDoc(doc(db, "payments", id));
+      logAction("delete", "payments", { id, contractor: rec?.contractor, invoiceNumber: rec?.invoiceNumber });
       showToast("✅ Usunięto");
       setDetail(null);
     } catch(e) {

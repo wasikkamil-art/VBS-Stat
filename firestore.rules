@@ -167,6 +167,18 @@ service cloud.firestore {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // AUDIT LOG — logi aktywności użytkowników
+    // Każdy zalogowany może tworzyć wpisy (logAction jest fire-and-forget).
+    // Tylko admin może czytać — zakładka "Logi" jest admin-only.
+    // Nikt nie może edytować ani usuwać — logi są nienaruszalne.
+    // ═══════════════════════════════════════════════════════════════
+    match /auditLog/{docId} {
+      allow read: if isAdmin();
+      allow create: if isAuth();
+      allow update, delete: if false;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // FCM TOKENS — push notifications
     // Każdy zalogowany może zapisać/odczytać SWÓJ token
     // ═══════════════════════════════════════════════════════════════
