@@ -5714,9 +5714,11 @@ function expandPayment(p, windowStartISO, windowEndISO) {
     if (cursor >= windowStartISO && cursor <= windowEndISO) {
       const key = frequency === "yearly" ? yearKey(cursor) : monthKey(cursor);
       const overrides = (p.instanceOverrides || {})[key] || {};
+      // Nie kopiuj załącznika szablonu na instancje — plik jest per-instancja (z overrides)
+      const { fileUrl: _fu, filePath: _fp, fileName: _fn, fileType: _ft, fileSize: _fs, ...templateWithoutFile } = p;
       out.push({
-        ...p,
-        ...overrides,         // nadpisz nr FV, kwoty, itp. per instancja
+        ...templateWithoutFile,
+        ...overrides,         // nadpisz nr FV, kwoty, plik itp. per instancja
         instanceKey: key,
         dueDate: cursor,
         isInstance: true,
