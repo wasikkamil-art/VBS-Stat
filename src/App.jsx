@@ -2132,9 +2132,15 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
           {/* Mobile header — ukryty w zakładce czat */}
           {tab !== "chat" && (
-            <div className="flex md:hidden items-center mb-4" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
-              <img src="/icon-192.png" alt="FS" className="w-8 h-8 rounded-lg mr-2" />
-              <span className="font-bold text-base text-gray-900">FleetStat</span>
+            <div className="flex md:hidden items-center justify-between mb-4" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
+              <div className="flex items-center">
+                <img src="/icon-192.png" alt="FS" className="w-8 h-8 rounded-lg mr-2" />
+                <span className="font-bold text-base text-gray-900">FleetStat</span>
+              </div>
+              <button onClick={() => { logAction("logout", "auth", { reason: "manual" }); signOut(auth); }}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-500 hover:bg-red-50 border border-red-100">
+                Wyloguj
+              </button>
             </div>
           )}
 
