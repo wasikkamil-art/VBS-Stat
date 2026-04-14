@@ -216,9 +216,13 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
       statusColor = "#15803d";
       statusBg = "#f0fdf4";
       statusType = "trasa";
-      // Pokaż ostatni kod rozładunku + datę rozładunku
-      const rozlKod = [activeF.dokod, activeF.dokod2, activeF.dokod3].filter(s => s && s.trim()).pop() || "—";
-      const rozlDate = activeF.dataRozladunku ? fmtDate(activeF.dataRozladunku) : "";
+      // Pokaż OSTATNI rozładunek w ciągu (jeśli po aktywnym jest nextF — tam auto jedzie na końcu)
+      const pendingFrachty = vFrachty
+        .filter(r => r.statusRozladunku !== "rozladowano" && r.dataRozladunku && r.dataRozladunku >= todayISO)
+        .sort((a, b) => (b.dataRozladunku || "").localeCompare(a.dataRozladunku || ""));
+      const lastPending = pendingFrachty[0] || activeF;
+      const rozlKod = [lastPending.dokod, lastPending.dokod2, lastPending.dokod3].filter(s => s && s.trim()).join(" / ") || "—";
+      const rozlDate = lastPending.dataRozladunku ? fmtDate(lastPending.dataRozladunku) : "";
       details = rozlDate ? `${rozlKod} · ${rozlDate}` : rozlKod;
     } else if (vehiclePauza) {
       const pauzaLabels = { pauza9: "Pauza 9h", pauza11: "Pauza 11h", pauza24: "Pauza 24h", pauza45: "Pauza 45h", pauzaInne: "Pauza", baza: "Baza" };
@@ -233,7 +237,7 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
         // Weź kod z ostatniego rozładowanego frachtu (tam kierowca faktycznie stoi)
         const refF = lastDoneF || activeF;
         if (refF) {
-          locationKod = [refF.dokod, refF.dokod2, refF.dokod3].filter(s => s && s.trim()).pop() || BAZA_KOD;
+          locationKod = [refF.dokod, refF.dokod2, refF.dokod3].filter(s => s && s.trim()).join(" / ") || BAZA_KOD;
         }
       }
       details = `Dostępny od: ${fmtDate(vehiclePauza.end)} · ${locationKod}`;
@@ -243,12 +247,14 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
       statusColor = "#15803d";
       statusBg = "#f0fdf4";
       statusType = "trasa";
-      // Pokaż datę najbliższego załadunku — to jest teraz najbardziej relewantna data
-      const nextKod = [nextF.zaladunekKod, nextF.zaladunekKod2, nextF.zaladunekKod3].filter(s => s && s.trim())[0]
-                   || [nextF.dokod, nextF.dokod2, nextF.dokod3].filter(s => s && s.trim()).pop()
-                   || "—";
-      const nextDate = nextF.dataZaladunku ? fmtDate(nextF.dataZaladunku) : "";
-      details = nextDate ? `Załadunek: ${nextKod} · ${nextDate}` : nextKod;
+      // Pokaż OSTATNI rozładunek z przyszłych frachtów (tam auto jedzie na końcu)
+      const futureFrachty = vFrachty
+        .filter(r => r.statusRozladunku !== "rozladowano" && r.dataRozladunku && r.dataRozladunku >= todayISO)
+        .sort((a, b) => (b.dataRozladunku || "").localeCompare(a.dataRozladunku || ""));
+      const lastFuture = futureFrachty[0] || nextF;
+      const nextKod = [lastFuture.dokod, lastFuture.dokod2, lastFuture.dokod3].filter(s => s && s.trim()).join(" / ") || "—";
+      const nextDate = lastFuture.dataRozladunku ? fmtDate(lastFuture.dataRozladunku) : "";
+      details = nextDate ? `${nextKod} · ${nextDate}` : nextKod;
     } else {
       const daysSince = lastDoneF
         ? Math.round((new Date(todayISO + "T00:00:00").getTime() - new Date(lastDoneF.dataRozladunku + "T00:00:00").getTime()) / 86400000)
@@ -259,7 +265,7 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
       statusType = "wolny";
       // Pokaż ostatni kod rozładunku + datę rozładunku
       const lastKod = lastDoneF
-        ? ([lastDoneF.dokod, lastDoneF.dokod2, lastDoneF.dokod3].filter(s => s && s.trim()).pop() || "—")
+        ? ([lastDoneF.dokod, lastDoneF.dokod2, lastDoneF.dokod3].filter(s => s && s.trim()).join(" / ") || "—")
         : "—";
       const lastDate = lastDoneF?.dataRozladunku ? fmtDate(lastDoneF.dataRozladunku) : "";
       details = lastDoneF ? (lastDate ? `${lastKod} · ${lastDate}` : lastKod) : "Brak frachtów";

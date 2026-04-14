@@ -2280,9 +2280,13 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                       }
 
                       // Aktywny fracht do wyświetlenia na karcie
-                      const displayF = activeF || nextF || lastF;
+                      // Dla trasy: pokaż OSTATNI rozładunek w ciągu (nie pierwszy aktywny)
+                      const pendingFF = vFrachty
+                        .filter(r => r.statusRozladunku !== "rozladowano" && r.dataRozladunku && r.dataRozladunku >= tISO)
+                        .sort((a, b) => (b.dataRozladunku || "").localeCompare(a.dataRozladunku || ""));
+                      const displayF = pendingFF[0] || activeF || nextF || lastF;
 
-                      // Dane trasy z aktywnego/następnego/ostatniego frachtu
+                      // Dane trasy z ostatniego pending / aktywnego / następnego frachtu
                       const skad = displayF ? [displayF.zaladunekKod,displayF.zaladunekKod2,displayF.zaladunekKod3].filter(s=>s&&s.trim()).join(" / ") || displayF.skad || "—" : "—";
                       const dokad = displayF ? [displayF.dokod,displayF.dokod2,displayF.dokod3].filter(s=>s&&s.trim()).join(" / ") || displayF.dokad || "—" : "—";
                       const cena = displayF?.cenaEur ? parseFloat(displayF.cenaEur) : null;
