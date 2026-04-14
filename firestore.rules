@@ -179,6 +179,16 @@ service cloud.firestore {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // DRIVER EVENTS — zdarzenia kierowcy (załadunek, rozładunek, CMR)
+    // Kierowca może tworzyć zdarzenia, wszyscy zalogowani mogą czytać.
+    // ═══════════════════════════════════════════════════════════════
+    match /driverEvents/{docId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update, delete: if canEdit();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // FCM TOKENS — push notifications
     // Każdy zalogowany może zapisać/odczytać SWÓJ token
     // ═══════════════════════════════════════════════════════════════

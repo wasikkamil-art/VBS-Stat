@@ -772,6 +772,7 @@ const DEFAULT_TABS_BY_ROLE = {
   admin:      ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","payments","users","email","logi","sprawy","chat"],
   dyspozytor: ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","sprawy","chat"],
   podglad:    ["dashboard","frachty","vehicles","serwis","docs","imi","chat"],
+  kierowca:   ["driver"],  // kierowca widzi TYLKO swój panel
 };
 // Zakładki zawsze admin-only (nie da się ich przyznać przez checkboxy)
 const ADMIN_ONLY_TABS = ["users", "email"];
@@ -781,6 +782,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   const [showExportModal, setShowExportModal] = useState(false);
   const isDyspozytor = role === "dyspozytor";
   const isPodglad    = role === "podglad";
+  const isKierowca   = role === "kierowca";
   const canEdit      = isAdmin || isDyspozytor;  // może edytować
   const canFinance   = isAdmin || isDyspozytor;  // widzi finanse
 
@@ -1918,6 +1920,28 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
       Ładowanie danych…
     </div>
   );
+
+  // ─── PANEL KIEROWCY (osobny layout, mobile-first) ───────────────────────────
+  if (isKierowca) {
+    // Znajdź pojazd przypisany do tego kierowcy (po emailu w driverHistory)
+    const myVehicle = vehicles.find(v =>
+      (v.driverHistory || []).some(d => !d.to && d.email === user.email)
+    );
+    // Frachty przypisane do mojego pojazdu
+    const myFrachty = myVehicle
+      ? frachtyList.filter(f => f.vehicleId === myVehicle.id).sort((a,b) => (b.dataZaladunku||"").localeCompare(a.dataZaladunku||""))
+      : [];
+
+    return (
+      <DriverPanel
+        user={user}
+        vehicle={myVehicle}
+        frachty={myFrachty}
+        pauzy={pauzy.filter(p => myVehicle && p.vehicleId === myVehicle.id)}
+        showToast={showToast}
+      />
+    );
+  }
 
   // ─── RENDER ──────────────────────────────────────────────────────────────────
   return (
@@ -5497,6 +5521,7 @@ function UsersTab({ currentUid, showToast }) {
   const DEFAULTS = {
     admin:      ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","sprawy","chat"],
     dyspozytor: ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","sprawy","chat"],
+    kierowca:   ["driver"],
     podglad:    ["dashboard","frachty","vehicles","serwis","docs","imi","chat"],
   };
 
@@ -5547,6 +5572,7 @@ function UsersTab({ currentUid, showToast }) {
   const ROLES = [
     { id: "admin",      label: "Admin",      icon: "👑", desc: "Pełny dostęp",                      color: "#92400e", bg: "#fef3c7" },
     { id: "dyspozytor", label: "Dyspozytor", icon: "🚚", desc: "Edycja frachtów i kosztów",          color: "#1d4ed8", bg: "#eff6ff" },
+    { id: "kierowca",   label: "Kierowca",   icon: "🧑‍✈️", desc: "Panel kierowcy — zlecenia, CMR, czas pracy", color: "#059669", bg: "#ecfdf5" },
     { id: "podglad",    label: "Podgląd",    icon: "👁",  desc: "Tylko odczyt, bez finansów",        color: "#6b7280", bg: "#f3f4f6" },
   ];
 
@@ -5779,6 +5805,263 @@ const STATUS_META = {
   paid:    { label: "Zapłacone",      bg: "#f0fdf4", border: "#bbf7d0", color: "#15803d" },
   overdue: { label: "Przeterminowane",bg: "#fef2f2", border: "#fecaca", color: "#b91c1c" },
 };
+
+// ═══════════════════════════════════════════════════════════════════
+//  PANEL KIEROWCY — mobile-first, osobny layout
+// ═══════════════════════════════════════════════════════════════════
+function DriverPanel({ user, vehicle, frachty, pauzy, showToast }) {
+  const [selectedFracht, setSelectedFracht] = useState(null);
+  const [driverTab, setDriverTab] = useState("zlecenia"); // "zlecenia" | "historia"
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  // Podział na aktywne / przyszłe / historia
+  const active = frachty.filter(f => {
+    if (f.statusRozladunku === "rozladowano") return false;
+    if (!f.dataZaladunku) return false;
+    return f.dataZaladunku <= todayStr && (!f.dataRozladunku || f.dataRozladunku >= todayStr);
+  });
+  const upcoming = frachty.filter(f => {
+    if (f.statusRozladunku === "rozladowano") return false;
+    return f.dataZaladunku && f.dataZaladunku > todayStr;
+  });
+  const history = frachty.filter(f =>
+    f.statusRozladunku === "rozladowano" || (f.dataRozladunku && f.dataRozladunku < todayStr)
+  );
+
+  const formatKody = (f) => {
+    const zal = [f.zaladunekKod, f.zaladunekKod2, f.zaladunekKod3].filter(s => s && s.trim()).join(" / ");
+    const roz = [f.dokod, f.dokod2, f.dokod3].filter(s => s && s.trim()).join(" / ");
+    return { zal: zal || "—", roz: roz || "—" };
+  };
+
+  const fmtDate = (d) => {
+    if (!d) return "—";
+    try { return new Date(d + "T12:00:00").toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit" }); }
+    catch { return d; }
+  };
+
+  // Aktualizacja statusu frachtu
+  const updateFrachtStatus = async (fracht, field, value) => {
+    try {
+      // Frachty są w config/fleet doc, nie w osobnej kolekcji → trzeba zmienić przez setFrachtyList
+      // Ale kierowca nie ma dostępu do setFrachtyList — potrzebujemy nowej kolekcji lub Cloud Function.
+      // Na razie zapiszemy zdarzenie do nowej podkolekcji `driverEvents` w Firestore.
+      await addDoc(collection(db, "driverEvents"), {
+        type: field,  // "zaladowano" | "rozladowano"
+        frachtId: fracht.id,
+        vehicleId: vehicle?.id,
+        value,
+        driverEmail: user.email,
+        driverName: user.displayName || user.email,
+        ts: new Date().toISOString(),
+      });
+      logAction(field, "driverEvents", { frachtId: fracht.id, vehicleId: vehicle?.id });
+      showToast(field === "zaladowano" ? "✅ Załadunek potwierdzony" : "✅ Rozładunek potwierdzony");
+    } catch (e) {
+      console.error("driverEvent error", e);
+      showToast("❌ Błąd zapisu");
+    }
+  };
+
+  // ── Detail view ──
+  if (selectedFracht) {
+    const f = selectedFracht;
+    const kody = formatKody(f);
+    return (
+      <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh" }}>
+        <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet"/>
+        <div className="max-w-lg mx-auto p-4">
+          <button onClick={() => setSelectedFracht(null)}
+            className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-4">
+            ← Powrót
+          </button>
+
+          <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+            {/* Header */}
+            <div className="p-5" style={{background: "linear-gradient(135deg, #1e293b, #334155)"}}>
+              <div className="text-white text-lg font-bold">Zlecenie {f.nrZlecenia || ""}</div>
+              <div className="text-gray-300 text-sm mt-1">{f.klient || "—"}</div>
+            </div>
+
+            {/* Trasa */}
+            <div className="p-5 space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="flex flex-col items-center">
+                  <div className="w-4 h-4 rounded-full bg-blue-500 border-2 border-blue-200"></div>
+                  <div className="w-0.5 h-12 bg-gray-200"></div>
+                  <div className="w-4 h-4 rounded-full bg-green-500 border-2 border-green-200"></div>
+                </div>
+                <div className="flex-1 space-y-6">
+                  <div>
+                    <div className="text-xs text-gray-500 uppercase font-semibold">Załadunek</div>
+                    <div className="text-base font-bold text-gray-900">{kody.zal}</div>
+                    <div className="text-sm text-gray-500">{fmtDate(f.dataZaladunku)}{f.godzZaladunku ? ` · ${f.godzZaladunku}` : ""}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500 uppercase font-semibold">Rozładunek</div>
+                    <div className="text-base font-bold text-gray-900">{kody.roz}</div>
+                    <div className="text-sm text-gray-500">{fmtDate(f.dataRozladunku)}{f.godzRozladunku ? ` · ${f.godzRozladunku}` : ""}</div>
+                  </div>
+                </div>
+              </div>
+
+              {f.uwagi && (
+                <div className="p-3 rounded-lg bg-yellow-50 border border-yellow-200">
+                  <div className="text-xs font-semibold text-yellow-800 mb-1">Uwagi od dyspozytora</div>
+                  <div className="text-sm text-yellow-900">{f.uwagi}</div>
+                </div>
+              )}
+
+              {f.wagaLadunku && (
+                <div className="text-sm text-gray-600">Waga ładunku: <span className="font-semibold">{f.wagaLadunku} kg</span></div>
+              )}
+
+              {/* Przyciski akcji */}
+              <div className="space-y-2 pt-2">
+                {f.statusRozladunku !== "rozladowano" && (
+                  <>
+                    {!f._driverZaladowano && (
+                      <button
+                        onClick={() => updateFrachtStatus(f, "zaladowano", new Date().toISOString())}
+                        className="w-full py-3 rounded-xl text-base font-bold text-white transition-all hover:opacity-90"
+                        style={{background: "#3b82f6"}}>
+                        📦 Potwierdzam załadunek
+                      </button>
+                    )}
+                    <button
+                      onClick={() => updateFrachtStatus(f, "rozladowano", new Date().toISOString())}
+                      className="w-full py-3 rounded-xl text-base font-bold text-white transition-all hover:opacity-90"
+                      style={{background: "#10b981"}}>
+                      ✅ Potwierdzam rozładunek
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Main list view ──
+  const driverName = (vehicle?.driverHistory || []).find(d => !d.to)?.name || user.displayName || user.email;
+  const renderFrachtCard = (f, showDate = false) => {
+    const kody = formatKody(f);
+    const isDone = f.statusRozladunku === "rozladowano" || (f.dataRozladunku && f.dataRozladunku < todayStr);
+    return (
+      <div key={f.id} onClick={() => setSelectedFracht(f)}
+        className={"bg-white rounded-xl border p-4 cursor-pointer hover:shadow-sm transition-all " + (isDone ? "opacity-50" : "")}
+        style={{ borderColor: "#e5e7eb" }}>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-xs text-gray-500">{fmtDate(f.dataZaladunku)} → {fmtDate(f.dataRozladunku)}</div>
+          {isDone ? (
+            <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{background:"#f0fdf4",color:"#15803d"}}>Zakończone</span>
+          ) : (
+            <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{background:"#eff6ff",color:"#2563eb"}}>W trasie</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-blue-600 font-bold">{kody.zal}</span>
+          <span className="text-gray-400">→</span>
+          <span className="text-green-600 font-bold">{kody.roz}</span>
+        </div>
+        <div className="text-xs text-gray-500 mt-1">{f.klient || "—"}{f.nrZlecenia ? ` · ${f.nrZlecenia}` : ""}</div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh" }}>
+      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet"/>
+
+      {/* HEADER */}
+      <div style={{background: "linear-gradient(135deg, #1e293b, #334155)"}} className="px-4 py-5">
+        <div className="max-w-lg mx-auto">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-white text-lg font-bold">FleetStat</div>
+              <div className="text-gray-300 text-sm">{driverName}</div>
+            </div>
+            <div className="text-right">
+              {vehicle ? (
+                <div className="text-white text-sm font-medium">{vehicle.plate}{vehicle.plate2 ? ` + ${vehicle.plate2}` : ""}</div>
+              ) : (
+                <div className="text-yellow-300 text-sm">Brak przypisanego pojazdu</div>
+              )}
+              <button onClick={() => { logAction("logout", "auth", { reason: "manual" }); signOut(auth); }}
+                className="text-xs text-gray-400 hover:text-gray-200 mt-1">Wyloguj</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-lg mx-auto p-4">
+        {/* TABS */}
+        <div className="flex gap-1 mb-4 bg-white rounded-xl p-1 border border-gray-200">
+          {[
+            { id: "zlecenia", label: "Zlecenia", count: active.length + upcoming.length },
+            { id: "historia", label: "Historia", count: history.length },
+          ].map(t => (
+            <button key={t.id} onClick={() => setDriverTab(t.id)}
+              className="flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all"
+              style={{
+                background: driverTab === t.id ? "#111827" : "transparent",
+                color: driverTab === t.id ? "#fff" : "#6b7280",
+              }}>
+              {t.label} ({t.count})
+            </button>
+          ))}
+        </div>
+
+        {!vehicle && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-4 text-center">
+            <div className="text-2xl mb-2">🚛</div>
+            <div className="text-sm font-semibold text-yellow-800">Brak przypisanego pojazdu</div>
+            <div className="text-xs text-yellow-600 mt-1">Skontaktuj się z dyspozytorem</div>
+          </div>
+        )}
+
+        {/* ZLECENIA */}
+        {driverTab === "zlecenia" && (
+          <div className="space-y-3">
+            {active.length > 0 && (
+              <>
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Aktywne ({active.length})</div>
+                {active.map(f => renderFrachtCard(f))}
+              </>
+            )}
+            {upcoming.length > 0 && (
+              <>
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-4">Nadchodzące ({upcoming.length})</div>
+                {upcoming.map(f => renderFrachtCard(f))}
+              </>
+            )}
+            {active.length === 0 && upcoming.length === 0 && (
+              <div className="text-center py-12 text-gray-400">
+                <div className="text-4xl mb-3">🛣️</div>
+                <div className="font-medium">Brak aktywnych zleceń</div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* HISTORIA */}
+        {driverTab === "historia" && (
+          <div className="space-y-2">
+            {history.length === 0 ? (
+              <div className="text-center py-12 text-gray-400">
+                <div className="text-4xl mb-3">📋</div>
+                <div className="font-medium">Brak historii</div>
+              </div>
+            ) : history.map(f => renderFrachtCard(f, true))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function PaymentsTab({ payments, showToast, isAdmin }) {
   const [view, setView] = useState("calendar"); // "calendar" | "list"
