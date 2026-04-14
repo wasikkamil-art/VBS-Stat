@@ -4822,6 +4822,7 @@ function SprawyTab({ sprawyList, vehicles, costs, updateCost, currentUser, appUs
   const [filterMoje, setFilterMoje] = useState(false);
   const [customTypy, setCustomTypy] = useState([]);
   const [newTypLabel, setNewTypLabel] = useState("");
+  const [showArchive, setShowArchive] = useState(false);
 
   const allTypy = [...SPRAWA_TYPY, ...customTypy];
   const selected = sprawyList.find(s => s.id === selectedId);
@@ -4829,22 +4830,28 @@ function SprawyTab({ sprawyList, vehicles, costs, updateCost, currentUser, appUs
   const today = new Date().toISOString().slice(0,10);
   const dzisiaj = sprawyList.filter(s => s.status !== "zamknieta" && s.status !== "wygrana" && s.status !== "przegrana" && s.przypomnienie && s.przypomnienie <= today);
 
+  const CLOSED_STATUSES = ["zamknieta", "wygrana", "przegrana"];
   const isAdminUser = appUsers.find(u => u.email === currentUser.email)?.role === "admin";
-  const filtered = sprawyList.filter(s => {
+
+  const allFiltered = sprawyList.filter(s => {
     if (!isAdminUser && !(s.przypisani||[]).includes(currentUser.email)) return false;
     if (filterStatus !== "all" && s.status !== filterStatus) return false;
     if (filterTyp !== "all" && s.typ !== filterTyp) return false;
     if (filterMoje && !(s.przypisani||[]).includes(currentUser.email)) return false;
     return true;
   }).sort((a,b) => {
-    // Priorytet: otwarta (0) > w_toku (1) > wstrzymana (2) > zamknieta/wygrana/przegrana (3)
     const statusOrder = { otwarta: 0, w_toku: 1, wstrzymana: 2, zamknieta: 3, wygrana: 3, przegrana: 3 };
     const oa = statusOrder[a.status] ?? 1;
     const ob = statusOrder[b.status] ?? 1;
     if (oa !== ob) return oa - ob;
-    // W tej samej grupie — nowsze na górze
     return (b.dataUtworzenia||"").localeCompare(a.dataUtworzenia||"");
   });
+
+  const activeFiltered  = allFiltered.filter(s => !CLOSED_STATUSES.includes(s.status));
+  const archivedFiltered = allFiltered.filter(s => CLOSED_STATUSES.includes(s.status));
+  // Gdy użytkownik filtruje po konkretnym zamkniętym statusie, pokaż wyniki
+  const isFilteringClosed = CLOSED_STATUSES.includes(filterStatus);
+  const filtered = showArchive || isFilteringClosed ? allFiltered : activeFiltered;
 
   if (view === "szczegoly" && selected) {
     return <SprawaDetail
@@ -4868,7 +4875,10 @@ function SprawyTab({ sprawyList, vehicles, costs, updateCost, currentUser, appUs
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-900">Sprawy</h2>
-          <p className="text-sm text-gray-400 mt-0.5">{sprawyList.filter(s=>s.status==="otwarta"||s.status==="w_toku").length} aktywnych · {sprawyList.length} łącznie</p>
+          <p className="text-sm text-gray-400 mt-0.5">
+            {sprawyList.filter(s => !CLOSED_STATUSES.includes(s.status)).length} aktywnych
+            {archivedFiltered.length > 0 && ` · ${archivedFiltered.length} w archiwum`}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <div className="px-3 py-2 rounded-xl text-sm flex items-center gap-1.5"
@@ -4926,6 +4936,17 @@ function SprawyTab({ sprawyList, vehicles, costs, updateCost, currentUser, appUs
           style={{background: filterMoje ? "#111827" : "#fff", color: filterMoje ? "#fff" : "#6b7280", borderColor: filterMoje ? "#111827" : "#e5e7eb"}}>
           Moje sprawy
         </button>
+        {archivedFiltered.length > 0 && (
+          <button onClick={() => setShowArchive(p => !p)}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ml-auto"
+            style={{
+              background: showArchive ? "#6b7280" : "#fff",
+              color: showArchive ? "#fff" : "#6b7280",
+              borderColor: showArchive ? "#6b7280" : "#e5e7eb",
+            }}>
+            🗄️ Archiwum ({archivedFiltered.length})
+          </button>
+        )}
       </div>
 
       {/* LISTA SPRAW */}
@@ -4933,18 +4954,31 @@ function SprawyTab({ sprawyList, vehicles, costs, updateCost, currentUser, appUs
         {filtered.length === 0 && (
           <div className="text-center py-16 text-gray-400">
             <div className="text-4xl mb-3">⚡</div>
-            <div className="font-medium">Brak spraw</div>
-            <div className="text-sm mt-1">Kliknij "+ Nowa sprawa" aby dodać</div>
+            <div className="font-medium">{showArchive ? "Brak spraw w archiwum" : "Brak aktywnych spraw"}</div>
+            <div className="text-sm mt-1">{showArchive ? "" : "Kliknij \"+ Nowa sprawa\" aby dodać"}</div>
           </div>
         )}
-        {filtered.map(s => {
+        {filtered.map((s, idx) => {
+          // Separator między aktywnymi a archiwalnymi (gdy showArchive)
+          const prevS = idx > 0 ? filtered[idx-1] : null;
+          const isClosed = CLOSED_STATUSES.includes(s.status);
+          const prevClosed = prevS ? CLOSED_STATUSES.includes(prevS.status) : false;
+          const showSeparator = showArchive && isClosed && !prevClosed && idx > 0;
           const typ = allTypy.find(t => t.id === s.typ);
           const status = SPRAWA_STATUSY.find(st => st.id === s.status) || SPRAWA_STATUSY[0];
           const isOverdue = s.terminPlatnosci && s.terminPlatnosci < today && s.status !== "zamknieta" && s.status !== "wygrana";
           const daysLeft = s.terminPlatnosci ? Math.ceil((new Date(s.terminPlatnosci) - new Date()) / 86400000) : null;
           return (
-            <div key={s.id} onClick={() => { setSelectedId(s.id); setView("szczegoly"); }}
-              className="bg-white rounded-xl border p-4 cursor-pointer hover:shadow-sm transition-all"
+            <React.Fragment key={s.id}>
+            {showSeparator && (
+              <div className="flex items-center gap-3 py-3">
+                <div className="flex-1 h-px bg-gray-200"></div>
+                <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">🗄️ Archiwum</div>
+                <div className="flex-1 h-px bg-gray-200"></div>
+              </div>
+            )}
+            <div onClick={() => { setSelectedId(s.id); setView("szczegoly"); }}
+              className={"rounded-xl border p-4 cursor-pointer hover:shadow-sm transition-all" + (isClosed ? " opacity-60" : "")}
               style={{borderColor: isOverdue ? "#fca5a5" : "#f3f4f6", background: isOverdue ? "#fff7f7" : "#fff"}}>
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-2.5 flex-1 min-w-0">
@@ -4970,6 +5004,7 @@ function SprawyTab({ sprawyList, vehicles, costs, updateCost, currentUser, appUs
                 </div>
               </div>
             </div>
+            </React.Fragment>
           );
         })}
       </div>
