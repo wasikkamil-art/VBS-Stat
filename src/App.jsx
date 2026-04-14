@@ -6551,32 +6551,80 @@ function Row({ label, value }) {
 }
 
 // ── Mini-formularz nadpisań per instancja cykliczna ──
-function InstanceOverrideForm({ inst, onSave }) {
+function InstanceOverrideForm({ inst, onSave, onSaveFile }) {
   const [open, setOpen] = useState(false);
-  const [invoiceNumber, setInvoiceNumber] = useState(inst.invoiceNumber || "");
-  const [netto, setNetto]   = useState(inst.netto || "");
-  const [brutto, setBrutto] = useState(inst.brutto || "");
-  const [note, setNote]     = useState(inst.note || "");
+  const [step, setStep] = useState("upload"); // "upload" | "review"
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [parsed, setParsed] = useState(null);
+  const [fileMeta, setFileMeta] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  // Reset przy zmianie instancji
+  // Pola formularza (wypełniane po AI parse lub ręcznie)
+  const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [netto, setNetto]   = useState("");
+  const [brutto, setBrutto] = useState("");
+  const [note, setNote]     = useState("");
+
+  // Jeśli inst ma overrides, pre-fill do edycji
   useEffect(() => {
-    setInvoiceNumber(inst.invoiceNumber || "");
-    setNetto(inst.netto || "");
-    setBrutto(inst.brutto || "");
-    setNote(inst.note || "");
+    if (inst._hasOverrides) {
+      setInvoiceNumber(inst.invoiceNumber || "");
+      setNetto(inst.netto || "");
+      setBrutto(inst.brutto || "");
+      setNote(inst.note || "");
+      setStep("review");
+    } else {
+      setStep("upload");
+      setInvoiceNumber("");
+      setNetto("");
+      setBrutto("");
+      setNote("");
+    }
+    setParsed(null);
+    setFileMeta(null);
+    setAiError("");
   }, [inst.instanceKey]);
+
+  const handleFile = async (file) => {
+    setAiLoading(true);
+    setAiError("");
+    try {
+      // Parsuj AI + upload pliku równolegle
+      const [aiResult, uploadResult] = await Promise.all([
+        parseOneInvoice(file),
+        uploadPaymentFile(file).catch(e => { console.error("upload fail", e); return null; }),
+      ]);
+      setParsed(aiResult);
+      setFileMeta(uploadResult);
+      setInvoiceNumber(aiResult.invoiceNumber || "");
+      setNetto(aiResult.netto || "");
+      setBrutto(aiResult.brutto || "");
+      setNote(aiResult.note || "");
+      setStep("review");
+    } catch(e) {
+      setAiError(e.message || "Błąd parsowania");
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
-    // Zawsze zapisz wszystkie pola — nawet jeśli wartości takie same jak szablon.
-    // Samo istnienie overrides oznacza "potwierdzone dane z realnej FV".
     const data = {
       invoiceNumber: invoiceNumber || "",
       netto: Number(netto) || 0,
       brutto: Number(brutto) || 0,
     };
     if (note) data.note = note;
+    // Jeśli mamy nowy plik — zapisz metadane
+    if (fileMeta) {
+      data.fileUrl  = fileMeta.fileUrl;
+      data.filePath = fileMeta.filePath;
+      data.fileName = fileMeta.fileName;
+      data.fileType = fileMeta.fileType;
+      data.fileSize = fileMeta.fileSize;
+    }
     await onSave(data);
     setSaving(false);
     setOpen(false);
@@ -6592,7 +6640,7 @@ function InstanceOverrideForm({ inst, onSave }) {
             color: inst._hasOverrides ? "#059669" : "#2563eb",
             background: inst._hasOverrides ? "#f0fdf4" : "#eff6ff",
           }}>
-          {inst._hasOverrides ? "✓ Dane z FV uzupełnione — edytuj" : "✏️ Uzupełnij dane z FV"}
+          {inst._hasOverrides ? "✓ Dane z FV uzupełnione — edytuj" : "📄 Wgraj fakturę i uzupełnij dane"}
         </button>
       </div>
     );
@@ -6600,39 +6648,88 @@ function InstanceOverrideForm({ inst, onSave }) {
 
   return (
     <div className="pt-2 pb-1 space-y-2 p-3 rounded-lg border border-blue-200 bg-blue-50/50">
-      <div className="text-xs font-semibold text-blue-800 mb-1">Dane tej instancji ({inst.instanceKey})</div>
-      <div>
-        <label className="text-xs text-gray-600">Nr faktury</label>
-        <input type="text" value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)}
-          className="w-full px-3 py-1.5 rounded-lg text-sm border border-gray-200" placeholder="np. 0912/05/2026" />
+      <div className="text-xs font-semibold text-blue-800 mb-1">
+        Dane z faktury · {inst.instanceKey}
       </div>
-      <div className="flex gap-2">
-        <div className="flex-1">
-          <label className="text-xs text-gray-600">Netto</label>
-          <input type="number" step="0.01" value={netto} onChange={e => setNetto(e.target.value)}
-            className="w-full px-3 py-1.5 rounded-lg text-sm border border-gray-200" />
+
+      {/* KROK 1: Upload */}
+      {step === "upload" && (
+        <div>
+          <label className="flex flex-col items-center justify-center gap-2 p-4 rounded-lg border-2 border-dashed border-blue-300 bg-blue-50 cursor-pointer hover:bg-blue-100 transition-colors">
+            {aiLoading ? (
+              <div className="text-sm text-blue-700 font-medium animate-pulse">⏳ AI czyta fakturę…</div>
+            ) : (
+              <>
+                <div className="text-2xl">📄</div>
+                <div className="text-sm text-blue-700 font-medium">Wgraj fakturę (PDF lub zdjęcie)</div>
+                <div className="text-xs text-blue-500">AI odczyta nr FV, kwoty i inne dane</div>
+              </>
+            )}
+            <input type="file" accept=".pdf,image/png,image/jpeg,image/webp" className="hidden"
+              disabled={aiLoading}
+              onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
+          </label>
+          {aiError && <div className="mt-2 text-xs text-red-600 font-medium">{aiError}</div>}
+          <div className="flex gap-2 mt-2">
+            <button onClick={() => { setStep("review"); }}
+              className="flex-1 px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-200 hover:bg-gray-50 text-gray-600">
+              Uzupełnij ręcznie (bez pliku)
+            </button>
+            <button onClick={() => setOpen(false)}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-200 hover:bg-gray-50 text-gray-500">
+              Anuluj
+            </button>
+          </div>
         </div>
-        <div className="flex-1">
-          <label className="text-xs text-gray-600">Brutto</label>
-          <input type="number" step="0.01" value={brutto} onChange={e => setBrutto(e.target.value)}
-            className="w-full px-3 py-1.5 rounded-lg text-sm border border-gray-200" />
-        </div>
-      </div>
-      <div>
-        <label className="text-xs text-gray-600">Notatka</label>
-        <input type="text" value={note} onChange={e => setNote(e.target.value)}
-          className="w-full px-3 py-1.5 rounded-lg text-sm border border-gray-200" placeholder="opcjonalnie" />
-      </div>
-      <div className="flex gap-2 pt-1">
-        <button onClick={handleSave} disabled={saving}
-          className="flex-1 px-3 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50">
-          {saving ? "Zapisuję…" : "Zapisz"}
-        </button>
-        <button onClick={() => setOpen(false)}
-          className="px-3 py-2 rounded-lg text-sm font-semibold border border-gray-200 hover:bg-gray-50">
-          Anuluj
-        </button>
-      </div>
+      )}
+
+      {/* KROK 2: Przegląd / edycja */}
+      {step === "review" && (
+        <>
+          {parsed && <div className="text-xs text-green-700 font-medium mb-1">✓ AI odczytał dane z faktury — sprawdź i zapisz</div>}
+          <div>
+            <label className="text-xs text-gray-600">Nr faktury</label>
+            <input type="text" value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)}
+              className="w-full px-3 py-1.5 rounded-lg text-sm border border-gray-200" placeholder="np. 0912/05/2026" />
+          </div>
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <label className="text-xs text-gray-600">Netto</label>
+              <input type="number" step="0.01" value={netto} onChange={e => setNetto(e.target.value)}
+                className="w-full px-3 py-1.5 rounded-lg text-sm border border-gray-200" />
+            </div>
+            <div className="flex-1">
+              <label className="text-xs text-gray-600">Brutto</label>
+              <input type="number" step="0.01" value={brutto} onChange={e => setBrutto(e.target.value)}
+                className="w-full px-3 py-1.5 rounded-lg text-sm border border-gray-200" />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-gray-600">Notatka</label>
+            <input type="text" value={note} onChange={e => setNote(e.target.value)}
+              className="w-full px-3 py-1.5 rounded-lg text-sm border border-gray-200" placeholder="opcjonalnie" />
+          </div>
+          {fileMeta && (
+            <div className="text-xs text-green-700">📎 {fileMeta.fileName} ({(fileMeta.fileSize/1024).toFixed(0)} KB)</div>
+          )}
+          {!fileMeta && !inst._hasOverrides && (
+            <button onClick={() => setStep("upload")}
+              className="text-xs text-blue-600 hover:underline">
+              ← Wróć do uploadu pliku
+            </button>
+          )}
+          <div className="flex gap-2 pt-1">
+            <button onClick={handleSave} disabled={saving}
+              className="flex-1 px-3 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50">
+              {saving ? "Zapisuję…" : "Zapisz"}
+            </button>
+            <button onClick={() => setOpen(false)}
+              className="px-3 py-2 rounded-lg text-sm font-semibold border border-gray-200 hover:bg-gray-50">
+              Anuluj
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -6662,6 +6759,43 @@ Reguły:
 - Kategorię zgadnij na podstawie opisu/pozycji (np. "olej napędowy" → paliwo, "polisa OC" → ubezpieczenie, "rata leasingowa" → leasing, "klocki hamulcowe" → czesci, "naprawa" lub "usługa" → uslugi).
 - bankAccount zwracaj bez spacji (np. "PL12345678901234567890123456" lub "12345678901234567890123456").
 - Zwracaj POPRAWNY JSON bez dodatkowego tekstu.`;
+
+// Parsuj jedną fakturę przez AI (PDF / obraz → JSON)
+// Wydzielone na poziom modułu żeby mogło być reużywane w InstanceOverrideForm i PaymentForm.
+async function parseOneInvoice(file) {
+  if (file.size > 10 * 1024 * 1024) throw new Error(`${file.name}: plik za duży (max 10 MB)`);
+  const isPdf = file.type === "application/pdf";
+  const isImg = /^image\/(png|jpe?g|webp)$/.test(file.type);
+  if (!isPdf && !isImg) throw new Error(`${file.name}: nieobsługiwany format`);
+  const base64 = await new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(",")[1]);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+  const msgContent = isPdf
+    ? [{ type:"document", source:{ type:"base64", media_type:"application/pdf", data: base64 } }, { type:"text", text: PAYMENT_AI_PROMPT }]
+    : [{ type:"image",    source:{ type:"base64", media_type: file.type,         data: base64 } }, { type:"text", text: PAYMENT_AI_PROMPT }];
+  const res = await fetch("/api/claude", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 1500,
+      messages: [{ role: "user", content: msgContent }],
+    }),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`API ${res.status}: ${errText.slice(0,150)}`);
+  }
+  const resp = await res.json();
+  if (resp.error) throw new Error(resp.error.message || "Błąd API");
+  const txt = resp.content?.map(c => c.text || "").join("").trim().replace(/```json|```/g,"").trim();
+  if (!txt) throw new Error("Pusta odpowiedź AI");
+  try { return JSON.parse(txt); }
+  catch(e) { throw new Error(`${file.name}: niepoprawny JSON z AI`); }
+}
 
 function PaymentForm({ initial, isEdit, onSave, onClose, onSkipNext, onQueueAppend, queueInfo }) {
   const [aiLoading, setAiLoading] = useState(false);
@@ -6705,42 +6839,6 @@ function PaymentForm({ initial, isEdit, onSave, onClose, onSkipNext, onQueueAppe
   }));
   const upd = (k, v) => setF(p => ({ ...p, [k]: v }));
   const updSub = (sub, k, v) => setF(p => ({ ...p, [sub]: { ...p[sub], [k]: v } }));
-
-  // Parse pojedynczej faktury przez Claude API
-  async function parseOneInvoice(file) {
-    if (file.size > 10 * 1024 * 1024) throw new Error(`${file.name}: plik za duży (max 10 MB)`);
-    const isPdf = file.type === "application/pdf";
-    const isImg = /^image\/(png|jpe?g|webp)$/.test(file.type);
-    if (!isPdf && !isImg) throw new Error(`${file.name}: nieobsługiwany format`);
-    const base64 = await new Promise((resolve, reject) => {
-      const r = new FileReader();
-      r.onload = () => resolve(String(r.result).split(",")[1]);
-      r.onerror = reject;
-      r.readAsDataURL(file);
-    });
-    const msgContent = isPdf
-      ? [{ type:"document", source:{ type:"base64", media_type:"application/pdf", data: base64 } }, { type:"text", text: PAYMENT_AI_PROMPT }]
-      : [{ type:"image",    source:{ type:"base64", media_type: file.type,         data: base64 } }, { type:"text", text: PAYMENT_AI_PROMPT }];
-    const res = await fetch("/api/claude", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 1500,
-        messages: [{ role: "user", content: msgContent }],
-      }),
-    });
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`API ${res.status}: ${errText.slice(0,150)}`);
-    }
-    const resp = await res.json();
-    if (resp.error) throw new Error(resp.error.message || "Błąd API");
-    const txt = resp.content?.map(c => c.text || "").join("").trim().replace(/```json|```/g,"").trim();
-    if (!txt) throw new Error("Pusta odpowiedź AI");
-    try { return JSON.parse(txt); }
-    catch(e) { throw new Error(`${file.name}: niepoprawny JSON z AI`); }
-  }
 
   // Wspólna logika: przyjmuje File[] (z inputa lub dropa) i parsuje równolegle
   async function processFiles(files) {
