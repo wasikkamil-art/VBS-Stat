@@ -5713,11 +5713,14 @@ function expandPayment(p, windowStartISO, windowEndISO) {
     // obcinamy do okna widoczności
     if (cursor >= windowStartISO && cursor <= windowEndISO) {
       const key = frequency === "yearly" ? yearKey(cursor) : monthKey(cursor);
+      const overrides = (p.instanceOverrides || {})[key] || {};
       out.push({
         ...p,
+        ...overrides,         // nadpisz nr FV, kwoty, itp. per instancja
         instanceKey: key,
         dueDate: cursor,
         isInstance: true,
+        _hasOverrides: Object.keys(overrides).length > 0,
         // status instancji czyta z p.paidInstances
         instanceStatus: (p.paidInstances || []).includes(key) ? "paid" : "topay",
       });
@@ -5849,6 +5852,24 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
     } catch(e) {
       console.error("togglePaid", e);
       showToast("❌ Błąd aktualizacji");
+    }
+  }
+
+  // ── Zapis nadpisań (overrides) dla instancji cyklicznej ──
+  async function saveInstanceOverride(inst, overrideData) {
+    try {
+      const template = payments.find(p => p.id === inst.id);
+      if (!template) throw new Error("Szablon nie znaleziony");
+      const existing = template.instanceOverrides || {};
+      const merged = { ...existing, [inst.instanceKey]: { ...(existing[inst.instanceKey] || {}), ...overrideData } };
+      await updateDoc(doc(db, "payments", inst.id), { instanceOverrides: merged });
+      logAction("update", "payments", { id: inst.id, instanceKey: inst.instanceKey, action: "instanceOverride", ...overrideData });
+      showToast("✅ Dane instancji zaktualizowane");
+      // Odśwież detail z nowymi danymi
+      setDetail(d => d ? { ...d, ...overrideData, _hasOverrides: true } : d);
+    } catch(e) {
+      console.error("saveInstanceOverride", e);
+      showToast("❌ Błąd zapisu");
     }
   }
 
@@ -6171,7 +6192,11 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
                       <td className="px-3 py-2">{x.dueDate}</td>
                       <td className="px-3 py-2 font-medium">
                         {x.contractor || "—"}
-                        {x.isInstance && <span className="ml-1 text-[10px] text-gray-400">(cykliczna)</span>}
+                        {x.isInstance && (
+                          x._hasOverrides
+                            ? <span className="ml-1 text-[10px] text-green-600">✓</span>
+                            : <span className="ml-1 text-[10px] text-gray-400">(cykliczna)</span>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-gray-600">
                         <div className="flex items-center gap-1.5">
@@ -6281,7 +6306,11 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
                             {x.contractor || "—"}
                           </div>
                           {cat && <span className="px-2 py-0.5 rounded text-[10px] font-semibold" style={{background: cat.color+"22", color: cat.color}}>{cat.label}</span>}
-                          {x.isInstance && <span className="text-[10px] text-gray-400">(cykliczna)</span>}
+                          {x.isInstance && (
+                            x._hasOverrides
+                              ? <span className="text-[10px] text-green-600">✓</span>
+                              : <span className="text-[10px] text-gray-400">(cykliczna)</span>
+                          )}
                           <span className="px-2 py-0.5 rounded text-[10px] font-semibold border"
                             style={{background: STATUS_META[st].bg, borderColor: STATUS_META[st].border, color: STATUS_META[st].color}}>
                             {STATUS_META[st].label}
@@ -6368,6 +6397,15 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
                 <Row label="Cykl" value={`${PAY_FREQUENCIES.find(f=>f.id===detail.recurring.frequency)?.label || "cykl"} · ${detail.recurring.startDate} → ${detail.recurring.endDate || "∞"}`} />
               )}
               {detail.note && <Row label="Notatka" value={detail.note} />}
+
+              {/* ── Mini-formularz nadpisań dla instancji cyklicznej ── */}
+              {detail.isInstance && (
+                <InstanceOverrideForm
+                  inst={detail}
+                  onSave={(data) => saveInstanceOverride(detail, data)}
+                />
+              )}
+
               <div className="pt-3 flex gap-2">
                 <button onClick={() => togglePaid(detail)}
                   className="flex-1 px-3 py-2 rounded-lg text-sm font-semibold text-white"
@@ -6375,7 +6413,7 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
                   {statusOf(detail)==="paid" ? "↩ Cofnij zapłacone" : "✓ Oznacz zapłacone"}
                 </button>
                 <button onClick={() => { setEditRec(payments.find(p=>p.id===detail.id)); setShowForm(true); setDetail(null); }}
-                  className="px-3 py-2 rounded-lg text-sm font-semibold border border-gray-200 hover:bg-gray-50">Edytuj</button>
+                  className="px-3 py-2 rounded-lg text-sm font-semibold border border-gray-200 hover:bg-gray-50">Edytuj szablon</button>
                 <button onClick={() => deleteRec(detail.id)}
                   className="px-3 py-2 rounded-lg text-sm font-semibold border border-red-200 text-red-600 hover:bg-red-50">Usuń</button>
               </div>
@@ -6412,6 +6450,91 @@ function Row({ label, value }) {
     <div>
       <div className="text-xs text-gray-500 uppercase tracking-wide">{label}</div>
       <div className="font-medium text-gray-900">{value}</div>
+    </div>
+  );
+}
+
+// ── Mini-formularz nadpisań per instancja cykliczna ──
+function InstanceOverrideForm({ inst, onSave }) {
+  const [open, setOpen] = useState(false);
+  const [invoiceNumber, setInvoiceNumber] = useState(inst.invoiceNumber || "");
+  const [netto, setNetto]   = useState(inst.netto || "");
+  const [brutto, setBrutto] = useState(inst.brutto || "");
+  const [note, setNote]     = useState(inst.note || "");
+  const [saving, setSaving] = useState(false);
+
+  // Reset przy zmianie instancji
+  useEffect(() => {
+    setInvoiceNumber(inst.invoiceNumber || "");
+    setNetto(inst.netto || "");
+    setBrutto(inst.brutto || "");
+    setNote(inst.note || "");
+  }, [inst.instanceKey]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    const data = {};
+    if (invoiceNumber !== (inst.invoiceNumber || "")) data.invoiceNumber = invoiceNumber;
+    if (String(netto) !== String(inst.netto || "")) data.netto = Number(netto) || 0;
+    if (String(brutto) !== String(inst.brutto || "")) data.brutto = Number(brutto) || 0;
+    if (note !== (inst.note || "")) data.note = note;
+    if (Object.keys(data).length === 0) { setSaving(false); setOpen(false); return; }
+    await onSave(data);
+    setSaving(false);
+    setOpen(false);
+  };
+
+  if (!open) {
+    return (
+      <div className="pt-2 pb-1">
+        <button onClick={() => setOpen(true)}
+          className="w-full px-3 py-2 rounded-lg text-sm font-semibold border-2 border-dashed transition-all"
+          style={{
+            borderColor: inst._hasOverrides ? "#10b981" : "#3b82f6",
+            color: inst._hasOverrides ? "#059669" : "#2563eb",
+            background: inst._hasOverrides ? "#f0fdf4" : "#eff6ff",
+          }}>
+          {inst._hasOverrides ? "✓ Dane uzupełnione — edytuj" : "✏️ Uzupełnij dane tej instancji"}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="pt-2 pb-1 space-y-2 p-3 rounded-lg border border-blue-200 bg-blue-50/50">
+      <div className="text-xs font-semibold text-blue-800 mb-1">Dane tej instancji ({inst.instanceKey})</div>
+      <div>
+        <label className="text-xs text-gray-600">Nr faktury</label>
+        <input type="text" value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)}
+          className="w-full px-3 py-1.5 rounded-lg text-sm border border-gray-200" placeholder="np. 0912/05/2026" />
+      </div>
+      <div className="flex gap-2">
+        <div className="flex-1">
+          <label className="text-xs text-gray-600">Netto</label>
+          <input type="number" step="0.01" value={netto} onChange={e => setNetto(e.target.value)}
+            className="w-full px-3 py-1.5 rounded-lg text-sm border border-gray-200" />
+        </div>
+        <div className="flex-1">
+          <label className="text-xs text-gray-600">Brutto</label>
+          <input type="number" step="0.01" value={brutto} onChange={e => setBrutto(e.target.value)}
+            className="w-full px-3 py-1.5 rounded-lg text-sm border border-gray-200" />
+        </div>
+      </div>
+      <div>
+        <label className="text-xs text-gray-600">Notatka</label>
+        <input type="text" value={note} onChange={e => setNote(e.target.value)}
+          className="w-full px-3 py-1.5 rounded-lg text-sm border border-gray-200" placeholder="opcjonalnie" />
+      </div>
+      <div className="flex gap-2 pt-1">
+        <button onClick={handleSave} disabled={saving}
+          className="flex-1 px-3 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50">
+          {saving ? "Zapisuję…" : "Zapisz"}
+        </button>
+        <button onClick={() => setOpen(false)}
+          className="px-3 py-2 rounded-lg text-sm font-semibold border border-gray-200 hover:bg-gray-50">
+          Anuluj
+        </button>
+      </div>
     </div>
   );
 }
