@@ -6498,7 +6498,7 @@ function InstanceOverrideForm({ inst, onSave }) {
             color: inst._hasOverrides ? "#059669" : "#2563eb",
             background: inst._hasOverrides ? "#f0fdf4" : "#eff6ff",
           }}>
-          {inst._hasOverrides ? "✓ Dane uzupełnione — edytuj" : "✏️ Uzupełnij dane tej instancji"}
+          {inst._hasOverrides ? "✓ Dane z FV uzupełnione — edytuj" : "✏️ Uzupełnij dane z FV"}
         </button>
       </div>
     );
