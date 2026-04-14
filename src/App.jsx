@@ -11277,7 +11277,7 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
     const hist = v.driverHistory.map((d) =>
       !d.to ? { ...d, to: new Date().toISOString().split("T")[0] } : d
     );
-    setDH([...hist, { id: uid(), name: "", from: new Date().toISOString().split("T")[0], to: "" }]);
+    setDH([...hist, { id: uid(), name: "", email: "", phone: "", from: new Date().toISOString().split("T")[0], to: "" }]);
   };
 
   const updateDriver = (id, field, val) => {
@@ -11456,7 +11456,7 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
                 </div>
 
                 <div className="grid grid-cols-1 gap-2">
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     <MF label="Imię i nazwisko">
                       <MInput
                         value={d.name}
@@ -11468,7 +11468,14 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
                       <MInput
                         value={d.phone || ""}
                         onChange={(val) => updateDriver(d.id, "phone", val)}
-                        placeholder="np. +48 600 000 000"
+                        placeholder="+48 600 000 000"
+                      />
+                    </MF>
+                    <MF label="Email (login kierowcy)">
+                      <MInput
+                        value={d.email || ""}
+                        onChange={(val) => updateDriver(d.id, "email", val.toLowerCase().trim())}
+                        placeholder="kierowca@email.com"
                       />
                     </MF>
                   </div>
