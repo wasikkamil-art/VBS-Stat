@@ -4969,7 +4969,7 @@ function SprawyTab({ sprawyList, vehicles, costs, updateCost, currentUser, appUs
           const isOverdue = s.terminPlatnosci && s.terminPlatnosci < today && s.status !== "zamknieta" && s.status !== "wygrana";
           const daysLeft = s.terminPlatnosci ? Math.ceil((new Date(s.terminPlatnosci) - new Date()) / 86400000) : null;
           return (
-            <React.Fragment key={s.id}>
+            <div key={s.id}>
             {showSeparator && (
               <div className="flex items-center gap-3 py-3">
                 <div className="flex-1 h-px bg-gray-200"></div>
@@ -5004,7 +5004,7 @@ function SprawyTab({ sprawyList, vehicles, costs, updateCost, currentUser, appUs
                 </div>
               </div>
             </div>
-            </React.Fragment>
+            </div>
           );
         })}
       </div>
