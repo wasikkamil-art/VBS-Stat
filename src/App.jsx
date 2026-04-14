@@ -5846,7 +5846,8 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
           (i.contractor || "") + " " +
           (i.invoiceNumber || "") + " " +
           (i.sellerNip || "") + " " +
-          (i.bankAccount || "")
+          (i.bankAccount || "") + " " +
+          (i.bankAccount2 || "")
         ).toLowerCase();
         if (!hay.includes(q)) return false;
       }
@@ -6461,11 +6462,27 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
               <Row label="Brutto"       value={fmtMoney(detail.brutto, detail.currency)} />
               {detail.bankAccount && (
                 <div>
-                  <div className="text-xs text-gray-500 uppercase tracking-wide">Numer konta</div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wide">
+                    Konto {detail.bankAccountLabel ? `(${detail.bankAccountLabel})` : "1"}
+                  </div>
                   <div className="flex items-center gap-2">
                     <div className="font-mono text-sm text-gray-900 flex-1 break-all">{detail.bankAccount}</div>
                     <button type="button"
                       onClick={() => { navigator.clipboard?.writeText(detail.bankAccount); showToast("📋 Skopiowano"); }}
+                      className="px-2 py-1 rounded text-xs font-semibold border border-gray-200 hover:bg-gray-50 flex-shrink-0"
+                      title="Kopiuj">📋</button>
+                  </div>
+                </div>
+              )}
+              {detail.bankAccount2 && (
+                <div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wide">
+                    Konto {detail.bankAccount2Label ? `(${detail.bankAccount2Label})` : "2"}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="font-mono text-sm text-gray-900 flex-1 break-all">{detail.bankAccount2}</div>
+                    <button type="button"
+                      onClick={() => { navigator.clipboard?.writeText(detail.bankAccount2); showToast("📋 Skopiowano"); }}
                       className="px-2 py-1 rounded text-xs font-semibold border border-gray-200 hover:bg-gray-50 flex-shrink-0"
                       title="Kopiuj">📋</button>
                   </div>
@@ -6751,7 +6768,10 @@ const PAYMENT_AI_PROMPT = `Jesteś asystentem księgowym. Przeczytaj załączon�
   "brutto": liczba (bez walut i separatorów tysięcy, kropka jako separator dziesiętny),
   "issueDate": "data wystawienia w formacie YYYY-MM-DD",
   "dueDate":   "termin płatności w formacie YYYY-MM-DD",
-  "bankAccount": "numer konta bankowego do zapłaty (IBAN lub 26-cyfrowy NRB, string; jeśli jest kilka — wybierz ten w walucie faktury)",
+  "bankAccount": "numer konta bankowego do zapłaty w walucie faktury — PLN (IBAN lub 26-cyfrowy NRB, string)",
+  "bankAccount2": "drugi numer konta jeśli jest na fakturze (np. konto walutowe EUR/USD, string; jeśli nie ma — pusty string)",
+  "bankAccountLabel": "opis pierwszego konta, np. 'PLN' lub 'konto główne' (string, krótki)",
+  "bankAccount2Label": "opis drugiego konta, np. 'EUR' lub 'konto walutowe' (string; jeśli brak — pusty string)",
   "note": "opcjonalna notatka (string) lub pusty string"
 }
 
@@ -6759,7 +6779,9 @@ Reguły:
 - Jeśli jakieś pole nie jest widoczne na fakturze, wstaw pusty string "" lub 0 dla liczb.
 - Jeśli waluta to PLN, użyj "PLN" nawet jeśli na fakturze jest "zł" lub "PLN".
 - Kategorię zgadnij na podstawie opisu/pozycji (np. "olej napędowy" → paliwo, "polisa OC" → ubezpieczenie, "rata leasingowa" → leasing, "klocki hamulcowe" → czesci, "naprawa" lub "usługa" → uslugi).
-- bankAccount zwracaj bez spacji (np. "PL12345678901234567890123456" lub "12345678901234567890123456").
+- bankAccount i bankAccount2 zwracaj bez spacji (np. "PL12345678901234567890123456" lub "12345678901234567890123456").
+- Jeśli na fakturze jest tylko jedno konto, wstaw je w bankAccount, a bankAccount2 zostaw pustym.
+- Jeśli są dwa konta (np. PLN i EUR), wstaw konto w walucie faktury jako bankAccount, drugie jako bankAccount2.
 - Zwracaj POPRAWNY JSON bez dodatkowego tekstu.`;
 
 // Parsuj jedną fakturę przez AI (PDF / obraz → JSON)
@@ -6817,7 +6839,10 @@ function PaymentForm({ initial, isEdit, onSave, onClose, onSkipNext, onQueueAppe
     brutto:        initial?.brutto        || "",
     issueDate:     initial?.issueDate     || todayISO(),
     dueDate:       initial?.dueDate       || todayISO(),
-    bankAccount:   initial?.bankAccount   || "",
+    bankAccount:      initial?.bankAccount      || "",
+    bankAccountLabel: initial?.bankAccountLabel || "",
+    bankAccount2:     initial?.bankAccount2     || "",
+    bankAccount2Label:initial?.bankAccount2Label|| "",
     status:        initial?.status        || "topay",
     note:          initial?.note          || "",
     // załącznik (oryginał faktury w Storage)
@@ -6885,7 +6910,10 @@ function PaymentForm({ initial, isEdit, onSave, onClose, onSkipNext, onQueueAppe
         brutto:        first.brutto || prev.brutto,
         issueDate:     first.issueDate || prev.issueDate,
         dueDate:       first.dueDate   || prev.dueDate,
-        bankAccount:   (first.bankAccount || "").replace(/\s+/g,"") || prev.bankAccount,
+        bankAccount:      (first.bankAccount || "").replace(/\s+/g,"") || prev.bankAccount,
+        bankAccountLabel: first.bankAccountLabel || prev.bankAccountLabel,
+        bankAccount2:     (first.bankAccount2 || "").replace(/\s+/g,"") || prev.bankAccount2,
+        bankAccount2Label:first.bankAccount2Label || prev.bankAccount2Label,
         note:          first.note  || prev.note,
         // metadata pliku z Firebase Storage
         fileUrl:  first._file?.fileUrl  || prev.fileUrl,
@@ -7133,15 +7161,29 @@ function PaymentForm({ initial, isEdit, onSave, onClose, onSkipNext, onQueueAppe
                 className="w-full px-3 py-2 rounded-lg border border-gray-200" />
             </Field>
           </div>
-          <Field label="Numer konta (IBAN / NRB)">
+          <Field label={`Konto bankowe 1${f.bankAccountLabel ? ` (${f.bankAccountLabel})` : ""}`}>
             <div className="flex gap-2">
               <input value={f.bankAccount}
                 onChange={e=>upd("bankAccount", e.target.value.replace(/\s+/g,""))}
                 className="flex-1 px-3 py-2 rounded-lg border border-gray-200 font-mono text-sm"
-                placeholder="PL00 0000 0000 0000 0000 0000 0000" />
+                placeholder="IBAN / NRB" />
               {f.bankAccount && (
                 <button type="button"
                   onClick={() => { navigator.clipboard?.writeText(f.bankAccount); }}
+                  className="px-3 py-2 rounded-lg text-xs font-semibold border border-gray-200 hover:bg-gray-50"
+                  title="Kopiuj numer konta">📋</button>
+              )}
+            </div>
+          </Field>
+          <Field label={`Konto bankowe 2${f.bankAccount2Label ? ` (${f.bankAccount2Label})` : ""}`}>
+            <div className="flex gap-2">
+              <input value={f.bankAccount2}
+                onChange={e=>upd("bankAccount2", e.target.value.replace(/\s+/g,""))}
+                className="flex-1 px-3 py-2 rounded-lg border border-gray-200 font-mono text-sm"
+                placeholder="drugie konto (opcjonalne)" />
+              {f.bankAccount2 && (
+                <button type="button"
+                  onClick={() => { navigator.clipboard?.writeText(f.bankAccount2); }}
                   className="px-3 py-2 rounded-lg text-xs font-semibold border border-gray-200 hover:bg-gray-50"
                   title="Kopiuj numer konta">📋</button>
               )}
