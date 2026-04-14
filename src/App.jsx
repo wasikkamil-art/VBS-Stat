@@ -6113,11 +6113,12 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], showToast
     const f = selectedFracht;
     const kody = formatKody(f);
     return (
-      <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh" }}>
+      <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", paddingTop: "env(safe-area-inset-top, 0px)" }}>
         <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet"/>
         <div className="max-w-lg mx-auto p-4">
           <button onClick={() => setSelectedFracht(null)}
-            className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-4">
+            className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-4 py-2"
+            style={{ minHeight: 44 }}>
             ← Powrót
           </button>
 
