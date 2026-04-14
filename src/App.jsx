@@ -5806,6 +5806,25 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
     return acc;
   }, [monthInstances]);
 
+  // ── Podział: stałe (cykliczne) vs jednorazowe ──
+  const costBreakdown = useMemo(() => {
+    const recurring = {};  // { currency: { total, paid, topay } }
+    const oneoff    = {};
+    monthInstances.forEach(i => {
+      const cur = i.currency || "PLN";
+      const target = i.isInstance ? recurring : oneoff;
+      if (!target[cur]) target[cur] = { total: 0, paid: 0, topay: 0 };
+      const total = Number(i.brutto) || 0;
+      const companyPct = i.split?.enabled ? (Number(i.split.companyPct)||100) : 100;
+      const share = total * companyPct / 100;
+      target[cur].total += share;
+      target[cur][statusOf(i) === "paid" ? "paid" : "topay"] += share;
+    });
+    return { recurring, oneoff };
+  }, [monthInstances]);
+
+  const [filterType, setFilterType] = useState("all"); // "all" | "recurring" | "oneoff"
+
   // ── Filtrowanie dla listy i kalendarza ──
   // Gdy są aktywne filtry wyszukiwania (nr FV / klient / zakres dat) — lista pokazuje wyniki
   // z całego okna (cross-month), a kalendarz dalej bazuje na bieżącym miesiącu.
@@ -5816,6 +5835,8 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
       if (filterStatus !== "all" && statusOf(i) !== filterStatus) return false;
       if (filterCurrency !== "all" && (i.currency||"PLN") !== filterCurrency) return false;
       if (filterCategory !== "all" && i.category !== filterCategory) return false;
+      if (filterType === "recurring" && !i.isInstance) return false;
+      if (filterType === "oneoff" && i.isInstance) return false;
       if (dateFrom && (!i.dueDate || i.dueDate < dateFrom)) return false;
       if (dateTo   && (!i.dueDate || i.dueDate > dateTo))   return false;
       if (q) {
@@ -5829,7 +5850,7 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
       }
       return true;
     }).sort((a,b) => (a.dueDate||"").localeCompare(b.dueDate||""));
-  }, [monthInstances, allInstances, hasSearchFilters, filterStatus, filterCurrency, filterCategory, searchQuery, dateFrom, dateTo]);
+  }, [monthInstances, allInstances, hasSearchFilters, filterStatus, filterCurrency, filterCategory, filterType, searchQuery, dateFrom, dateTo]);
 
   // ── Mark as paid / unpaid ──
   async function togglePaid(inst) {
@@ -6029,6 +6050,75 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* ── PODZIAŁ: STAŁE vs JEDNORAZOWE ── */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+        {/* Stałe koszty (cykliczne) */}
+        <button
+          onClick={() => setFilterType(f => f === "recurring" ? "all" : "recurring")}
+          className="rounded-xl p-4 border-2 text-left transition-all hover:shadow-sm"
+          style={{
+            borderColor: filterType === "recurring" ? "#6366f1" : "#e5e7eb",
+            background: filterType === "recurring" ? "#eef2ff" : "#fff",
+          }}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-xs font-semibold uppercase tracking-wide" style={{color: "#6366f1"}}>
+              🔄 Stałe koszty (cykliczne)
+            </div>
+            <div className="text-xs text-gray-400">
+              {monthInstances.filter(i => i.isInstance).length} pozycji
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {PAY_CURRENCIES.map(cur => {
+              const v = costBreakdown.recurring[cur];
+              if (!v?.total) return null;
+              return (
+                <div key={cur} className="text-sm">
+                  <span className="font-bold text-gray-900">{fmtMoney(v.total, cur)}</span>
+                  {v.paid > 0 && <span className="ml-1.5 text-xs text-green-600">({fmtMoney(v.paid, cur)} zapł.)</span>}
+                </div>
+              );
+            })}
+            {!PAY_CURRENCIES.some(cur => costBreakdown.recurring[cur]?.total) && (
+              <div className="text-sm text-gray-400">—</div>
+            )}
+          </div>
+        </button>
+
+        {/* Jednorazowe */}
+        <button
+          onClick={() => setFilterType(f => f === "oneoff" ? "all" : "oneoff")}
+          className="rounded-xl p-4 border-2 text-left transition-all hover:shadow-sm"
+          style={{
+            borderColor: filterType === "oneoff" ? "#f59e0b" : "#e5e7eb",
+            background: filterType === "oneoff" ? "#fffbeb" : "#fff",
+          }}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-xs font-semibold uppercase tracking-wide" style={{color: "#d97706"}}>
+              📄 Jednorazowe faktury
+            </div>
+            <div className="text-xs text-gray-400">
+              {monthInstances.filter(i => !i.isInstance).length} pozycji
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {PAY_CURRENCIES.map(cur => {
+              const v = costBreakdown.oneoff[cur];
+              if (!v?.total) return null;
+              return (
+                <div key={cur} className="text-sm">
+                  <span className="font-bold text-gray-900">{fmtMoney(v.total, cur)}</span>
+                  {v.paid > 0 && <span className="ml-1.5 text-xs text-green-600">({fmtMoney(v.paid, cur)} zapł.)</span>}
+                </div>
+              );
+            })}
+            {!PAY_CURRENCIES.some(cur => costBreakdown.oneoff[cur]?.total) && (
+              <div className="text-sm text-gray-400">—</div>
+            )}
+          </div>
+        </button>
       </div>
 
       {/* ── FILTRY ── */}
