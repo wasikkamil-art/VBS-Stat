@@ -6166,18 +6166,19 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
               {hasSearchFilters ? "Brak wyników wyszukiwania" : "Brak faktur w tym miesiącu przy wybranych filtrach"}
             </div>
           ) : (
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full text-sm" style={{ minWidth: 1050 }}>
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-600">
-                  <th className="text-left px-3 py-2 font-semibold">Termin</th>
-                  <th className="text-left px-3 py-2 font-semibold">Kontrahent</th>
-                  <th className="text-left px-3 py-2 font-semibold">Nr FV</th>
-                  <th className="text-left px-3 py-2 font-semibold">Kategoria</th>
-                  <th className="text-right px-3 py-2 font-semibold">Netto</th>
-                  <th className="text-right px-3 py-2 font-semibold">Brutto</th>
-                  <th className="text-right px-3 py-2 font-semibold">Udział firmy</th>
-                  <th className="text-center px-3 py-2 font-semibold">Status</th>
-                  <th className="text-center px-3 py-2 font-semibold">Akcje</th>
+                  <th className="text-left px-3 py-2.5 font-semibold" style={{minWidth:100}}>Termin</th>
+                  <th className="text-left px-3 py-2.5 font-semibold" style={{minWidth:180}}>Kontrahent</th>
+                  <th className="text-left px-3 py-2.5 font-semibold" style={{minWidth:130}}>Nr FV</th>
+                  <th className="text-left px-3 py-2.5 font-semibold" style={{minWidth:80}}>Kategoria</th>
+                  <th className="text-right px-3 py-2.5 font-semibold" style={{minWidth:100}}>Netto</th>
+                  <th className="text-right px-3 py-2.5 font-semibold" style={{minWidth:100}}>Brutto</th>
+                  <th className="text-right px-3 py-2.5 font-semibold" style={{minWidth:110}}>Udział firmy</th>
+                  <th className="text-center px-3 py-2.5 font-semibold" style={{minWidth:95}}>Status</th>
+                  <th className="text-center px-3 py-2.5 font-semibold" style={{minWidth:130}}>Akcje</th>
                 </tr>
               </thead>
               <tbody>
@@ -6189,21 +6190,21 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
                   return (
                     <tr key={x.id+"-"+x.instanceKey} className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
                       onClick={() => setDetail(x)}>
-                      <td className="px-3 py-2">{x.dueDate}</td>
-                      <td className="px-3 py-2 font-medium">
+                      <td className="px-3 py-2.5 whitespace-nowrap">{x.dueDate}</td>
+                      <td className="px-3 py-2.5 font-medium">
                         {x.contractor || "—"}
                         {x.isInstance && (
                           x._hasOverrides
-                            ? <span className="ml-1 text-[10px] text-green-600">✓</span>
-                            : <span className="ml-1 text-[10px] text-gray-400">(cykliczna)</span>
+                            ? <span className="ml-1.5 text-xs text-green-600 font-semibold">✓</span>
+                            : <span className="ml-1.5 text-xs text-gray-400">(cykliczna)</span>
                         )}
                       </td>
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-2.5">
                         <div className="flex items-center gap-1.5">
                           {x.isInstance && !x._hasOverrides ? (
-                            <span className="text-xs text-orange-500 italic">do uzupełnienia</span>
+                            <span className="text-sm text-orange-500 italic font-medium">do uzupełnienia</span>
                           ) : (
-                            <span className="text-gray-600">{x.invoiceNumber || "—"}</span>
+                            <span className="text-gray-700">{x.invoiceNumber || "—"}</span>
                           )}
                           {x.fileUrl && (
                             <a href={x.fileUrl} target="_blank" rel="noreferrer"
@@ -6213,35 +6214,35 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
                           )}
                         </div>
                       </td>
-                      <td className="px-3 py-2">
-                        {cat && <span className="px-2 py-0.5 rounded text-[10px] font-semibold" style={{background: cat.color+"22", color: cat.color}}>{cat.label}</span>}
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        {cat && <span className="px-2.5 py-1 rounded text-xs font-semibold" style={{background: cat.color+"22", color: cat.color}}>{cat.label}</span>}
                       </td>
-                      <td className={"px-3 py-2 text-right tabular-nums" + (x.isInstance && !x._hasOverrides ? " text-gray-300" : "")}>{fmtMoney(x.netto, x.currency)}</td>
-                      <td className={"px-3 py-2 text-right tabular-nums font-semibold" + (x.isInstance && !x._hasOverrides ? " text-gray-300 font-normal" : "")}>{fmtMoney(x.brutto, x.currency)}</td>
-                      <td className={"px-3 py-2 text-right tabular-nums" + (x.isInstance && !x._hasOverrides ? " text-gray-300" : "")}>
+                      <td className={"px-3 py-2.5 text-right tabular-nums whitespace-nowrap" + (x.isInstance && !x._hasOverrides ? " text-gray-400" : "")}>{fmtMoney(x.netto, x.currency)}</td>
+                      <td className={"px-3 py-2.5 text-right tabular-nums whitespace-nowrap font-semibold" + (x.isInstance && !x._hasOverrides ? " text-gray-400 font-normal" : "")}>{fmtMoney(x.brutto, x.currency)}</td>
+                      <td className={"px-3 py-2.5 text-right tabular-nums whitespace-nowrap" + (x.isInstance && !x._hasOverrides ? " text-gray-400" : "")}>
                         {x.split?.enabled ? (
                           <div>
                             <div className={x.isInstance && !x._hasOverrides ? "" : "font-semibold"}>{fmtMoney(share, x.currency)}</div>
-                            <div className="text-[10px] text-gray-500">{companyPct}% · {x.split.partnerName||"partner"} {100-companyPct}%</div>
+                            <div className="text-xs text-gray-500">{companyPct}% · {x.split.partnerName||"partner"} {100-companyPct}%</div>
                           </div>
                         ) : fmtMoney(x.brutto, x.currency)}
                       </td>
-                      <td className="px-3 py-2 text-center">
-                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold border"
+                      <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                        <span className="px-2.5 py-1 rounded text-xs font-semibold border"
                           style={{background: STATUS_META[st].bg, borderColor: STATUS_META[st].border, color: STATUS_META[st].color}}>
                           {STATUS_META[st].label}
                         </span>
                       </td>
-                      <td className="px-3 py-2 text-center">
-                        <div className="flex items-center justify-center gap-1">
+                      <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                        <div className="flex items-center justify-center gap-1.5">
                           <button onClick={(e) => { e.stopPropagation(); togglePaid(x); }}
-                            className="px-2 py-1 rounded text-[11px] font-semibold border hover:bg-gray-50"
+                            className="px-2.5 py-1 rounded text-xs font-semibold border hover:bg-gray-50"
                             style={{borderColor: "#d1d5db"}}>
                             {st === "paid" ? "↩ Cofnij" : "✓ Zapłacone"}
                           </button>
                           {isAdmin && (
                             <button onClick={(e) => { e.stopPropagation(); deleteRec(x.id); }}
-                              className="px-2 py-1 rounded text-[11px] font-semibold border border-red-200 text-red-600 hover:bg-red-50"
+                              className="px-2 py-1 rounded text-xs font-semibold border border-red-200 text-red-600 hover:bg-red-50"
                               title="Usuń fakturę (admin)">
                               🗑
                             </button>
@@ -6253,6 +6254,7 @@ function PaymentsTab({ payments, showToast, isAdmin }) {
                 })}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       )}
