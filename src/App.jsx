@@ -6164,6 +6164,60 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     }
   };
 
+  // ── Helper: status step (potwierdź/cofnij z datą) ──
+  const renderStatusStep = (isDone, label, event, enabled, onConfirm, onUndo) => (
+    <div style={{padding: 12, borderRadius: 12, marginBottom: 8, opacity: enabled ? 1 : 0.4,
+      background: isDone ? "#f0fdf4" : "#f8fafc", border: `1px solid ${isDone ? "#bbf7d0" : "#e5e7eb"}`}}>
+      <div className="flex items-center justify-between">
+        <div>
+          <div style={{fontSize: 13, fontWeight: 600, color: isDone ? "#15803d" : "#374151"}}>
+            {isDone ? "✅" : "⏳"} {label}
+          </div>
+          {event && <div style={{fontSize: 12, color: "#6b7280", marginTop: 2}}>
+            {new Date(event.value || event.ts).toLocaleString("pl-PL", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
+          </div>}
+        </div>
+        {enabled && !isDone && (
+          <button onClick={onConfirm}
+            style={{padding: "8px 16px", borderRadius: 10, border: "none", background: "#3b82f6", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer"}}>
+            Potwierdź
+          </button>
+        )}
+        {isDone && onUndo && (
+          <button onClick={onUndo}
+            style={{padding: "6px 10px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", color: "#9ca3af", fontSize: 11, fontWeight: 500, cursor: "pointer"}}>
+            ↩ Cofnij
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  // ── Helper: photo step (dodaj zdjęcie z datą) ──
+  const renderPhotoStep = (isDone, label, photoEvent, enabled, photoType) => (
+    <div style={{padding: 12, borderRadius: 12, marginBottom: 8, opacity: enabled ? 1 : 0.4,
+      background: isDone ? "#f0fdf4" : "#f8fafc", border: `1px solid ${isDone ? "#bbf7d0" : "#e5e7eb"}`}}>
+      <div className="flex items-center justify-between">
+        <div>
+          <div style={{fontSize: 13, fontWeight: 600, color: isDone ? "#15803d" : "#374151"}}>
+            {isDone ? "✅" : "📄"} {label}
+          </div>
+          {photoEvent && <div style={{fontSize: 12, color: "#6b7280", marginTop: 2}}>
+            {photoEvent.ts ? new Date(photoEvent.ts).toLocaleString("pl-PL", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "Dodane"}
+            {photoEvent.photoUrl && <span> · <a href={photoEvent.photoUrl} target="_blank" rel="noopener noreferrer" style={{color: "#6366f1", textDecoration: "none"}}>Zobacz</a></span>}
+          </div>}
+        </div>
+        {enabled && !isDone && (
+          <label style={{padding: "8px 16px", borderRadius: 10, border: "none", background: "#6366f1", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4}}>
+            📷 Dodaj
+            <input type="file" accept="image/*" capture="environment" className="hidden"
+              onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto(photoType, file); e.target.value=""; }} />
+          </label>
+        )}
+      </div>
+    </div>
+  );
+
   // ── Detail view (zlecenie) — wg mockupu ──
   if (selectedFracht) {
     const f = selectedFracht;
@@ -6175,13 +6229,23 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     const rozEvent = myEvents.filter(e => e.type === "rozladowano").pop();
     const rozUndo = myEvents.filter(e => e.type === "cofnij_rozladowano").pop();
     const towarPhotos = myEvents.filter(e => e.type === "towar_photo");
+    const towarDmgPhotos = myEvents.filter(e => e.type === "towar_damage_photo");
     const cmrZalPhoto = myEvents.find(e => e.type === "cmr_zaladunek_photo");
     const cmrRozPhoto = myEvents.find(e => e.type === "cmr_rozladunek_photo");
-    // Fallback: stary typ "cmr_photo" traktuj jako cmr rozładunek
     const cmrPhotoLegacy = myEvents.find(e => e.type === "cmr_photo");
-    // Cofnięcie anuluje potwierdzenie jeśli jest nowsze
+    // Nowe statusy
+    const dotarcieZalEvent = myEvents.filter(e => e.type === "dotarcie_zaladunek").pop();
+    const dotarcieZalUndo = myEvents.filter(e => e.type === "cofnij_dotarcie_zaladunek").pop();
+    const startRozEvent = myEvents.filter(e => e.type === "start_rozladunek").pop();
+    const startRozUndo = myEvents.filter(e => e.type === "cofnij_start_rozladunek").pop();
+    const dotarcieRozEvent = myEvents.filter(e => e.type === "dotarcie_rozladunek").pop();
+    const dotarcieRozUndo = myEvents.filter(e => e.type === "cofnij_dotarcie_rozladunek").pop();
+    // Cofnięcie anuluje jeśli nowsze
     const hasZal = (!!zalEvent && (!zalUndo || zalEvent.ts > zalUndo.ts)) || !!f._driverZaladowano;
     const hasRoz = (!!rozEvent && (!rozUndo || rozEvent.ts > rozUndo.ts)) || f.statusRozladunku === "rozladowano";
+    const hasDotarcieZal = !!dotarcieZalEvent && (!dotarcieZalUndo || dotarcieZalEvent.ts > dotarcieZalUndo.ts);
+    const hasStartRoz = !!startRozEvent && (!startRozUndo || startRozEvent.ts > startRozUndo.ts);
+    const hasDotarcieRoz = !!dotarcieRozEvent && (!dotarcieRozUndo || dotarcieRozEvent.ts > dotarcieRozUndo.ts);
     const hasCmrZal = !!cmrZalPhoto;
     const hasCmrRoz = !!cmrRozPhoto || !!cmrPhotoLegacy;
 
@@ -6327,144 +6391,87 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
             </div>
           )}
 
-          {/* ═══ STATUS REALIZACJI ═══ */}
-          <div style={{background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", padding: 16}}>
-            <div style={{fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 12}}>Status realizacji</div>
-
-            {/* Planowane daty */}
-            <div style={{padding: "10px 14px", borderRadius: 12, marginBottom: 8, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
-              <div className="flex items-center justify-between" style={{marginBottom: f.dataRozladunku ? 6 : 0}}>
-                <span style={{fontSize: 12, color: "#9ca3af"}}>📋 Załadunek planowany</span>
-                <span style={{fontSize: 12, fontWeight: 600, color: "#6b7280"}}>{fmtDate(f.dataZaladunku)}{f.godzZaladunku ? ` · ${f.godzZaladunku}` : ""}</span>
-              </div>
-              {f.dataRozladunku && (
-                <div className="flex items-center justify-between">
-                  <span style={{fontSize: 12, color: "#9ca3af"}}>📋 Rozładunek planowany</span>
-                  <span style={{fontSize: 12, fontWeight: 600, color: "#6b7280"}}>{fmtDate(f.dataRozladunku)}{f.godzRozladunku ? ` · ${f.godzRozladunku}` : ""}</span>
-                </div>
-              )}
+          {/* ═══ KAFELEK 1: ZAŁADUNEK ═══ */}
+          <div style={{background: "#fff", borderRadius: 16, border: "2px solid #bfdbfe", padding: 16, marginBottom: 12}}>
+            <div className="flex items-center justify-between" style={{marginBottom: 12}}>
+              <div style={{fontSize: 13, fontWeight: 700, color: "#1d4ed8"}}>📦 ZAŁADUNEK</div>
+              <span style={{fontSize: 11, color: "#9ca3af"}}>{fmtDate(f.dataZaladunku)}{f.godzZaladunku ? ` · ${f.godzZaladunku}` : ""}</span>
             </div>
 
-            {/* ZAŁADUNEK */}
-            <div style={{padding: 14, borderRadius: 12, marginBottom: 8,
-              background: hasZal ? "#f0fdf4" : "#f8fafc",
-              border: `1px solid ${hasZal ? "#bbf7d0" : "#e5e7eb"}`}}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <div style={{fontSize: 13, fontWeight: 600, color: hasZal ? "#15803d" : "#374151"}}>
-                    {hasZal ? "✅ Załadowano" : "📦 Załadunek"}
+            {/* 1. Dotarcie na załadunek */}
+            {renderStatusStep(hasDotarcieZal, "Dotarcie na załadunek", dotarcieZalEvent, !false, () => updateFrachtStatus(f, "dotarcie_zaladunek", new Date().toISOString()), () => undoFrachtStatus(f, "dotarcie_zaladunek"))}
+
+            {/* 2. Zdjęcia towaru */}
+            {hasDotarcieZal && (
+              <div style={{padding: 12, borderRadius: 12, marginBottom: 8, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
+                <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 8}}>📸 Zdjęcia towaru</div>
+                {towarPhotos.length > 0 && (
+                  <div style={{display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8}}>
+                    {towarPhotos.map((p, i) => (
+                      <a key={p.id || i} href={p.photoUrl} target="_blank" rel="noopener noreferrer"
+                        style={{display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8,
+                          background: "#f0fdf4", border: "1px solid #bbf7d0", fontSize: 12, color: "#15803d",
+                          fontWeight: 500, textDecoration: "none"}}>
+                        📸 {i + 1} · {p.ts ? new Date(p.ts).toLocaleString("pl-PL", {hour:"2-digit",minute:"2-digit"}) : ""}
+                      </a>
+                    ))}
                   </div>
-                  {zalEvent && <div style={{fontSize: 12, color: "#6b7280", marginTop: 2}}>
-                    {new Date(zalEvent.value || zalEvent.ts).toLocaleString("pl-PL", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
-                  </div>}
-                </div>
-                {!hasZal ? (
-                  <button onClick={() => updateFrachtStatus(f, "zaladowano", new Date().toISOString())}
-                    style={{padding: "8px 16px", borderRadius: 10, border: "none", background: "#3b82f6", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer"}}>
-                    Potwierdź
-                  </button>
-                ) : (
-                  <button onClick={() => undoFrachtStatus(f, "zaladowano")}
-                    style={{padding: "6px 12px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", color: "#9ca3af", fontSize: 11, fontWeight: 500, cursor: "pointer"}}>
-                    ↩ Cofnij
-                  </button>
                 )}
+                <label style={{display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  padding: "10px", borderRadius: 10, border: "1px dashed #d1d5db", background: "#fff",
+                  color: "#6b7280", fontSize: 13, fontWeight: 500, cursor: "pointer"}}>
+                  📷 {towarPhotos.length > 0 ? "Dodaj kolejne zdjęcie" : "Dodaj zdjęcie towaru"}
+                  <input type="file" accept="image/*" capture="environment" className="hidden"
+                    onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto("towar", file); e.target.value=""; }} />
+                </label>
               </div>
-              {/* Zdjęcia towaru (wielokrotne) */}
-              {hasZal && (
-                <div style={{marginTop: 10}}>
-                  {towarPhotos.length > 0 && (
-                    <div style={{display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8}}>
-                      {towarPhotos.map((p, i) => (
-                        <a key={p.id || i} href={p.photoUrl} target="_blank" rel="noopener noreferrer"
-                          style={{display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8,
-                            background: "#f0fdf4", border: "1px solid #bbf7d0", fontSize: 12, color: "#15803d",
-                            fontWeight: 500, textDecoration: "none"}}>
-                          📸 Zdjęcie {i + 1}
-                        </a>
-                      ))}
-                    </div>
-                  )}
-                  <label style={{display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                    padding: "10px", borderRadius: 10, border: "1px dashed #d1d5db", background: "#f9fafb",
-                    color: "#6b7280", fontSize: 13, fontWeight: 500, cursor: "pointer"}}>
-                    📷 {towarPhotos.length > 0 ? "Dodaj kolejne zdjęcie" : "Dodaj zdjęcie towaru"}
-                    <input type="file" accept="image/*" capture="environment" className="hidden"
-                      onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto("towar", file); e.target.value=""; }} />
-                  </label>
-                </div>
-              )}
+            )}
+
+            {/* 3. CMR załadunek */}
+            {hasDotarcieZal && renderPhotoStep(hasCmrZal, "CMR załadunek", cmrZalPhoto, hasDotarcieZal, "cmr_zaladunek")}
+
+            {/* 4. Start do rozładunku */}
+            {hasDotarcieZal && renderStatusStep(hasStartRoz, "Start do rozładunku", startRozEvent, hasCmrZal, () => updateFrachtStatus(f, "start_rozladunek", new Date().toISOString()), () => undoFrachtStatus(f, "start_rozladunek"))}
+          </div>
+
+          {/* ═══ KAFELEK 2: ROZŁADUNEK ═══ */}
+          <div style={{background: "#fff", borderRadius: 16, border: `2px solid ${hasStartRoz ? "#a7f3d0" : "#e5e7eb"}`, padding: 16, opacity: hasStartRoz ? 1 : 0.4}}>
+            <div className="flex items-center justify-between" style={{marginBottom: 12}}>
+              <div style={{fontSize: 13, fontWeight: 700, color: "#059669"}}>📦 ROZŁADUNEK</div>
+              <span style={{fontSize: 11, color: "#9ca3af"}}>{fmtDate(f.dataRozladunku)}{f.godzRozladunku ? ` · ${f.godzRozladunku}` : ""}</span>
             </div>
 
-            {/* CMR ZAŁADUNEK */}
-            <div style={{padding: 14, borderRadius: 12, marginBottom: 8, opacity: hasZal ? 1 : 0.4,
-              background: hasCmrZal ? "#f0fdf4" : "#f8fafc",
-              border: `1px solid ${hasCmrZal ? "#bbf7d0" : "#e5e7eb"}`}}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <div style={{fontSize: 13, fontWeight: 600, color: hasCmrZal ? "#15803d" : "#374151"}}>
-                    {hasCmrZal ? "✅ CMR załadunek" : "📄 CMR załadunek"}
-                  </div>
-                  {hasCmrZal && <div style={{fontSize: 12, color: "#6b7280", marginTop: 2}}>Zdjęcie CMR dodane</div>}
-                </div>
-                {hasZal && !hasCmrZal && (
-                  <label style={{padding: "8px 16px", borderRadius: 10, border: "none", background: "#6366f1", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6}}>
-                    📷 Dodaj CMR
-                    <input type="file" accept="image/*" capture="environment" className="hidden"
-                      onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto("cmr_zaladunek", file); e.target.value=""; }} />
-                  </label>
-                )}
-              </div>
-            </div>
+            {/* 1. Dotarcie na rozładunek */}
+            {renderStatusStep(hasDotarcieRoz, "Dotarcie na rozładunek", dotarcieRozEvent, hasStartRoz, () => updateFrachtStatus(f, "dotarcie_rozladunek", new Date().toISOString()), () => undoFrachtStatus(f, "dotarcie_rozladunek"))}
 
-            {/* ROZŁADUNEK */}
-            <div style={{padding: 14, borderRadius: 12, marginBottom: 8, opacity: hasZal ? 1 : 0.4,
-              background: hasRoz ? "#f0fdf4" : "#f8fafc",
-              border: `1px solid ${hasRoz ? "#bbf7d0" : "#e5e7eb"}`}}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <div style={{fontSize: 13, fontWeight: 600, color: hasRoz ? "#15803d" : "#374151"}}>
-                    {hasRoz ? "✅ Rozładowano" : "📦 Rozładunek"}
-                  </div>
-                  {rozEvent && <div style={{fontSize: 12, color: "#6b7280", marginTop: 2}}>
-                    {new Date(rozEvent.value || rozEvent.ts).toLocaleString("pl-PL", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
-                  </div>}
-                </div>
-                {hasRoz && (
-                  <button onClick={() => undoFrachtStatus(f, "rozladowano")}
-                    style={{padding: "6px 12px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", color: "#9ca3af", fontSize: 11, fontWeight: 500, cursor: "pointer"}}>
-                    ↩ Cofnij
-                  </button>
-                )}
-                {hasZal && !hasRoz && (
-                  <button onClick={() => updateFrachtStatus(f, "rozladowano", new Date().toISOString())}
-                    style={{padding: "8px 16px", borderRadius: 10, border: "none", background: "#10b981", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer"}}>
-                    Potwierdź
-                  </button>
-                )}
-              </div>
-            </div>
+            {/* 2. CMR rozładunek */}
+            {hasDotarcieRoz && renderPhotoStep(hasCmrRoz, "CMR rozładunek", cmrRozPhoto || cmrPhotoLegacy, hasDotarcieRoz, "cmr_rozladunek")}
 
-            {/* CMR ROZŁADUNEK */}
-            <div style={{padding: 14, borderRadius: 12, opacity: hasRoz ? 1 : 0.4,
-              background: hasCmrRoz ? "#f0fdf4" : "#f8fafc",
-              border: `1px solid ${hasCmrRoz ? "#bbf7d0" : "#e5e7eb"}`}}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <div style={{fontSize: 13, fontWeight: 600, color: hasCmrRoz ? "#15803d" : "#374151"}}>
-                    {hasCmrRoz ? "✅ CMR rozładunek" : "📄 CMR rozładunek"}
+            {/* 3. Zdjęcie uszkodzonego towaru (opcjonalne) */}
+            {hasDotarcieRoz && (
+              <div style={{padding: 12, borderRadius: 12, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
+                <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 4}}>📸 Zdjęcie uszkodzeń <span style={{fontSize: 11, color: "#9ca3af", fontWeight: 400}}>(opcjonalne)</span></div>
+                {towarDmgPhotos.length > 0 && (
+                  <div style={{display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8}}>
+                    {towarDmgPhotos.map((p, i) => (
+                      <a key={p.id || i} href={p.photoUrl} target="_blank" rel="noopener noreferrer"
+                        style={{display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8,
+                          background: "#fef2f2", border: "1px solid #fecaca", fontSize: 12, color: "#dc2626",
+                          fontWeight: 500, textDecoration: "none"}}>
+                        ⚠️ Uszkodzenie {i + 1}
+                      </a>
+                    ))}
                   </div>
-                  {hasCmrRoz && <div style={{fontSize: 12, color: "#6b7280", marginTop: 2}}>Zdjęcie CMR dodane</div>}
-                </div>
-                {hasRoz && !hasCmrRoz && (
-                  <label style={{padding: "8px 16px", borderRadius: 10, border: "none", background: "#6366f1", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6}}>
-                    📷 Dodaj CMR
-                    <input type="file" accept="image/*" capture="environment" className="hidden"
-                      onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto("cmr_rozladunek", file); e.target.value=""; }} />
-                  </label>
                 )}
+                <label style={{display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  padding: "10px", borderRadius: 10, border: "1px dashed #fecaca", background: "#fff",
+                  color: "#9ca3af", fontSize: 13, fontWeight: 500, cursor: "pointer"}}>
+                  📷 Dodaj zdjęcie uszkodzenia
+                  <input type="file" accept="image/*" capture="environment" className="hidden"
+                    onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto("towar_damage", file); e.target.value=""; }} />
+                </label>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </div>
@@ -13770,12 +13777,16 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
                   // Sortuj po czasie
                   evts.sort((a,b) => (a.ts||"").localeCompare(b.ts||""));
                   const typeLabels = {
+                    dotarcie_zaladunek: { icon: "📍", label: "Dotarcie na załadunek", color: "#2563eb" },
                     zaladowano: { icon: "📦", label: "Załadunek potwierdzony", color: "#2563eb" },
-                    rozladowano: { icon: "✅", label: "Rozładunek potwierdzony", color: "#15803d" },
                     towar_photo: { icon: "📸", label: "Zdjęcie towaru", color: "#7c3aed" },
                     cmr_zaladunek_photo: { icon: "📄", label: "CMR załadunek", color: "#6366f1" },
+                    start_rozladunek: { icon: "🚛", label: "Start do rozładunku", color: "#0891b2" },
+                    dotarcie_rozladunek: { icon: "📍", label: "Dotarcie na rozładunek", color: "#059669" },
+                    rozladowano: { icon: "✅", label: "Rozładunek potwierdzony", color: "#15803d" },
                     cmr_rozladunek_photo: { icon: "📄", label: "CMR rozładunek", color: "#6366f1" },
                     cmr_photo: { icon: "📄", label: "CMR", color: "#6366f1" },
+                    towar_damage_photo: { icon: "⚠️", label: "Zdjęcie uszkodzenia", color: "#dc2626" },
                   };
                   return (
                     <tr key={`${r.id}_status`}>
