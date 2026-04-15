@@ -6312,15 +6312,18 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                 {f.zaladunekGeo && (() => {
                   const [lat,lng] = f.zaladunekGeo.split(",").map(Number);
                   return (
-                    <div className="flex items-center gap-2" style={{marginTop: 6}}>
+                    <div style={{marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "#eff6ff", border: "1px solid #bfdbfe"}}>
+                      <div style={{fontSize: 11, color: "#6b7280", marginBottom: 4}}>📍 Współrzędne GPS</div>
+                      <div style={{fontSize: 18, fontWeight: 700, color: "#1e293b", letterSpacing: 0.5, fontFamily: "monospace"}}>
+                        {lat?.toFixed(5)}, {lng?.toFixed(5)}
+                      </div>
                       <a href={`https://www.google.com/maps/dir/?api=1&destination=${f.zaladunekGeo}&travelmode=driving`}
                         target="_blank" rel="noopener noreferrer"
-                        style={{display: "inline-flex", alignItems: "center", gap: 4,
-                          padding: "5px 10px", borderRadius: 8, background: "#3b82f6", color: "#fff",
-                          fontSize: 11, fontWeight: 600, textDecoration: "none"}}>
-                        🧭 Nawiguj
+                        style={{display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8,
+                          padding: "10px 16px", borderRadius: 10, background: "#3b82f6", color: "#fff",
+                          fontSize: 14, fontWeight: 600, textDecoration: "none"}}>
+                        🧭 Nawiguj do załadunku
                       </a>
-                      <span style={{fontSize: 11, color: "#9ca3af"}}>{lat?.toFixed(5)}, {lng?.toFixed(5)}</span>
                     </div>
                   );
                 })()}
@@ -6346,15 +6349,18 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                 {f.rozladunekGeo && (() => {
                   const [lat,lng] = f.rozladunekGeo.split(",").map(Number);
                   return (
-                    <div className="flex items-center gap-2" style={{marginTop: 6}}>
+                    <div style={{marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "#ecfdf5", border: "1px solid #a7f3d0"}}>
+                      <div style={{fontSize: 11, color: "#6b7280", marginBottom: 4}}>📍 Współrzędne GPS</div>
+                      <div style={{fontSize: 18, fontWeight: 700, color: "#1e293b", letterSpacing: 0.5, fontFamily: "monospace"}}>
+                        {lat?.toFixed(5)}, {lng?.toFixed(5)}
+                      </div>
                       <a href={`https://www.google.com/maps/dir/?api=1&destination=${f.rozladunekGeo}&travelmode=driving`}
                         target="_blank" rel="noopener noreferrer"
-                        style={{display: "inline-flex", alignItems: "center", gap: 4,
-                          padding: "5px 10px", borderRadius: 8, background: "#10b981", color: "#fff",
-                          fontSize: 11, fontWeight: 600, textDecoration: "none"}}>
-                        🧭 Nawiguj
+                        style={{display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8,
+                          padding: "10px 16px", borderRadius: 10, background: "#10b981", color: "#fff",
+                          fontSize: 14, fontWeight: 600, textDecoration: "none"}}>
+                        🧭 Nawiguj do rozładunku
                       </a>
-                      <span style={{fontSize: 11, color: "#9ca3af"}}>{lat?.toFixed(5)}, {lng?.toFixed(5)}</span>
                     </div>
                   );
                 })()}
