@@ -13941,35 +13941,57 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
                             Status kierowcy — {evts[0]?.driverName || evts[0]?.driverEmail || "—"}
                           </div>
                           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                            {/* Załadunek: planowany vs faktyczny */}
-                            {r.dataZaladunku && (
-                              <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-                                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 20, flexShrink: 0 }}>
-                                  <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#3b82f6", marginTop: 4 }}></div>
-                                  <div style={{ width: 1, height: 20, background: "#d1d5db" }}></div>
+                            {/* Załadunek: plan vs dotarł w jednej linii */}
+                            {r.dataZaladunku && (() => {
+                              const dotEv = evts.find(e => e.type === "dotarcie_zaladunek");
+                              const srEv = evts.find(e => e.type === "start_rozladunek");
+                              const planned = new Date(`${r.dataZaladunku}T${r.godzZaladunku || "23:59"}:00`);
+                              const dotTime = dotEv ? new Date(dotEv.value || dotEv.ts) : null;
+                              const diffMin = dotTime ? Math.round((dotTime - planned) / 60000) : null;
+                              const dotColor = diffMin === null ? "#6b7280" : diffMin <= 0 ? "#15803d" : diffMin <= 30 ? "#d97706" : "#dc2626";
+                              const dotStr = dotTime ? dotTime.toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : null;
+                              const srStr = srEv ? new Date(srEv.value||srEv.ts).toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : null;
+                              return (
+                                <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 20, flexShrink: 0 }}>
+                                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#3b82f6", marginTop: 4 }}></div>
+                                    <div style={{ width: 1, height: 20, background: "#d1d5db" }}></div>
+                                  </div>
+                                  <div style={{ flex: 1 }}>
+                                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1d4ed8", marginBottom: 3 }}>📦 Załadunek</div>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                      <span style={{ fontSize: 12, color: "#6b7280" }}>Plan: {r.dataZaladunku?.slice(5)}{r.godzZaladunku ? ` · ${r.godzZaladunku}` : ""}</span>
+                                      {dotStr && <span style={{ fontSize: 12, fontWeight: 700, color: dotColor }}>→ Dotarł: {dotStr}</span>}
+                                    </div>
+                                    {srStr && <div style={{ fontSize: 12, color: "#0891b2", fontWeight: 600, marginTop: 2 }}>🚛 Ruszył: {srStr}</div>}
+                                  </div>
                                 </div>
-                                <div style={{ flex: 1 }}>
-                                  <div style={{ fontSize: 13, fontWeight: 600, color: "#1d4ed8" }}>📦 Załadunek</div>
-                                  <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>Plan: {r.dataZaladunku}{r.godzZaladunku ? ` · ${r.godzZaladunku}` : ""}</div>
-                                  {(() => { const dot = evts.find(e => e.type === "dotarcie_zaladunek"); return dot ? <div style={{ fontSize: 12, color: "#15803d", fontWeight: 600, marginTop: 1 }}>📍 Dotarł: {new Date(dot.value||dot.ts).toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</div> : null; })()}
-                                  {(() => { const sr = evts.find(e => e.type === "start_rozladunek"); return sr ? <div style={{ fontSize: 12, color: "#0891b2", fontWeight: 600, marginTop: 1 }}>🚛 Ruszył: {new Date(sr.value||sr.ts).toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</div> : null; })()}
+                              );
+                            })()}
+                            {/* Rozładunek: plan vs dotarł w jednej linii */}
+                            {r.dataRozladunku && (() => {
+                              const dotEv = evts.find(e => e.type === "dotarcie_rozladunek");
+                              const planned = new Date(`${r.dataRozladunku}T${r.godzRozladunku || "23:59"}:00`);
+                              const dotTime = dotEv ? new Date(dotEv.value || dotEv.ts) : null;
+                              const diffMin = dotTime ? Math.round((dotTime - planned) / 60000) : null;
+                              const dotColor = diffMin === null ? "#6b7280" : diffMin <= 0 ? "#15803d" : diffMin <= 30 ? "#d97706" : "#dc2626";
+                              const dotStr = dotTime ? dotTime.toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : null;
+                              return (
+                                <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 20, flexShrink: 0 }}>
+                                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#10b981", marginTop: 4 }}></div>
+                                    <div style={{ width: 1, height: 20, background: "#d1d5db" }}></div>
+                                  </div>
+                                  <div style={{ flex: 1 }}>
+                                    <div style={{ fontSize: 13, fontWeight: 600, color: "#059669", marginBottom: 3 }}>📦 Rozładunek</div>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                      <span style={{ fontSize: 12, color: "#6b7280" }}>Plan: {r.dataRozladunku?.slice(5)}{r.godzRozladunku ? ` · ${r.godzRozladunku}` : ""}</span>
+                                      {dotStr && <span style={{ fontSize: 12, fontWeight: 700, color: dotColor }}>→ Dotarł: {dotStr}</span>}
+                                    </div>
+                                  </div>
                                 </div>
-                              </div>
-                            )}
-                            {/* Rozładunek: planowany vs faktyczny */}
-                            {r.dataRozladunku && (
-                              <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-                                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 20, flexShrink: 0 }}>
-                                  <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#10b981", marginTop: 4 }}></div>
-                                  <div style={{ width: 1, height: 20, background: "#d1d5db" }}></div>
-                                </div>
-                                <div style={{ flex: 1 }}>
-                                  <div style={{ fontSize: 13, fontWeight: 600, color: "#059669" }}>📦 Rozładunek</div>
-                                  <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>Plan: {r.dataRozladunku}{r.godzRozladunku ? ` · ${r.godzRozladunku}` : ""}</div>
-                                  {(() => { const dot = evts.find(e => e.type === "dotarcie_rozladunek"); return dot ? <div style={{ fontSize: 12, color: "#15803d", fontWeight: 600, marginTop: 1 }}>📍 Dotarł: {new Date(dot.value||dot.ts).toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</div> : null; })()}
-                                </div>
-                              </div>
-                            )}
+                              );
+                            })()}
                             {/* Pozostałe eventy (zdjęcia, CMR, uwagi) */}
                             {evts.filter(e => !["dotarcie_zaladunek","start_rozladunek","dotarcie_rozladunek"].includes(e.type)).map((ev, i) => {
                               const meta = typeLabels[ev.type] || { icon: "•", label: ev.type, color: "#6b7280" };
