@@ -6474,11 +6474,13 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
           {/* ═══ KAFELEK 1: ZAŁADUNEK ═══ */}
           {(() => { const zalDelay = calcDelay(f.dataZaladunku, f.godzZaladunku, dotarcieZalEvent?.value || dotarcieZalEvent?.ts); return (
           <div style={{background: "#fff", borderRadius: 16, border: "2px solid #bfdbfe", padding: 16, marginBottom: 12}}>
-            <div style={{marginBottom: 10}}>
-              <div style={{fontSize: 14, fontWeight: 700, color: "#1d4ed8"}}>📦 ZAŁADUNEK</div>
-              <div style={{fontSize: 13, color: "#6b7280", marginTop: 2}}>📅 {fmtDateFull(f.dataZaladunku)}{f.godzZaladunku ? ` · ${f.godzZaladunku}` : ""}</div>
-              {hasDotarcieZal && zalDelay && <div style={{marginTop: 6}}>{renderDelayBadge(zalDelay)}</div>}
+            <div className="flex items-center justify-between" style={{marginBottom: 8}}>
+              <div style={{fontSize: 13, fontWeight: 700, color: "#1d4ed8"}}>📦 ZAŁADUNEK</div>
+              <span style={{fontSize: 11, color: "#9ca3af"}}>{fmtDate(f.dataZaladunku)}{f.godzZaladunku ? ` · ${f.godzZaladunku}` : ""}</span>
             </div>
+            {hasDotarcieZal && zalDelay && (
+              <div style={{marginBottom: 10}}>{renderDelayBadge(zalDelay)}</div>
+            )}
 
             {/* 1. Dotarcie na załadunek */}
             {renderStatusStep(hasDotarcieZal, "Dotarcie na załadunek", dotarcieZalEvent, !false, () => updateFrachtStatus(f, "dotarcie_zaladunek", new Date().toISOString()), () => undoFrachtStatus(f, "dotarcie_zaladunek"))}
@@ -6539,11 +6541,13 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
           {/* ═══ KAFELEK 2: ROZŁADUNEK ═══ */}
           {(() => { const rozDelay = calcDelay(f.dataRozladunku, f.godzRozladunku, dotarcieRozEvent?.value || dotarcieRozEvent?.ts); return (
           <div style={{background: "#fff", borderRadius: 16, border: `2px solid ${hasStartRoz ? "#a7f3d0" : "#e5e7eb"}`, padding: 16, opacity: hasStartRoz ? 1 : 0.4}}>
-            <div style={{marginBottom: 10}}>
-              <div style={{fontSize: 14, fontWeight: 700, color: "#059669"}}>📦 ROZŁADUNEK</div>
-              <div style={{fontSize: 13, color: "#6b7280", marginTop: 2}}>📅 {fmtDateFull(f.dataRozladunku)}{f.godzRozladunku ? ` · ${f.godzRozladunku}` : ""}</div>
-              {hasDotarcieRoz && rozDelay && <div style={{marginTop: 6}}>{renderDelayBadge(rozDelay)}</div>}
+            <div className="flex items-center justify-between" style={{marginBottom: 8}}>
+              <div style={{fontSize: 13, fontWeight: 700, color: "#059669"}}>📦 ROZŁADUNEK</div>
+              <span style={{fontSize: 11, color: "#9ca3af"}}>{fmtDate(f.dataRozladunku)}{f.godzRozladunku ? ` · ${f.godzRozladunku}` : ""}</span>
             </div>
+            {hasDotarcieRoz && rozDelay && (
+              <div style={{marginBottom: 10}}>{renderDelayBadge(rozDelay)}</div>
+            )}
 
             {/* 1. Dotarcie na rozładunek */}
             {renderStatusStep(hasDotarcieRoz, "Dotarcie na rozładunek", dotarcieRozEvent, hasStartRoz, () => updateFrachtStatus(f, "dotarcie_rozladunek", new Date().toISOString()), () => undoFrachtStatus(f, "dotarcie_rozladunek"))}
