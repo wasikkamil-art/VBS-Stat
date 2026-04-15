@@ -6176,6 +6176,32 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     }
   };
 
+  // ── Helper: zapisz uwagi kierowcy ──
+  const saveDriverNote = async (fracht, type, text) => {
+    if (!fracht || !text?.trim()) return;
+    try {
+      // Znajdź istniejący event uwagi i zaktualizuj lub utwórz nowy
+      const existing = driverEvents.find(e => e.frachtId === fracht.id && e.type === type);
+      if (existing?.id) {
+        await updateDoc(doc(db, "driverEvents", existing.id), { note: text.trim(), ts: new Date().toISOString() });
+      } else {
+        await addDoc(collection(db, "driverEvents"), {
+          type,
+          frachtId: fracht.id,
+          vehicleId: vehicle?.id,
+          note: text.trim(),
+          driverEmail: user.email,
+          driverName: user.displayName || user.email,
+          ts: new Date().toISOString(),
+        });
+      }
+      showToast("✅ Uwagi zapisane");
+    } catch (e) {
+      console.error("Save note error:", e);
+      showToast("❌ Błąd zapisu uwag");
+    }
+  };
+
   // ── Helper: status step (potwierdź/cofnij z datą) ──
   const renderStatusStep = (isDone, label, event, enabled, onConfirm, onUndo) => (
     <div style={{padding: 12, borderRadius: 12, marginBottom: 8, opacity: enabled ? 1 : 0.4,
@@ -6264,6 +6290,9 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     const hasDotarcieZal = !!dotarcieZalEvent && (!dotarcieZalUndo || dotarcieZalEvent.ts > dotarcieZalUndo.ts);
     const hasStartRoz = !!startRozEvent && (!startRozUndo || startRozEvent.ts > startRozUndo.ts);
     const hasDotarcieRoz = !!dotarcieRozEvent && (!dotarcieRozUndo || dotarcieRozEvent.ts > dotarcieRozUndo.ts);
+    // Uwagi kierowcy
+    const uwagiZalEvent = myEvents.filter(e => e.type === "uwagi_zaladunek").pop();
+    const uwagiRozEvent = myEvents.filter(e => e.type === "uwagi_rozladunek").pop();
     const hasCmrZal = !!cmrZalPhoto;
     const hasCmrRoz = !!cmrRozPhoto || !!cmrPhotoLegacy;
 
@@ -6458,7 +6487,23 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
             {/* 3. CMR załadunek */}
             {hasDotarcieZal && renderPhotoStep(hasCmrZal, "CMR załadunek", cmrZalPhoto, hasDotarcieZal, "cmr_zaladunek")}
 
-            {/* 4. Start do rozładunku */}
+            {/* 4. Uwagi kierowcy — załadunek */}
+            {hasDotarcieZal && (
+              <div style={{padding: 12, borderRadius: 12, marginBottom: 8, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
+                <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6}}>📝 Uwagi — załadunek</div>
+                <textarea
+                  defaultValue={uwagiZalEvent?.note || ""}
+                  placeholder="Wpisz uwagi z załadunku..."
+                  onBlur={(e) => { if (e.target.value !== (uwagiZalEvent?.note || "")) saveDriverNote(f, "uwagi_zaladunek", e.target.value); }}
+                  style={{width: "100%", fontSize: 14, padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e7eb",
+                    background: "#fff", resize: "vertical", minHeight: 60, fontFamily: "inherit"}} />
+                {uwagiZalEvent?.ts && <div style={{fontSize: 11, color: "#9ca3af", marginTop: 4}}>
+                  Zapisane: {new Date(uwagiZalEvent.ts).toLocaleString("pl-PL", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
+                </div>}
+              </div>
+            )}
+
+            {/* 5. Start do rozładunku */}
             {hasDotarcieZal && renderStatusStep(hasStartRoz, "Start do rozładunku", startRozEvent, hasCmrZal, () => updateFrachtStatus(f, "start_rozladunek", new Date().toISOString()), () => undoFrachtStatus(f, "start_rozladunek"))}
           </div>
 
@@ -6475,7 +6520,23 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
             {/* 2. CMR rozładunek */}
             {hasDotarcieRoz && renderPhotoStep(hasCmrRoz, "CMR rozładunek", cmrRozPhoto || cmrPhotoLegacy, hasDotarcieRoz, "cmr_rozladunek")}
 
-            {/* 3. Zdjęcie uszkodzonego towaru (opcjonalne) */}
+            {/* 3. Uwagi kierowcy — rozładunek */}
+            {hasDotarcieRoz && (
+              <div style={{padding: 12, borderRadius: 12, marginBottom: 8, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
+                <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6}}>📝 Uwagi — rozładunek</div>
+                <textarea
+                  defaultValue={uwagiRozEvent?.note || ""}
+                  placeholder="Wpisz uwagi z rozładunku..."
+                  onBlur={(e) => { if (e.target.value !== (uwagiRozEvent?.note || "")) saveDriverNote(f, "uwagi_rozladunek", e.target.value); }}
+                  style={{width: "100%", fontSize: 14, padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e7eb",
+                    background: "#fff", resize: "vertical", minHeight: 60, fontFamily: "inherit"}} />
+                {uwagiRozEvent?.ts && <div style={{fontSize: 11, color: "#9ca3af", marginTop: 4}}>
+                  Zapisane: {new Date(uwagiRozEvent.ts).toLocaleString("pl-PL", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
+                </div>}
+              </div>
+            )}
+
+            {/* 4. Zdjęcie uszkodzonego towaru (opcjonalne) */}
             {hasDotarcieRoz && (
               <div style={{padding: 12, borderRadius: 12, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
                 <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 4}}>📸 Zdjęcie uszkodzeń <span style={{fontSize: 11, color: "#9ca3af", fontWeight: 400}}>(opcjonalne)</span></div>
@@ -13806,6 +13867,17 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
                   // CMR rozładunek
                   const cmrRoz = allEvts.find(e => e.type === "cmr_rozladunek_photo") || allEvts.find(e => e.type === "cmr_photo");
                   if (cmrRoz) evts.push(cmrRoz);
+                  // Uwagi kierowcy
+                  allEvts.filter(e => e.type === "uwagi_zaladunek" || e.type === "uwagi_rozladunek").forEach(e => evts.push(e));
+                  // Zdjęcia uszkodzeń
+                  allEvts.filter(e => e.type === "towar_damage_photo").forEach(e => evts.push(e));
+                  // Nowe statusy
+                  const dotZal = allEvts.filter(e => e.type === "dotarcie_zaladunek").pop();
+                  const startRoz = allEvts.filter(e => e.type === "start_rozladunek").pop();
+                  const dotRoz = allEvts.filter(e => e.type === "dotarcie_rozladunek").pop();
+                  if (dotZal) evts.push(dotZal);
+                  if (startRoz) evts.push(startRoz);
+                  if (dotRoz) evts.push(dotRoz);
                   // Sortuj po czasie
                   evts.sort((a,b) => (a.ts||"").localeCompare(b.ts||""));
                   const typeLabels = {
@@ -13819,6 +13891,8 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
                     cmr_rozladunek_photo: { icon: "📄", label: "CMR rozładunek", color: "#6366f1" },
                     cmr_photo: { icon: "📄", label: "CMR", color: "#6366f1" },
                     towar_damage_photo: { icon: "⚠️", label: "Zdjęcie uszkodzenia", color: "#dc2626" },
+                    uwagi_zaladunek: { icon: "📝", label: "Uwagi — załadunek", color: "#6b7280" },
+                    uwagi_rozladunek: { icon: "📝", label: "Uwagi — rozładunek", color: "#6b7280" },
                   };
                   return (
                     <tr key={`${r.id}_status`}>
@@ -13877,6 +13951,12 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
                                           borderRadius: 6, background: "#f5f3ff", border: "1px solid #e9e5ff" }}>
                                         🔍 Zobacz zdjęcie
                                       </a>
+                                    )}
+                                    {ev.note && (
+                                      <div style={{ marginTop: 4, fontSize: 12, color: "#374151", padding: "6px 10px",
+                                        borderRadius: 6, background: "#f9fafb", border: "1px solid #f3f4f6", fontStyle: "italic" }}>
+                                        „{ev.note}"
+                                      </div>
                                     )}
                                   </div>
                                 </div>
