@@ -13353,6 +13353,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
+  const [driverStatusId, setDriverStatusId] = useState(null); // rozwinięty panel statusów kierowcy
   const [showImport, setShowImport] = useState(false);
   const [overviewYear, setOverviewYear] = useState(String(new Date().getFullYear()));
   const [overviewMonth, setOverviewMonth] = useState(String(new Date().getMonth() + 1).padStart(2, "0"));
@@ -13599,7 +13600,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
                 { id: "przeterminowana", label: "Przeterminowana", bg: "#fef2f2", color: "#991b1b", dot: "#ef4444" },
                 { id: "zaplacona",    label: "Zapłacona",      bg: "#f0fdf4", color: "#166534", dot: "#22c55e" },
               ];
-              return (
+              return [
                 <tr key={r.id} className="border-b border-gray-50 hover:bg-blue-50 transition-colors">
                   <td className="px-2 py-2 text-gray-400">{idx+1}</td>
                   <td className="px-2 py-2 whitespace-nowrap">{r.dataZlecenia||"-"}</td>
@@ -13632,11 +13633,16 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
                             <option value="rozladowano">✅ Rozładowano</option>
                             <option value="problem">⚠️ Problem</option>
                           </select>
-                          {(hasZal || hasRoz) && (
-                            <div className="flex gap-0.5 ml-1" title={evts.map(e => `${e.type === "zaladowano" ? "Załadunek" : "Rozładunek"}: ${e.driverName || e.driverEmail} ${e.value ? new Date(e.value).toLocaleString("pl-PL") : ""}`).join("\n")}>
-                              {hasZal && <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px]" style={{background:"#eff6ff",color:"#2563eb"}} title="Kierowca potwierdził załadunek">📦</span>}
-                              {hasRoz && <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px]" style={{background:"#f0fdf4",color:"#15803d"}} title="Kierowca potwierdził rozładunek">✅</span>}
-                            </div>
+                          {evts.length > 0 && (
+                            <button onClick={(ev) => { ev.stopPropagation(); setDriverStatusId(driverStatusId === r.id ? null : r.id); }}
+                              className="flex gap-0.5 ml-1 px-1.5 py-0.5 rounded-lg hover:bg-gray-100 transition-all cursor-pointer"
+                              title="Pokaż statusy kierowcy">
+                              {hasZal && <span className="text-[10px]">📦</span>}
+                              {hasRoz && <span className="text-[10px]">✅</span>}
+                              {evts.some(e=>e.type?.includes("cmr")) && <span className="text-[10px]">📄</span>}
+                              {evts.some(e=>e.type?.includes("photo")) && <span className="text-[10px]">📸</span>}
+                              <span className="text-[10px] text-gray-400">{driverStatusId === r.id ? "▲" : "▼"}</span>
+                            </button>
                           )}
                         </div>
                       );
@@ -13666,8 +13672,64 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
                       <button onClick={() => { if(window.confirm("Usunac?")) onDelete(r.id); }} className="w-6 h-6 rounded-lg flex items-center justify-center text-xs bg-red-50 hover:bg-red-100 text-red-400">✕</button>
                     </div>
                   </td>
-                </tr>
-              );
+                </tr>,
+                driverStatusId === r.id && (() => {
+                  const evts = (eventsByFracht[r.id] || []).sort((a,b) => (a.ts||"").localeCompare(b.ts||""));
+                  if (evts.length === 0) return null;
+                  const typeLabels = {
+                    zaladowano: { icon: "📦", label: "Załadunek potwierdzony", color: "#2563eb" },
+                    rozladowano: { icon: "✅", label: "Rozładunek potwierdzony", color: "#15803d" },
+                    cofnij_zaladowano: { icon: "↩️", label: "Cofnięto załadunek", color: "#9ca3af" },
+                    cofnij_rozladowano: { icon: "↩️", label: "Cofnięto rozładunek", color: "#9ca3af" },
+                    towar_photo: { icon: "📸", label: "Zdjęcie towaru", color: "#7c3aed" },
+                    cmr_zaladunek_photo: { icon: "📄", label: "CMR załadunek", color: "#6366f1" },
+                    cmr_rozladunek_photo: { icon: "📄", label: "CMR rozładunek", color: "#6366f1" },
+                    cmr_photo: { icon: "📄", label: "CMR", color: "#6366f1" },
+                  };
+                  return (
+                    <tr key={`${r.id}_status`}>
+                      <td colSpan={19} style={{ padding: 0 }}>
+                        <div style={{ background: "#f8fafc", borderTop: "1px solid #e5e7eb", borderBottom: "2px solid #e5e7eb", padding: "12px 16px" }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
+                            Status kierowcy — {evts[0]?.driverName || evts[0]?.driverEmail || "—"}
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            {evts.map((ev, i) => {
+                              const meta = typeLabels[ev.type] || { icon: "•", label: ev.type, color: "#6b7280" };
+                              const time = ev.value || ev.ts;
+                              const timeStr = time ? new Date(time).toLocaleString("pl-PL", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" }) : "";
+                              return (
+                                <div key={ev.id || i} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                                  {/* Timeline line */}
+                                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 20, flexShrink: 0 }}>
+                                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: meta.color, marginTop: 4 }}></div>
+                                    {i < evts.length - 1 && <div style={{ width: 1, height: 20, background: "#d1d5db" }}></div>}
+                                  </div>
+                                  {/* Content */}
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                      <span style={{ fontSize: 13, fontWeight: 600, color: meta.color }}>{meta.icon} {meta.label}</span>
+                                      <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: "auto", flexShrink: 0 }}>{timeStr}</span>
+                                    </div>
+                                    {ev.photoUrl && (
+                                      <a href={ev.photoUrl} target="_blank" rel="noopener noreferrer"
+                                        style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 4,
+                                          fontSize: 11, color: "#6366f1", textDecoration: "none", padding: "3px 8px",
+                                          borderRadius: 6, background: "#f5f3ff", border: "1px solid #e9e5ff" }}>
+                                        🔍 Zobacz zdjęcie
+                                      </a>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })()
+              ];
             })}
             {rows.length > 0 && (
               <tr className="bg-gray-50 font-bold border-t-2 border-gray-200">
