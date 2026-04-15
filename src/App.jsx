@@ -13941,25 +13941,37 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
                             Status kierowcy — {evts[0]?.driverName || evts[0]?.driverEmail || "—"}
                           </div>
                           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                            {/* Planowane daty */}
-                            {[
-                              r.dataZaladunku && { label: "Załadunek planowany", date: `${r.dataZaladunku}${r.godzZaladunku ? ` · ${r.godzZaladunku}` : ""}`, icon: "📋" },
-                              r.dataRozladunku && { label: "Rozładunek planowany", date: `${r.dataRozladunku}${r.godzRozladunku ? ` · ${r.godzRozladunku}` : ""}`, icon: "📋" },
-                            ].filter(Boolean).map((p, pi) => (
-                              <div key={`plan_${pi}`} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                            {/* Załadunek: planowany vs faktyczny */}
+                            {r.dataZaladunku && (
+                              <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
                                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 20, flexShrink: 0 }}>
-                                  <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#d1d5db", border: "2px solid #e5e7eb", marginTop: 4 }}></div>
+                                  <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#3b82f6", marginTop: 4 }}></div>
                                   <div style={{ width: 1, height: 20, background: "#d1d5db" }}></div>
                                 </div>
                                 <div style={{ flex: 1 }}>
-                                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                    <span style={{ fontSize: 13, fontWeight: 500, color: "#9ca3af" }}>{p.icon} {p.label}</span>
-                                    <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: "auto" }}>{p.date}</span>
-                                  </div>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: "#1d4ed8" }}>📦 Załadunek</div>
+                                  <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>Plan: {r.dataZaladunku}{r.godzZaladunku ? ` · ${r.godzZaladunku}` : ""}</div>
+                                  {(() => { const dot = evts.find(e => e.type === "dotarcie_zaladunek"); return dot ? <div style={{ fontSize: 12, color: "#15803d", fontWeight: 600, marginTop: 1 }}>📍 Dotarł: {new Date(dot.value||dot.ts).toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</div> : null; })()}
+                                  {(() => { const sr = evts.find(e => e.type === "start_rozladunek"); return sr ? <div style={{ fontSize: 12, color: "#0891b2", fontWeight: 600, marginTop: 1 }}>🚛 Ruszył: {new Date(sr.value||sr.ts).toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</div> : null; })()}
                                 </div>
                               </div>
-                            ))}
-                            {evts.map((ev, i) => {
+                            )}
+                            {/* Rozładunek: planowany vs faktyczny */}
+                            {r.dataRozladunku && (
+                              <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 20, flexShrink: 0 }}>
+                                  <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#10b981", marginTop: 4 }}></div>
+                                  <div style={{ width: 1, height: 20, background: "#d1d5db" }}></div>
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: "#059669" }}>📦 Rozładunek</div>
+                                  <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>Plan: {r.dataRozladunku}{r.godzRozladunku ? ` · ${r.godzRozladunku}` : ""}</div>
+                                  {(() => { const dot = evts.find(e => e.type === "dotarcie_rozladunek"); return dot ? <div style={{ fontSize: 12, color: "#15803d", fontWeight: 600, marginTop: 1 }}>📍 Dotarł: {new Date(dot.value||dot.ts).toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</div> : null; })()}
+                                </div>
+                              </div>
+                            )}
+                            {/* Pozostałe eventy (zdjęcia, CMR, uwagi) */}
+                            {evts.filter(e => !["dotarcie_zaladunek","start_rozladunek","dotarcie_rozladunek"].includes(e.type)).map((ev, i) => {
                               const meta = typeLabels[ev.type] || { icon: "•", label: ev.type, color: "#6b7280" };
                               const time = ev.value || ev.ts;
                               const timeStr = time ? new Date(time).toLocaleString("pl-PL", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" }) : "";
