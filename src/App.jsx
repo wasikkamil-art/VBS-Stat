@@ -13851,6 +13851,10 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
                               <span className="text-[10px] text-gray-400">{driverStatusId === r.id ? "▲" : "▼"}</span>
                             </button>
                           )}
+                          <div style={{fontSize: 10, color: "#9ca3af", marginTop: 3, lineHeight: 1.4}}>
+                            {r.godzZaladunku && <div>Zał: {r.dataZaladunku?.slice(5)} · {r.godzZaladunku}</div>}
+                            {r.godzRozladunku && <div>Roz: {r.dataRozladunku?.slice(5)} · {r.godzRozladunku}</div>}
+                          </div>
                         </div>
                       );
                     })()}
