@@ -6051,6 +6051,10 @@ const STATUS_META = {
 function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEvents = [], showToast }) {
   const [selectedFracht, setSelectedFracht] = useState(null);
   const [driverTab, setDriverTab] = useState("home"); // "home" | "zlecenia" | "pojazd" | "serwis" | "spalanie" | "czas" | "dokumenty" | "mapa"
+  const [driverZoom, setDriverZoom] = useState(() => {
+    try { return localStorage.getItem("fleetstat_driver_zoom") || "normal"; } catch { return "normal"; }
+  }); // "normal" | "large"
+  const zoomScale = driverZoom === "large" ? 1.25 : 1;
 
   const todayStr = new Date().toISOString().slice(0, 10);
   const today = new Date();
@@ -6184,7 +6188,7 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     return (
       <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", paddingTop: "env(safe-area-inset-top, 0px)", paddingBottom: 40 }}>
         <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet"/>
-        <div className="max-w-lg mx-auto p-4">
+        <div className="max-w-lg mx-auto p-4" style={{fontSize: `${zoomScale}rem`}}>
           <button onClick={() => setSelectedFracht(null)}
             className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-3 py-2"
             style={{ minHeight: 44 }}>
@@ -6532,7 +6536,7 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     return (
       <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", paddingTop: "env(safe-area-inset-top, 0px)" }}>
         <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet"/>
-        <div className="max-w-lg mx-auto p-4">
+        <div className="max-w-lg mx-auto p-4" style={{fontSize: `${zoomScale}rem`}}>
           <button onClick={() => setDriverTab("home")} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-3 py-2" style={{ minHeight: 44 }}>← Powrót</button>
           <div className="text-lg font-bold text-gray-900 mb-4">{subTitles[driverTab] || driverTab}</div>
 
@@ -6658,14 +6662,25 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
               ) : (
                 <div className="text-yellow-300 text-sm">Brak pojazdu</div>
               )}
-              <button onClick={() => { logAction("logout", "auth", { reason: "manual" }); signOut(auth); }}
-                className="text-xs text-gray-400 hover:text-gray-200 mt-1">Wyloguj</button>
+              <div className="flex items-center gap-2 mt-1">
+                <button onClick={() => {
+                  const next = driverZoom === "normal" ? "large" : "normal";
+                  setDriverZoom(next);
+                  try { localStorage.setItem("fleetstat_driver_zoom", next); } catch {}
+                }}
+                  className="text-xs text-gray-400 hover:text-gray-200"
+                  style={{padding: "2px 6px", borderRadius: 6, background: driverZoom === "large" ? "rgba(255,255,255,0.15)" : "transparent"}}>
+                  {driverZoom === "large" ? "🔍 Aa−" : "🔍 Aa+"}
+                </button>
+                <button onClick={() => { logAction("logout", "auth", { reason: "manual" }); signOut(auth); }}
+                  className="text-xs text-gray-400 hover:text-gray-200">Wyloguj</button>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="max-w-lg mx-auto p-4">
+      <div className="max-w-lg mx-auto p-4" style={{fontSize: `${zoomScale}rem`}}>
         {!vehicle && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-4 text-center">
             <div className="text-2xl mb-2">🚛</div>
