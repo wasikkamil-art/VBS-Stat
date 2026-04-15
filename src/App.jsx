@@ -6089,6 +6089,26 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
 
   const daysUntil = (d) => d ? Math.ceil((new Date(d) - today) / 86400000) : null;
 
+  // Cofnięcie statusu (załadunek / rozładunek)
+  const undoFrachtStatus = async (fracht, field) => {
+    if (!window.confirm(field === "zaladowano" ? "Cofnąć potwierdzenie załadunku?" : "Cofnąć potwierdzenie rozładunku?")) return;
+    try {
+      await addDoc(collection(db, "driverEvents"), {
+        type: `cofnij_${field}`,
+        frachtId: fracht.id,
+        vehicleId: vehicle?.id,
+        driverEmail: user.email,
+        driverName: user.displayName || user.email,
+        ts: new Date().toISOString(),
+      });
+      logAction(`cofnij_${field}`, "driverEvents", { frachtId: fracht.id });
+      showToast("↩️ Cofnięto potwierdzenie");
+    } catch (e) {
+      console.error("undo error", e);
+      showToast("❌ Błąd cofania");
+    }
+  };
+
   // Aktualizacja statusu frachtu
   const updateFrachtStatus = async (fracht, field, value) => {
     try {
@@ -6139,14 +6159,17 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
   if (selectedFracht) {
     const f = selectedFracht;
     const kody = formatKody(f);
-    // Sprawdź driverEvents dla tego frachtu
-    const myEvents = driverEvents.filter(ev => ev.frachtId === f.id);
-    const zalEvent = myEvents.find(e => e.type === "zaladowano");
-    const rozEvent = myEvents.find(e => e.type === "rozladowano");
+    // Sprawdź driverEvents dla tego frachtu (uwzględnij cofnięcia)
+    const myEvents = driverEvents.filter(ev => ev.frachtId === f.id).sort((a,b) => (a.ts||"").localeCompare(b.ts||""));
+    const zalEvent = myEvents.filter(e => e.type === "zaladowano").pop();
+    const zalUndo = myEvents.filter(e => e.type === "cofnij_zaladowano").pop();
+    const rozEvent = myEvents.filter(e => e.type === "rozladowano").pop();
+    const rozUndo = myEvents.filter(e => e.type === "cofnij_rozladowano").pop();
     const towarPhoto = myEvents.find(e => e.type === "towar_photo");
     const cmrPhoto = myEvents.find(e => e.type === "cmr_photo");
-    const hasZal = !!zalEvent || !!f._driverZaladowano;
-    const hasRoz = !!rozEvent || f.statusRozladunku === "rozladowano";
+    // Cofnięcie anuluje potwierdzenie jeśli jest nowsze
+    const hasZal = (!!zalEvent && (!zalUndo || zalEvent.ts > zalUndo.ts)) || !!f._driverZaladowano;
+    const hasRoz = (!!rozEvent && (!rozUndo || rozEvent.ts > rozUndo.ts)) || f.statusRozladunku === "rozladowano";
     const hasCMR = !!cmrPhoto;
 
     return (
@@ -6278,10 +6301,15 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                     {new Date(zalEvent.value || zalEvent.ts).toLocaleString("pl-PL", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
                   </div>}
                 </div>
-                {!hasZal && (
+                {!hasZal ? (
                   <button onClick={() => updateFrachtStatus(f, "zaladowano", new Date().toISOString())}
                     style={{padding: "8px 16px", borderRadius: 10, border: "none", background: "#3b82f6", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer"}}>
                     Potwierdź
+                  </button>
+                ) : (
+                  <button onClick={() => undoFrachtStatus(f, "zaladowano")}
+                    style={{padding: "6px 12px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", color: "#9ca3af", fontSize: 11, fontWeight: 500, cursor: "pointer"}}>
+                    ↩ Cofnij
                   </button>
                 )}
               </div>
@@ -6315,6 +6343,12 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                     {new Date(rozEvent.value || rozEvent.ts).toLocaleString("pl-PL", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
                   </div>}
                 </div>
+                {hasRoz && (
+                  <button onClick={() => undoFrachtStatus(f, "rozladowano")}
+                    style={{padding: "6px 12px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", color: "#9ca3af", fontSize: 11, fontWeight: 500, cursor: "pointer"}}>
+                    ↩ Cofnij
+                  </button>
+                )}
                 {hasZal && !hasRoz && (
                   <button onClick={() => updateFrachtStatus(f, "rozladowano", new Date().toISOString())}
                     style={{padding: "8px 16px", borderRadius: 10, border: "none", background: "#10b981", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer"}}>
