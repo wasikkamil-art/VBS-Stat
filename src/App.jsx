@@ -462,16 +462,33 @@ export default function Root() {
               tokenRole = firestoreRole; // Firestore wygrywa
             }
           } else {
-            // Nowy użytkownik — utwórz dokument
-            if (!tokenRole) {
-              const usersSnap = await getDocs(collection(db, "users"));
-              const isFirst = usersSnap.empty;
-              tokenRole = isFirst ? "admin" : "podglad";
+            // Dokument z UID nie istnieje — szukaj po emailu (mógł być dodany z losowym ID)
+            const allUsersSnap = await getDocs(collection(db, "users"));
+            const byEmail = allUsersSnap.docs.find(d => d.data().email === u.email);
+            if (byEmail) {
+              // Znaleziono dokument z emailem ale złym ID — napraw: utwórz z prawidłowym UID
+              const existingData = byEmail.data();
+              tokenRole = existingData.role || "podglad";
               await setDoc(doc(db, "users", u.uid), {
+                ...existingData,
                 email: u.email,
                 role: tokenRole,
-                createdAt: new Date().toISOString(),
+                migratedFrom: byEmail.id,
+                migratedAt: new Date().toISOString(),
               });
+              // Usuń stary dokument z losowym ID
+              try { await deleteDoc(doc(db, "users", byEmail.id)); } catch {}
+            } else {
+              // Nowy użytkownik — utwórz dokument
+              if (!tokenRole) {
+                const isFirst = allUsersSnap.empty;
+                tokenRole = isFirst ? "admin" : "podglad";
+                await setDoc(doc(db, "users", u.uid), {
+                  email: u.email,
+                  role: tokenRole,
+                  createdAt: new Date().toISOString(),
+                });
+              }
             }
           }
 
