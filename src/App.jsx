@@ -13792,6 +13792,13 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
                                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                                       <span style={{ fontSize: 13, fontWeight: 600, color: meta.color }}>{meta.icon} {meta.label}</span>
                                       <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: "auto", flexShrink: 0 }}>{timeStr}</span>
+                                      {ev.id && (
+                                        <button onClick={async () => {
+                                          if (!window.confirm("Usunąć ten wpis?")) return;
+                                          try { await deleteDoc(doc(db, "driverEvents", ev.id)); } catch(e) { console.error(e); }
+                                        }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "#d1d5db", padding: "2px 4px" }}
+                                          title="Usuń wpis">✕</button>
+                                      )}
                                     </div>
                                     {ev.photoUrl && (
                                       <a href={ev.photoUrl} target="_blank" rel="noopener noreferrer"
