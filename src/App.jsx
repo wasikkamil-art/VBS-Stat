@@ -6165,7 +6165,7 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     const zalUndo = myEvents.filter(e => e.type === "cofnij_zaladowano").pop();
     const rozEvent = myEvents.filter(e => e.type === "rozladowano").pop();
     const rozUndo = myEvents.filter(e => e.type === "cofnij_rozladowano").pop();
-    const towarPhoto = myEvents.find(e => e.type === "towar_photo");
+    const towarPhotos = myEvents.filter(e => e.type === "towar_photo");
     const cmrZalPhoto = myEvents.find(e => e.type === "cmr_zaladunek_photo");
     const cmrRozPhoto = myEvents.find(e => e.type === "cmr_rozladunek_photo");
     // Fallback: stary typ "cmr_photo" traktuj jako cmr rozładunek
@@ -6331,20 +6331,28 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                   </button>
                 )}
               </div>
-              {/* Zdjęcie towaru */}
-              {hasZal && !towarPhoto && (
-                <label style={{display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 10,
-                  padding: "10px", borderRadius: 10, border: "1px dashed #d1d5db", background: "#f9fafb",
-                  color: "#6b7280", fontSize: 13, fontWeight: 500, cursor: "pointer"}}>
-                  📷 Dodaj zdjęcie towaru
-                  <input type="file" accept="image/*" capture="environment" className="hidden"
-                    onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto("towar", file); e.target.value=""; }} />
-                </label>
-              )}
-              {towarPhoto && (
-                <div style={{marginTop: 8, display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, background: "#f0fdf4", border: "1px solid #bbf7d0"}}>
-                  <span style={{fontSize: 16}}>📸</span>
-                  <span style={{fontSize: 12, color: "#15803d", fontWeight: 500}}>Zdjęcie towaru dodane</span>
+              {/* Zdjęcia towaru (wielokrotne) */}
+              {hasZal && (
+                <div style={{marginTop: 10}}>
+                  {towarPhotos.length > 0 && (
+                    <div style={{display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8}}>
+                      {towarPhotos.map((p, i) => (
+                        <a key={p.id || i} href={p.photoUrl} target="_blank" rel="noopener noreferrer"
+                          style={{display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8,
+                            background: "#f0fdf4", border: "1px solid #bbf7d0", fontSize: 12, color: "#15803d",
+                            fontWeight: 500, textDecoration: "none"}}>
+                          📸 Zdjęcie {i + 1}
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                  <label style={{display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                    padding: "10px", borderRadius: 10, border: "1px dashed #d1d5db", background: "#f9fafb",
+                    color: "#6b7280", fontSize: 13, fontWeight: 500, cursor: "pointer"}}>
+                    📷 {towarPhotos.length > 0 ? "Dodaj kolejne zdjęcie" : "Dodaj zdjęcie towaru"}
+                    <input type="file" accept="image/*" capture="environment" className="hidden"
+                      onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto("towar", file); e.target.value=""; }} />
+                  </label>
                 </div>
               )}
             </div>
