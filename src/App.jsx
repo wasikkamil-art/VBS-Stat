@@ -6164,6 +6164,18 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     }
   };
 
+  // ── Helper: usuń zdjęcie kierowcy ──
+  const deleteDriverPhoto = async (eventId) => {
+    if (!window.confirm("Usunąć to zdjęcie?")) return;
+    try {
+      await deleteDoc(doc(db, "driverEvents", eventId));
+      showToast("🗑️ Zdjęcie usunięte");
+    } catch (e) {
+      console.error("Delete photo error:", e);
+      showToast("❌ Błąd usuwania");
+    }
+  };
+
   // ── Helper: status step (potwierdź/cofnij z datą) ──
   const renderStatusStep = (isDone, label, event, enabled, onConfirm, onUndo) => (
     <div style={{padding: 12, borderRadius: 12, marginBottom: 8, opacity: enabled ? 1 : 0.4,
@@ -6193,12 +6205,12 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     </div>
   );
 
-  // ── Helper: photo step (dodaj zdjęcie z datą) ──
+  // ── Helper: photo step (dodaj zdjęcie z datą + usuwanie) ──
   const renderPhotoStep = (isDone, label, photoEvent, enabled, photoType) => (
     <div style={{padding: 12, borderRadius: 12, marginBottom: 8, opacity: enabled ? 1 : 0.4,
       background: isDone ? "#f0fdf4" : "#f8fafc", border: `1px solid ${isDone ? "#bbf7d0" : "#e5e7eb"}`}}>
       <div className="flex items-center justify-between">
-        <div>
+        <div style={{flex: 1, minWidth: 0}}>
           <div style={{fontSize: 13, fontWeight: 600, color: isDone ? "#15803d" : "#374151"}}>
             {isDone ? "✅" : "📄"} {label}
           </div>
@@ -6207,13 +6219,19 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
             {photoEvent.photoUrl && <span> · <a href={photoEvent.photoUrl} target="_blank" rel="noopener noreferrer" style={{color: "#6366f1", textDecoration: "none"}}>Zobacz</a></span>}
           </div>}
         </div>
-        {enabled && !isDone && (
-          <label style={{padding: "8px 16px", borderRadius: 10, border: "none", background: "#6366f1", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4}}>
-            📷 Dodaj
-            <input type="file" accept="image/*" capture="environment" className="hidden"
-              onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto(photoType, file); e.target.value=""; }} />
-          </label>
-        )}
+        <div className="flex items-center gap-2">
+          {isDone && photoEvent?.id && (
+            <button onClick={() => deleteDriverPhoto(photoEvent.id)}
+              style={{background: "none", border: "none", color: "#d1d5db", fontSize: 14, cursor: "pointer", padding: "4px"}}>✕</button>
+          )}
+          {enabled && !isDone && (
+            <label style={{padding: "8px 16px", borderRadius: 10, border: "none", background: "#6366f1", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4}}>
+              📷 Dodaj
+              <input type="file" accept="image/*" capture="environment" className="hidden"
+                onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto(photoType, file); e.target.value=""; }} />
+            </label>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -6408,12 +6426,16 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                 {towarPhotos.length > 0 && (
                   <div style={{display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8}}>
                     {towarPhotos.map((p, i) => (
-                      <a key={p.id || i} href={p.photoUrl} target="_blank" rel="noopener noreferrer"
-                        style={{display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8,
-                          background: "#f0fdf4", border: "1px solid #bbf7d0", fontSize: 12, color: "#15803d",
-                          fontWeight: 500, textDecoration: "none"}}>
-                        📸 {i + 1} · {p.ts ? new Date(p.ts).toLocaleString("pl-PL", {hour:"2-digit",minute:"2-digit"}) : ""}
-                      </a>
+                      <div key={p.id || i} style={{display: "flex", alignItems: "center", gap: 2}}>
+                        <a href={p.photoUrl} target="_blank" rel="noopener noreferrer"
+                          style={{display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8,
+                            background: "#f0fdf4", border: "1px solid #bbf7d0", fontSize: 12, color: "#15803d",
+                            fontWeight: 500, textDecoration: "none"}}>
+                          📸 {i + 1} · {p.ts ? new Date(p.ts).toLocaleString("pl-PL", {hour:"2-digit",minute:"2-digit"}) : ""}
+                        </a>
+                        {p.id && <button onClick={() => deleteDriverPhoto(p.id)}
+                          style={{background: "none", border: "none", color: "#d1d5db", fontSize: 14, cursor: "pointer", padding: "4px"}}>✕</button>}
+                      </div>
                     ))}
                   </div>
                 )}
@@ -6454,12 +6476,16 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                 {towarDmgPhotos.length > 0 && (
                   <div style={{display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8}}>
                     {towarDmgPhotos.map((p, i) => (
-                      <a key={p.id || i} href={p.photoUrl} target="_blank" rel="noopener noreferrer"
-                        style={{display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8,
-                          background: "#fef2f2", border: "1px solid #fecaca", fontSize: 12, color: "#dc2626",
-                          fontWeight: 500, textDecoration: "none"}}>
-                        ⚠️ Uszkodzenie {i + 1}
-                      </a>
+                      <div key={p.id || i} style={{display: "flex", alignItems: "center", gap: 2}}>
+                        <a href={p.photoUrl} target="_blank" rel="noopener noreferrer"
+                          style={{display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8,
+                            background: "#fef2f2", border: "1px solid #fecaca", fontSize: 12, color: "#dc2626",
+                            fontWeight: 500, textDecoration: "none"}}>
+                          ⚠️ Uszkodzenie {i + 1}
+                        </a>
+                        {p.id && <button onClick={() => deleteDriverPhoto(p.id)}
+                          style={{background: "none", border: "none", color: "#d1d5db", fontSize: 14, cursor: "pointer", padding: "4px"}}>✕</button>}
+                      </div>
                     ))}
                   </div>
                 )}
