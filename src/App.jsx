@@ -5854,6 +5854,57 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
             </p>
           </div>
 
+          {/* DODAJ KIEROWCĘ */}
+          <div className="bg-white rounded-2xl border border-gray-100 p-4 mb-4">
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Dodaj kierowcę</div>
+            <div className="flex gap-2 flex-wrap">
+              <input id="newDriverEmail" placeholder="email kierowcy" className="flex-1 min-w-48 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+              <input id="newDriverName" placeholder="Imię i nazwisko" className="flex-1 min-w-40 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+              <button onClick={async () => {
+                const emailEl = document.getElementById("newDriverEmail");
+                const nameEl = document.getElementById("newDriverName");
+                const email = emailEl?.value?.trim().toLowerCase();
+                const name = nameEl?.value?.trim();
+                if (!email || !email.includes("@")) { showToast("❌ Podaj prawidłowy email"); return; }
+                if (users.find(u => u.email === email)) { showToast("❌ Ten email już istnieje w systemie"); return; }
+                try {
+                  // Znajdź UID z Firebase Auth (jeśli istnieje) lub użyj emaila jako ID
+                  const usersSnap = await getDocs(collection(db, "users"));
+                  const existing = usersSnap.docs.find(d => d.data().email === email);
+                  if (existing) {
+                    // User istnieje — zmień rolę na kierowca
+                    await setDoc(doc(db, "users", existing.id), { role: "kierowca", displayName: name || undefined }, { merge: true });
+                    setUsers(p => p.map(u => u.uid === existing.id ? { ...u, role: "kierowca", displayName: name || u.displayName } : u));
+                  } else {
+                    // Utwórz nowy dokument — kierowca musi się jeszcze zalogować żeby Claims zadziałały
+                    const newDocRef = doc(collection(db, "users"));
+                    await setDoc(newDocRef, {
+                      email,
+                      role: "kierowca",
+                      displayName: name || email.split("@")[0],
+                      createdAt: new Date().toISOString(),
+                      addedByAdmin: true,
+                    });
+                    setUsers(p => [...p, { uid: newDocRef.id, email, role: "kierowca", displayName: name || email.split("@")[0] }]);
+                  }
+                  logAction("add", "users", { email, role: "kierowca" });
+                  showToast("✅ Kierowca dodany");
+                  emailEl.value = "";
+                  nameEl.value = "";
+                } catch (e) {
+                  console.error(e);
+                  showToast("❌ Błąd dodawania kierowcy");
+                }
+              }}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white" style={{background:"#059669"}}>
+                + Dodaj kierowcę
+              </button>
+            </div>
+            <div className="text-xs text-gray-400 mt-2">
+              Kierowca musi mieć konto w Firebase Auth (założone w konsoli lub przez rejestrację). Po dodaniu tutaj i pierwszym zalogowaniu — zobaczy panel kierowcy.
+            </div>
+          </div>
+
           {/* DRIVERS LIST */}
           <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
             <div className="hidden md:grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-medium text-gray-400 uppercase tracking-wider">
