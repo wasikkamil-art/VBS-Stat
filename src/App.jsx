@@ -13696,13 +13696,32 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
                   </td>
                 </tr>,
                 driverStatusId === r.id && (() => {
-                  const evts = (eventsByFracht[r.id] || []).sort((a,b) => (a.ts||"").localeCompare(b.ts||""));
-                  if (evts.length === 0) return null;
+                  const allEvts = (eventsByFracht[r.id] || []).sort((a,b) => (a.ts||"").localeCompare(b.ts||""));
+                  if (allEvts.length === 0) return null;
+                  // Filtruj: pokaż tylko aktualny stan (bez cofniętych)
+                  const lastZal = allEvts.filter(e => e.type === "zaladowano").pop();
+                  const lastZalUndo = allEvts.filter(e => e.type === "cofnij_zaladowano").pop();
+                  const lastRoz = allEvts.filter(e => e.type === "rozladowano").pop();
+                  const lastRozUndo = allEvts.filter(e => e.type === "cofnij_rozladowano").pop();
+                  const isZalActive = lastZal && (!lastZalUndo || lastZal.ts > lastZalUndo.ts);
+                  const isRozActive = lastRoz && (!lastRozUndo || lastRoz.ts > lastRozUndo.ts);
+                  // Zbierz tylko aktualne eventy
+                  const evts = [];
+                  if (isZalActive) evts.push(lastZal);
+                  // Zdjęcia towaru — wszystkie (nie cofane)
+                  allEvts.filter(e => e.type === "towar_photo").forEach(e => evts.push(e));
+                  // CMR załadunek
+                  const cmrZal = allEvts.find(e => e.type === "cmr_zaladunek_photo");
+                  if (cmrZal) evts.push(cmrZal);
+                  if (isRozActive) evts.push(lastRoz);
+                  // CMR rozładunek
+                  const cmrRoz = allEvts.find(e => e.type === "cmr_rozladunek_photo") || allEvts.find(e => e.type === "cmr_photo");
+                  if (cmrRoz) evts.push(cmrRoz);
+                  // Sortuj po czasie
+                  evts.sort((a,b) => (a.ts||"").localeCompare(b.ts||""));
                   const typeLabels = {
                     zaladowano: { icon: "📦", label: "Załadunek potwierdzony", color: "#2563eb" },
                     rozladowano: { icon: "✅", label: "Rozładunek potwierdzony", color: "#15803d" },
-                    cofnij_zaladowano: { icon: "↩️", label: "Cofnięto załadunek", color: "#9ca3af" },
-                    cofnij_rozladowano: { icon: "↩️", label: "Cofnięto rozładunek", color: "#9ca3af" },
                     towar_photo: { icon: "📸", label: "Zdjęcie towaru", color: "#7c3aed" },
                     cmr_zaladunek_photo: { icon: "📄", label: "CMR załadunek", color: "#6366f1" },
                     cmr_rozladunek_photo: { icon: "📄", label: "CMR rozładunek", color: "#6366f1" },
