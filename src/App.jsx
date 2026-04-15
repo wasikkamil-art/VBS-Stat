@@ -13793,7 +13793,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-gray-100 text-gray-400 uppercase bg-gray-50">
-              {["#","Data zlec.","Data zal.","Data rozl.","Zaladunek","Rozladunek","Status rozł.","Klient","Cena EUR","KM podj.","KM lad.","KM wsz.","EUR/km lad.","EUR/km wsz.","Waga kg","Dyspozytor","Nr FV","Uwagi",""].map(h => <th key={h} className="px-2 py-2.5 text-left whitespace-nowrap">{h}</th>)}
+              {["#","Zlec.","Zał.","Rozł.","Załadunek","Rozładunek","Status","Klient","EUR","KM p.","KM ł.","KM w.","€/km ł.","€/km w.","Waga","Dysp.","FV","Uwagi",""].map(h => <th key={h} className="px-1.5 py-2 text-left whitespace-nowrap" style={{fontSize:11}}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -13808,13 +13808,13 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
                 { id: "zaplacona",    label: "Zapłacona",      bg: "#f0fdf4", color: "#166534", dot: "#22c55e" },
               ];
               return [
-                <tr key={r.id} className="border-b border-gray-50 hover:bg-blue-50 transition-colors">
-                  <td className="px-2 py-2 text-gray-400">{idx+1}</td>
-                  <td className="px-2 py-2 whitespace-nowrap">{r.dataZlecenia||"-"}</td>
-                  <td className="px-2 py-2 whitespace-nowrap text-gray-500">{r.dataZaladunku||"-"}</td>
-                  <td className="px-2 py-2 whitespace-nowrap text-gray-500">{r.dataRozladunku||"-"}</td>
-                  <td className="px-2 py-2 whitespace-nowrap">{[r.zaladunekKod,r.zaladunekKod2,r.zaladunekKod3].filter(s=>s&&s.trim()).join(" / ")||[r.skad].filter(Boolean).join("")||"-"}</td>
-                  <td className="px-2 py-2 whitespace-nowrap">{[r.dokod,r.dokod2,r.dokod3].filter(s=>s&&s.trim()).join(" / ")||"-"}</td>
+                <tr key={r.id} className="border-b border-gray-50 hover:bg-blue-50 transition-colors" style={{fontSize: 12}}>
+                  <td className="px-1.5 py-1.5 text-gray-400">{idx+1}</td>
+                  <td className="px-1.5 py-1.5 whitespace-nowrap">{r.dataZlecenia||"-"}</td>
+                  <td className="px-1.5 py-1.5 whitespace-nowrap text-gray-500">{r.dataZaladunku||"-"}</td>
+                  <td className="px-1.5 py-1.5 whitespace-nowrap text-gray-500">{r.dataRozladunku||"-"}</td>
+                  <td className="px-1.5 py-1.5 whitespace-nowrap" style={{maxWidth:120,overflow:"hidden",textOverflow:"ellipsis"}}>{[r.zaladunekKod,r.zaladunekKod2,r.zaladunekKod3].filter(s=>s&&s.trim()).join(" / ")||[r.skad].filter(Boolean).join("")||"-"}</td>
+                  <td className="px-1.5 py-1.5 whitespace-nowrap" style={{maxWidth:120,overflow:"hidden",textOverflow:"ellipsis"}}>{[r.dokod,r.dokod2,r.dokod3].filter(s=>s&&s.trim()).join(" / ")||"-"}</td>
                   <td className="px-2 py-2 whitespace-nowrap">
                     {(() => {
                       const s = r.statusRozladunku || "w_trasie";
@@ -13851,26 +13851,22 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
                               <span className="text-[10px] text-gray-400">{driverStatusId === r.id ? "▲" : "▼"}</span>
                             </button>
                           )}
-                          <div style={{fontSize: 10, color: "#9ca3af", marginTop: 3, lineHeight: 1.4}}>
-                            {r.godzZaladunku && <div>Zał: {r.dataZaladunku?.slice(5)} · {r.godzZaladunku}</div>}
-                            {r.godzRozladunku && <div>Roz: {r.dataRozladunku?.slice(5)} · {r.godzRozladunku}</div>}
-                          </div>
                         </div>
                       );
                     })()}
                   </td>
-                  <td className="px-2 py-2 whitespace-nowrap max-w-24 truncate">{r.klient||"-"}</td>
-                  <td className="px-2 py-2 text-right font-semibold text-green-700 whitespace-nowrap">{r.cenaEur ? fmt(r.cenaEur) : "-"}</td>
-                  <td className="px-2 py-2 text-right text-gray-600">{r.kmPodjazd||"-"}</td>
-                  <td className="px-2 py-2 text-right text-gray-600">{r.kmLadowne||"-"}</td>
-                  <td className="px-2 py-2 text-right text-gray-600">{r.kmWszystkie||"-"}</td>
-                  <td className="px-2 py-2 text-right text-amber-600 font-medium">{eurKmLad}</td>
-                  <td className="px-2 py-2 text-right text-blue-600 font-medium">{eurKmWsz}</td>
-                  <td className="px-2 py-2 text-gray-500">{r.wagaLadunku||"-"}</td>
-                  <td className="px-2 py-2 whitespace-nowrap text-gray-500">{r.dyspozytor||"-"}</td>
-                  <td className="px-2 py-2 whitespace-nowrap text-gray-500">{r.nrFV||"-"}</td>
-                  <td className="px-2 py-2 text-gray-500 max-w-24 truncate">{r.uwagi||""}</td>
-                  <td className="px-2 py-2 whitespace-nowrap text-right">
+                  <td className="px-1.5 py-1.5 whitespace-nowrap max-w-20 truncate">{r.klient||"-"}</td>
+                  <td className="px-1.5 py-1.5 text-right font-semibold text-green-700 whitespace-nowrap">{r.cenaEur ? fmt(r.cenaEur) : "-"}</td>
+                  <td className="px-1.5 py-1.5 text-right text-gray-600">{r.kmPodjazd||"-"}</td>
+                  <td className="px-1.5 py-1.5 text-right text-gray-600">{r.kmLadowne||"-"}</td>
+                  <td className="px-1.5 py-1.5 text-right text-gray-600">{r.kmWszystkie||"-"}</td>
+                  <td className="px-1.5 py-1.5 text-right text-amber-600 font-medium">{eurKmLad}</td>
+                  <td className="px-1.5 py-1.5 text-right text-blue-600 font-medium">{eurKmWsz}</td>
+                  <td className="px-1.5 py-1.5 text-gray-500">{r.wagaLadunku||"-"}</td>
+                  <td className="px-1.5 py-1.5 whitespace-nowrap text-gray-500">{r.dyspozytor||"-"}</td>
+                  <td className="px-1.5 py-1.5 whitespace-nowrap text-gray-500">{r.nrFV||"-"}</td>
+                  <td className="px-1.5 py-1.5 text-gray-500 max-w-20 truncate">{r.uwagi||""}</td>
+                  <td className="px-1.5 py-1.5 whitespace-nowrap text-right">
                     <div className="flex gap-1 justify-end items-center">
                       {r.urlZlecenie
                         ? <a href={safeHref(r.urlZlecenie)} target="_blank" rel="noopener noreferrer"
