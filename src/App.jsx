@@ -6164,6 +6164,33 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     }
   };
 
+  // ── Helper: oblicz opóźnienie (planowane vs faktyczne) ──
+  const calcDelay = (plannedDate, plannedTime, actualTs) => {
+    if (!plannedDate || !actualTs) return null;
+    const planned = new Date(`${plannedDate}T${plannedTime || "23:59"}:00`);
+    const actual = new Date(actualTs);
+    const diffMin = Math.round((actual - planned) / 60000);
+    if (diffMin <= 0) return { onTime: true, text: "Na czas", diffMin };
+    const h = Math.floor(diffMin / 60);
+    const m = diffMin % 60;
+    return { onTime: false, text: h > 0 ? `Opóźnienie ${h}h ${m}min` : `Opóźnienie ${m}min`, diffMin };
+  };
+
+  // ── Helper: badge opóźnienia ──
+  const renderDelayBadge = (delay) => {
+    if (!delay) return null;
+    return (
+      <span style={{
+        display: "inline-flex", alignItems: "center", gap: 4,
+        padding: "3px 8px", borderRadius: 8, fontSize: 11, fontWeight: 600,
+        background: delay.onTime ? "#f0fdf4" : delay.diffMin > 120 ? "#fef2f2" : "#fffbeb",
+        color: delay.onTime ? "#15803d" : delay.diffMin > 120 ? "#dc2626" : "#d97706",
+      }}>
+        {delay.onTime ? "✅" : "⏰"} {delay.text}
+      </span>
+    );
+  };
+
   // ── Helper: usuń zdjęcie kierowcy ──
   const deleteDriverPhoto = async (eventId) => {
     if (!window.confirm("Usunąć to zdjęcie?")) return;
@@ -6445,11 +6472,15 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
           )}
 
           {/* ═══ KAFELEK 1: ZAŁADUNEK ═══ */}
+          {(() => { const zalDelay = calcDelay(f.dataZaladunku, f.godzZaladunku, dotarcieZalEvent?.value || dotarcieZalEvent?.ts); return (
           <div style={{background: "#fff", borderRadius: 16, border: "2px solid #bfdbfe", padding: 16, marginBottom: 12}}>
-            <div className="flex items-center justify-between" style={{marginBottom: 12}}>
+            <div className="flex items-center justify-between" style={{marginBottom: 8}}>
               <div style={{fontSize: 13, fontWeight: 700, color: "#1d4ed8"}}>📦 ZAŁADUNEK</div>
               <span style={{fontSize: 11, color: "#9ca3af"}}>{fmtDate(f.dataZaladunku)}{f.godzZaladunku ? ` · ${f.godzZaladunku}` : ""}</span>
             </div>
+            {hasDotarcieZal && zalDelay && (
+              <div style={{marginBottom: 10}}>{renderDelayBadge(zalDelay)}</div>
+            )}
 
             {/* 1. Dotarcie na załadunek */}
             {renderStatusStep(hasDotarcieZal, "Dotarcie na załadunek", dotarcieZalEvent, !false, () => updateFrachtStatus(f, "dotarcie_zaladunek", new Date().toISOString()), () => undoFrachtStatus(f, "dotarcie_zaladunek"))}
@@ -6505,14 +6536,18 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
 
             {/* 5. Start do rozładunku */}
             {hasDotarcieZal && renderStatusStep(hasStartRoz, "Start do rozładunku", startRozEvent, hasCmrZal, () => updateFrachtStatus(f, "start_rozladunek", new Date().toISOString()), () => undoFrachtStatus(f, "start_rozladunek"))}
-          </div>
+          </div>); })()}
 
           {/* ═══ KAFELEK 2: ROZŁADUNEK ═══ */}
+          {(() => { const rozDelay = calcDelay(f.dataRozladunku, f.godzRozladunku, dotarcieRozEvent?.value || dotarcieRozEvent?.ts); return (
           <div style={{background: "#fff", borderRadius: 16, border: `2px solid ${hasStartRoz ? "#a7f3d0" : "#e5e7eb"}`, padding: 16, opacity: hasStartRoz ? 1 : 0.4}}>
-            <div className="flex items-center justify-between" style={{marginBottom: 12}}>
+            <div className="flex items-center justify-between" style={{marginBottom: 8}}>
               <div style={{fontSize: 13, fontWeight: 700, color: "#059669"}}>📦 ROZŁADUNEK</div>
               <span style={{fontSize: 11, color: "#9ca3af"}}>{fmtDate(f.dataRozladunku)}{f.godzRozladunku ? ` · ${f.godzRozladunku}` : ""}</span>
             </div>
+            {hasDotarcieRoz && rozDelay && (
+              <div style={{marginBottom: 10}}>{renderDelayBadge(rozDelay)}</div>
+            )}
 
             {/* 1. Dotarcie na rozładunek */}
             {renderStatusStep(hasDotarcieRoz, "Dotarcie na rozładunek", dotarcieRozEvent, hasStartRoz, () => updateFrachtStatus(f, "dotarcie_rozladunek", new Date().toISOString()), () => undoFrachtStatus(f, "dotarcie_rozladunek"))}
@@ -6565,7 +6600,7 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                 </label>
               </div>
             )}
-          </div>
+          </div>); })()}
         </div>
       </div>
     );
