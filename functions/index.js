@@ -309,9 +309,9 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
       const daysSince = lastDoneF
         ? Math.round((new Date(todayISO + "T00:00:00").getTime() - new Date(lastDoneF.dataRozladunku + "T00:00:00").getTime()) / 86400000)
         : null;
-      statusText = `⏳ Wolny${daysSince ? ` · ${daysSince}d` : ""}`;
-      statusColor = "#d97706";
-      statusBg = "#fffbeb";
+      statusText = `🔴 DO PODJĘCIA${daysSince ? ` · ${daysSince}d` : ""}`;
+      statusColor = "#dc2626";
+      statusBg = "#fef2f2";
       statusType = "wolny";
       // Pokaż ostatni kod rozładunku + datę rozładunku
       const lastKod = lastDoneF
@@ -334,8 +334,8 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
     return days < INACTIVE_DAYS;
   });
 
-  // Sortuj: W trasie → Pauza/Baza → Wolny
-  const order = { trasa: 0, pauza: 1, wolny: 2 };
+  // Sortuj: DO PODJĘCIA (wolny) na górze → W trasie → Pauza/Baza
+  const order = { wolny: 0, trasa: 1, pauza: 2 };
   activeVehicles.sort((a, b) => (order[a.statusType] ?? 9) - (order[b.statusType] ?? 9));
 
   // Layout kartowy (mobile-friendly): 1 wiersz per pojazd, w środku nazwa + plakietka + detale.
