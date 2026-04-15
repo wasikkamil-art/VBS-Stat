@@ -6218,6 +6218,15 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                     📞 {f.zaladunekTelefon}
                   </a>
                 )}
+                {f.zaladunekGeo && (
+                  <a href={`https://www.google.com/maps/dir/?api=1&destination=${f.zaladunekGeo}&travelmode=driving`}
+                    target="_blank" rel="noopener noreferrer"
+                    style={{display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8,
+                      padding: "8px 14px", borderRadius: 10, background: "#3b82f6", color: "#fff",
+                      fontSize: 13, fontWeight: 600, textDecoration: "none"}}>
+                    🧭 Nawiguj do załadunku
+                  </a>
+                )}
               </div>
             </div>
             {/* Rozładunek */}
@@ -6235,6 +6244,15 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                 {f.rozladunekTelefon && (
                   <a href={`tel:${f.rozladunekTelefon}`} style={{fontSize: 13, color: "#3b82f6", textDecoration: "none", display: "block", marginTop: 4}}>
                     📞 {f.rozladunekTelefon}
+                  </a>
+                )}
+                {f.rozladunekGeo && (
+                  <a href={`https://www.google.com/maps/dir/?api=1&destination=${f.rozladunekGeo}&travelmode=driving`}
+                    target="_blank" rel="noopener noreferrer"
+                    style={{display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8,
+                      padding: "8px 14px", borderRadius: 10, background: "#10b981", color: "#fff",
+                      fontSize: 13, fontWeight: 600, textDecoration: "none"}}>
+                    🧭 Nawiguj do rozładunku
                   </a>
                 )}
               </div>
@@ -14207,15 +14225,131 @@ NIE podawaj cen frachtu, warunków płatności, NIP, danych spedytora ani warunk
   );
 }
 
+// ═══════ GEO PICKER — mini mapa Leaflet do wyboru lokalizacji ═══════
+function GeoPickerModal({ initialGeo, address, onSave, onClose }) {
+  const mapRef = useRef(null);
+  const mapInstance = useRef(null);
+  const markerRef = useRef(null);
+  const [searchQuery, setSearchQuery] = useState(address || "");
+  const [coords, setCoords] = useState(() => {
+    if (initialGeo) {
+      const [lat, lng] = initialGeo.split(",").map(Number);
+      if (lat && lng) return { lat, lng };
+    }
+    return { lat: 51.5, lng: 19.0 }; // Polska centrum
+  });
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    if (!mapRef.current || mapInstance.current) return;
+    if (typeof window.L === "undefined") return;
+    const map = window.L.map(mapRef.current).setView([coords.lat, coords.lng], initialGeo ? 15 : 6);
+    window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© OpenStreetMap",
+      maxZoom: 19,
+    }).addTo(map);
+    const marker = window.L.marker([coords.lat, coords.lng], { draggable: true }).addTo(map);
+    marker.on("dragend", () => {
+      const pos = marker.getLatLng();
+      setCoords({ lat: pos.lat, lng: pos.lng });
+    });
+    map.on("click", (e) => {
+      marker.setLatLng(e.latlng);
+      setCoords({ lat: e.latlng.lat, lng: e.latlng.lng });
+    });
+    mapInstance.current = map;
+    markerRef.current = marker;
+    // Jeśli mamy adres ale nie mamy geo, szukaj automatycznie
+    if (!initialGeo && address) {
+      setTimeout(() => searchAddress(address), 500);
+    }
+    return () => { map.remove(); mapInstance.current = null; };
+  }, []);
+
+  const searchAddress = async (query) => {
+    if (!query?.trim()) return;
+    setSearching(true);
+    try {
+      const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`);
+      const data = await resp.json();
+      if (data.length > 0) {
+        const { lat, lon } = data[0];
+        const newCoords = { lat: parseFloat(lat), lng: parseFloat(lon) };
+        setCoords(newCoords);
+        if (mapInstance.current) {
+          mapInstance.current.setView([newCoords.lat, newCoords.lng], 16);
+          markerRef.current?.setLatLng([newCoords.lat, newCoords.lng]);
+        }
+      }
+    } catch (e) { console.error("Geocoding error:", e); }
+    setSearching(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{background:"rgba(0,0,0,0.5)"}}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl flex flex-col" style={{maxHeight:"90vh"}}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <h3 className="text-base font-bold text-gray-900">📍 Wybierz lokalizację</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+        </div>
+        <div className="px-5 py-3">
+          <div className="flex gap-2">
+            <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && searchAddress(searchQuery)}
+              placeholder="Szukaj adresu..."
+              className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+            <button onClick={() => searchAddress(searchQuery)} disabled={searching}
+              className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+              style={{background: searching ? "#9ca3af" : "#3b82f6"}}>
+              {searching ? "..." : "Szukaj"}
+            </button>
+          </div>
+          <div className="text-xs text-gray-400 mt-1">Kliknij w mapę lub przeciągnij pin na dokładne miejsce (np. brama wjazdowa)</div>
+        </div>
+        <div ref={mapRef} style={{height: 350, width: "100%"}}></div>
+        <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between">
+          <span className="text-xs text-gray-500">
+            {coords.lat.toFixed(6)}, {coords.lng.toFixed(6)}
+          </span>
+          <div className="flex gap-2">
+            <button onClick={onClose}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-gray-500 hover:bg-gray-100">Anuluj</button>
+            <button onClick={() => onSave(`${coords.lat.toFixed(6)},${coords.lng.toFixed(6)}`)}
+              className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+              style={{background:"#111827"}}>
+              ✓ Zapisz lokalizację
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }) {
-  const empty = {dataZlecenia:"",dataZaladunku:"",dataRozladunku:"",godzZaladunku:"",godzRozladunku:"",skad:"",zaladunekKod:"",zaladunekKod2:"",zaladunekKod3:"",zaladunekAdres:"",zaladunekTelefon:"",dokod:"",dokod2:"",dokod3:"",rozladunekAdres:"",rozladunekTelefon:"",klient:"",cenaEur:"",kmPodjazd:"",kmLadowne:"",kmWszystkie:"",wagaLadunku:"",dyspozytor:"",nrFV:"",dataWyslania:"",terminPlatnosci:"",uwagi:"",urlZlecenie:"",nrZlecenia:"",nrRef:"",towarOpis:"",towarPalety:"",towarIloscPalet:"",zaladunekTyp:"",vehicleId:defaultVehicleId};
+  const empty = {dataZlecenia:"",dataZaladunku:"",dataRozladunku:"",godzZaladunku:"",godzRozladunku:"",skad:"",zaladunekKod:"",zaladunekKod2:"",zaladunekKod3:"",zaladunekAdres:"",zaladunekTelefon:"",zaladunekGeo:"",dokod:"",dokod2:"",dokod3:"",rozladunekAdres:"",rozladunekTelefon:"",rozladunekGeo:"",klient:"",cenaEur:"",kmPodjazd:"",kmLadowne:"",kmWszystkie:"",wagaLadunku:"",dyspozytor:"",nrFV:"",dataWyslania:"",terminPlatnosci:"",uwagi:"",urlZlecenie:"",nrZlecenia:"",nrRef:"",towarOpis:"",towarPalety:"",towarIloscPalet:"",zaladunekTyp:"",vehicleId:defaultVehicleId};
   const [f, setF] = useState(record ? {...empty,...record} : empty);
   const set = (k,v) => setF(prev => { const next={...prev,[k]:v}; const pod=parseInt(next.kmPodjazd)||0; const lad=parseInt(next.kmLadowne)||0; next.kmWszystkie=pod+lad>0?String(pod+lad):""; return next; });
   const eurKmLad = f.kmLadowne && f.cenaEur ? (parseFloat(f.cenaEur)/parseInt(f.kmLadowne)).toFixed(2) : null;
   const eurKmWsz = f.kmWszystkie && f.cenaEur ? (parseFloat(f.cenaEur)/parseInt(f.kmWszystkie)).toFixed(2) : null;
+  const [geoPickerFor, setGeoPickerFor] = useState(null); // "zaladunek" | "rozladunek" | null
   const inp = "w-full text-sm px-3 py-2 rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-gray-400";
   const lbl = "text-xs font-semibold text-gray-500 mb-1 block";
   return (
+    <>
+    {geoPickerFor && (
+      <GeoPickerModal
+        initialGeo={geoPickerFor === "zaladunek" ? f.zaladunekGeo : f.rozladunekGeo}
+        address={geoPickerFor === "zaladunek"
+          ? [f.zaladunekAdres, f.zaladunekKod].filter(Boolean).join(", ")
+          : [f.rozladunekAdres, f.dokod].filter(Boolean).join(", ")}
+        onSave={(geo) => {
+          set(geoPickerFor === "zaladunek" ? "zaladunekGeo" : "rozladunekGeo", geo);
+          setGeoPickerFor(null);
+        }}
+        onClose={() => setGeoPickerFor(null)}
+      />
+    )}
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{background:"rgba(0,0,0,0.4)"}}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col" style={{maxHeight:"92vh"}}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
@@ -14291,11 +14425,33 @@ function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }
               </button>
             )}
           </div>
-          {/* ADRESY + TELEFONY */}
+          {/* ADRESY + TELEFONY + GEO */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div><label className={lbl}>Adres załadunku (pełny)</label><input placeholder="ulica, miasto" value={f.zaladunekAdres||""} onChange={e => set("zaladunekAdres",e.target.value)} className={inp} /></div>
+            <div>
+              <label className={lbl}>Adres załadunku (pełny)</label>
+              <input placeholder="ulica, miasto" value={f.zaladunekAdres||""} onChange={e => set("zaladunekAdres",e.target.value)} className={inp} />
+              <div className="flex items-center gap-2 mt-1">
+                <button type="button" onClick={() => setGeoPickerFor("zaladunek")}
+                  className="text-xs font-medium px-2 py-1 rounded-lg transition-all hover:bg-blue-50"
+                  style={{ color: f.zaladunekGeo ? "#15803d" : "#3b82f6", background: f.zaladunekGeo ? "#f0fdf4" : "transparent" }}>
+                  {f.zaladunekGeo ? `✅ ${f.zaladunekGeo}` : "📍 Ustaw lokalizację"}
+                </button>
+                {f.zaladunekGeo && <button type="button" onClick={() => set("zaladunekGeo","")} className="text-xs text-gray-400 hover:text-red-400">✕</button>}
+              </div>
+            </div>
             <div><label className={lbl}>Telefon na załadunku</label><input placeholder="+48..." value={f.zaladunekTelefon||""} onChange={e => set("zaladunekTelefon",e.target.value)} className={inp} /></div>
-            <div><label className={lbl}>Adres rozładunku (pełny)</label><input placeholder="ulica, miasto" value={f.rozladunekAdres||""} onChange={e => set("rozladunekAdres",e.target.value)} className={inp} /></div>
+            <div>
+              <label className={lbl}>Adres rozładunku (pełny)</label>
+              <input placeholder="ulica, miasto" value={f.rozladunekAdres||""} onChange={e => set("rozladunekAdres",e.target.value)} className={inp} />
+              <div className="flex items-center gap-2 mt-1">
+                <button type="button" onClick={() => setGeoPickerFor("rozladunek")}
+                  className="text-xs font-medium px-2 py-1 rounded-lg transition-all hover:bg-blue-50"
+                  style={{ color: f.rozladunekGeo ? "#15803d" : "#3b82f6", background: f.rozladunekGeo ? "#f0fdf4" : "transparent" }}>
+                  {f.rozladunekGeo ? `✅ ${f.rozladunekGeo}` : "📍 Ustaw lokalizację"}
+                </button>
+                {f.rozladunekGeo && <button type="button" onClick={() => set("rozladunekGeo","")} className="text-xs text-gray-400 hover:text-red-400">✕</button>}
+              </div>
+            </div>
             <div><label className={lbl}>Telefon na rozładunku</label><input placeholder="+39..." value={f.rozladunekTelefon||""} onChange={e => set("rozladunekTelefon",e.target.value)} className={inp} /></div>
           </div>
           {/* TOWAR */}
@@ -14357,5 +14513,6 @@ function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }
         </div>
       </div>
     </div>
+    </>
   );
 }
