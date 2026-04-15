@@ -6137,8 +6137,13 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
       const sRef = storageRef(storage, path);
       await uploadBytes(sRef, file);
       const url = await getDownloadURL(sRef);
+      const eventType = type === "towar" ? "towar_photo"
+        : type === "cmr_zaladunek" ? "cmr_zaladunek_photo"
+        : type === "cmr_rozladunek" ? "cmr_rozladunek_photo"
+        : type === "cmr" ? "cmr_photo"
+        : `${type}_photo`;
       await addDoc(collection(db, "driverEvents"), {
-        type: type === "cmr" ? "cmr_photo" : "towar_photo",
+        type: eventType,
         frachtId: selectedFracht.id,
         vehicleId: vehicle?.id,
         photoUrl: url,
@@ -6146,7 +6151,7 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
         driverName: user.displayName || user.email,
         ts: new Date().toISOString(),
       });
-      showToast(type === "cmr" ? "✅ Zdjęcie CMR dodane" : "✅ Zdjęcie towaru dodane");
+      showToast(type.includes("cmr") ? "✅ Zdjęcie CMR dodane" : "✅ Zdjęcie towaru dodane");
       return url;
     } catch (e) {
       console.error("Photo upload error:", e);
