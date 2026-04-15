@@ -187,7 +187,8 @@ service cloud.firestore {
     match /driverEvents/{docId} {
       allow read: if isAuth();
       allow create: if isAuth();
-      allow update, delete: if canEdit();
+      allow update: if canEdit();
+      allow delete: if canEdit() || (isAuth() && resource.data.driverEmail == request.auth.token.email);
     }
 
     // ═══════════════════════════════════════════════════════════════
