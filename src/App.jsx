@@ -6292,6 +6292,20 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
           <div style={{background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", padding: 16}}>
             <div style={{fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 12}}>Status realizacji</div>
 
+            {/* Planowane daty */}
+            <div style={{padding: "10px 14px", borderRadius: 12, marginBottom: 8, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
+              <div className="flex items-center justify-between" style={{marginBottom: f.dataRozladunku ? 6 : 0}}>
+                <span style={{fontSize: 12, color: "#9ca3af"}}>📋 Załadunek planowany</span>
+                <span style={{fontSize: 12, fontWeight: 600, color: "#6b7280"}}>{fmtDate(f.dataZaladunku)}{f.godzZaladunku ? ` · ${f.godzZaladunku}` : ""}</span>
+              </div>
+              {f.dataRozladunku && (
+                <div className="flex items-center justify-between">
+                  <span style={{fontSize: 12, color: "#9ca3af"}}>📋 Rozładunek planowany</span>
+                  <span style={{fontSize: 12, fontWeight: 600, color: "#6b7280"}}>{fmtDate(f.dataRozladunku)}{f.godzRozladunku ? ` · ${f.godzRozladunku}` : ""}</span>
+                </div>
+              )}
+            </div>
+
             {/* ZAŁADUNEK */}
             <div style={{padding: 14, borderRadius: 12, marginBottom: 8,
               background: hasZal ? "#f0fdf4" : "#f8fafc",
@@ -13694,6 +13708,24 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
                             Status kierowcy — {evts[0]?.driverName || evts[0]?.driverEmail || "—"}
                           </div>
                           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            {/* Planowane daty */}
+                            {[
+                              r.dataZaladunku && { label: "Załadunek planowany", date: `${r.dataZaladunku}${r.godzZaladunku ? ` · ${r.godzZaladunku}` : ""}`, icon: "📋" },
+                              r.dataRozladunku && { label: "Rozładunek planowany", date: `${r.dataRozladunku}${r.godzRozladunku ? ` · ${r.godzRozladunku}` : ""}`, icon: "📋" },
+                            ].filter(Boolean).map((p, pi) => (
+                              <div key={`plan_${pi}`} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 20, flexShrink: 0 }}>
+                                  <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#d1d5db", border: "2px solid #e5e7eb", marginTop: 4 }}></div>
+                                  <div style={{ width: 1, height: 20, background: "#d1d5db" }}></div>
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                    <span style={{ fontSize: 13, fontWeight: 500, color: "#9ca3af" }}>{p.icon} {p.label}</span>
+                                    <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: "auto" }}>{p.date}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
                             {evts.map((ev, i) => {
                               const meta = typeLabels[ev.type] || { icon: "•", label: ev.type, color: "#6b7280" };
                               const time = ev.value || ev.ts;
