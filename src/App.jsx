@@ -6188,7 +6188,7 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     return (
       <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", paddingTop: "env(safe-area-inset-top, 0px)", paddingBottom: 40 }}>
         <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet"/>
-        <div className="max-w-lg mx-auto p-4" style={{fontSize: `${zoomScale}rem`}}>
+        <div className="max-w-lg mx-auto p-4" style={{zoom: driverZoom === "large" ? 1.2 : 1}}>
           <button onClick={() => setSelectedFracht(null)}
             className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-3 py-2"
             style={{ minHeight: 44 }}>
@@ -6536,7 +6536,7 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     return (
       <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", paddingTop: "env(safe-area-inset-top, 0px)" }}>
         <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet"/>
-        <div className="max-w-lg mx-auto p-4" style={{fontSize: `${zoomScale}rem`}}>
+        <div className="max-w-lg mx-auto p-4" style={{zoom: driverZoom === "large" ? 1.2 : 1}}>
           <button onClick={() => setDriverTab("home")} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-3 py-2" style={{ minHeight: 44 }}>← Powrót</button>
           <div className="text-lg font-bold text-gray-900 mb-4">{subTitles[driverTab] || driverTab}</div>
 
@@ -6680,7 +6680,7 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
         </div>
       </div>
 
-      <div className="max-w-lg mx-auto p-4" style={{fontSize: `${zoomScale}rem`}}>
+      <div className="max-w-lg mx-auto p-4" style={{zoom: driverZoom === "large" ? 1.2 : 1}}>
         {!vehicle && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-4 text-center">
             <div className="text-2xl mb-2">🚛</div>
