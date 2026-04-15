@@ -14286,7 +14286,7 @@ function GeoPickerModal({ initialGeo, address, onSave, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{background:"rgba(0,0,0,0.5)"}}>
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{background:"rgba(0,0,0,0.6)", zIndex: 9999}}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl flex flex-col" style={{maxHeight:"90vh"}}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <h3 className="text-base font-bold text-gray-900">📍 Wybierz lokalizację</h3>
@@ -14357,7 +14357,17 @@ function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">x</button>
         </div>
         <div className="overflow-y-auto flex-1 px-6 py-4 space-y-4">
+          {/* Legenda */}
+          <div className="flex items-center gap-4 text-xs">
+            <span className="flex items-center gap-1"><span style={{width:10,height:10,borderRadius:3,background:"#ecfdf5",border:"1px solid #a7f3d0",display:"inline-block"}}></span> Widoczne dla kierowcy</span>
+            <span className="flex items-center gap-1"><span style={{width:10,height:10,borderRadius:3,background:"#fff",border:"1px solid #e5e7eb",display:"inline-block"}}></span> Tylko biuro</span>
+          </div>
+
           <div><label className={lbl}>Pojazd</label><select value={f.vehicleId} onChange={e => set("vehicleId",e.target.value)} className={inp}><option value="">wybierz pojazd</option>{vehicles.map(v => <option key={v.id} value={v.id}>{v.plate} {v.brand}</option>)}</select></div>
+
+          {/* ── SEKCJA KIEROWCY (zielona ramka) ── */}
+          <div style={{border:"2px solid #a7f3d0", borderRadius:12, padding:"12px", background:"#fafffe"}}>
+            <div className="text-xs font-semibold text-emerald-600 uppercase tracking-wider mb-3">🧑‍✈️ Dane widoczne dla kierowcy</div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <div><label className={lbl}>Data zlecenia</label><input type="date" value={f.dataZlecenia} onChange={e => set("dataZlecenia",e.target.value)} className={inp} /></div>
             <div><label className={lbl}>Data zaladunku</label><input type="date" value={f.dataZaladunku} onChange={e => set("dataZaladunku",e.target.value)} className={inp} /></div>
@@ -14462,11 +14472,17 @@ function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }
             <div><label className={lbl}>Typ załadunku</label><input placeholder="Bok, tył, góra" value={f.zaladunekTyp||""} onChange={e => set("zaladunekTyp",e.target.value)} className={inp} /></div>
           </div>
           <div><label className={lbl}>Wymiary palet / szczegóły towaru</label><textarea rows={2} placeholder="2× 240x120x240, 1× 240x120xH200..." value={f.towarPalety||""} onChange={e => set("towarPalety",e.target.value)} className={inp+" resize-none"} /></div>
+          <div><label className={lbl}>Uwagi dla kierowcy</label><textarea rows={2} placeholder="dodatkowe informacje..." value={f.uwagi} onChange={e => set("uwagi",e.target.value)} className={inp+" resize-none"} /></div>
+          </div>{/* zamknięcie zielonej sekcji kierowcy */}
+
+          {/* ── SEKCJA BIUROWA (szara) ── */}
+          <div style={{border:"1px solid #e5e7eb", borderRadius:12, padding:"12px", background:"#fafafa"}}>
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">🏢 Dane biurowe (kierowca nie widzi)</div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div><label className={lbl}>Klient</label><input placeholder="nazwa klienta" value={f.klient} onChange={e => set("klient",e.target.value)} className={inp} /></div>
             <div><label className={lbl}>Dyspozytor</label><input placeholder="imie dyspozytora" value={f.dyspozytor} onChange={e => set("dyspozytor",e.target.value)} className={inp} /></div>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
             <div><label className={lbl}>Cena EUR</label><input type="number" placeholder="0.00" value={f.cenaEur} onChange={e => set("cenaEur",e.target.value)} className={inp} /></div>
             <div><label className={lbl}>KM podjazd</label><input type="number" placeholder="0" value={f.kmPodjazd} onChange={e => set("kmPodjazd",e.target.value)} className={inp} /></div>
             <div><label className={lbl}>KM ladowne</label><input type="number" placeholder="0" value={f.kmLadowne} onChange={e => set("kmLadowne",e.target.value)} className={inp} /></div>
@@ -14479,7 +14495,7 @@ function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }
             <div><label className={lbl}>Data wyslania FV</label><input type="date" value={f.dataWyslania} onChange={e => set("dataWyslania",e.target.value)} className={inp} /></div>
             <div><label className={lbl}>Termin platnosci</label><input type="date" value={f.terminPlatnosci} onChange={e => set("terminPlatnosci",e.target.value)} className={inp} /></div>
           </div>
-          <div><label className={lbl}>Uwagi</label><textarea rows={2} placeholder="dodatkowe informacje..." value={f.uwagi} onChange={e => set("uwagi",e.target.value)} className={inp+" resize-none"} /></div>
+          </div>{/* zamknięcie szarej sekcji biurowej */}
 
           {/* ZLECENIE */}
           <div className="pt-2 border-t border-gray-100">
@@ -14496,6 +14512,8 @@ function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }
                   onUploaded={(url, parsed) => { set("urlZlecenie", url); if(parsed) Object.entries(parsed).forEach(([k,v]) => { if(v != null && v !== "") set(k, String(v)); }); }}
                   label="Zastąp"
                 />
+                <button type="button" onClick={() => set("urlZlecenie", "")}
+                  className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50" title="Usuń zlecenie">✕</button>
               </div>
             ) : (
               <ZlecenieUploadBtn
