@@ -13268,7 +13268,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                             className="text-xs px-2 py-1 rounded-lg font-medium transition-all hover:bg-blue-100"
                             style={{background:"#f0fdf4", color:"#15803d"}}>📄 Otwórz</a>
                         : <ZlecenieUploadBtn frachtId={r.id}
-                            onUploaded={(url, parsed) => { const p = parsed || {}; onUpdate(r.id, { urlZlecenie: url, ...Object.fromEntries(Object.entries(p).filter(([,v]) => v != null && v !== "")) }); }} />
+                            onUploaded={(url, parsed) => { const p = parsed || {}; const existing = frachtyList.find(x => x.id === r.id) || {}; const onlyNew = Object.fromEntries(Object.entries(p).filter(([k,v]) => v != null && v !== "" && !existing[k])); onUpdate(r.id, { urlZlecenie: url, ...onlyNew }); }} />
                       }
                       <button onClick={() => setEditFVId(r.id)}
                         className="w-6 h-6 rounded-lg flex items-center justify-center transition-all hover:bg-indigo-50 text-xs"
@@ -13706,7 +13706,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
                             className="text-xs px-2 py-1 rounded-lg font-medium transition-all hover:bg-blue-100"
                             style={{background:"#f0fdf4", color:"#15803d"}}>📄 Otwórz</a>
                         : <ZlecenieUploadBtn frachtId={r.id}
-                            onUploaded={(url, parsed) => { const p = parsed || {}; onUpdate(r.id, { urlZlecenie: url, ...Object.fromEntries(Object.entries(p).filter(([,v]) => v != null && v !== "")) }); }} />
+                            onUploaded={(url, parsed) => { const p = parsed || {}; const existing = frachtyList.find(x => x.id === r.id) || {}; const onlyNew = Object.fromEntries(Object.entries(p).filter(([k,v]) => v != null && v !== "" && !existing[k])); onUpdate(r.id, { urlZlecenie: url, ...onlyNew }); }} />
                       }
                       <button onClick={() => { setEditId(r.id); setShowForm(true); }} className="w-6 h-6 rounded-lg flex items-center justify-center transition-all hover:bg-indigo-50 text-xs" style={{background:"#f3f4f6"}} title="Edytuj">✏️</button>
                       <button onClick={() => { if(window.confirm("Usunac?")) onDelete(r.id); }} className="w-6 h-6 rounded-lg flex items-center justify-center text-xs bg-red-50 hover:bg-red-100 text-red-400">✕</button>
@@ -14509,7 +14509,7 @@ function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }
                 </div>
                 <ZlecenieUploadBtn
                   frachtId={record?.id || "new"}
-                  onUploaded={(url, parsed) => { set("urlZlecenie", url); if(parsed) Object.entries(parsed).forEach(([k,v]) => { if(v != null && v !== "") set(k, String(v)); }); }}
+                  onUploaded={(url, parsed) => { set("urlZlecenie", url); if(parsed) Object.entries(parsed).forEach(([k,v]) => { if(v != null && v !== "" && !f[k]) set(k, String(v)); }); }}
                   label="Zastąp"
                 />
                 <button type="button" onClick={() => set("urlZlecenie", "")}
@@ -14518,7 +14518,7 @@ function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }
             ) : (
               <ZlecenieUploadBtn
                 frachtId={record?.id || "new"}
-                onUploaded={(url, parsed) => { set("urlZlecenie", url); if(parsed) Object.entries(parsed).forEach(([k,v]) => { if(v != null && v !== "") set(k, String(v)); }); }}
+                onUploaded={(url, parsed) => { set("urlZlecenie", url); if(parsed) Object.entries(parsed).forEach(([k,v]) => { if(v != null && v !== "" && !f[k]) set(k, String(v)); }); }}
                 label="📎 Wgraj zlecenie (PDF / JPG)"
                 fullWidth
               />
