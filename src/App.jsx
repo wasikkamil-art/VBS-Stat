@@ -6223,15 +6223,21 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                     📞 {f.zaladunekTelefon}
                   </a>
                 )}
-                {f.zaladunekGeo && (
-                  <a href={`https://www.google.com/maps/dir/?api=1&destination=${f.zaladunekGeo}&travelmode=driving`}
-                    target="_blank" rel="noopener noreferrer"
-                    style={{display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8,
-                      padding: "8px 14px", borderRadius: 10, background: "#3b82f6", color: "#fff",
-                      fontSize: 13, fontWeight: 600, textDecoration: "none"}}>
-                    🧭 Nawiguj do załadunku
-                  </a>
-                )}
+                {f.zaladunekGeo && (() => {
+                  const [lat,lng] = f.zaladunekGeo.split(",").map(Number);
+                  return (
+                    <div className="flex items-center gap-2" style={{marginTop: 6}}>
+                      <a href={`https://www.google.com/maps/dir/?api=1&destination=${f.zaladunekGeo}&travelmode=driving`}
+                        target="_blank" rel="noopener noreferrer"
+                        style={{display: "inline-flex", alignItems: "center", gap: 4,
+                          padding: "5px 10px", borderRadius: 8, background: "#3b82f6", color: "#fff",
+                          fontSize: 11, fontWeight: 600, textDecoration: "none"}}>
+                        🧭 Nawiguj
+                      </a>
+                      <span style={{fontSize: 11, color: "#9ca3af"}}>{lat?.toFixed(5)}, {lng?.toFixed(5)}</span>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
             {/* Rozładunek */}
@@ -6251,15 +6257,21 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                     📞 {f.rozladunekTelefon}
                   </a>
                 )}
-                {f.rozladunekGeo && (
-                  <a href={`https://www.google.com/maps/dir/?api=1&destination=${f.rozladunekGeo}&travelmode=driving`}
-                    target="_blank" rel="noopener noreferrer"
-                    style={{display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8,
-                      padding: "8px 14px", borderRadius: 10, background: "#10b981", color: "#fff",
-                      fontSize: 13, fontWeight: 600, textDecoration: "none"}}>
-                    🧭 Nawiguj do rozładunku
-                  </a>
-                )}
+                {f.rozladunekGeo && (() => {
+                  const [lat,lng] = f.rozladunekGeo.split(",").map(Number);
+                  return (
+                    <div className="flex items-center gap-2" style={{marginTop: 6}}>
+                      <a href={`https://www.google.com/maps/dir/?api=1&destination=${f.rozladunekGeo}&travelmode=driving`}
+                        target="_blank" rel="noopener noreferrer"
+                        style={{display: "inline-flex", alignItems: "center", gap: 4,
+                          padding: "5px 10px", borderRadius: 8, background: "#10b981", color: "#fff",
+                          fontSize: 11, fontWeight: 600, textDecoration: "none"}}>
+                        🧭 Nawiguj
+                      </a>
+                      <span style={{fontSize: 11, color: "#9ca3af"}}>{lat?.toFixed(5)}, {lng?.toFixed(5)}</span>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>
