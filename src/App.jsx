@@ -5940,7 +5940,7 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
 
             {!loading && driverUsers.map((u, i) => {
               const assignedVehicle = activeVehicles.find(v => v.assignedDriver === u.email);
-              const availableVehicles = activeVehicles.filter(v => !v.assignedDriver || v.assignedDriver === u.email);
+              const availableVehicles = activeVehicles; // pokaż wszystkie — admin może nadpisać przypisanie
               return (
                 <div key={u.uid} className="md:grid md:grid-cols-12 flex flex-wrap gap-y-3 px-5 py-4 items-center hover:bg-gray-50 transition-colors"
                   style={{ borderBottom: i === driverUsers.length - 1 ? "none" : "1px solid #f9fafb" }}>
@@ -5987,7 +5987,7 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
                         defaultValue="">
                         <option value="" disabled>Przypisz do pojazdu…</option>
                         {availableVehicles.map(v => (
-                          <option key={v.id} value={v.id}>{v.plate} {v.brand ? `(${v.brand})` : ""}</option>
+                          <option key={v.id} value={v.id}>{v.plate} {v.brand ? `(${v.brand})` : ""}{v.assignedDriver && v.assignedDriver !== u.email ? ` ← ${(v.driverHistory||[]).find(d=>!d.to)?.name || v.assignedDriver}` : ""}</option>
                         ))}
                       </select>
                     )}
