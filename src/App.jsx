@@ -5869,34 +5869,29 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
                 const email = emailEl?.value?.trim().toLowerCase();
                 const name = nameEl?.value?.trim();
                 if (!email || !email.includes("@")) { showToast("❌ Podaj prawidłowy email"); return; }
-                if (users.find(u => u.email === email)) { showToast("❌ Ten email już istnieje w systemie"); return; }
+                if (users.find(u => u.email === email && u.role === "kierowca")) { showToast("❌ Ten kierowca już jest w systemie"); return; }
                 try {
-                  // Znajdź UID z Firebase Auth (jeśli istnieje) lub użyj emaila jako ID
-                  const usersSnap = await getDocs(collection(db, "users"));
-                  const existing = usersSnap.docs.find(d => d.data().email === email);
-                  if (existing) {
-                    // User istnieje — zmień rolę na kierowca
-                    await setDoc(doc(db, "users", existing.id), { role: "kierowca", displayName: name || undefined }, { merge: true });
-                    setUsers(p => p.map(u => u.uid === existing.id ? { ...u, role: "kierowca", displayName: name || u.displayName } : u));
-                  } else {
-                    // Utwórz nowy dokument — kierowca musi się jeszcze zalogować żeby Claims zadziałały
-                    const newDocRef = doc(collection(db, "users"));
-                    await setDoc(newDocRef, {
-                      email,
-                      role: "kierowca",
-                      displayName: name || email.split("@")[0],
-                      createdAt: new Date().toISOString(),
-                      addedByAdmin: true,
+                  const addDriver = httpsCallable(functions, "addDriverByEmail");
+                  const result = await addDriver({ email, displayName: name });
+                  if (result.data.success) {
+                    setUsers(p => {
+                      const exists = p.find(u => u.uid === result.data.uid);
+                      if (exists) return p.map(u => u.uid === result.data.uid ? { ...u, role: "kierowca", displayName: result.data.displayName } : u);
+                      return [...p, { uid: result.data.uid, email, role: "kierowca", displayName: result.data.displayName }];
                     });
-                    setUsers(p => [...p, { uid: newDocRef.id, email, role: "kierowca", displayName: name || email.split("@")[0] }]);
+                    logAction("add", "users", { email, role: "kierowca" });
+                    showToast("✅ Kierowca dodany");
+                    emailEl.value = "";
+                    nameEl.value = "";
                   }
-                  logAction("add", "users", { email, role: "kierowca" });
-                  showToast("✅ Kierowca dodany");
-                  emailEl.value = "";
-                  nameEl.value = "";
                 } catch (e) {
                   console.error(e);
-                  showToast("❌ Błąd dodawania kierowcy");
+                  const msg = e.message || "";
+                  if (msg.includes("nie istnieje") || msg.includes("not-found")) {
+                    showToast("❌ Konto nie istnieje w Firebase Auth — najpierw załóż konto w konsoli");
+                  } else {
+                    showToast("❌ Błąd dodawania kierowcy");
+                  }
                 }
               }}
                 className="px-4 py-2 rounded-lg text-sm font-semibold text-white" style={{background:"#059669"}}>

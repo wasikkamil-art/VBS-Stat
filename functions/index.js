@@ -136,6 +136,56 @@ exports.setUserRole = onCall(
 );
 
 // ═══════════════════════════════════════════════════════════════
+// 2b. CALLABLE — admin dodaje kierowcę po emailu
+//     Szuka UID w Firebase Auth, ustawia rolę kierowca + tworzy/aktualizuje Firestore
+// ═══════════════════════════════════════════════════════════════
+exports.addDriverByEmail = onCall(
+  { region: "europe-west1" },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musisz być zalogowany.");
+    const callerRole = request.auth.token.role;
+    if (callerRole !== "admin") throw new HttpsError("permission-denied", "Tylko admin.");
+
+    const { email, displayName } = request.data;
+    if (!email) throw new HttpsError("invalid-argument", "Wymagany email.");
+
+    try {
+      // Szukaj użytkownika w Firebase Auth po emailu
+      let userRecord;
+      try {
+        userRecord = await getAuth().getUserByEmail(email.trim().toLowerCase());
+      } catch (e) {
+        // Użytkownik nie istnieje w Auth — zwróć błąd
+        throw new HttpsError("not-found", `Konto ${email} nie istnieje w Firebase Auth. Najpierw załóż konto w konsoli Firebase.`);
+      }
+
+      const uid = userRecord.uid;
+
+      // Ustaw Custom Claims
+      await getAuth().setCustomUserClaims(uid, {
+        ...userRecord.customClaims,
+        role: "kierowca",
+      });
+
+      // Utwórz/aktualizuj dokument w Firestore
+      await getFirestore().doc(`users/${uid}`).set({
+        email: email.trim().toLowerCase(),
+        role: "kierowca",
+        displayName: displayName || userRecord.displayName || email.split("@")[0],
+        claimsUpdatedAt: new Date().toISOString(),
+      }, { merge: true });
+
+      console.log(`✅ Admin ${request.auth.uid} dodał kierowcę: ${email} (uid: ${uid})`);
+      return { success: true, uid, email, displayName: displayName || userRecord.displayName || email.split("@")[0] };
+    } catch (e) {
+      if (e.code) throw e; // re-throw HttpsError
+      console.error("Błąd addDriverByEmail:", e);
+      throw new HttpsError("internal", "Błąd dodawania kierowcy.");
+    }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════
 // 3. SCHEDULED — wysyłka emaili ze statusami pojazdów
 //    3x dziennie: 8:00, 14:00, 20:00 (Europe/Warsaw)
 //    Odbiorcy z kolekcji Firestore: emailRecipients
