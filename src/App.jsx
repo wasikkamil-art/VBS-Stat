@@ -5626,13 +5626,16 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
     const today = new Date().toISOString().split("T")[0];
     setVehicles(prev => prev.map(v => {
       if (v.id === vehicleId) {
-        // Zamknij poprzedniego kierowcę jeśli jest
-        const hist = (v.driverHistory || []).map(d => !d.to ? { ...d, to: today } : d);
-        // Dodaj nowy wpis
+        const hist = v.driverHistory || [];
+        // Sprawdź czy ten kierowca już jest aktywny na tym pojeździe
+        const alreadyActive = hist.some(d => !d.to && d.email === driverEmail);
+        if (alreadyActive) return { ...v, assignedDriver: driverEmail };
+        // Zamknij tylko aktywnego kierowcę z emailem INNYM niż nowy (nie ruszaj imion)
+        const updated = hist.map(d => !d.to && d.email !== driverEmail ? { ...d, to: today } : d);
         const newEntry = { id: Date.now().toString(36), name: driverName || driverEmail, email: driverEmail, phone: "", from: today, to: "" };
-        return { ...v, driverHistory: [...hist, newEntry], assignedDriver: driverEmail };
+        return { ...v, driverHistory: [...updated, newEntry], assignedDriver: driverEmail };
       }
-      // Jeśli ten kierowca był wcześniej przypisany do innego auta — odpisz
+      // Odpisz tego kierowcę z innego auta (tylko jego wpis, nie ruszaj innych)
       if (v.assignedDriver === driverEmail) {
         const hist = (v.driverHistory || []).map(d => !d.to && d.email === driverEmail ? { ...d, to: today } : d);
         return { ...v, driverHistory: hist, assignedDriver: "" };
