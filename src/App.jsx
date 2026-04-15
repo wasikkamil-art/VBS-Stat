@@ -6166,11 +6166,15 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     const rozEvent = myEvents.filter(e => e.type === "rozladowano").pop();
     const rozUndo = myEvents.filter(e => e.type === "cofnij_rozladowano").pop();
     const towarPhoto = myEvents.find(e => e.type === "towar_photo");
-    const cmrPhoto = myEvents.find(e => e.type === "cmr_photo");
+    const cmrZalPhoto = myEvents.find(e => e.type === "cmr_zaladunek_photo");
+    const cmrRozPhoto = myEvents.find(e => e.type === "cmr_rozladunek_photo");
+    // Fallback: stary typ "cmr_photo" traktuj jako cmr rozładunek
+    const cmrPhotoLegacy = myEvents.find(e => e.type === "cmr_photo");
     // Cofnięcie anuluje potwierdzenie jeśli jest nowsze
     const hasZal = (!!zalEvent && (!zalUndo || zalEvent.ts > zalUndo.ts)) || !!f._driverZaladowano;
     const hasRoz = (!!rozEvent && (!rozUndo || rozEvent.ts > rozUndo.ts)) || f.statusRozladunku === "rozladowano";
-    const hasCMR = !!cmrPhoto;
+    const hasCmrZal = !!cmrZalPhoto;
+    const hasCmrRoz = !!cmrRozPhoto || !!cmrPhotoLegacy;
 
     return (
       <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", paddingTop: "env(safe-area-inset-top, 0px)", paddingBottom: 40 }}>
@@ -6313,6 +6317,7 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                   </button>
                 )}
               </div>
+              {/* Zdjęcie towaru */}
               {hasZal && !towarPhoto && (
                 <label style={{display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 10,
                   padding: "10px", borderRadius: 10, border: "1px dashed #d1d5db", background: "#f9fafb",
@@ -6328,6 +6333,27 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                   <span style={{fontSize: 12, color: "#15803d", fontWeight: 500}}>Zdjęcie towaru dodane</span>
                 </div>
               )}
+            </div>
+
+            {/* CMR ZAŁADUNEK */}
+            <div style={{padding: 14, borderRadius: 12, marginBottom: 8, opacity: hasZal ? 1 : 0.4,
+              background: hasCmrZal ? "#f0fdf4" : "#f8fafc",
+              border: `1px solid ${hasCmrZal ? "#bbf7d0" : "#e5e7eb"}`}}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div style={{fontSize: 13, fontWeight: 600, color: hasCmrZal ? "#15803d" : "#374151"}}>
+                    {hasCmrZal ? "✅ CMR załadunek" : "📄 CMR załadunek"}
+                  </div>
+                  {hasCmrZal && <div style={{fontSize: 12, color: "#6b7280", marginTop: 2}}>Zdjęcie CMR dodane</div>}
+                </div>
+                {hasZal && !hasCmrZal && (
+                  <label style={{padding: "8px 16px", borderRadius: 10, border: "none", background: "#6366f1", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6}}>
+                    📷 Dodaj CMR
+                    <input type="file" accept="image/*" capture="environment" className="hidden"
+                      onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto("cmr_zaladunek", file); e.target.value=""; }} />
+                  </label>
+                )}
+              </div>
             </div>
 
             {/* ROZŁADUNEK */}
@@ -6358,22 +6384,22 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
               </div>
             </div>
 
-            {/* CMR */}
+            {/* CMR ROZŁADUNEK */}
             <div style={{padding: 14, borderRadius: 12, opacity: hasRoz ? 1 : 0.4,
-              background: hasCMR ? "#f0fdf4" : "#f8fafc",
-              border: `1px solid ${hasCMR ? "#bbf7d0" : "#e5e7eb"}`}}>
+              background: hasCmrRoz ? "#f0fdf4" : "#f8fafc",
+              border: `1px solid ${hasCmrRoz ? "#bbf7d0" : "#e5e7eb"}`}}>
               <div className="flex items-center justify-between">
                 <div>
-                  <div style={{fontSize: 13, fontWeight: 600, color: hasCMR ? "#15803d" : "#374151"}}>
-                    {hasCMR ? "✅ CMR dodany" : "📄 CMR"}
+                  <div style={{fontSize: 13, fontWeight: 600, color: hasCmrRoz ? "#15803d" : "#374151"}}>
+                    {hasCmrRoz ? "✅ CMR rozładunek" : "📄 CMR rozładunek"}
                   </div>
-                  {cmrPhoto && <div style={{fontSize: 12, color: "#6b7280", marginTop: 2}}>Zdjęcie CMR dodane</div>}
+                  {hasCmrRoz && <div style={{fontSize: 12, color: "#6b7280", marginTop: 2}}>Zdjęcie CMR dodane</div>}
                 </div>
-                {hasRoz && !hasCMR && (
-                  <label style={{padding: "8px 16px", borderRadius: 10, border: "none", background: "#6366f1", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer"}}>
-                    📷 Dodaj zdjęcie
+                {hasRoz && !hasCmrRoz && (
+                  <label style={{padding: "8px 16px", borderRadius: 10, border: "none", background: "#6366f1", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6}}>
+                    📷 Dodaj CMR
                     <input type="file" accept="image/*" capture="environment" className="hidden"
-                      onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto("cmr", file); e.target.value=""; }} />
+                      onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto("cmr_rozladunek", file); e.target.value=""; }} />
                   </label>
                 )}
               </div>
