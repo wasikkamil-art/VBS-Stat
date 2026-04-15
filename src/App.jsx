@@ -14246,16 +14246,20 @@ function GeoPickerModal({ initialGeo, address, onSave, onClose }) {
   const [coords, setCoords] = useState(() => {
     if (initialGeo) {
       const [lat, lng] = initialGeo.split(",").map(Number);
-      if (lat && lng) return { lat, lng };
+      if (lat && lng && !(Math.abs(lat - 51.5) < 0.01 && Math.abs(lng - 19.0) < 0.01)) return { lat, lng };
     }
     return { lat: 51.5, lng: 19.0 }; // Polska centrum
   });
+  const hasRealGeo = initialGeo && (() => {
+    const [lat, lng] = initialGeo.split(",").map(Number);
+    return lat && lng && !(Math.abs(lat - 51.5) < 0.01 && Math.abs(lng - 19.0) < 0.01);
+  })();
   const [searching, setSearching] = useState(false);
 
   useEffect(() => {
     if (!mapRef.current || mapInstance.current) return;
     if (typeof window.L === "undefined") return;
-    const map = window.L.map(mapRef.current).setView([coords.lat, coords.lng], initialGeo ? 15 : 6);
+    const map = window.L.map(mapRef.current).setView([coords.lat, coords.lng], hasRealGeo ? 15 : 6);
     window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "© OpenStreetMap",
       maxZoom: 19,
@@ -14271,8 +14275,8 @@ function GeoPickerModal({ initialGeo, address, onSave, onClose }) {
     });
     mapInstance.current = map;
     markerRef.current = marker;
-    // Jeśli mamy adres ale nie mamy geo, szukaj automatycznie
-    if (!initialGeo && address) {
+    // Zawsze szukaj adresu automatycznie jeśli jest dostępny
+    if (address) {
       setTimeout(() => searchAddress(address), 500);
     }
     return () => { map.remove(); mapInstance.current = null; };
