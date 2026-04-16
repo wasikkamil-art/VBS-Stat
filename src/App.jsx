@@ -7379,7 +7379,10 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
             // Znajdź aktualny status (dziś)
             const todayISO = now.toISOString().slice(0,10);
             const todayEntry = dayMap[todayISO];
-            const todaySt = todayEntry ? stInfo(todayEntry.status) : null;
+            // Fallback: jeśli brak wpisu w pauzy ale jest aktywny fracht → Jazda
+            const hasActiveFracht = active.length > 0;
+            const todaySt = todayEntry ? stInfo(todayEntry.status)
+              : hasActiveFracht ? stInfo("jazda") : null;
 
             // Lista wpisów w tym miesiącu (oryginalne wpisy, nie rozwinięte)
             const monthEntries = pauzy
@@ -7806,6 +7809,7 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                 const todayISO = new Date().toISOString().slice(0,10);
                 const todayP = pauzy.find(p => p.start && p.end && p.start <= todayISO && p.end >= todayISO);
                 if (todayP) { const labels = {jazda:"Jazda",pauza9:"Pauza 9h",pauza11:"Pauza 11h",pauza24:"Pauza 24h",pauza45:"Pauza 45h",baza:"Baza"}; return labels[todayP.status] || todayP.status; }
+                if (active.length > 0) return "Jazda";
                 return "Pauzy, jazda";
               })() },
             { id: "mapa", icon: "🗺️", label: "Mapa", gradient: "linear-gradient(135deg, #ec4899, #db2777)", sub: "Wkrótce" },
