@@ -6,7 +6,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 // 👇 WKLEJ TUTAJ SWÓJ firebaseConfig z Firebase Console
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, orderBy, arrayUnion, serverTimestamp, writeBatch, limit as firestoreLimit } from "firebase/firestore";
-import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, browserLocalPersistence, setPersistence } from "firebase/auth";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
 import { getFunctions, httpsCallable } from "firebase/functions";
@@ -28,6 +28,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db        = getFirestore(app);
 const auth      = getAuth(app);
+setPersistence(auth, browserLocalPersistence).catch(e => console.warn("setPersistence error", e));
 const storage   = getStorage(app);
 const functions = getFunctions(app, "europe-west1");
 
@@ -350,6 +351,8 @@ const VehicleIcon = ({v, size=20, className=""}) => <span className={className}>
 // ═══════════════════════════════════════════════════════════════════════════════
 // LOGIN SCREEN
 // ═══════════════════════════════════════════════════════════════════════════════
+let _justLoggedIn = false; // module-level flaga: true tuż po login, false po pierwszym onAuthStateChanged
+
 function LoginScreen() {
   const [email, setEmail]       = useState("");
   const [password, setPassword] = useState("");
@@ -361,6 +364,7 @@ function LoginScreen() {
     setError(null);
     setLoading(true);
     try {
+      _justLoggedIn = true;
       await signInWithEmailAndPassword(auth, email, password);
       logAction("login", "auth", { email });
     } catch (err) {
@@ -450,7 +454,11 @@ export default function Root() {
       if (u) {
         try {
           // 1. Odczytaj rolę z Custom Claims (token Auth) + Firestore
-          await u.getIdToken(true); // force refresh przy logowaniu
+          // Force refresh tylko przy świeżym logowaniu, nie przy reload strony
+          if (_justLoggedIn) {
+            await u.getIdToken(true);
+            _justLoggedIn = false;
+          }
           const tokenResult = await u.getIdTokenResult();
           let tokenRole = tokenResult.claims.role;
 
