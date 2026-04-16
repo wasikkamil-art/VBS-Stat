@@ -792,8 +792,8 @@ function exportCostsToExcel(costs, vehicles, categories, filterYear, filterMonth
 
 // ── Per-role default tab access (fallback kiedy user nie ma jeszcze allowedTabs) ──
 const DEFAULT_TABS_BY_ROLE = {
-  admin:      ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","payments","users","email","logi","sprawy","chat"],
-  dyspozytor: ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","sprawy","chat"],
+  admin:      ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","payments","users","email","logi","sprawy","kierowcy","chat"],
+  dyspozytor: ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","sprawy","kierowcy","chat"],
   podglad:    ["dashboard","frachty","vehicles","serwis","docs","imi","chat"],
   kierowca:   ["driver"],  // kierowca widzi TYLKO swój panel
 };
@@ -821,6 +821,8 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   }, [isAdmin, allowedTabs, role]);
   const canSeeTab = (id) => effectiveTabs.includes(id);
   const [tab, setTab]               = useState("dashboard");
+  const [dkFilter, setDkFilter]     = useState("all"); // filtr panelu kierowców
+  const [dkSection, setDkSection]   = useState("tankowania"); // sekcja panelu kierowców
   // Auto-switch z niedozwolonej zakładki na pierwszą dostępną (np. gdy admin odbierze dostęp)
   useEffect(() => {
     if (!canSeeTab(tab)) {
@@ -2128,6 +2130,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               { id: "email", label: "Email statusy", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> },
               { id: "logi", label: "Logi aktywności", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> },
               { id: "sprawy", label: "Sprawy", badge: sprawyList.filter(s => !['zamknieta','wygrana','przegrana'].includes(s.status) && (s.przypisani||[]).includes(user?.email)).length || null, icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v6"/><line x1="7" y1="13" x2="12" y2="13"/><line x1="7" y1="17" x2="10" y2="17"/></svg> },
+              { id: "kierowcy", label: "Panel kierowców", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/><path d="M8 12a4 4 0 0 0 8 0"/><path d="M17 21v-2a4 4 0 0 0-4-4H5"/></svg> },
               { id: "chat", label: "Czat", badge: chatUnreadCount || null, icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> },
             ].filter(item => canSeeTab(item.id)).map((item) => (
               <button key={item.id} onClick={() => setTab(item.id)}
@@ -3248,6 +3251,202 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             );
           })()}
 
+          {tab === "kierowcy" && canSeeTab("kierowcy") && (() => {
+            // ── PANEL KIEROWCÓW — podgląd tankowań, dokumentów, statusów ──
+            // Drivers list (from users with role kierowca + assigned vehicles)
+            const drivers = appUsers.filter(u => u.role === "kierowca");
+            const driverEmails = drivers.map(d => d.email);
+
+            // Filtered data
+            const filteredFuel = dkFilter === "all"
+              ? fuelEntries
+              : fuelEntries.filter(fe => fe.driverEmail === dkFilter || fe.vehicleId === dkFilter);
+            const filteredDocs = dkFilter === "all"
+              ? driverDocs
+              : driverDocs.filter(dd => dd.driverEmail === dkFilter);
+            const filteredEvents = dkFilter === "all"
+              ? driverEvents
+              : driverEvents.filter(de => de.driverEmail === dkFilter || de.vehicleId === dkFilter);
+
+            const fmtD = (d) => { if (!d) return "—"; const parts = d.split(/[-T ]/); return parts.length >= 3 ? `${parts[2]}.${parts[1]}.${parts[0]}` : d; };
+            const countryFlag = (c) => ({PL:"\u{1F1F5}\u{1F1F1}",DE:"\u{1F1E9}\u{1F1EA}",NL:"\u{1F1F3}\u{1F1F1}",BE:"\u{1F1E7}\u{1F1EA}",FR:"\u{1F1EB}\u{1F1F7}",CZ:"\u{1F1E8}\u{1F1FF}",AT:"\u{1F1E6}\u{1F1F9}",IT:"\u{1F1EE}\u{1F1F9}"})[c]||c||"";
+            const DOC_TYPES = {paragon:"🧾",faktura:"📄",mandat:"⚠️",serwis:"🔧",opony:"🔄",mycie:"🚿",parking:"🅿️",autostrada:"🛣️",hotel:"🏨",inne:"📋"};
+            const driverLabel = (email) => {
+              const u = appUsers.find(a => a.email === email);
+              return u ? (u.displayName || u.name || email.split("@")[0]) : email;
+            };
+            const vehicleLabel = (vid) => {
+              const v = vehicles.find(x => x.id === vid);
+              return v ? v.plate : vid;
+            };
+
+            return (
+              <div>
+                <h2 className="text-xl font-bold text-gray-800 mb-4">Panel kierowców</h2>
+
+                {/* Filter bar */}
+                <div className="flex flex-wrap items-center gap-2 mb-4">
+                  <select value={dkFilter} onChange={e => setDkFilter(e.target.value)}
+                    className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white" style={{minWidth:200}}>
+                    <option value="all">Wszyscy kierowcy</option>
+                    {drivers.map(d => (
+                      <option key={d.email} value={d.email}>{d.displayName || d.name || d.email}</option>
+                    ))}
+                  </select>
+
+                  {/* Section tabs */}
+                  <div className="flex gap-1 ml-auto">
+                    {[["tankowania","⛽ Tankowania"],["dokumenty","📄 Dokumenty"],["statusy","🚛 Statusy"]].map(([k,l]) => (
+                      <button key={k} onClick={() => setDkSection(k)}
+                        className="px-3 py-2 rounded-lg text-sm font-medium transition-all"
+                        style={{
+                          background: dkSection === k ? "#1e40af" : "#f1f5f9",
+                          color: dkSection === k ? "#fff" : "#64748b",
+                        }}>{l}</button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* ── TANKOWANIA ── */}
+                {dkSection === "tankowania" && (
+                  <div className="space-y-2">
+                    {filteredFuel.length === 0 && <div className="text-center py-8 text-gray-400">Brak tankowań</div>}
+                    <div className="overflow-x-auto">
+                      {filteredFuel.length > 0 && (
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-left text-xs text-gray-500 border-b border-gray-100">
+                              <th className="pb-2 pr-3">Data</th>
+                              <th className="pb-2 pr-3">Kierowca</th>
+                              <th className="pb-2 pr-3">Pojazd</th>
+                              <th className="pb-2 pr-3 text-right">Litry</th>
+                              <th className="pb-2 pr-3 text-right">Przebieg</th>
+                              <th className="pb-2 pr-3">Stacja</th>
+                              <th className="pb-2 pr-3">Kraj</th>
+                              <th className="pb-2 pr-3 text-right">Cena/L</th>
+                              <th className="pb-2 pr-3">Typ</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {[...filteredFuel].sort((a,b) => (b.date||"").localeCompare(a.date||"")).map(fe => (
+                              <tr key={fe.id} className="border-b border-gray-50 hover:bg-gray-50">
+                                <td className="py-2 pr-3 text-gray-700">{fmtD(fe.date)}</td>
+                                <td className="py-2 pr-3 text-gray-600">{driverLabel(fe.driverEmail)}</td>
+                                <td className="py-2 pr-3 font-medium text-gray-800">{vehicleLabel(fe.vehicleId)}</td>
+                                <td className="py-2 pr-3 text-right font-semibold" style={{color: fe.isAdblue ? "#0284c7" : "#059669"}}>{(fe.liters||0).toLocaleString("pl-PL")} L</td>
+                                <td className="py-2 pr-3 text-right text-gray-600">{fe.mileage ? fe.mileage.toLocaleString("pl-PL") : "—"}</td>
+                                <td className="py-2 pr-3 text-gray-500">{fe.station || "—"}</td>
+                                <td className="py-2 pr-3">{countryFlag(fe.country)}</td>
+                                <td className="py-2 pr-3 text-right text-gray-500">{fe.pricePerL ? `${fe.pricePerL.toFixed(2)} ${fe.currency||"EUR"}` : "—"}</td>
+                                <td className="py-2 pr-3">
+                                  {fe.isAdblue && <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-sky-100 text-sky-700">AdBlue</span>}
+                                  {fe.fullTank && !fe.isAdblue && <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">FULL</span>}
+                                  {!fe.fullTank && !fe.isAdblue && <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-500">Diesel</span>}
+                                  {fe.adblueL > 0 && !fe.isAdblue && <span className="ml-1 text-xs text-sky-600">+{fe.adblueL}L AB</span>}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                    {/* Podsumowanie */}
+                    {filteredFuel.length > 0 && (() => {
+                      const diesel = filteredFuel.filter(f => !f.isAdblue).reduce((s,f) => s + (f.liters||0), 0);
+                      const adblue = filteredFuel.reduce((s,f) => s + (f.isAdblue ? (f.liters||0) : 0) + (f.adblueL||0), 0);
+                      return (
+                        <div className="flex gap-4 mt-3 pt-3 border-t border-gray-100 text-sm">
+                          <span className="text-gray-500">Razem: <strong className="text-green-700">{diesel.toLocaleString("pl-PL")} L diesel</strong></span>
+                          {adblue > 0 && <span className="text-gray-500">| <strong className="text-sky-700">{adblue.toLocaleString("pl-PL")} L AdBlue</strong></span>}
+                          <span className="text-gray-500">| <strong className="text-gray-800">{filteredFuel.length} tankowań</strong></span>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {/* ── DOKUMENTY ── */}
+                {dkSection === "dokumenty" && (
+                  <div className="space-y-2">
+                    {filteredDocs.length === 0 && <div className="text-center py-8 text-gray-400">Brak dokumentów</div>}
+                    {[...filteredDocs].sort((a,b) => (b.createdAt||"").localeCompare(a.createdAt||"")).map(dd => (
+                      <div key={dd.id} className="bg-white rounded-xl border border-gray-100 p-4 flex items-start gap-3">
+                        <div className="text-2xl">{DOC_TYPES[dd.type] || "📋"}</div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-gray-800 text-sm">{dd.description}</div>
+                          <div className="text-xs text-gray-400 mt-1">
+                            <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">{dd.type}</span>
+                            <span className="ml-2">{driverLabel(dd.driverEmail)}</span>
+                            <span className="ml-2">{fmtD(dd.createdAt)}</span>
+                            {dd.vehicleId && <span className="ml-2 text-gray-500">{vehicleLabel(dd.vehicleId)}</span>}
+                          </div>
+                        </div>
+                        {dd.photoUrl && (
+                          <a href={dd.photoUrl} target="_blank" rel="noopener noreferrer">
+                            <img src={dd.photoUrl} alt="" className="w-16 h-16 object-cover rounded-lg border border-gray-200"/>
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* ── STATUSY (driverEvents) ── */}
+                {dkSection === "statusy" && (
+                  <div className="space-y-2">
+                    {filteredEvents.length === 0 && <div className="text-center py-8 text-gray-400">Brak zdarzeń</div>}
+                    <div className="overflow-x-auto">
+                      {filteredEvents.length > 0 && (
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-left text-xs text-gray-500 border-b border-gray-100">
+                              <th className="pb-2 pr-3">Czas</th>
+                              <th className="pb-2 pr-3">Kierowca</th>
+                              <th className="pb-2 pr-3">Typ</th>
+                              <th className="pb-2 pr-3">Pojazd</th>
+                              <th className="pb-2 pr-3">Zdjęcie</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {[...filteredEvents].sort((a,b) => (b.ts||"").localeCompare(a.ts||"")).slice(0, 100).map(de => {
+                              const typeLabels = {
+                                dotarcie_zaladunek: "📍 Dotarcie załadunek",
+                                zaladowano: "📦 Załadowano",
+                                start_rozladunek: "🚛 Start do rozładunku",
+                                dotarcie_rozladunek: "📍 Dotarcie rozładunek",
+                                rozladowano: "✅ Rozładowano",
+                                towar_photo: "📷 Zdjęcie towaru",
+                                cmr_zaladunek_photo: "📄 CMR załadunek",
+                                cmr_rozladunek_photo: "📄 CMR rozładunek",
+                                towar_damage_photo: "⚠️ Uszkodzenia",
+                                uwagi_zaladunek: "📝 Uwagi załadunek",
+                                uwagi_rozladunek: "📝 Uwagi rozładunek",
+                              };
+                              const tLabel = typeLabels[de.type] || de.type;
+                              const tsStr = de.ts ? de.ts.replace("T"," ").slice(0,16) : "—";
+                              return (
+                                <tr key={de.id} className="border-b border-gray-50 hover:bg-gray-50">
+                                  <td className="py-2 pr-3 text-gray-600 text-xs">{tsStr}</td>
+                                  <td className="py-2 pr-3 text-gray-700">{driverLabel(de.driverEmail)}</td>
+                                  <td className="py-2 pr-3">{tLabel}</td>
+                                  <td className="py-2 pr-3 text-gray-500">{vehicleLabel(de.vehicleId)}</td>
+                                  <td className="py-2 pr-3">
+                                    {de.photoUrl && <a href={de.photoUrl} target="_blank" rel="noopener noreferrer"><img src={de.photoUrl} alt="" className="w-10 h-10 object-cover rounded border border-gray-200"/></a>}
+                                    {de.note && <span className="text-xs text-gray-500 italic">{de.note.slice(0,50)}{de.note.length > 50 ? "…" : ""}</span>}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           {tab === "sprawy" && canSeeTab("sprawy") && (
             <SprawyTab
               sprawyList={sprawyList}
@@ -3379,6 +3578,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             { id: "serwis", label: "Serwis", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> },
             ...((isAdmin||isDyspozytor) ? [
               { id: "sprawy", label: "Sprawy", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v6"/><line x1="7" y1="13" x2="12" y2="13"/><line x1="7" y1="17" x2="10" y2="17"/></svg> },
+              { id: "kierowcy", label: "Kierowcy", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><circle cx="12" cy="12" r="10"/></svg> },
             ] : []),
             { id: "chat", label: "Czat", badge: chatUnreadCount || null, icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> },
             ...(isAdmin ? [
