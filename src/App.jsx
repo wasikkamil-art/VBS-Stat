@@ -7392,8 +7392,52 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
             // Mini kalendarz
             const firstDow = (new Date(curY, curM, 1).getDay() + 6) % 7;
 
+            // Tacho — 28-dniowy cykl
+            const tachoData = (() => {
+              if (!vehicle || !vehicle.tachoStart) return null;
+              const [ty,tm,td] = vehicle.tachoStart.split("-").map(Number);
+              const tachoStart = new Date(ty, tm-1, td);
+              const todayD = new Date(); todayD.setHours(0,0,0,0);
+              const daysSince = Math.round((todayD - tachoStart) / 86400000);
+              const daysLeft = 28 - daysSince;
+              const stopDate = new Date(tachoStart); stopDate.setDate(stopDate.getDate() + 28);
+              const stopStr = stopDate.toLocaleDateString("pl-PL", {day:"2-digit", month:"2-digit"});
+              const isRed = daysLeft < 5;
+              const isYellow = daysLeft >= 5 && daysLeft < 10;
+              return { daysSince, daysLeft, stopStr, isRed, isYellow,
+                bg: isRed ? "#fef2f2" : isYellow ? "#fffbeb" : "#f0fdf4",
+                color: isRed ? "#b91c1c" : isYellow ? "#92400e" : "#15803d",
+                icon: isRed ? "🔴" : isYellow ? "🟡" : "🟢",
+              };
+            })();
+
             return (
               <div>
+                {/* Tacho */}
+                {tachoData && (
+                  <div style={{
+                    background: tachoData.bg, borderRadius: 14, padding: "14px 16px", marginBottom: 12,
+                    border: `1.5px solid ${tachoData.color}22`,
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 18 }}>{tachoData.icon}</span>
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: tachoData.color }}>
+                            {tachoData.daysLeft > 0 ? `Tacho: ${tachoData.daysLeft} dni` : tachoData.daysLeft === 0 ? "Tacho: dziś powrót!" : `Tacho: przekroczone o ${Math.abs(tachoData.daysLeft)} dni!`}
+                          </div>
+                          <div style={{ fontSize: 11, color: tachoData.color, opacity: 0.7 }}>do {tachoData.stopStr}</div>
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: tachoData.color }}>{tachoData.daysSince}/28</div>
+                    </div>
+                    {/* Progress bar */}
+                    <div style={{ marginTop: 8, background: "#fff", borderRadius: 6, height: 8, overflow: "hidden" }}>
+                      <div style={{ width: `${Math.min((tachoData.daysSince / 28) * 100, 100)}%`, height: "100%", borderRadius: 6, background: tachoData.color, transition: "width 0.3s" }}/>
+                    </div>
+                  </div>
+                )}
+
                 {/* Aktualny status */}
                 <div style={{
                   background: todaySt ? todaySt.bg : "#f9fafb",
