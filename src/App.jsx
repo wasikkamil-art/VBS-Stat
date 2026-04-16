@@ -6951,90 +6951,58 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                 )}
 
                 {/* ── STATS VIEW ── */}
-                {fuelView === "stats" && (
-                  <div>
-                    {/* Bar chart liters */}
-                    <div style={{ background: "#fff", borderRadius: 14, padding: 14, boxShadow: "0 1px 4px rgba(0,0,0,0.08)", marginBottom: 12 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 10 }}>Litry na tankowanie</div>
-                      {sorted.slice(0,8).map(e => {
-                        const pct = Math.min((e.liters||0) / 500 * 100, 100);
+                {fuelView === "stats" && (() => {
+                  // Grupuj fuelEntries wg miesiąca YYYY-MM
+                  const byMonth = {};
+                  fuelEntries.forEach(e => {
+                    const ym = (e.date || "").slice(0, 7);
+                    if (!ym) return;
+                    if (!byMonth[ym]) byMonth[ym] = { diesel: 0, adblue: 0, minKm: Infinity, maxKm: 0, count: 0 };
+                    const m = byMonth[ym];
+                    if (!e.isAdblue) m.diesel += (e.liters || 0);
+                    if (e.isAdblue) m.adblue += (e.liters || 0);
+                    m.adblue += (e.adblueL || 0); // adblue dolane przy dieslu
+                    if (e.mileage > 0) { m.minKm = Math.min(m.minKm, e.mileage); m.maxKm = Math.max(m.maxKm, e.mileage); }
+                    m.count++;
+                  });
+                  const months = Object.entries(byMonth).sort((a,b) => b[0].localeCompare(a[0]));
+
+                  return (
+                    <div>
+                      {months.length === 0 && (
+                        <div style={{ textAlign: "center", padding: "32px 0", color: "#9ca3af" }}>
+                          <div style={{ fontSize: 32, marginBottom: 8 }}>📊</div>
+                          <div style={{ fontSize: 13 }}>Dodaj tankowania aby zobaczyć statystyki</div>
+                        </div>
+                      )}
+                      {months.map(([ym, m]) => {
+                        const [y, mo] = ym.split("-");
+                        const label = new Date(+y, +mo - 1).toLocaleDateString("pl-PL", { month: "long", year: "numeric" });
+                        const km = m.maxKm > m.minKm ? m.maxKm - m.minKm : 0;
                         return (
-                          <div key={e.id} style={{ marginBottom: 6 }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#64748b", marginBottom: 2 }}>
-                              <span>{fmtD(e.date)}</span><span>{(e.liters||0)} L</span>
+                          <div key={ym} style={{ background: "#fff", borderRadius: 14, padding: 14, boxShadow: "0 1px 3px rgba(0,0,0,0.08)", marginBottom: 10 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#1e293b", marginBottom: 10, textTransform: "capitalize" }}>{label}</div>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                              <div style={{ padding: "10px 6px", borderRadius: 10, background: "#f0fdf4", textAlign: "center" }}>
+                                <div style={{ fontSize: 16, fontWeight: 800, color: "#059669" }}>{m.diesel > 0 ? m.diesel.toLocaleString("pl-PL") : "—"}</div>
+                                <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>Diesel L</div>
+                              </div>
+                              <div style={{ padding: "10px 6px", borderRadius: 10, background: "#e0f2fe", textAlign: "center" }}>
+                                <div style={{ fontSize: 16, fontWeight: 800, color: "#0284c7" }}>{m.adblue > 0 ? m.adblue.toLocaleString("pl-PL") : "—"}</div>
+                                <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>AdBlue L</div>
+                              </div>
+                              <div style={{ padding: "10px 6px", borderRadius: 10, background: "#f5f3ff", textAlign: "center" }}>
+                                <div style={{ fontSize: 16, fontWeight: 800, color: "#7c3aed" }}>{km > 0 ? km.toLocaleString("pl-PL") : "—"}</div>
+                                <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>km</div>
+                              </div>
                             </div>
-                            <div style={{ background: "#f1f5f9", borderRadius: 5, height: 16, overflow: "hidden" }}>
-                              <div style={{ width: `${pct}%`, height: "100%", borderRadius: 5, background: e.fullTank ? "linear-gradient(90deg, #3b82f6, #2563eb)" : "linear-gradient(90deg, #94a3b8, #64748b)" }}/>
-                            </div>
+                            <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 6, textAlign: "right" }}>{m.count} tankowań{km > 0 ? ` · ${m.minKm.toLocaleString("pl-PL")} → ${m.maxKm.toLocaleString("pl-PL")} km` : ""}</div>
                           </div>
                         );
                       })}
                     </div>
-                    {/* Consumption between FULLs */}
-                    {fulls.length >= 2 && (
-                      <div style={{ background: "#fff", borderRadius: 14, padding: 14, boxShadow: "0 1px 4px rgba(0,0,0,0.08)", marginBottom: 12 }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 8 }}>Spalanie między tankowaniami (FULL)</div>
-                        {(() => {
-                          const segs = [];
-                          for (let i = 1; i < fulls.length; i++) {
-                            const km = fulls[i].mileage - fulls[i-1].mileage;
-                            const cons = km > 0 ? ((fulls[i].liters / km) * 100).toFixed(1) : "—";
-                            segs.push({ date: fulls[i].date, km, consumption: cons });
-                          }
-                          return segs.reverse().map((s,i) => (
-                            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: i < segs.length-1 ? "1px solid #f1f5f9" : "none" }}>
-                              <span style={{ fontSize: 11, color: "#64748b" }}>{fmtD(s.date)}</span>
-                              <span style={{ fontSize: 11, color: "#475569" }}>{s.km.toLocaleString("pl-PL")} km</span>
-                              <span style={{ fontSize: 13, fontWeight: 700, color: parseFloat(s.consumption) > 35 ? "#dc2626" : parseFloat(s.consumption) > 32 ? "#f59e0b" : "#059669" }}>{s.consumption} L/100</span>
-                            </div>
-                          ));
-                        })()}
-                      </div>
-                    )}
-                    {/* Country breakdown */}
-                    {fuelEntries.length > 0 && (
-                      <div style={{ background: "#fff", borderRadius: 14, padding: 14, boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 8 }}>Wg kraju</div>
-                        {(() => {
-                          const byC = {};
-                          fuelEntries.forEach(e => { if (!byC[e.country]) byC[e.country] = { liters: 0, count: 0 }; byC[e.country].liters += (e.liters||0); byC[e.country].count++; });
-                          return Object.entries(byC).sort((a,b) => b[1].liters - a[1].liters).map(([c,d]) => (
-                            <div key={c} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderBottom: "1px solid #f8fafc" }}>
-                              <span style={{ fontSize: 18 }}>{countryFlag(c)}</span>
-                              <span style={{ fontSize: 12, fontWeight: 600, color: "#334155", flex: 1 }}>{c}</span>
-                              <span style={{ fontSize: 11, color: "#64748b" }}>{d.count}x</span>
-                              <span style={{ fontSize: 12, fontWeight: 600, color: "#1e293b" }}>{d.liters.toLocaleString("pl-PL")} L</span>
-                            </div>
-                          ));
-                        })()}
-                      </div>
-                    )}
-                    {fuelEntries.length === 0 && (
-                      <div style={{ textAlign: "center", padding: "24px 0", color: "#9ca3af", fontSize: 13 }}>Dodaj tankowania aby zobaczyć statystyki</div>
-                    )}
-                    {/* Dane miesięczne z operacyjne (z biura) */}
-                    {operacyjne.length > 0 && (
-                      <div style={{ background: "#fff", borderRadius: 14, padding: 14, boxShadow: "0 1px 4px rgba(0,0,0,0.08)", marginTop: 12 }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 8 }}>Dane z biura (miesięczne)</div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                          {operacyjne.sort((a,b) => (b.year*100+b.month)-(a.year*100+a.month)).slice(0,6).map(op => {
-                            const mn = new Date(op.year, op.month-1).toLocaleDateString("pl-PL",{month:"short",year:"numeric"});
-                            return (
-                              <div key={`${op.year}-${op.month}`} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 10px", borderRadius: 8, background: "#f9fafb" }}>
-                                <span style={{ fontSize: 12, fontWeight: 500, color: "#475569" }}>{mn}</span>
-                                <div style={{ display: "flex", gap: 10, fontSize: 11 }}>
-                                  {op.spalanie > 0 && <span style={{ fontWeight: 700, color: "#0891b2" }}>{op.spalanie.toFixed(1)} L/100</span>}
-                                  {op.kmLicznik > 0 && <span style={{ color: "#64748b" }}>{op.kmLicznik.toLocaleString("pl-PL")} km</span>}
-                                  {op.paliwoL > 0 && <span style={{ color: "#64748b" }}>{op.paliwoL} L</span>}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* ── FORM VIEW ── */}
                 {fuelView === "form" && (
