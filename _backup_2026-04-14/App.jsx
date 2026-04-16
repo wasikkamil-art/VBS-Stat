@@ -449,46 +449,26 @@ export default function Root() {
 
       if (u) {
         try {
-          // 1. Odczytaj rolę z Custom Claims (token Auth) + Firestore
-          await u.getIdToken(true); // force refresh przy logowaniu
+          // 1. Odczytaj rolę z Custom Claims (token Auth)
           const tokenResult = await u.getIdTokenResult();
           let tokenRole = tokenResult.claims.role;
 
-          // 2. Zawsze sprawdź Firestore — jest source of truth (Cloud Function może mieć opóźnienie)
-          const userSnap = await getDoc(doc(db, "users", u.uid));
-          if (userSnap.exists()) {
-            const firestoreRole = userSnap.data().role;
-            if (firestoreRole) {
-              tokenRole = firestoreRole; // Firestore wygrywa
-            }
-          } else {
-            // Dokument z UID nie istnieje — szukaj po emailu (mógł być dodany z losowym ID)
-            const allUsersSnap = await getDocs(collection(db, "users"));
-            const byEmail = allUsersSnap.docs.find(d => d.data().email === u.email);
-            if (byEmail) {
-              // Znaleziono dokument z emailem ale złym ID — napraw: utwórz z prawidłowym UID
-              const existingData = byEmail.data();
-              tokenRole = existingData.role || "podglad";
+          // 2. Fallback: jeśli brak claims (stary user), czytaj z Firestore
+          if (!tokenRole) {
+            const snap = await getDoc(doc(db, "users", u.uid));
+            if (snap.exists()) {
+              tokenRole = snap.data().role || "podglad";
+            } else {
+              // Nowy użytkownik — Cloud Function (onNewUser) ustawi claims,
+              // ale na wszelki wypadek tworzymy dokument i fallback
+              const usersSnap = await getDocs(collection(db, "users"));
+              const isFirst = usersSnap.empty;
+              tokenRole = isFirst ? "admin" : "podglad";
               await setDoc(doc(db, "users", u.uid), {
-                ...existingData,
                 email: u.email,
                 role: tokenRole,
-                migratedFrom: byEmail.id,
-                migratedAt: new Date().toISOString(),
+                createdAt: new Date().toISOString(),
               });
-              // Usuń stary dokument z losowym ID
-              try { await deleteDoc(doc(db, "users", byEmail.id)); } catch {}
-            } else {
-              // Nowy użytkownik — utwórz dokument
-              if (!tokenRole) {
-                const isFirst = allUsersSnap.empty;
-                tokenRole = isFirst ? "admin" : "podglad";
-                await setDoc(doc(db, "users", u.uid), {
-                  email: u.email,
-                  role: tokenRole,
-                  createdAt: new Date().toISOString(),
-                });
-              }
             }
           }
 
@@ -514,11 +494,8 @@ export default function Root() {
             if (data.role && data.role !== currentTokenRole) {
               await u.getIdToken(true); // force refresh
               const refreshed = await u.getIdTokenResult();
-              if (refreshed.claims.role && refreshed.claims.role !== currentTokenRole) {
+              if (refreshed.claims.role) {
                 setRole(refreshed.claims.role);
-              } else if (data.role) {
-                // Fallback: Claims nie zaktualizowane (Cloud Function problem) — użyj roli z Firestore
-                setRole(data.role);
               }
             }
           });
@@ -842,8 +819,6 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   const [chatUnreadCount, setChatUnreadCount] = useState(0);      // ile pokojów z nieprzeczytanymi
   const [chatUnreadMsgCount, setChatUnreadMsgCount] = useState(0); // ile wiadomości łącznie nieprzeczytanych
   const [operacyjne, setOperacyjne] = useState([]);
-  const [driverEvents, setDriverEvents] = useState([]);
-  const [fuelEntries, setFuelEntries] = useState([]);
   const [pauzy, setPauzy] = useState([]);
   const [loaded, setLoaded]         = useState(false);
   const [toast, setToast]           = useState(null);
@@ -886,13 +861,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
       // Zapobiega race condition przy zmianie statusów
       if (!_pendingWrites.has(SK.vehicles)) {
         const v = data[SK.vehicles];
-        // Migracja: dodaj assignedDriver jeśli brak (sync z driverHistory)
-        const migrated = (v || SEED_VEHICLES).map(veh => {
-          if (veh.assignedDriver !== undefined) return veh;
-          const active = (veh.driverHistory || []).find(d => !d.to);
-          return { ...veh, assignedDriver: active?.email || "" };
-        });
-        setVehicles(migrated);
+        setVehicles(v || SEED_VEHICLES);
       }
 
       if (!_pendingWrites.has(SK.costs)) {
@@ -956,22 +925,6 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     const unsub = onSnapshot(collection(db, "operacyjne"), (snap) => {
       setOperacyjne(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }, (err) => console.error("operacyjne onSnapshot error", err));
-    return () => unsub();
-  }, []);
-
-  // ── DRIVER EVENTS — potwierdzenia załadunków/rozładunków od kierowców ──
-  useEffect(() => {
-    const unsub = onSnapshot(collection(db, "driverEvents"), (snap) => {
-      setDriverEvents(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, (err) => console.error("driverEvents onSnapshot error", err));
-    return () => unsub();
-  }, []);
-
-  // ── FUEL ENTRIES — tankowania od kierowców ──
-  useEffect(() => {
-    const unsub = onSnapshot(collection(db, "fuelEntries"), (snap) => {
-      setFuelEntries(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, (err) => console.error("fuelEntries onSnapshot error", err));
     return () => unsub();
   }, []);
 
@@ -1854,12 +1807,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
   const deleteCost   = (id)    => { setCosts((p) => p.filter((c) => c.id !== id)); logAction("delete", "costs", { id }); showToast("Usunięto wpis"); };
   const updateCost   = (updated) => { setCosts((p) => p.map((c) => c.id === updated.id ? updated : c)); logAction("update", "costs", { id: updated.id, vehicleId: updated.vehicleId }); showToast("✅ Koszt zaktualizowany"); setEditCostId(null); };
-  // Sync assignedDriver from driverHistory — aktywny kierowca (bez daty 'to')
-  const syncAssignedDriver = (veh) => {
-    const active = (veh.driverHistory || []).find(d => !d.to);
-    return { ...veh, assignedDriver: active?.email || "" };
-  };
-  const addVehicle   = (v)     => { const vid = uid(); const veh = syncAssignedDriver({ ...v, id: vid, driverHistory: v.driverHistory || [] }); setVehicles((p) => [...p, veh]); logAction("add", "vehicles", { id: vid, type: v.type, plate: v.plate }); showToast("Pojazd dodany"); setShowAddVehicle(false); };
+  const addVehicle   = (v)     => { const vid = uid(); setVehicles((p) => [...p, { ...v, id: vid, driverHistory: v.driverHistory || [] }]); logAction("add", "vehicles", { id: vid, type: v.type, plate: v.plate }); showToast("Pojazd dodany"); setShowAddVehicle(false); };
   const delVehicle   = (id, reason) => {
     const veh = vehicles.find(v => v.id === id);
     setVehicles((p) => p.map((v) => v.id !== id ? v : {
@@ -1871,7 +1819,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     logAction("delete", "vehicles", { id, plate: veh?.plate, reason });
     showToast("✅ Pojazd przeniesiony do archiwum");
   };
-  const updateVehicle= (updated) => { const veh = syncAssignedDriver(updated); setVehicles((p) => p.map((v) => v.id === veh.id ? veh : v)); logAction("update", "vehicles", { id: veh.id, plate: veh.plate }); showToast("✅ Zmiany zapisane"); setEditVehicleId(null); };
+  const updateVehicle= (updated) => { setVehicles((p) => p.map((v) => v.id === updated.id ? updated : v)); logAction("update", "vehicles", { id: updated.id, plate: updated.plate }); showToast("✅ Zmiany zapisane"); setEditVehicleId(null); };
   const addCategory  = (cat)   => setCategories((p) => [...p, cat]);
 
   const CAT_FALLBACKS = {
@@ -1902,17 +1850,10 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   const catColor = (id) => catById(id)?.color || "#94a3b8";
   const catLabel = (id) => { const c = catById(id); return c ? `${c.icon} ${c.label}` : id; };
 
-  // current active driver for a vehicle (assignedDriver + driverHistory)
+  // current active driver for a vehicle
   const currentDriver = (v) => {
     const hist = v.driverHistory || [];
-    const active = hist.find((d) => !d.to);
-    if (active) return active;
-    // fallback: szukaj po assignedDriver email
-    if (v.assignedDriver) {
-      const byEmail = hist.find(d => d.email === v.assignedDriver);
-      if (byEmail) return byEmail;
-    }
-    return hist[hist.length - 1] || null;
+    return hist.find((d) => !d.to) || hist[hist.length - 1] || null;
   };
 
   // ── GET PLN VALUE ──
@@ -1982,24 +1923,13 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
   // ─── PANEL KIEROWCY (osobny layout, mobile-first) ───────────────────────────
   if (isKierowca) {
-    // Znajdź pojazd przypisany do tego kierowcy (szybki lookup po assignedDriver, fallback na driverHistory)
-    const myVehicle = vehicles.find(v => v.assignedDriver === user.email)
-      || vehicles.find(v => (v.driverHistory || []).some(d => !d.to && d.email === user.email));
-    // DEBUG: log vehicle matching
-    console.log("[DriverPanel] user.email:", user.email, "vehicles:", vehicles.length, "assignedDrivers:", vehicles.map(v => v.assignedDriver).filter(Boolean), "myVehicle:", myVehicle?.plate || "NOT FOUND");
+    // Znajdź pojazd przypisany do tego kierowcy (po emailu w driverHistory)
+    const myVehicle = vehicles.find(v =>
+      (v.driverHistory || []).some(d => !d.to && d.email === user.email)
+    );
     // Frachty przypisane do mojego pojazdu
     const myFrachty = myVehicle
       ? frachtyList.filter(f => f.vehicleId === myVehicle.id).sort((a,b) => (b.dataZaladunku||"").localeCompare(a.dataZaladunku||""))
-      : [];
-
-    // Dane operacyjne (spalanie) filtrowane po pojeździe kierowcy
-    const myOperacyjne = myVehicle
-      ? operacyjne.filter(o => o.vehicleId === myVehicle.id)
-      : [];
-
-    // Tankowania filtrowane po pojeździe kierowcy
-    const myFuelEntries = myVehicle
-      ? fuelEntries.filter(fe => fe.vehicleId === myVehicle.id)
       : [];
 
     return (
@@ -2008,9 +1938,6 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
         vehicle={myVehicle}
         frachty={myFrachty}
         pauzy={pauzy.filter(p => myVehicle && p.vehicleId === myVehicle.id)}
-        operacyjne={myOperacyjne}
-        driverEvents={driverEvents}
-        fuelEntries={myFuelEntries}
         showToast={showToast}
       />
     );
@@ -2167,15 +2094,9 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
           {/* Mobile header — ukryty w zakładce czat */}
           {tab !== "chat" && (
-            <div className="flex md:hidden items-center justify-between mb-4" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
-              <div className="flex items-center">
-                <img src="/icon-192.png" alt="FS" className="w-8 h-8 rounded-lg mr-2" />
-                <span className="font-bold text-base text-gray-900">FleetStat</span>
-              </div>
-              <button onClick={() => { logAction("logout", "auth", { reason: "manual" }); signOut(auth); }}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-500 hover:bg-red-50 border border-red-100">
-                Wyloguj
-              </button>
+            <div className="flex md:hidden items-center mb-4" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
+              <img src="/icon-192.png" alt="FS" className="w-8 h-8 rounded-lg mr-2" />
+              <span className="font-bold text-base text-gray-900">FleetStat</span>
             </div>
           )}
 
@@ -2321,13 +2242,9 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                       }
 
                       // Aktywny fracht do wyświetlenia na karcie
-                      // Dla trasy: pokaż OSTATNI rozładunek w ciągu (nie pierwszy aktywny)
-                      const pendingFF = vFrachty
-                        .filter(r => r.statusRozladunku !== "rozladowano" && r.dataRozladunku && r.dataRozladunku >= todayISO)
-                        .sort((a, b) => (b.dataRozladunku || "").localeCompare(a.dataRozladunku || ""));
-                      const displayF = pendingFF[0] || activeF || nextF || lastF;
+                      const displayF = activeF || nextF || lastF;
 
-                      // Dane trasy z ostatniego pending / aktywnego / następnego frachtu
+                      // Dane trasy z aktywnego/następnego/ostatniego frachtu
                       const skad = displayF ? [displayF.zaladunekKod,displayF.zaladunekKod2,displayF.zaladunekKod3].filter(s=>s&&s.trim()).join(" / ") || displayF.skad || "—" : "—";
                       const dokad = displayF ? [displayF.dokod,displayF.dokod2,displayF.dokod3].filter(s=>s&&s.trim()).join(" / ") || displayF.dokad || "—" : "—";
                       const cena = displayF?.cenaEur ? parseFloat(displayF.cenaEur) : null;
@@ -3176,7 +3093,6 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             <FrachtyTab
               frachtyList={frachtyList}
               vehicles={vehicles}
-              driverEvents={driverEvents}
               onAdd={(r) => { const fid = uid(); setFrachtyList(p => [{ ...r, id: fid }, ...p]); logAction("add", "frachty", { id: fid, vehicleId: r.vehicleId, dokod: r.dokod }); }}
               onDelete={(id) => { setFrachtyList(p => p.filter(r => r.id !== id)); logAction("delete", "frachty", { id }); }}
               onUpdate={(id, data) => { setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r)); logAction("update", "frachty", { id }); }}
@@ -3213,7 +3129,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
           )}
 
           {tab === "users" && isAdmin && (
-            <UsersTab currentUid={user.uid} showToast={showToast} vehicles={vehicles} setVehicles={setVehicles} />
+            <UsersTab currentUid={user.uid} showToast={showToast} />
           )}
 
           {tab === "email" && isAdmin && (
@@ -5582,11 +5498,10 @@ function AuditLogTab() {
   );
 }
 
-function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
+function UsersTab({ currentUid, showToast }) {
   const [users, setUsers]     = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedUid, setExpandedUid] = useState(null);
-  const [subTab, setSubTab]   = useState("biuro"); // "biuro" | "kierowcy"
 
   useEffect(() => {
     (async () => {
@@ -5634,6 +5549,7 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
 
   async function changeRole(uid, newRole) {
     try {
+      // Wywołaj Cloud Function (ustawia Custom Claims + aktualizuje Firestore)
       const setUserRole = httpsCallable(functions, "setUserRole");
       await setUserRole({ uid, role: newRole });
       logAction("update", "users", { targetUid: uid, newRole, method: "cloudFunction" });
@@ -5641,6 +5557,7 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
       showToast("✅ Rola zaktualizowana (Custom Claims)");
     } catch(e) {
       console.warn("Cloud Function niedostępna, fallback na Firestore:", e);
+      // Fallback: bezpośredni zapis do Firestore (trigger onRoleChange ustawi claims)
       try {
         await setDoc(doc(db, "users", uid), { role: newRole }, { merge: true });
         logAction("update", "users", { targetUid: uid, newRole, method: "firestoreFallback" });
@@ -5652,60 +5569,12 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
     }
   }
 
-  // ── Przypisanie / odpisanie kierowcy do pojazdu ──
-  function assignDriverToVehicle(driverEmail, driverName, vehicleId) {
-    if (!vehicleId || !driverEmail) return;
-    const today = new Date().toISOString().split("T")[0];
-    setVehicles(prev => prev.map(v => {
-      if (v.id === vehicleId) {
-        const hist = v.driverHistory || [];
-        // Sprawdź czy ten kierowca już jest aktywny na tym pojeździe
-        const alreadyActive = hist.some(d => !d.to && d.email === driverEmail);
-        if (alreadyActive) return { ...v, assignedDriver: driverEmail };
-        // Zamknij tylko aktywnego kierowcę z emailem INNYM niż nowy (nie ruszaj imion)
-        const updated = hist.map(d => !d.to && d.email !== driverEmail ? { ...d, to: today } : d);
-        const newEntry = { id: Date.now().toString(36), name: driverName || driverEmail, email: driverEmail, phone: "", from: today, to: "" };
-        return { ...v, driverHistory: [...updated, newEntry], assignedDriver: driverEmail };
-      }
-      // Odpisz tego kierowcę z innego auta (tylko jego wpis, nie ruszaj innych)
-      if (v.assignedDriver === driverEmail) {
-        const hist = (v.driverHistory || []).map(d => !d.to && d.email === driverEmail ? { ...d, to: today } : d);
-        return { ...v, driverHistory: hist, assignedDriver: "" };
-      }
-      return v;
-    }));
-    logAction("update", "vehicles", { vehicleId, assignedDriver: driverEmail, action: "assignDriver" });
-    showToast("✅ Kierowca przypisany do pojazdu");
-  }
-
-  function unassignDriver(driverEmail) {
-    if (!driverEmail) return;
-    const today = new Date().toISOString().split("T")[0];
-    setVehicles(prev => prev.map(v => {
-      if (v.assignedDriver === driverEmail) {
-        const hist = (v.driverHistory || []).map(d => !d.to && d.email === driverEmail ? { ...d, to: today } : d);
-        return { ...v, driverHistory: hist, assignedDriver: "" };
-      }
-      return v;
-    }));
-    logAction("update", "vehicles", { driverEmail, action: "unassignDriver" });
-    showToast("✅ Kierowca odpisany od pojazdu");
-  }
-
-  const ROLES_BIURO = [
+  const ROLES = [
     { id: "admin",      label: "Admin",      icon: "👑", desc: "Pełny dostęp",                      color: "#92400e", bg: "#fef3c7" },
     { id: "dyspozytor", label: "Dyspozytor", icon: "🚚", desc: "Edycja frachtów i kosztów",          color: "#1d4ed8", bg: "#eff6ff" },
+    { id: "kierowca",   label: "Kierowca",   icon: "🧑‍✈️", desc: "Panel kierowcy — zlecenia, CMR, czas pracy", color: "#059669", bg: "#ecfdf5" },
     { id: "podglad",    label: "Podgląd",    icon: "👁",  desc: "Tylko odczyt, bez finansów",        color: "#6b7280", bg: "#f3f4f6" },
   ];
-
-  const ALL_ROLES = [
-    ...ROLES_BIURO,
-    { id: "kierowca",   label: "Kierowca",   icon: "🧑‍✈️", desc: "Panel kierowcy — zlecenia, CMR, czas pracy", color: "#059669", bg: "#ecfdf5" },
-  ];
-
-  const biuroUsers   = users.filter(u => u.role !== "kierowca");
-  const driverUsers  = users.filter(u => u.role === "kierowca");
-  const activeVehicles = (vehicles || []).filter(v => !v.archived);
 
   return (
     <div>
@@ -5716,334 +5585,145 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
         </div>
       </div>
 
-      {/* SUB-TABS: Biuro / Kierowcy */}
-      <div className="flex gap-2 mb-6">
-        {[
-          { id: "biuro", label: "Biuro", icon: "🏢", count: biuroUsers.length },
-          { id: "kierowcy", label: "Kierowcy", icon: "🧑‍✈️", count: driverUsers.length },
-        ].map(t => (
-          <button key={t.id} onClick={() => setSubTab(t.id)}
-            className="px-4 py-2.5 rounded-xl text-sm font-semibold transition-all border"
-            style={{
-              background: subTab === t.id ? "#111827" : "#fff",
-              color: subTab === t.id ? "#fff" : "#6b7280",
-              borderColor: subTab === t.id ? "#111827" : "#e5e7eb",
-            }}>
-            {t.icon} {t.label} <span className="ml-1 opacity-60">({t.count})</span>
-          </button>
+      {/* ROLE LEGEND */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+        {ROLES.map(r => (
+          <div key={r.id} className="rounded-xl p-4 border border-gray-100 bg-white">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-lg">{r.icon}</span>
+              <span className="font-semibold text-gray-800 text-sm">{r.label}</span>
+              <span className="ml-auto px-2 py-0.5 rounded-full text-xs font-semibold"
+                style={{ background: r.bg, color: r.color }}>{r.id}</span>
+            </div>
+            <p className="text-xs text-gray-400">{r.desc}</p>
+          </div>
         ))}
       </div>
 
-      {/* ═══════ TAB: BIURO ═══════ */}
-      {subTab === "biuro" && (
-        <div>
-          {/* ROLE LEGEND */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
-            {ROLES_BIURO.map(r => (
-              <div key={r.id} className="rounded-xl p-4 border border-gray-100 bg-white">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-lg">{r.icon}</span>
-                  <span className="font-semibold text-gray-800 text-sm">{r.label}</span>
-                  <span className="ml-auto px-2 py-0.5 rounded-full text-xs font-semibold"
-                    style={{ background: r.bg, color: r.color }}>{r.id}</span>
-                </div>
-                <p className="text-xs text-gray-400">{r.desc}</p>
-              </div>
-            ))}
-          </div>
+      {/* USERS LIST */}
+      <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+        <div className="hidden md:grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-medium text-gray-400 uppercase tracking-wider">
+          <span className="col-span-5">Email</span>
+          <span className="col-span-3">Aktualna rola</span>
+          <span className="col-span-4">Zmień rolę</span>
+        </div>
 
-          {/* BIURO USERS LIST */}
-          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-            <div className="hidden md:grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-medium text-gray-400 uppercase tracking-wider">
-              <span className="col-span-5">Email</span>
-              <span className="col-span-3">Aktualna rola</span>
-              <span className="col-span-4">Zmień rolę</span>
-            </div>
+        {loading && (
+          <div className="px-5 py-10 text-center text-gray-400 text-sm">Ładowanie użytkowników…</div>
+        )}
 
-            {loading && (
-              <div className="px-5 py-10 text-center text-gray-400 text-sm">Ładowanie użytkowników…</div>
-            )}
-            {!loading && biuroUsers.length === 0 && (
-              <div className="px-5 py-10 text-center text-gray-400 text-sm">Brak użytkowników biurowych</div>
-            )}
+        {!loading && users.length === 0 && (
+          <div className="px-5 py-10 text-center text-gray-400 text-sm">Brak użytkowników — zaloguj się na każdym koncie aby pojawili się tutaj</div>
+        )}
 
-            {!loading && biuroUsers.map((u, i) => {
-              const roleInfo = ALL_ROLES.find(r => r.id === u.role) || ALL_ROLES[2];
-              const isMe = u.uid === currentUid;
-              const isAdminUser = u.role === "admin";
-              const effectiveAllowed = Array.isArray(u.allowedTabs) && u.allowedTabs.length > 0
-                ? u.allowedTabs
-                : (DEFAULTS[u.role] || DEFAULTS.podglad);
-              const isExpanded = expandedUid === u.uid;
-              const hasCustom = Array.isArray(u.allowedTabs);
-              return (
-                <div key={u.uid} style={{ borderBottom: i === biuroUsers.length - 1 ? "none" : "1px solid #f9fafb" }}>
-                  <div className="md:grid md:grid-cols-12 flex flex-wrap gap-y-2 px-5 py-4 items-center hover:bg-gray-50 transition-colors">
-                    <div className="col-span-5 flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                        style={{ background: "#f3f4f6", color: "#374151" }}>
-                        {(u.email||"?")[0].toUpperCase()}
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium text-gray-800 truncate max-w-48">{u.email || "—"}</div>
-                        {isMe && <div className="text-xs text-amber-500 font-medium">to Ty</div>}
-                      </div>
-                    </div>
-                    <div className="col-span-3">
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold"
-                        style={{ background: roleInfo.bg, color: roleInfo.color }}>
-                        {roleInfo.icon} {roleInfo.label}
-                      </span>
-                    </div>
-                    <div className="col-span-4 flex gap-1.5 flex-wrap items-center">
-                      {ALL_ROLES.filter(r => r.id !== u.role).map(r => (
-                        <button key={r.id}
-                          onClick={() => {
-                            if (isMe && r.id !== "admin") {
-                              if (!window.confirm("Zmieniasz własną rolę — stracisz dostęp admina. Kontynuować?")) return;
-                            }
-                            changeRole(u.uid, r.id);
-                          }}
-                          className="px-3 py-1 rounded-lg text-xs font-medium border transition-all hover:opacity-80"
-                          style={{ borderColor: r.bg, background: r.bg, color: r.color }}>
-                          {r.icon} {r.label}
-                        </button>
-                      ))}
-                      {!isAdminUser && (
-                        <button onClick={() => setExpandedUid(isExpanded ? null : u.uid)}
-                          className="px-2.5 py-1 rounded-lg text-xs font-medium border transition-all hover:bg-gray-100"
-                          style={{ borderColor:"#e5e7eb", color:"#374151", background:"#fff" }}
-                          title="Zakładki dostępne dla tego użytkownika">
-                          {isExpanded ? "▲" : "▼"} Zakładki ({effectiveAllowed.length})
-                        </button>
-                      )}
-                    </div>
+        {!loading && users.map((u, i) => {
+          const roleInfo = ROLES.find(r => r.id === u.role) || ROLES[2];
+          const isMe = u.uid === currentUid;
+          const isAdmin = u.role === "admin";
+          const effectiveAllowed = Array.isArray(u.allowedTabs) && u.allowedTabs.length > 0
+            ? u.allowedTabs
+            : (DEFAULTS[u.role] || DEFAULTS.podglad);
+          const isExpanded = expandedUid === u.uid;
+          const hasCustom = Array.isArray(u.allowedTabs);
+          return (
+            <div key={u.uid} style={{ borderBottom: i === users.length - 1 ? "none" : "1px solid #f9fafb" }}>
+              <div className="md:grid md:grid-cols-12 flex flex-wrap gap-y-2 px-5 py-4 items-center hover:bg-gray-50 transition-colors">
+
+                <div className="col-span-5 flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+                    style={{ background: "#f3f4f6", color: "#374151" }}>
+                    {(u.email||"?")[0].toUpperCase()}
                   </div>
+                  <div>
+                    <div className="text-sm font-medium text-gray-800 truncate max-w-48">{u.email || "—"}</div>
+                    {isMe && <div className="text-xs text-amber-500 font-medium">to Ty</div>}
+                  </div>
+                </div>
 
-                  {isExpanded && !isAdminUser && (
-                    <div className="px-5 pb-5 pt-1 bg-gray-50">
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                          Dostęp do zakładek
-                          {hasCustom ? (
-                            <span className="ml-2 text-xs font-normal text-blue-600">· własne ustawienia</span>
-                          ) : (
-                            <span className="ml-2 text-xs font-normal text-gray-400">· domyślne dla roli "{u.role}"</span>
-                          )}
-                        </div>
-                        {hasCustom && (
-                          <button onClick={() => saveAllowedTabs(u.uid, [], u.role)}
-                            className="text-xs text-gray-500 hover:text-gray-800 underline">
-                            Przywróć domyślne dla roli
-                          </button>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                        {ASSIGNABLE_TABS.map(t => {
-                          const checked = effectiveAllowed.includes(t.id);
-                          return (
-                            <label key={t.id}
-                              className="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all border text-sm"
-                              style={{
-                                background: checked ? "#eff6ff" : "#fff",
-                                borderColor: checked ? "#bfdbfe" : "#e5e7eb",
-                                color: checked ? "#1d4ed8" : "#6b7280",
-                                fontWeight: checked ? 600 : 400,
-                              }}>
-                              <input type="checkbox" checked={checked} onChange={() => toggleTab(u, t.id)}
-                                className="w-4 h-4" style={{ accentColor: "#3b82f6" }} />
-                              <span>{t.icon}</span>
-                              <span className="text-xs">{t.label}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                      <div className="mt-3 text-xs text-gray-400">
-                        💡 Zakładki <strong>Użytkownicy</strong> i <strong>Email statusy</strong> są zawsze admin-only i nie można ich przyznać tutaj.
-                      </div>
-                    </div>
+                <div className="col-span-3">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold"
+                    style={{ background: roleInfo.bg, color: roleInfo.color }}>
+                    {roleInfo.icon} {roleInfo.label}
+                  </span>
+                </div>
+
+                <div className="col-span-4 flex gap-1.5 flex-wrap items-center">
+                  {ROLES.filter(r => r.id !== u.role).map(r => (
+                    <button key={r.id}
+                      onClick={() => {
+                        if (isMe && r.id !== "admin") {
+                          if (!window.confirm("Zmieniasz własną rolę — stracisz dostęp admina. Kontynuować?")) return;
+                        }
+                        changeRole(u.uid, r.id);
+                      }}
+                      className="px-3 py-1 rounded-lg text-xs font-medium border transition-all hover:opacity-80"
+                      style={{ borderColor: r.bg, background: r.bg, color: r.color }}>
+                      {r.icon} {r.label}
+                    </button>
+                  ))}
+                  {!isAdmin && (
+                    <button onClick={() => setExpandedUid(isExpanded ? null : u.uid)}
+                      className="px-2.5 py-1 rounded-lg text-xs font-medium border transition-all hover:bg-gray-100"
+                      style={{ borderColor:"#e5e7eb", color:"#374151", background:"#fff" }}
+                      title="Zakładki dostępne dla tego użytkownika">
+                      {isExpanded ? "▲" : "▼"} Zakładki ({effectiveAllowed.length})
+                    </button>
                   )}
                 </div>
-              );
-            })}
-          </div>
-
-          <div className="mt-4 px-1 text-xs text-gray-400">
-            💡 Nowy użytkownik pojawi się na liście po pierwszym zalogowaniu. Domyślnie otrzymuje rolę <strong>Podgląd</strong>.
-          </div>
-        </div>
-      )}
-
-      {/* ═══════ TAB: KIEROWCY ═══════ */}
-      {subTab === "kierowcy" && (
-        <div>
-          {/* Info banner */}
-          <div className="rounded-xl p-4 border border-emerald-100 bg-emerald-50/50 mb-6">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-lg">🧑‍✈️</span>
-              <span className="font-semibold text-emerald-800 text-sm">Kierowcy</span>
-            </div>
-            <p className="text-xs text-emerald-600">
-              Kierowca widzi osobny panel mobile-first: zlecenia (bez cen), pojazd, serwis, spalanie i czas pracy.
-              Przypisz kierowcę do pojazdu żeby widział swoje dane.
-            </p>
-          </div>
-
-          {/* DODAJ KIEROWCĘ */}
-          <div className="bg-white rounded-2xl border border-gray-100 p-4 mb-4">
-            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Dodaj kierowcę</div>
-            <div className="flex gap-2 flex-wrap">
-              <input id="newDriverEmail" placeholder="email kierowcy" className="flex-1 min-w-48 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
-              <input id="newDriverName" placeholder="Imię i nazwisko" className="flex-1 min-w-40 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
-              <button onClick={async () => {
-                const emailEl = document.getElementById("newDriverEmail");
-                const nameEl = document.getElementById("newDriverName");
-                const email = emailEl?.value?.trim().toLowerCase();
-                const name = nameEl?.value?.trim();
-                if (!email || !email.includes("@")) { showToast("❌ Podaj prawidłowy email"); return; }
-                if (users.find(u => u.email === email && u.role === "kierowca")) { showToast("❌ Ten kierowca już jest w systemie"); return; }
-                try {
-                  const addDriver = httpsCallable(functions, "addDriverByEmail");
-                  const result = await addDriver({ email, displayName: name });
-                  if (result.data.success) {
-                    setUsers(p => {
-                      const exists = p.find(u => u.uid === result.data.uid);
-                      if (exists) return p.map(u => u.uid === result.data.uid ? { ...u, role: "kierowca", displayName: result.data.displayName } : u);
-                      return [...p, { uid: result.data.uid, email, role: "kierowca", displayName: result.data.displayName }];
-                    });
-                    logAction("add", "users", { email, role: "kierowca" });
-                    showToast("✅ Kierowca dodany");
-                    emailEl.value = "";
-                    nameEl.value = "";
-                  }
-                } catch (e) {
-                  console.error(e);
-                  const msg = e.message || "";
-                  if (msg.includes("nie istnieje") || msg.includes("not-found")) {
-                    showToast("❌ Konto nie istnieje w Firebase Auth — najpierw załóż konto w konsoli");
-                  } else {
-                    showToast("❌ Błąd dodawania kierowcy");
-                  }
-                }
-              }}
-                className="px-4 py-2 rounded-lg text-sm font-semibold text-white" style={{background:"#059669"}}>
-                + Dodaj kierowcę
-              </button>
-            </div>
-            <div className="text-xs text-gray-400 mt-2">
-              Kierowca musi mieć konto w Firebase Auth (założone w konsoli lub przez rejestrację). Po dodaniu tutaj i pierwszym zalogowaniu — zobaczy panel kierowcy.
-            </div>
-          </div>
-
-          {/* DRIVERS LIST */}
-          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-            <div className="hidden md:grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-medium text-gray-400 uppercase tracking-wider">
-              <span className="col-span-4">Kierowca</span>
-              <span className="col-span-4">Przypisany pojazd</span>
-              <span className="col-span-4">Akcje</span>
-            </div>
-
-            {loading && (
-              <div className="px-5 py-10 text-center text-gray-400 text-sm">Ładowanie…</div>
-            )}
-
-            {!loading && driverUsers.length === 0 && (
-              <div className="px-5 py-10 text-center text-gray-400 text-sm">
-                Brak kierowców. Zmień rolę użytkownika na <strong>Kierowca</strong> w zakładce Biuro, aby dodać go tutaj.
               </div>
-            )}
 
-            {!loading && driverUsers.map((u, i) => {
-              const assignedVehicle = activeVehicles.find(v => v.assignedDriver === u.email);
-              const availableVehicles = activeVehicles; // pokaż wszystkie — admin może nadpisać przypisanie
-              return (
-                <div key={u.uid} className="md:grid md:grid-cols-12 flex flex-wrap gap-y-3 px-5 py-4 items-center hover:bg-gray-50 transition-colors"
-                  style={{ borderBottom: i === driverUsers.length - 1 ? "none" : "1px solid #f9fafb" }}>
-
-                  {/* Kierowca info */}
-                  <div className="col-span-4 flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full flex items-center justify-center text-base font-bold flex-shrink-0"
-                      style={{ background: "#ecfdf5", color: "#059669" }}>
-                      {(u.email||"?")[0].toUpperCase()}
+              {/* Tab permissions panel — tylko dla non-adminów */}
+              {isExpanded && !isAdmin && (
+                <div className="px-5 pb-5 pt-1 bg-gray-50">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                      Dostęp do zakładek
+                      {hasCustom ? (
+                        <span className="ml-2 text-xs font-normal text-blue-600">· własne ustawienia</span>
+                      ) : (
+                        <span className="ml-2 text-xs font-normal text-gray-400">· domyślne dla roli "{u.role}"</span>
+                      )}
                     </div>
-                    <div>
-                      <div className="text-sm font-medium text-gray-800">{u.displayName || u.email?.split("@")[0] || "—"}</div>
-                      <div className="text-xs text-gray-400 truncate max-w-48">{u.email}</div>
-                    </div>
-                  </div>
-
-                  {/* Pojazd */}
-                  <div className="col-span-4">
-                    {assignedVehicle ? (
-                      <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-100">
-                        <span className="text-sm">🚛</span>
-                        <span className="text-sm font-semibold text-emerald-800">{assignedVehicle.plate}</span>
-                        {assignedVehicle.brand && <span className="text-xs text-emerald-600">{assignedVehicle.brand}</span>}
-                      </div>
-                    ) : (
-                      <span className="text-sm text-gray-400 italic">Brak pojazdu</span>
-                    )}
-                  </div>
-
-                  {/* Akcje */}
-                  <div className="col-span-4 flex gap-2 flex-wrap items-center">
-                    {assignedVehicle ? (
-                      <button onClick={() => unassignDriver(u.email)}
-                        className="px-3 py-1.5 rounded-lg text-xs font-medium border border-red-100 bg-red-50 text-red-600 hover:bg-red-100 transition-colors">
-                        Odpisz od auta
+                    {hasCustom && (
+                      <button onClick={() => saveAllowedTabs(u.uid, [], u.role)}
+                        className="text-xs text-gray-500 hover:text-gray-800 underline">
+                        Przywróć domyślne dla roli
                       </button>
-                    ) : (
-                      <select
-                        onChange={(e) => {
-                          if (e.target.value) assignDriverToVehicle(u.email, u.displayName || u.email?.split("@")[0], e.target.value);
-                          e.target.value = "";
-                        }}
-                        className="px-3 py-1.5 rounded-lg text-xs font-medium border border-emerald-200 bg-emerald-50 text-emerald-700 cursor-pointer"
-                        defaultValue="">
-                        <option value="" disabled>Przypisz do pojazdu…</option>
-                        {availableVehicles.map(v => (
-                          <option key={v.id} value={v.id}>{v.plate} {v.brand ? `(${v.brand})` : ""}{v.assignedDriver && v.assignedDriver !== u.email ? ` ← ${(v.driverHistory||[]).find(d=>!d.to)?.name || v.assignedDriver}` : ""}</option>
-                        ))}
-                      </select>
                     )}
-                    <button onClick={() => changeRole(u.uid, "podglad")}
-                      className="px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-200 bg-white text-gray-500 hover:bg-gray-100 transition-colors">
-                      Zmień na Podgląd
-                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {ASSIGNABLE_TABS.map(t => {
+                      const checked = effectiveAllowed.includes(t.id);
+                      return (
+                        <label key={t.id}
+                          className="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all border text-sm"
+                          style={{
+                            background: checked ? "#eff6ff" : "#fff",
+                            borderColor: checked ? "#bfdbfe" : "#e5e7eb",
+                            color: checked ? "#1d4ed8" : "#6b7280",
+                            fontWeight: checked ? 600 : 400,
+                          }}>
+                          <input type="checkbox" checked={checked} onChange={() => toggleTab(u, t.id)}
+                            className="w-4 h-4" style={{ accentColor: "#3b82f6" }} />
+                          <span>{t.icon}</span>
+                          <span className="text-xs">{t.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-3 text-xs text-gray-400">
+                    💡 Zakładki <strong>Użytkownicy</strong> i <strong>Email statusy</strong> są zawsze admin-only i nie można ich przyznać tutaj.
                   </div>
                 </div>
-              );
-            })}
-          </div>
-
-          {/* Driver history summary */}
-          {!loading && driverUsers.length > 0 && (
-            <div className="mt-6 bg-white rounded-2xl border border-gray-100 p-5">
-              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Historia przypisań</div>
-              <div className="space-y-2">
-                {activeVehicles.filter(v => (v.driverHistory || []).length > 0).map(v => (
-                  <div key={v.id} className="flex items-start gap-3 py-2 border-b border-gray-50 last:border-0">
-                    <div className="text-sm font-semibold text-gray-700 min-w-24">{v.plate}</div>
-                    <div className="flex flex-wrap gap-1">
-                      {(v.driverHistory || []).slice(-5).reverse().map((d, idx) => (
-                        <span key={d.id || idx}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs"
-                          style={{
-                            background: !d.to ? "#ecfdf5" : "#f3f4f6",
-                            color: !d.to ? "#059669" : "#9ca3af",
-                            fontWeight: !d.to ? 600 : 400,
-                          }}>
-                          {d.name || d.email} · {d.from}{d.to ? ` → ${d.to}` : " → teraz"}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
+              )}
             </div>
-          )}
-        </div>
-      )}
+          );
+        })}
+      </div>
+
+      <div className="mt-4 px-1 text-xs text-gray-400">
+        💡 Nowy użytkownik pojawi się na liście po pierwszym zalogowaniu. Domyślnie otrzymuje rolę <strong>Podgląd</strong>.
+      </div>
     </div>
   );
 }
@@ -6129,18 +5809,11 @@ const STATUS_META = {
 // ═══════════════════════════════════════════════════════════════════
 //  PANEL KIEROWCY — mobile-first, osobny layout
 // ═══════════════════════════════════════════════════════════════════
-function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEvents = [], fuelEntries = [], showToast }) {
+function DriverPanel({ user, vehicle, frachty, pauzy, showToast }) {
   const [selectedFracht, setSelectedFracht] = useState(null);
-  const [driverTab, setDriverTab] = useState("home"); // "home" | "zlecenia" | "pojazd" | "serwis" | "spalanie" | "czas" | "dokumenty" | "mapa"
-  const [fuelView, setFuelView] = useState("list"); // "list" | "form" | "stats"
-  const [fuelForm, setFuelForm] = useState({ date: new Date().toISOString().slice(0,10), liters: "", mileage: "", station: "", cardNr: "", pricePerL: "", country: "PL", fullTank: true });
-  const [driverZoom, setDriverZoom] = useState(() => {
-    try { return localStorage.getItem("fleetstat_driver_zoom") || "normal"; } catch { return "normal"; }
-  }); // "normal" | "large"
-  const zoomScale = driverZoom === "large" ? 1.25 : 1;
+  const [driverTab, setDriverTab] = useState("zlecenia"); // "zlecenia" | "historia"
 
   const todayStr = new Date().toISOString().slice(0, 10);
-  const today = new Date();
 
   // Podział na aktywne / przyszłe / historia
   const active = frachty.filter(f => {
@@ -6168,39 +5841,14 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     catch { return d; }
   };
 
-  const fmtDateFull = (d) => {
-    if (!d) return "—";
-    try { return new Date(d + "T12:00:00").toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric" }); }
-    catch { return d; }
-  };
-
-  const daysUntil = (d) => d ? Math.ceil((new Date(d) - today) / 86400000) : null;
-
-  // Cofnięcie statusu (załadunek / rozładunek)
-  const undoFrachtStatus = async (fracht, field) => {
-    if (!window.confirm(field === "zaladowano" ? "Cofnąć potwierdzenie załadunku?" : "Cofnąć potwierdzenie rozładunku?")) return;
-    try {
-      await addDoc(collection(db, "driverEvents"), {
-        type: `cofnij_${field}`,
-        frachtId: fracht.id,
-        vehicleId: vehicle?.id,
-        driverEmail: user.email,
-        driverName: user.displayName || user.email,
-        ts: new Date().toISOString(),
-      });
-      logAction(`cofnij_${field}`, "driverEvents", { frachtId: fracht.id });
-      showToast("↩️ Cofnięto potwierdzenie");
-    } catch (e) {
-      console.error("undo error", e);
-      showToast("❌ Błąd cofania");
-    }
-  };
-
   // Aktualizacja statusu frachtu
   const updateFrachtStatus = async (fracht, field, value) => {
     try {
+      // Frachty są w config/fleet doc, nie w osobnej kolekcji → trzeba zmienić przez setFrachtyList
+      // Ale kierowca nie ma dostępu do setFrachtyList — potrzebujemy nowej kolekcji lub Cloud Function.
+      // Na razie zapiszemy zdarzenie do nowej podkolekcji `driverEvents` w Firestore.
       await addDoc(collection(db, "driverEvents"), {
-        type: field,
+        type: field,  // "zaladowano" | "rozladowano"
         frachtId: fracht.id,
         vehicleId: vehicle?.id,
         value,
@@ -6216,934 +5864,120 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     }
   };
 
-  // ── Upload zdjęcia (towar / CMR) ──
-  const uploadDriverPhoto = async (type, file) => {
-    if (!file || !selectedFracht) return;
-    try {
-      const path = `driverPhotos/${selectedFracht.id}/${type}_${Date.now()}_${file.name}`;
-      const sRef = storageRef(storage, path);
-      await uploadBytes(sRef, file);
-      const url = await getDownloadURL(sRef);
-      const eventType = type === "towar" ? "towar_photo"
-        : type === "cmr_zaladunek" ? "cmr_zaladunek_photo"
-        : type === "cmr_rozladunek" ? "cmr_rozladunek_photo"
-        : type === "cmr" ? "cmr_photo"
-        : `${type}_photo`;
-      await addDoc(collection(db, "driverEvents"), {
-        type: eventType,
-        frachtId: selectedFracht.id,
-        vehicleId: vehicle?.id,
-        photoUrl: url,
-        driverEmail: user.email,
-        driverName: user.displayName || user.email,
-        ts: new Date().toISOString(),
-      });
-      showToast(type.includes("cmr") ? "✅ Zdjęcie CMR dodane" : "✅ Zdjęcie towaru dodane");
-      return url;
-    } catch (e) {
-      console.error("Photo upload error:", e);
-      showToast("❌ Błąd wysyłania zdjęcia");
-      return null;
-    }
-  };
-
-  // ── Helper: oblicz opóźnienie (planowane vs faktyczne) ──
-  const calcDelay = (plannedDate, plannedTime, actualTs) => {
-    if (!plannedDate || !actualTs) return null;
-    const planned = new Date(`${plannedDate}T${plannedTime || "23:59"}:00`);
-    const actual = new Date(actualTs);
-    const diffMin = Math.round((actual - planned) / 60000);
-    if (diffMin <= 0) return { onTime: true, text: "Na czas", diffMin };
-    const h = Math.floor(diffMin / 60);
-    const m = diffMin % 60;
-    return { onTime: false, text: h > 0 ? `Opóźnienie ${h}h ${m}min` : `Opóźnienie ${m}min`, diffMin };
-  };
-
-  // ── Helper: badge opóźnienia ──
-  const renderDelayBadge = (delay) => {
-    if (!delay) return null;
-    return (
-      <span style={{
-        display: "inline-flex", alignItems: "center", gap: 4,
-        padding: "3px 8px", borderRadius: 8, fontSize: 11, fontWeight: 600,
-        background: delay.onTime ? "#f0fdf4" : delay.diffMin > 120 ? "#fef2f2" : "#fffbeb",
-        color: delay.onTime ? "#15803d" : delay.diffMin > 120 ? "#dc2626" : "#d97706",
-      }}>
-        {delay.onTime ? "✅" : "⏰"} {delay.text}
-      </span>
-    );
-  };
-
-  // ── Helper: usuń zdjęcie kierowcy ──
-  const deleteDriverPhoto = async (eventId) => {
-    if (!window.confirm("Usunąć to zdjęcie?")) return;
-    try {
-      await deleteDoc(doc(db, "driverEvents", eventId));
-      showToast("🗑️ Zdjęcie usunięte");
-    } catch (e) {
-      console.error("Delete photo error:", e);
-      showToast("❌ Błąd usuwania");
-    }
-  };
-
-  // ── Helper: zapisz uwagi kierowcy ──
-  const saveDriverNote = async (fracht, type, text) => {
-    if (!fracht || !text?.trim()) return;
-    try {
-      // Znajdź istniejący event uwagi i zaktualizuj lub utwórz nowy
-      const existing = driverEvents.find(e => e.frachtId === fracht.id && e.type === type);
-      if (existing?.id) {
-        await updateDoc(doc(db, "driverEvents", existing.id), { note: text.trim(), ts: new Date().toISOString() });
-      } else {
-        await addDoc(collection(db, "driverEvents"), {
-          type,
-          frachtId: fracht.id,
-          vehicleId: vehicle?.id,
-          note: text.trim(),
-          driverEmail: user.email,
-          driverName: user.displayName || user.email,
-          ts: new Date().toISOString(),
-        });
-      }
-      showToast("✅ Uwagi zapisane");
-    } catch (e) {
-      console.error("Save note error:", e);
-      showToast("❌ Błąd zapisu uwag");
-    }
-  };
-
-  // ── Helper: status step (potwierdź/cofnij z datą) ──
-  const renderStatusStep = (isDone, label, event, enabled, onConfirm, onUndo) => (
-    <div style={{padding: 12, borderRadius: 12, marginBottom: 8, opacity: enabled ? 1 : 0.4,
-      background: isDone ? "#f0fdf4" : "#f8fafc", border: `1px solid ${isDone ? "#bbf7d0" : "#e5e7eb"}`}}>
-      <div className="flex items-center justify-between">
-        <div>
-          <div style={{fontSize: 13, fontWeight: 600, color: isDone ? "#15803d" : "#374151"}}>
-            {isDone ? "✅" : "⏳"} {label}
-          </div>
-          {event && <div style={{fontSize: 12, color: "#6b7280", marginTop: 2}}>
-            {new Date(event.value || event.ts).toLocaleString("pl-PL", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
-          </div>}
-        </div>
-        {enabled && !isDone && (
-          <button onClick={onConfirm}
-            style={{padding: "8px 16px", borderRadius: 10, border: "none", background: "#3b82f6", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer"}}>
-            Potwierdź
-          </button>
-        )}
-        {isDone && onUndo && (
-          <button onClick={onUndo}
-            style={{padding: "6px 10px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", color: "#9ca3af", fontSize: 11, fontWeight: 500, cursor: "pointer"}}>
-            ↩ Cofnij
-          </button>
-        )}
-      </div>
-    </div>
-  );
-
-  // ── Helper: photo step (dodaj zdjęcie z datą + usuwanie) ──
-  const renderPhotoStep = (isDone, label, photoEvent, enabled, photoType) => (
-    <div style={{padding: 12, borderRadius: 12, marginBottom: 8, opacity: enabled ? 1 : 0.4,
-      background: isDone ? "#f0fdf4" : "#f8fafc", border: `1px solid ${isDone ? "#bbf7d0" : "#e5e7eb"}`}}>
-      <div className="flex items-center justify-between">
-        <div style={{flex: 1, minWidth: 0}}>
-          <div style={{fontSize: 13, fontWeight: 600, color: isDone ? "#15803d" : "#374151"}}>
-            {isDone ? "✅" : "📄"} {label}
-          </div>
-          {photoEvent && <div style={{fontSize: 12, color: "#6b7280", marginTop: 2}}>
-            {photoEvent.ts ? new Date(photoEvent.ts).toLocaleString("pl-PL", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "Dodane"}
-            {photoEvent.photoUrl && <span> · <a href={photoEvent.photoUrl} target="_blank" rel="noopener noreferrer" style={{color: "#6366f1", textDecoration: "none"}}>Zobacz</a></span>}
-          </div>}
-        </div>
-        <div className="flex items-center gap-2">
-          {isDone && photoEvent?.id && (
-            <button onClick={() => deleteDriverPhoto(photoEvent.id)}
-              style={{background: "none", border: "none", color: "#d1d5db", fontSize: 14, cursor: "pointer", padding: "4px"}}>✕</button>
-          )}
-          {enabled && !isDone && (
-            <label style={{padding: "8px 16px", borderRadius: 10, border: "none", background: "#6366f1", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4}}>
-              📷 Dodaj
-              <input type="file" accept="image/*" capture="environment" className="hidden"
-                onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto(photoType, file); e.target.value=""; }} />
-            </label>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-
-  // ── Detail view (zlecenie) — wg mockupu ──
+  // ── Detail view ──
   if (selectedFracht) {
     const f = selectedFracht;
     const kody = formatKody(f);
-    // Sprawdź driverEvents dla tego frachtu (uwzględnij cofnięcia)
-    const myEvents = driverEvents.filter(ev => ev.frachtId === f.id).sort((a,b) => (a.ts||"").localeCompare(b.ts||""));
-    const zalEvent = myEvents.filter(e => e.type === "zaladowano").pop();
-    const zalUndo = myEvents.filter(e => e.type === "cofnij_zaladowano").pop();
-    const rozEvent = myEvents.filter(e => e.type === "rozladowano").pop();
-    const rozUndo = myEvents.filter(e => e.type === "cofnij_rozladowano").pop();
-    const towarPhotos = myEvents.filter(e => e.type === "towar_photo");
-    const towarDmgPhotos = myEvents.filter(e => e.type === "towar_damage_photo");
-    const cmrZalPhoto = myEvents.find(e => e.type === "cmr_zaladunek_photo");
-    const cmrRozPhoto = myEvents.find(e => e.type === "cmr_rozladunek_photo");
-    const cmrPhotoLegacy = myEvents.find(e => e.type === "cmr_photo");
-    // Nowe statusy
-    const dotarcieZalEvent = myEvents.filter(e => e.type === "dotarcie_zaladunek").pop();
-    const dotarcieZalUndo = myEvents.filter(e => e.type === "cofnij_dotarcie_zaladunek").pop();
-    const startRozEvent = myEvents.filter(e => e.type === "start_rozladunek").pop();
-    const startRozUndo = myEvents.filter(e => e.type === "cofnij_start_rozladunek").pop();
-    const dotarcieRozEvent = myEvents.filter(e => e.type === "dotarcie_rozladunek").pop();
-    const dotarcieRozUndo = myEvents.filter(e => e.type === "cofnij_dotarcie_rozladunek").pop();
-    // Cofnięcie anuluje jeśli nowsze
-    const hasZal = (!!zalEvent && (!zalUndo || zalEvent.ts > zalUndo.ts)) || !!f._driverZaladowano;
-    const hasRoz = (!!rozEvent && (!rozUndo || rozEvent.ts > rozUndo.ts)) || f.statusRozladunku === "rozladowano";
-    const hasDotarcieZal = !!dotarcieZalEvent && (!dotarcieZalUndo || dotarcieZalEvent.ts > dotarcieZalUndo.ts);
-    const hasStartRoz = !!startRozEvent && (!startRozUndo || startRozEvent.ts > startRozUndo.ts);
-    const hasDotarcieRoz = !!dotarcieRozEvent && (!dotarcieRozUndo || dotarcieRozEvent.ts > dotarcieRozUndo.ts);
-    // Uwagi kierowcy
-    const uwagiZalEvent = myEvents.filter(e => e.type === "uwagi_zaladunek").pop();
-    const uwagiRozEvent = myEvents.filter(e => e.type === "uwagi_rozladunek").pop();
-    const hasCmrZal = !!cmrZalPhoto;
-    const hasCmrRoz = !!cmrRozPhoto || !!cmrPhotoLegacy;
-
     return (
-      <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", paddingTop: "env(safe-area-inset-top, 0px)", paddingBottom: 40, zoom: driverZoom === "large" ? 1.2 : 1 }}>
+      <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh" }}>
         <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet"/>
         <div className="max-w-lg mx-auto p-4">
           <button onClick={() => setSelectedFracht(null)}
-            className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-3 py-2"
-            style={{ minHeight: 44 }}>
+            className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-4">
             ← Powrót
           </button>
 
-          {/* ═══ HEADER ═══ */}
-          <div style={{background: "linear-gradient(135deg, #1e293b, #334155)", borderRadius: 16, padding: 20, marginBottom: 16}}>
-            <div className="flex items-center justify-between" style={{marginBottom: 4}}>
-              {f.nrRef && <span style={{color: "#94a3b8", fontSize: 12, fontWeight: 600}}>REF: {f.nrRef}</span>}
-              <span style={{fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 20,
-                background: hasRoz ? "rgba(34,197,94,0.2)" : hasZal ? "rgba(59,130,246,0.2)" : "rgba(251,191,36,0.2)",
-                color: hasRoz ? "#4ade80" : hasZal ? "#60a5fa" : "#fbbf24"}}>
-                {hasRoz ? "Rozładowano" : hasZal ? "W trasie" : "Oczekuje"}
-              </span>
+          <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+            {/* Header */}
+            <div className="p-5" style={{background: "linear-gradient(135deg, #1e293b, #334155)"}}>
+              <div className="text-white text-lg font-bold">Zlecenie {f.nrZlecenia || ""}</div>
+              <div className="text-gray-300 text-sm mt-1">{f.klient || "—"}</div>
             </div>
-            <div style={{color: "#fff", fontSize: 13, marginTop: 4}}>{f.klient || "—"}</div>
-          </div>
 
-          {/* ═══ TRASA ═══ */}
-          <div style={{background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", overflow: "hidden", marginBottom: 16}}>
-            {/* Załadunek */}
-            <div style={{padding: "16px 16px 12px", borderBottom: "1px solid #f3f4f6"}}>
-              <div className="flex items-center gap-2" style={{marginBottom: 8}}>
-                <div style={{width: 10, height: 10, borderRadius: "50%", background: "#3b82f6", border: "2px solid #bfdbfe"}}></div>
-                <span style={{fontSize: 11, fontWeight: 700, color: "#3b82f6", textTransform: "uppercase", letterSpacing: 0.5}}>Załadunek</span>
-              </div>
-              <div style={{paddingLeft: 18}}>
-                <div style={{fontSize: 16, fontWeight: 700, color: "#111827", marginBottom: 2}}>{kody.zal}</div>
-                {f.zaladunekAdres && <div style={{fontSize: 13, color: "#6b7280", marginBottom: 2}}>{f.zaladunekAdres}</div>}
-                <div style={{fontSize: 13, color: "#374151", fontWeight: 600}}>
-                  {fmtDate(f.dataZaladunku)}{f.godzZaladunku ? ` · ${f.godzZaladunku}` : ""}
+            {/* Trasa */}
+            <div className="p-5 space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="flex flex-col items-center">
+                  <div className="w-4 h-4 rounded-full bg-blue-500 border-2 border-blue-200"></div>
+                  <div className="w-0.5 h-12 bg-gray-200"></div>
+                  <div className="w-4 h-4 rounded-full bg-green-500 border-2 border-green-200"></div>
                 </div>
-                {f.zaladunekTelefon && (
-                  <a href={`tel:${f.zaladunekTelefon}`} style={{fontSize: 13, color: "#3b82f6", textDecoration: "none", display: "block", marginTop: 4}}>
-                    📞 {f.zaladunekTelefon}
-                  </a>
-                )}
-                {f.zaladunekGeo && (() => {
-                  const [lat,lng] = f.zaladunekGeo.split(",").map(Number);
-                  return (
-                    <div style={{marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "#eff6ff", border: "1px solid #bfdbfe"}}>
-                      <div style={{fontSize: 11, color: "#6b7280", marginBottom: 4}}>📍 Współrzędne GPS</div>
-                      <div style={{fontSize: 18, fontWeight: 700, color: "#1e293b", letterSpacing: 0.5, fontFamily: "monospace"}}>
-                        {lat?.toFixed(5)}, {lng?.toFixed(5)}
-                      </div>
-                      <a href={`https://www.google.com/maps/dir/?api=1&destination=${f.zaladunekGeo}&travelmode=driving`}
-                        target="_blank" rel="noopener noreferrer"
-                        style={{display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8,
-                          padding: "10px 16px", borderRadius: 10, background: "#3b82f6", color: "#fff",
-                          fontSize: 14, fontWeight: 600, textDecoration: "none"}}>
-                        🧭 Nawiguj do załadunku
-                      </a>
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
-            {/* Rozładunek */}
-            <div style={{padding: "12px 16px 16px"}}>
-              <div className="flex items-center gap-2" style={{marginBottom: 8}}>
-                <div style={{width: 10, height: 10, borderRadius: "50%", background: "#10b981", border: "2px solid #a7f3d0"}}></div>
-                <span style={{fontSize: 11, fontWeight: 700, color: "#10b981", textTransform: "uppercase", letterSpacing: 0.5}}>Rozładunek</span>
-              </div>
-              <div style={{paddingLeft: 18}}>
-                <div style={{fontSize: 16, fontWeight: 700, color: "#111827", marginBottom: 2}}>{kody.roz}</div>
-                {f.rozladunekAdres && <div style={{fontSize: 13, color: "#6b7280", marginBottom: 2}}>{f.rozladunekAdres}</div>}
-                <div style={{fontSize: 13, color: "#374151", fontWeight: 600}}>
-                  {fmtDate(f.dataRozladunku)}{f.godzRozladunku ? ` · ${f.godzRozladunku}` : ""}
+                <div className="flex-1 space-y-6">
+                  <div>
+                    <div className="text-xs text-gray-500 uppercase font-semibold">Załadunek</div>
+                    <div className="text-base font-bold text-gray-900">{kody.zal}</div>
+                    <div className="text-sm text-gray-500">{fmtDate(f.dataZaladunku)}{f.godzZaladunku ? ` · ${f.godzZaladunku}` : ""}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500 uppercase font-semibold">Rozładunek</div>
+                    <div className="text-base font-bold text-gray-900">{kody.roz}</div>
+                    <div className="text-sm text-gray-500">{fmtDate(f.dataRozladunku)}{f.godzRozladunku ? ` · ${f.godzRozladunku}` : ""}</div>
+                  </div>
                 </div>
-                {f.rozladunekTelefon && (
-                  <a href={`tel:${f.rozladunekTelefon}`} style={{fontSize: 13, color: "#3b82f6", textDecoration: "none", display: "block", marginTop: 4}}>
-                    📞 {f.rozladunekTelefon}
-                  </a>
+              </div>
+
+              {f.uwagi && (
+                <div className="p-3 rounded-lg bg-yellow-50 border border-yellow-200">
+                  <div className="text-xs font-semibold text-yellow-800 mb-1">Uwagi od dyspozytora</div>
+                  <div className="text-sm text-yellow-900">{f.uwagi}</div>
+                </div>
+              )}
+
+              {f.wagaLadunku && (
+                <div className="text-sm text-gray-600">Waga ładunku: <span className="font-semibold">{f.wagaLadunku} kg</span></div>
+              )}
+
+              {/* Przyciski akcji */}
+              <div className="space-y-2 pt-2">
+                {f.statusRozladunku !== "rozladowano" && (
+                  <>
+                    {!f._driverZaladowano && (
+                      <button
+                        onClick={() => updateFrachtStatus(f, "zaladowano", new Date().toISOString())}
+                        className="w-full py-3 rounded-xl text-base font-bold text-white transition-all hover:opacity-90"
+                        style={{background: "#3b82f6"}}>
+                        📦 Potwierdzam załadunek
+                      </button>
+                    )}
+                    <button
+                      onClick={() => updateFrachtStatus(f, "rozladowano", new Date().toISOString())}
+                      className="w-full py-3 rounded-xl text-base font-bold text-white transition-all hover:opacity-90"
+                      style={{background: "#10b981"}}>
+                      ✅ Potwierdzam rozładunek
+                    </button>
+                  </>
                 )}
-                {f.rozladunekGeo && (() => {
-                  const [lat,lng] = f.rozladunekGeo.split(",").map(Number);
-                  return (
-                    <div style={{marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "#ecfdf5", border: "1px solid #a7f3d0"}}>
-                      <div style={{fontSize: 11, color: "#6b7280", marginBottom: 4}}>📍 Współrzędne GPS</div>
-                      <div style={{fontSize: 18, fontWeight: 700, color: "#1e293b", letterSpacing: 0.5, fontFamily: "monospace"}}>
-                        {lat?.toFixed(5)}, {lng?.toFixed(5)}
-                      </div>
-                      <a href={`https://www.google.com/maps/dir/?api=1&destination=${f.rozladunekGeo}&travelmode=driving`}
-                        target="_blank" rel="noopener noreferrer"
-                        style={{display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8,
-                          padding: "10px 16px", borderRadius: 10, background: "#10b981", color: "#fff",
-                          fontSize: 14, fontWeight: 600, textDecoration: "none"}}>
-                        🧭 Nawiguj do rozładunku
-                      </a>
-                    </div>
-                  );
-                })()}
               </div>
             </div>
           </div>
-
-          {/* ═══ TOWAR ═══ */}
-          {(f.wagaLadunku || f.towarIloscPalet || f.towarPalety || f.towarOpis) && (
-            <div style={{background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", padding: 16, marginBottom: 16}}>
-              <div style={{fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 12}}>Towar</div>
-              <div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: (f.towarPalety || f.towarOpis) ? 12 : 0}}>
-                {f.towarIloscPalet && (
-                  <div style={{padding: 12, borderRadius: 12, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
-                    <div style={{fontSize: 11, color: "#9ca3af"}}>Ilość palet</div>
-                    <div style={{fontSize: 18, fontWeight: 700, color: "#111827"}}>{f.towarIloscPalet}</div>
-                  </div>
-                )}
-                {f.wagaLadunku && (
-                  <div style={{padding: 12, borderRadius: 12, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
-                    <div style={{fontSize: 11, color: "#9ca3af"}}>Waga łączna</div>
-                    <div style={{fontSize: 18, fontWeight: 700, color: "#111827"}}>{f.wagaLadunku} kg</div>
-                  </div>
-                )}
-              </div>
-              {f.towarPalety && (
-                <div>
-                  <div style={{fontSize: 11, color: "#9ca3af", marginBottom: 6}}>Wymiary</div>
-                  {f.towarPalety.split("\n").filter(Boolean).map((line, i) => (
-                    <div key={i} style={{padding: "8px 12px", borderRadius: 8, background: "#f8fafc", border: "1px solid #f1f5f9", marginBottom: 4, fontSize: 13, color: "#374151", fontWeight: 500}}>
-                      {line}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {f.towarOpis && !f.towarPalety && (
-                <div style={{fontSize: 13, color: "#374151"}}>{f.towarOpis}</div>
-              )}
-              {f.zaladunekTyp && (
-                <div style={{marginTop: 12, padding: "8px 12px", borderRadius: 8, background: "#fffbeb", border: "1px solid #fde68a", fontSize: 13, color: "#92400e", fontWeight: 500}}>
-                  Załadunek: {f.zaladunekTyp}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ═══ UWAGI ═══ */}
-          {f.uwagi && (
-            <div style={{background: "#fffbeb", borderRadius: 12, border: "1px solid #fde68a", padding: "12px 16px", marginBottom: 16}}>
-              <div style={{fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 4}}>Uwagi</div>
-              <div style={{fontSize: 13, color: "#78350f"}}>{f.uwagi}</div>
-            </div>
-          )}
-
-          {/* ═══ KAFELEK 1: ZAŁADUNEK ═══ */}
-          {(() => { const zalDelay = calcDelay(f.dataZaladunku, f.godzZaladunku, dotarcieZalEvent?.value || dotarcieZalEvent?.ts); return (
-          <div style={{background: "#fff", borderRadius: 16, border: "2px solid #bfdbfe", padding: 16, marginBottom: 12}}>
-            <div className="flex items-center justify-between" style={{marginBottom: 8}}>
-              <div style={{fontSize: 13, fontWeight: 700, color: "#1d4ed8"}}>📦 ZAŁADUNEK</div>
-              <span style={{fontSize: 11, color: "#9ca3af"}}>{fmtDate(f.dataZaladunku)}{f.godzZaladunku ? ` · ${f.godzZaladunku}` : ""}</span>
-            </div>
-            {hasDotarcieZal && zalDelay && (
-              <div style={{marginBottom: 10}}>{renderDelayBadge(zalDelay)}</div>
-            )}
-
-            {/* 1. Dotarcie na załadunek */}
-            {renderStatusStep(hasDotarcieZal, "Dotarcie na załadunek", dotarcieZalEvent, !false, () => updateFrachtStatus(f, "dotarcie_zaladunek", new Date().toISOString()), () => undoFrachtStatus(f, "dotarcie_zaladunek"))}
-
-            {/* 2. Zdjęcia towaru */}
-            {hasDotarcieZal && (
-              <div style={{padding: 12, borderRadius: 12, marginBottom: 8, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
-                <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 8}}>📸 Zdjęcia towaru</div>
-                {towarPhotos.length > 0 && (
-                  <div style={{display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8}}>
-                    {towarPhotos.map((p, i) => (
-                      <div key={p.id || i} style={{display: "flex", alignItems: "center", gap: 2}}>
-                        <a href={p.photoUrl} target="_blank" rel="noopener noreferrer"
-                          style={{display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8,
-                            background: "#f0fdf4", border: "1px solid #bbf7d0", fontSize: 12, color: "#15803d",
-                            fontWeight: 500, textDecoration: "none"}}>
-                          📸 {i + 1} · {p.ts ? new Date(p.ts).toLocaleString("pl-PL", {hour:"2-digit",minute:"2-digit"}) : ""}
-                        </a>
-                        {p.id && <button onClick={() => deleteDriverPhoto(p.id)}
-                          style={{background: "none", border: "none", color: "#d1d5db", fontSize: 14, cursor: "pointer", padding: "4px"}}>✕</button>}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <label style={{display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                  padding: "10px", borderRadius: 10, border: "1px dashed #d1d5db", background: "#fff",
-                  color: "#6b7280", fontSize: 13, fontWeight: 500, cursor: "pointer"}}>
-                  📷 {towarPhotos.length > 0 ? "Dodaj kolejne zdjęcie" : "Dodaj zdjęcie towaru"}
-                  <input type="file" accept="image/*" capture="environment" className="hidden"
-                    onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto("towar", file); e.target.value=""; }} />
-                </label>
-              </div>
-            )}
-
-            {/* 3. CMR załadunek */}
-            {hasDotarcieZal && renderPhotoStep(hasCmrZal, "CMR załadunek", cmrZalPhoto, hasDotarcieZal, "cmr_zaladunek")}
-
-            {/* 4. Uwagi kierowcy — załadunek */}
-            {hasDotarcieZal && (
-              <div style={{padding: 12, borderRadius: 12, marginBottom: 8, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
-                <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6}}>📝 Uwagi — załadunek</div>
-                <textarea
-                  defaultValue={uwagiZalEvent?.note || ""}
-                  placeholder="Wpisz uwagi z załadunku..."
-                  onBlur={(e) => { if (e.target.value !== (uwagiZalEvent?.note || "")) saveDriverNote(f, "uwagi_zaladunek", e.target.value); }}
-                  style={{width: "100%", fontSize: 14, padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e7eb",
-                    background: "#fff", resize: "vertical", minHeight: 60, fontFamily: "inherit"}} />
-                {uwagiZalEvent?.ts && <div style={{fontSize: 11, color: "#9ca3af", marginTop: 4}}>
-                  Zapisane: {new Date(uwagiZalEvent.ts).toLocaleString("pl-PL", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
-                </div>}
-              </div>
-            )}
-
-            {/* 5. Start do rozładunku */}
-            {hasDotarcieZal && renderStatusStep(hasStartRoz, "Start do rozładunku", startRozEvent, hasCmrZal, () => updateFrachtStatus(f, "start_rozladunek", new Date().toISOString()), () => undoFrachtStatus(f, "start_rozladunek"))}
-          </div>); })()}
-
-          {/* ═══ KAFELEK 2: ROZŁADUNEK ═══ */}
-          {(() => { const rozDelay = calcDelay(f.dataRozladunku, f.godzRozladunku, dotarcieRozEvent?.value || dotarcieRozEvent?.ts); return (
-          <div style={{background: "#fff", borderRadius: 16, border: `2px solid ${hasStartRoz ? "#a7f3d0" : "#e5e7eb"}`, padding: 16, opacity: hasStartRoz ? 1 : 0.4}}>
-            <div className="flex items-center justify-between" style={{marginBottom: 8}}>
-              <div style={{fontSize: 13, fontWeight: 700, color: "#059669"}}>📦 ROZŁADUNEK</div>
-              <span style={{fontSize: 11, color: "#9ca3af"}}>{fmtDate(f.dataRozladunku)}{f.godzRozladunku ? ` · ${f.godzRozladunku}` : ""}</span>
-            </div>
-            {hasDotarcieRoz && rozDelay && (
-              <div style={{marginBottom: 10}}>{renderDelayBadge(rozDelay)}</div>
-            )}
-
-            {/* 1. Dotarcie na rozładunek */}
-            {renderStatusStep(hasDotarcieRoz, "Dotarcie na rozładunek", dotarcieRozEvent, hasStartRoz, () => updateFrachtStatus(f, "dotarcie_rozladunek", new Date().toISOString()), () => undoFrachtStatus(f, "dotarcie_rozladunek"))}
-
-            {/* 2. CMR rozładunek */}
-            {hasDotarcieRoz && renderPhotoStep(hasCmrRoz, "CMR rozładunek", cmrRozPhoto || cmrPhotoLegacy, hasDotarcieRoz, "cmr_rozladunek")}
-
-            {/* 3. Uwagi kierowcy — rozładunek */}
-            {hasDotarcieRoz && (
-              <div style={{padding: 12, borderRadius: 12, marginBottom: 8, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
-                <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6}}>📝 Uwagi — rozładunek</div>
-                <textarea
-                  defaultValue={uwagiRozEvent?.note || ""}
-                  placeholder="Wpisz uwagi z rozładunku..."
-                  onBlur={(e) => { if (e.target.value !== (uwagiRozEvent?.note || "")) saveDriverNote(f, "uwagi_rozladunek", e.target.value); }}
-                  style={{width: "100%", fontSize: 14, padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e7eb",
-                    background: "#fff", resize: "vertical", minHeight: 60, fontFamily: "inherit"}} />
-                {uwagiRozEvent?.ts && <div style={{fontSize: 11, color: "#9ca3af", marginTop: 4}}>
-                  Zapisane: {new Date(uwagiRozEvent.ts).toLocaleString("pl-PL", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
-                </div>}
-              </div>
-            )}
-
-            {/* 4. Zdjęcie uszkodzonego towaru (opcjonalne) */}
-            {hasDotarcieRoz && (
-              <div style={{padding: 12, borderRadius: 12, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
-                <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 4}}>📸 Zdjęcie uszkodzeń <span style={{fontSize: 11, color: "#9ca3af", fontWeight: 400}}>(opcjonalne)</span></div>
-                {towarDmgPhotos.length > 0 && (
-                  <div style={{display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8}}>
-                    {towarDmgPhotos.map((p, i) => (
-                      <div key={p.id || i} style={{display: "flex", alignItems: "center", gap: 2}}>
-                        <a href={p.photoUrl} target="_blank" rel="noopener noreferrer"
-                          style={{display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8,
-                            background: "#fef2f2", border: "1px solid #fecaca", fontSize: 12, color: "#dc2626",
-                            fontWeight: 500, textDecoration: "none"}}>
-                          ⚠️ Uszkodzenie {i + 1}
-                        </a>
-                        {p.id && <button onClick={() => deleteDriverPhoto(p.id)}
-                          style={{background: "none", border: "none", color: "#d1d5db", fontSize: 14, cursor: "pointer", padding: "4px"}}>✕</button>}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <label style={{display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                  padding: "10px", borderRadius: 10, border: "1px dashed #fecaca", background: "#fff",
-                  color: "#9ca3af", fontSize: 13, fontWeight: 500, cursor: "pointer"}}>
-                  📷 Dodaj zdjęcie uszkodzenia
-                  <input type="file" accept="image/*" capture="environment" className="hidden"
-                    onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto("towar_damage", file); e.target.value=""; }} />
-                </label>
-              </div>
-            )}
-          </div>); })()}
         </div>
       </div>
     );
   }
 
-  // ── Main view — Dashboard z kafelkami ──
+  // ── Main list view ──
   const driverName = (vehicle?.driverHistory || []).find(d => !d.to)?.name || user.displayName || user.email;
-
-  // Najbliższy urgent serwis
-  const serwisAlert = (() => {
-    if (!vehicle) return null;
-    const checks = [
-      ["OC", vehicle.ocExpiry], ["AC", vehicle.acExpiry],
-      ["Przegląd", vehicle.inspectionExpiry], ["UDT", vehicle.udtExpiry],
-    ].filter(([,d]) => d).map(([l,d]) => ({ label: l, days: daysUntil(d) })).filter(a => a.days !== null && a.days <= 60);
-    checks.sort((a,b) => a.days - b.days);
-    return checks[0] || null;
-  })();
-
-  // Średnie spalanie (z fuelEntries FULL lub fallback na operacyjne)
-  const avgSpalanie = (() => {
-    const fulls = [...fuelEntries].filter(e => e.fullTank && e.mileage > 0).sort((a,b) => a.mileage - b.mileage);
-    if (fulls.length >= 2) {
-      const tL = fulls.slice(1).reduce((s,e) => s + (e.liters||0), 0);
-      const tK = fulls[fulls.length-1].mileage - fulls[0].mileage;
-      if (tK > 0) return ((tL / tK) * 100).toFixed(1);
-    }
-    const w = operacyjne.filter(o => o.spalanie > 0);
-    return w.length > 0 ? (w.reduce((s,o) => s + o.spalanie, 0) / w.length).toFixed(1) : null;
-  })();
-
-  const renderFrachtCard = (f) => {
+  const renderFrachtCard = (f, showDate = false) => {
     const kody = formatKody(f);
     const isDone = f.statusRozladunku === "rozladowano" || (f.dataRozladunku && f.dataRozladunku < todayStr);
-    const myEvts = driverEvents.filter(ev => ev.frachtId === f.id);
-    const hasZal = myEvts.some(e => e.type === "zaladowano") || f._driverZaladowano;
-    const hasRoz = myEvts.some(e => e.type === "rozladowano") || isDone;
     return (
       <div key={f.id} onClick={() => setSelectedFracht(f)}
-        style={{ background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", overflow: "hidden", cursor: "pointer", marginBottom: 8 }}>
-        <div style={{ background: isDone ? "#f0fdf4" : hasZal ? "#eff6ff" : "#fffbeb", padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: isDone ? "#15803d" : hasZal ? "#2563eb" : "#92400e" }}>
-            {isDone ? "✅ Zakończone" : hasZal ? "🚛 W trasie" : "📋 Oczekuje"}
-          </span>
-          {f.nrRef && <span style={{ fontSize: 11, color: "#9ca3af" }}>{f.nrRef}</span>}
+        className={"bg-white rounded-xl border p-4 cursor-pointer hover:shadow-sm transition-all " + (isDone ? "opacity-50" : "")}
+        style={{ borderColor: "#e5e7eb" }}>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-xs text-gray-500">{fmtDate(f.dataZaladunku)} → {fmtDate(f.dataRozladunku)}</div>
+          {isDone ? (
+            <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{background:"#f0fdf4",color:"#15803d"}}>Zakończone</span>
+          ) : (
+            <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{background:"#eff6ff",color:"#2563eb"}}>W trasie</span>
+          )}
         </div>
-        <div style={{ padding: "12px 16px" }}>
-          <div className="flex items-center gap-2" style={{ marginBottom: 4 }}>
-            <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#3b82f6", flexShrink: 0 }}></div>
-            <span style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{kody.zal.split(" / ")[0]}</span>
-            <span style={{ fontSize: 12, color: "#9ca3af", marginLeft: "auto" }}>{fmtDate(f.dataZaladunku)}{f.godzZaladunku ? ` · ${f.godzZaladunku}` : ""}</span>
-          </div>
-          <div style={{ width: 1, height: 10, background: "#e5e7eb", marginLeft: 3 }}></div>
-          <div className="flex items-center gap-2">
-            <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#10b981", flexShrink: 0 }}></div>
-            <span style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{kody.roz.split(" / ")[0]}</span>
-            <span style={{ fontSize: 12, color: "#9ca3af", marginLeft: "auto" }}>{fmtDate(f.dataRozladunku)}{f.godzRozladunku ? ` · ${f.godzRozladunku}` : ""}</span>
-          </div>
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-blue-600 font-bold">{kody.zal}</span>
+          <span className="text-gray-400">→</span>
+          <span className="text-green-600 font-bold">{kody.roz}</span>
         </div>
-        {(f.towarIloscPalet || f.wagaLadunku || f.zaladunekTyp) && (
-          <div style={{ padding: "0 16px 12px", display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {f.towarIloscPalet && <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: "#f3f4f6", color: "#6b7280" }}>{f.towarIloscPalet} palet</span>}
-            {f.wagaLadunku && <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: "#f3f4f6", color: "#6b7280" }}>{f.wagaLadunku} kg</span>}
-            {f.zaladunekTyp && <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: "#f3f4f6", color: "#6b7280" }}>{f.zaladunekTyp}</span>}
-          </div>
-        )}
+        <div className="text-xs text-gray-500 mt-1">{f.klient || "—"}{f.nrZlecenia ? ` · ${f.nrZlecenia}` : ""}</div>
       </div>
     );
   };
 
-  // ── Ekran sub-view (nie home) ──
-  if (driverTab !== "home") {
-    const subTitles = { zlecenia: "Zlecenia", pojazd: "Pojazd", serwis: "Serwis", spalanie: "Tankowania", czas: "Czas pracy", dokumenty: "Dokumenty", mapa: "Mapa" };
-    return (
-      <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", paddingTop: "env(safe-area-inset-top, 0px)", zoom: driverZoom === "large" ? 1.2 : 1 }}>
-        <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet"/>
-        <div className="max-w-lg mx-auto p-4">
-          <button onClick={() => setDriverTab("home")} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-3 py-2" style={{ minHeight: 44 }}>← Powrót</button>
-          <div className="text-lg font-bold text-gray-900 mb-4">{subTitles[driverTab] || driverTab}</div>
-
-          {/* ZLECENIA */}
-          {driverTab === "zlecenia" && (
-            <div>
-              {active.length > 0 && (<><div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Aktywne ({active.length})</div>{active.map(f => renderFrachtCard(f))}</>)}
-              {upcoming.length > 0 && (<><div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-4 mb-2">Nadchodzące ({upcoming.length})</div>{upcoming.map(f => renderFrachtCard(f))}</>)}
-              {history.length > 0 && (<><div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-4 mb-2">Historia ({history.length})</div>{history.slice(0, 10).map(f => renderFrachtCard(f))}{history.length > 10 && <div className="text-xs text-gray-400 text-center mt-2">…i {history.length - 10} więcej</div>}</>)}
-              {active.length === 0 && upcoming.length === 0 && history.length === 0 && (
-                <div className="text-center py-12 text-gray-400"><div className="text-4xl mb-3">🛣️</div><div className="font-medium">Brak zleceń</div></div>
-              )}
-            </div>
-          )}
-
-          {/* POJAZD */}
-          {driverTab === "pojazd" && vehicle && (
-            <div className="space-y-4">
-              <div className="bg-white rounded-2xl border border-gray-100 p-5">
-                <div className="flex items-center gap-3 mb-4"><div className="text-3xl">🚛</div><div><div className="text-lg font-bold text-gray-900">{vehicle.plate}</div>{vehicle.plate2 && <div className="text-sm text-gray-500">Przyczepa: {vehicle.plate2}</div>}</div></div>
-                <div className="grid grid-cols-2 gap-3">
-                  {[["Marka",vehicle.brand],["Typ",vehicle.type],["Rok",vehicle.year],["Wymiary",vehicle.dimensions],["Ładowność",vehicle.maxWeight?`${vehicle.maxWeight} kg`:null],["VIN",vehicle.vin],["Przebieg",vehicle.currentKm?`${Number(vehicle.currentKm).toLocaleString("pl-PL")} km`:null]].filter(([,v])=>v).map(([l,v])=>(
-                    <div key={l} className="p-3 rounded-lg bg-gray-50 border border-gray-100"><div className="text-xs text-gray-400">{l}</div><div className="text-sm font-semibold text-gray-800">{v}</div></div>
-                  ))}
-                </div>
-              </div>
-              {((vehicle.equipment||[]).length>0||(vehicle.customEquipment||[]).length>0) && (
-                <div className="bg-white rounded-2xl border border-gray-100 p-5">
-                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Wyposażenie</div>
-                  <div className="flex flex-wrap gap-2">{[...(vehicle.equipment||[]),...(vehicle.customEquipment||[])].map(eq=>(<span key={eq} className="px-3 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100">{eq}</span>))}</div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* SERWIS */}
-          {driverTab === "serwis" && vehicle && (
-            <div className="space-y-4">
-              <div className="bg-white rounded-2xl border border-gray-100 p-5">
-                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Terminy i przeglądy</div>
-                <div className="space-y-2">
-                  {[["OC",vehicle.ocExpiry],["AC",vehicle.acExpiry],["Przegląd techniczny",vehicle.inspectionExpiry],["UDT ważność",vehicle.udtExpiry],["UDT przegląd",vehicle.udtNextDate],["GAP",vehicle.gapExpiry]].filter(([,d])=>d).map(([label,date])=>{
-                    const days=daysUntil(date);const urgent=days!==null&&days<=30;const warn=days!==null&&days<=60;
-                    return(<div key={label} className="flex items-center justify-between py-2 px-3 rounded-lg" style={{background:urgent?"#fef2f2":warn?"#fffbeb":"#f9fafb"}}><span className="text-sm text-gray-700">{label}</span><div className="text-right"><span className="text-sm font-semibold" style={{color:urgent?"#dc2626":warn?"#d97706":"#374151"}}>{fmtDateFull(date)}</span>{days!==null&&<span className="ml-2 text-xs" style={{color:urgent?"#dc2626":warn?"#d97706":"#9ca3af"}}>({days>0?`za ${days} dni`:days===0?"dziś!":`${Math.abs(days)} dni temu`})</span>}</div></div>);
-                  })}
-                </div>
-              </div>
-              {(vehicle.lastOilServiceKm||vehicle.oilServiceEveryKm)&&(
-                <div className="bg-white rounded-2xl border border-gray-100 p-5">
-                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Serwis olejowy</div>
-                  <div className="grid grid-cols-2 gap-3">
-                    {vehicle.lastOilServiceKm&&<div className="p-3 rounded-lg bg-gray-50 border border-gray-100"><div className="text-xs text-gray-400">Ostatni serwis</div><div className="text-sm font-semibold text-gray-800">{Number(vehicle.lastOilServiceKm).toLocaleString("pl-PL")} km</div></div>}
-                    {vehicle.oilServiceEveryKm&&<div className="p-3 rounded-lg bg-gray-50 border border-gray-100"><div className="text-xs text-gray-400">Następny co</div><div className="text-sm font-semibold text-gray-800">{Number(vehicle.oilServiceEveryKm).toLocaleString("pl-PL")} km</div></div>}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* SPALANIE / TANKOWANIA */}
-          {driverTab === "spalanie" && vehicle && (() => {
-            const FUEL_COUNTRIES = ["PL","DE","NL","BE","FR","CZ","AT","IT","ES","LU","DK","SE","HU","SK","LT","LV","RO","BG","HR","SI"];
-            const countryFlag = (c) => ({PL:"\u{1F1F5}\u{1F1F1}",DE:"\u{1F1E9}\u{1F1EA}",NL:"\u{1F1F3}\u{1F1F1}",BE:"\u{1F1E7}\u{1F1EA}",FR:"\u{1F1EB}\u{1F1F7}",CZ:"\u{1F1E8}\u{1F1FF}",AT:"\u{1F1E6}\u{1F1F9}",IT:"\u{1F1EE}\u{1F1F9}",ES:"\u{1F1EA}\u{1F1F8}",LU:"\u{1F1F1}\u{1F1FA}",DK:"\u{1F1E9}\u{1F1F0}",SE:"\u{1F1F8}\u{1F1EA}",HU:"\u{1F1ED}\u{1F1FA}",SK:"\u{1F1F8}\u{1F1F0}",LT:"\u{1F1F1}\u{1F1F9}",LV:"\u{1F1F1}\u{1F1FB}",RO:"\u{1F1F7}\u{1F1F4}",BG:"\u{1F1E7}\u{1F1EC}",HR:"\u{1F1ED}\u{1F1F7}",SI:"\u{1F1F8}\u{1F1EE}"})[c]||c;
-            const sorted = [...fuelEntries].sort((a,b) => (b.date||"").localeCompare(a.date||"") || (b.mileage||0)-(a.mileage||0));
-            const totalL = fuelEntries.reduce((s,e) => s + (e.liters||0), 0);
-            const byMileage = [...fuelEntries].filter(e => e.mileage > 0).sort((a,b) => b.mileage - a.mileage);
-            const totalKm = byMileage.length >= 2 ? byMileage[0].mileage - byMileage[byMileage.length-1].mileage : 0;
-            // Spalanie z tankowań FULL
-            const fulls = [...fuelEntries].filter(e => e.fullTank && e.mileage > 0).sort((a,b) => a.mileage - b.mileage);
-            const avgFuel = (() => {
-              if (fulls.length < 2) return null;
-              const tL = fulls.slice(1).reduce((s,e) => s + (e.liters||0), 0);
-              const tK = fulls[fulls.length-1].mileage - fulls[0].mileage;
-              return tK > 0 ? ((tL / tK) * 100).toFixed(1) : null;
-            })();
-            // Submit fuel entry
-            const submitFuel = async () => {
-              if (!fuelForm.liters || !fuelForm.mileage) { showToast("Podaj litry i przebieg"); return; }
-              try {
-                const now = new Date();
-                const ts = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")} ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
-                await addDoc(collection(db, "fuelEntries"), {
-                  vehicleId: vehicle.id,
-                  driverEmail: user.email,
-                  date: fuelForm.date,
-                  liters: parseFloat(fuelForm.liters),
-                  mileage: parseInt(fuelForm.mileage),
-                  station: fuelForm.station || "",
-                  cardNr: fuelForm.cardNr || "",
-                  pricePerL: fuelForm.pricePerL ? parseFloat(fuelForm.pricePerL) : null,
-                  country: fuelForm.country || "PL",
-                  fullTank: !!fuelForm.fullTank,
-                  createdAt: ts,
-                });
-                showToast("Tankowanie zapisane");
-                setFuelForm(f => ({ ...f, liters: "", mileage: "", station: "", pricePerL: "" }));
-                setFuelView("list");
-              } catch (err) {
-                console.error("fuelEntry save error", err);
-                showToast("Błąd zapisu: " + err.message);
-              }
-            };
-            // Delete fuel entry
-            const deleteFuel = async (id) => {
-              if (!window.confirm("Usunąć to tankowanie?")) return;
-              try {
-                await deleteDoc(doc(db, "fuelEntries", id));
-                showToast("Usunięto");
-              } catch (err) { showToast("Błąd: " + err.message); }
-            };
-            // Format date DD.MM.YYYY
-            const fmtD = (d) => { if (!d) return "—"; const [y,m,day] = d.split("-"); return `${day}.${m}.${y}`; };
-
-            return (
-              <div>
-                {/* SUMMARY CARDS */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
-                  <div style={{ background: "#fff", borderRadius: 12, padding: "10px 8px", textAlign: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", borderTop: "3px solid #2563eb" }}>
-                    <div style={{ fontSize: 15, fontWeight: 800, color: "#2563eb" }}>{avgFuel ? `${avgFuel}` : "—"}</div>
-                    <div style={{ fontSize: 10, color: "#64748b" }}>L/100km</div>
-                  </div>
-                  <div style={{ background: "#fff", borderRadius: 12, padding: "10px 8px", textAlign: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", borderTop: "3px solid #059669" }}>
-                    <div style={{ fontSize: 15, fontWeight: 800, color: "#059669" }}>{totalL > 0 ? totalL.toLocaleString("pl-PL") : "—"}</div>
-                    <div style={{ fontSize: 10, color: "#64748b" }}>Litry</div>
-                  </div>
-                  <div style={{ background: "#fff", borderRadius: 12, padding: "10px 8px", textAlign: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", borderTop: "3px solid #7c3aed" }}>
-                    <div style={{ fontSize: 15, fontWeight: 800, color: "#7c3aed" }}>{totalKm > 0 ? totalKm.toLocaleString("pl-PL") : "—"}</div>
-                    <div style={{ fontSize: 10, color: "#64748b" }}>km</div>
-                  </div>
-                </div>
-
-                {/* TAB BAR: Lista / Statystyki */}
-                <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-                  {[["list","Lista"],["stats","Statystyki"]].map(([k,l]) => (
-                    <button key={k} onClick={() => setFuelView(k)} style={{
-                      flex: 1, padding: "8px 0", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer", border: "none",
-                      background: fuelView === k ? "#2563eb" : "#f1f5f9", color: fuelView === k ? "#fff" : "#64748b",
-                    }}>{l}</button>
-                  ))}
-                </div>
-
-                {/* ── LIST VIEW ── */}
-                {fuelView === "list" && (
-                  <div>
-                    {sorted.length === 0 && (
-                      <div style={{ textAlign: "center", padding: "32px 0", color: "#9ca3af" }}>
-                        <div style={{ fontSize: 32, marginBottom: 8 }}>⛽</div>
-                        <div style={{ fontSize: 14 }}>Brak tankowań</div>
-                        <div style={{ fontSize: 12, marginTop: 4 }}>Dodaj pierwsze tankowanie</div>
-                      </div>
-                    )}
-                    {sorted.map(e => (
-                      <div key={e.id} style={{
-                        background: "#fff", borderRadius: 12, padding: "12px 14px", marginBottom: 8,
-                        boxShadow: "0 1px 3px rgba(0,0,0,0.08)", display: "flex", alignItems: "center", gap: 10,
-                      }}>
-                        <div style={{ textAlign: "center", minWidth: 42 }}>
-                          <div style={{ fontSize: 20 }}>{countryFlag(e.country)}</div>
-                          <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>{fmtD(e.date)}</div>
-                        </div>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: 600, fontSize: 14, color: "#1e293b" }}>
-                            {(e.liters||0).toLocaleString("pl-PL")} L
-                            {e.fullTank && <span style={{ fontSize: 9, background: "#dbeafe", color: "#1d4ed8", padding: "1px 5px", borderRadius: 6, marginLeft: 5, verticalAlign: "middle" }}>FULL</span>}
-                          </div>
-                          <div style={{ fontSize: 11, color: "#64748b" }}>{e.station || "—"}</div>
-                        </div>
-                        <div style={{ textAlign: "right" }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "#334155" }}>{e.mileage ? e.mileage.toLocaleString("pl-PL")+" km" : ""}</div>
-                          {e.pricePerL > 0 && <div style={{ fontSize: 10, color: "#94a3b8" }}>{e.country === "PL" ? `${e.pricePerL.toFixed(2)} PLN/L` : `${e.pricePerL.toFixed(3)} €/L`}</div>}
-                        </div>
-                        <button onClick={() => deleteFuel(e.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: "#d1d5db", padding: 4 }} title="Usuń">✕</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* ── STATS VIEW ── */}
-                {fuelView === "stats" && (
-                  <div>
-                    {/* Bar chart liters */}
-                    <div style={{ background: "#fff", borderRadius: 14, padding: 14, boxShadow: "0 1px 4px rgba(0,0,0,0.08)", marginBottom: 12 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 10 }}>Litry na tankowanie</div>
-                      {sorted.slice(0,8).map(e => {
-                        const pct = Math.min((e.liters||0) / 500 * 100, 100);
-                        return (
-                          <div key={e.id} style={{ marginBottom: 6 }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#64748b", marginBottom: 2 }}>
-                              <span>{fmtD(e.date)}</span><span>{(e.liters||0)} L</span>
-                            </div>
-                            <div style={{ background: "#f1f5f9", borderRadius: 5, height: 16, overflow: "hidden" }}>
-                              <div style={{ width: `${pct}%`, height: "100%", borderRadius: 5, background: e.fullTank ? "linear-gradient(90deg, #3b82f6, #2563eb)" : "linear-gradient(90deg, #94a3b8, #64748b)" }}/>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {/* Consumption between FULLs */}
-                    {fulls.length >= 2 && (
-                      <div style={{ background: "#fff", borderRadius: 14, padding: 14, boxShadow: "0 1px 4px rgba(0,0,0,0.08)", marginBottom: 12 }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 8 }}>Spalanie między tankowaniami (FULL)</div>
-                        {(() => {
-                          const segs = [];
-                          for (let i = 1; i < fulls.length; i++) {
-                            const km = fulls[i].mileage - fulls[i-1].mileage;
-                            const cons = km > 0 ? ((fulls[i].liters / km) * 100).toFixed(1) : "—";
-                            segs.push({ date: fulls[i].date, km, consumption: cons });
-                          }
-                          return segs.reverse().map((s,i) => (
-                            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: i < segs.length-1 ? "1px solid #f1f5f9" : "none" }}>
-                              <span style={{ fontSize: 11, color: "#64748b" }}>{fmtD(s.date)}</span>
-                              <span style={{ fontSize: 11, color: "#475569" }}>{s.km.toLocaleString("pl-PL")} km</span>
-                              <span style={{ fontSize: 13, fontWeight: 700, color: parseFloat(s.consumption) > 35 ? "#dc2626" : parseFloat(s.consumption) > 32 ? "#f59e0b" : "#059669" }}>{s.consumption} L/100</span>
-                            </div>
-                          ));
-                        })()}
-                      </div>
-                    )}
-                    {/* Country breakdown */}
-                    {fuelEntries.length > 0 && (
-                      <div style={{ background: "#fff", borderRadius: 14, padding: 14, boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 8 }}>Wg kraju</div>
-                        {(() => {
-                          const byC = {};
-                          fuelEntries.forEach(e => { if (!byC[e.country]) byC[e.country] = { liters: 0, count: 0 }; byC[e.country].liters += (e.liters||0); byC[e.country].count++; });
-                          return Object.entries(byC).sort((a,b) => b[1].liters - a[1].liters).map(([c,d]) => (
-                            <div key={c} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderBottom: "1px solid #f8fafc" }}>
-                              <span style={{ fontSize: 18 }}>{countryFlag(c)}</span>
-                              <span style={{ fontSize: 12, fontWeight: 600, color: "#334155", flex: 1 }}>{c}</span>
-                              <span style={{ fontSize: 11, color: "#64748b" }}>{d.count}x</span>
-                              <span style={{ fontSize: 12, fontWeight: 600, color: "#1e293b" }}>{d.liters.toLocaleString("pl-PL")} L</span>
-                            </div>
-                          ));
-                        })()}
-                      </div>
-                    )}
-                    {fuelEntries.length === 0 && (
-                      <div style={{ textAlign: "center", padding: "24px 0", color: "#9ca3af", fontSize: 13 }}>Dodaj tankowania aby zobaczyć statystyki</div>
-                    )}
-                    {/* Dane miesięczne z operacyjne (z biura) */}
-                    {operacyjne.length > 0 && (
-                      <div style={{ background: "#fff", borderRadius: 14, padding: 14, boxShadow: "0 1px 4px rgba(0,0,0,0.08)", marginTop: 12 }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 8 }}>Dane z biura (miesięczne)</div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                          {operacyjne.sort((a,b) => (b.year*100+b.month)-(a.year*100+a.month)).slice(0,6).map(op => {
-                            const mn = new Date(op.year, op.month-1).toLocaleDateString("pl-PL",{month:"short",year:"numeric"});
-                            return (
-                              <div key={`${op.year}-${op.month}`} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 10px", borderRadius: 8, background: "#f9fafb" }}>
-                                <span style={{ fontSize: 12, fontWeight: 500, color: "#475569" }}>{mn}</span>
-                                <div style={{ display: "flex", gap: 10, fontSize: 11 }}>
-                                  {op.spalanie > 0 && <span style={{ fontWeight: 700, color: "#0891b2" }}>{op.spalanie.toFixed(1)} L/100</span>}
-                                  {op.kmLicznik > 0 && <span style={{ color: "#64748b" }}>{op.kmLicznik.toLocaleString("pl-PL")} km</span>}
-                                  {op.paliwoL > 0 && <span style={{ color: "#64748b" }}>{op.paliwoL} L</span>}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* ── FORM VIEW ── */}
-                {fuelView === "form" && (
-                  <div style={{ background: "#fff", borderRadius: 14, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: "#1e293b", marginBottom: 12 }}>Nowe tankowanie</div>
-                    {/* Date */}
-                    <div style={{ marginBottom: 10 }}>
-                      <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 3 }}>Data tankowania *</label>
-                      <input type="date" value={fuelForm.date} onChange={e => setFuelForm(f => ({...f, date: e.target.value}))}
-                        style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 15, color: "#1e293b", background: "#f8fafc", boxSizing: "border-box" }}/>
-                    </div>
-                    {/* Liters + Mileage */}
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-                      <div>
-                        <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 3 }}>Litry *</label>
-                        <input type="number" placeholder="np. 400" value={fuelForm.liters} onChange={e => setFuelForm(f => ({...f, liters: e.target.value}))}
-                          style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 15, color: "#1e293b", background: "#f8fafc", boxSizing: "border-box" }}/>
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 3 }}>Przebieg km *</label>
-                        <input type="number" placeholder="np. 845230" value={fuelForm.mileage} onChange={e => setFuelForm(f => ({...f, mileage: e.target.value}))}
-                          style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 15, color: "#1e293b", background: "#f8fafc", boxSizing: "border-box" }}/>
-                      </div>
-                    </div>
-                    {/* Station */}
-                    <div style={{ marginBottom: 10 }}>
-                      <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 3 }}>Stacja paliw</label>
-                      <input type="text" placeholder="np. Shell Wrocław A4" value={fuelForm.station} onChange={e => setFuelForm(f => ({...f, station: e.target.value}))}
-                        style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 15, color: "#1e293b", background: "#f8fafc", boxSizing: "border-box" }}/>
-                    </div>
-                    {/* Card + Price */}
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-                      <div>
-                        <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 3 }}>Nr karty</label>
-                        <input type="text" placeholder="EW-4821" value={fuelForm.cardNr} onChange={e => setFuelForm(f => ({...f, cardNr: e.target.value}))}
-                          style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 15, color: "#1e293b", background: "#f8fafc", boxSizing: "border-box" }}/>
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 3 }}>Cena/L</label>
-                        <input type="number" step="0.01" placeholder="np. 5.89" value={fuelForm.pricePerL} onChange={e => setFuelForm(f => ({...f, pricePerL: e.target.value}))}
-                          style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 15, color: "#1e293b", background: "#f8fafc", boxSizing: "border-box" }}/>
-                      </div>
-                    </div>
-                    {/* Country */}
-                    <div style={{ marginBottom: 10 }}>
-                      <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 3 }}>Kraj</label>
-                      <select value={fuelForm.country} onChange={e => setFuelForm(f => ({...f, country: e.target.value}))}
-                        style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 15, color: "#1e293b", background: "#f8fafc", boxSizing: "border-box" }}>
-                        {FUEL_COUNTRIES.map(c => <option key={c} value={c}>{countryFlag(c)} {c}</option>)}
-                      </select>
-                    </div>
-                    {/* Full tank toggle */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", marginBottom: 10 }}>
-                      <div onClick={() => setFuelForm(f => ({...f, fullTank: !f.fullTank}))}
-                        style={{ width: 48, height: 26, borderRadius: 13, cursor: "pointer", background: fuelForm.fullTank ? "#2563eb" : "#cbd5e1", position: "relative", transition: "background 0.2s" }}>
-                        <div style={{ width: 22, height: 22, borderRadius: 11, background: "#fff", position: "absolute", top: 2, left: fuelForm.fullTank ? 24 : 2, transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }}/>
-                      </div>
-                      <span style={{ fontSize: 13, color: "#334155", fontWeight: 500 }}>Do pełna (FULL)</span>
-                    </div>
-                    {/* Submit */}
-                    <button onClick={submitFuel} style={{
-                      width: "100%", padding: "13px", background: "linear-gradient(135deg, #1e40af, #3b82f6)",
-                      color: "#fff", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: "pointer"
-                    }}>Zapisz tankowanie</button>
-                    <button onClick={() => setFuelView("list")} style={{
-                      width: "100%", padding: "10px", marginTop: 8, background: "transparent",
-                      color: "#64748b", border: "1px solid #e2e8f0", borderRadius: 12, fontSize: 13, fontWeight: 600, cursor: "pointer"
-                    }}>Anuluj</button>
-                  </div>
-                )}
-
-                {/* FAB — Dodaj tankowanie */}
-                {fuelView !== "form" && (
-                  <div style={{ textAlign: "center", marginTop: 16 }}>
-                    <button onClick={() => setFuelView("form")} style={{
-                      background: "linear-gradient(135deg, #1e40af, #3b82f6)", color: "#fff", border: "none", borderRadius: 14,
-                      padding: "12px 28px", fontSize: 14, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 12px rgba(37,99,235,0.3)"
-                    }}>+ Dodaj tankowanie</button>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-
-          {/* CZAS PRACY */}
-          {driverTab === "czas" && (
-            <div className="bg-white rounded-2xl border border-gray-100 p-5">
-              {pauzy.length === 0 ? (
-                <div className="text-center py-8 text-gray-400"><div className="text-3xl mb-2">⏱</div><div className="text-sm">Brak zapisanych pauz</div></div>
-              ) : (
-                <div className="space-y-2">{pauzy.sort((a,b)=>(b.date||"").localeCompare(a.date||"")).slice(0,30).map((p,i)=>(<div key={p.id||i} className="flex items-center justify-between py-2 px-3 rounded-lg bg-gray-50 border border-gray-100"><div><div className="text-sm font-medium text-gray-700">{fmtDateFull(p.date)}</div>{p.location&&<div className="text-xs text-gray-400">{p.location}</div>}</div><div className="text-right">{p.status&&<span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{background:p.status==="pauza"?"#fef3c7":"#ecfdf5",color:p.status==="pauza"?"#92400e":"#059669"}}>{p.status}</span>}{p.hours&&<div className="text-xs text-gray-500 mt-0.5">{p.hours}h</div>}</div></div>))}</div>
-              )}
-            </div>
-          )}
-
-          {/* DOKUMENTY / MAPA — placeholder */}
-          {(driverTab === "dokumenty" || driverTab === "mapa") && (
-            <div className="text-center py-16 text-gray-400">
-              <div className="text-4xl mb-3">{driverTab === "mapa" ? "🗺️" : "📄"}</div>
-              <div className="font-medium">{driverTab === "mapa" ? "Wkrótce — integracja GPS" : "Wkrótce"}</div>
-            </div>
-          )}
-
-          {!vehicle && driverTab !== "zlecenia" && (
-            <div className="text-center py-12 text-gray-400"><div className="text-4xl mb-3">🚛</div><div className="font-medium">Brak przypisanego pojazdu</div></div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // ── HOME — Dashboard z kafelkami ──
-  const firstActive = active[0] || upcoming[0];
-  const firstKody = firstActive ? formatKody(firstActive) : null;
-
   return (
-    <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", zoom: driverZoom === "large" ? 1.2 : 1 }}>
+    <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet"/>
 
       {/* HEADER */}
-      <div style={{background: "linear-gradient(135deg, #1e293b, #334155)", paddingTop: "max(env(safe-area-inset-top, 0px), 12px)"}} className="px-4 pb-5 pt-3">
+      <div style={{background: "linear-gradient(135deg, #1e293b, #334155)"}} className="px-4 py-5">
         <div className="max-w-lg mx-auto">
           <div className="flex items-center justify-between">
             <div>
@@ -7154,27 +5988,33 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
               {vehicle ? (
                 <div className="text-white text-sm font-medium">{vehicle.plate}{vehicle.plate2 ? ` + ${vehicle.plate2}` : ""}</div>
               ) : (
-                <div className="text-yellow-300 text-sm">Brak pojazdu</div>
+                <div className="text-yellow-300 text-sm">Brak przypisanego pojazdu</div>
               )}
-              <div className="flex items-center gap-2 mt-1">
-                <button onClick={() => {
-                  const next = driverZoom === "normal" ? "large" : "normal";
-                  setDriverZoom(next);
-                  try { localStorage.setItem("fleetstat_driver_zoom", next); } catch {}
-                }}
-                  className="text-xs text-gray-400 hover:text-gray-200"
-                  style={{padding: "2px 6px", borderRadius: 6, background: driverZoom === "large" ? "rgba(255,255,255,0.15)" : "transparent"}}>
-                  {driverZoom === "large" ? "🔍 Aa−" : "🔍 Aa+"}
-                </button>
-                <button onClick={() => { logAction("logout", "auth", { reason: "manual" }); signOut(auth); }}
-                  className="text-xs text-gray-400 hover:text-gray-200">Wyloguj</button>
-              </div>
+              <button onClick={() => { logAction("logout", "auth", { reason: "manual" }); signOut(auth); }}
+                className="text-xs text-gray-400 hover:text-gray-200 mt-1">Wyloguj</button>
             </div>
           </div>
         </div>
       </div>
 
       <div className="max-w-lg mx-auto p-4">
+        {/* TABS */}
+        <div className="flex gap-1 mb-4 bg-white rounded-xl p-1 border border-gray-200">
+          {[
+            { id: "zlecenia", label: "Zlecenia", count: active.length + upcoming.length },
+            { id: "historia", label: "Historia", count: history.length },
+          ].map(t => (
+            <button key={t.id} onClick={() => setDriverTab(t.id)}
+              className="flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all"
+              style={{
+                background: driverTab === t.id ? "#111827" : "transparent",
+                color: driverTab === t.id ? "#fff" : "#6b7280",
+              }}>
+              {t.label} ({t.count})
+            </button>
+          ))}
+        </div>
+
         {!vehicle && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-4 text-center">
             <div className="text-2xl mb-2">🚛</div>
@@ -7183,73 +6023,41 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
           </div>
         )}
 
-        {/* ═══ KAFELEK: ZLECENIA (full width, duży) ═══ */}
-        <div onClick={() => setDriverTab("zlecenia")}
-          style={{ background: "#fff", borderRadius: 20, border: "1px solid #e5e7eb", overflow: "hidden", cursor: "pointer", marginBottom: 12 }}>
-          <div style={{ padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div className="flex items-center gap-3">
-              <div style={{ width: 48, height: 48, borderRadius: 14, background: "linear-gradient(135deg, #3b82f6, #2563eb)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>📋</div>
-              <div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: "#111827" }}>Zlecenia</div>
-                <div style={{ fontSize: 12, color: "#6b7280" }}>
-                  {active.length > 0 ? `${active.length} aktywne` : ""}
-                  {active.length > 0 && upcoming.length > 0 ? " · " : ""}
-                  {upcoming.length > 0 ? `${upcoming.length} nadchodzące` : ""}
-                  {active.length === 0 && upcoming.length === 0 ? "Brak zleceń" : ""}
-                </div>
+        {/* ZLECENIA */}
+        {driverTab === "zlecenia" && (
+          <div className="space-y-3">
+            {active.length > 0 && (
+              <>
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Aktywne ({active.length})</div>
+                {active.map(f => renderFrachtCard(f))}
+              </>
+            )}
+            {upcoming.length > 0 && (
+              <>
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-4">Nadchodzące ({upcoming.length})</div>
+                {upcoming.map(f => renderFrachtCard(f))}
+              </>
+            )}
+            {active.length === 0 && upcoming.length === 0 && (
+              <div className="text-center py-12 text-gray-400">
+                <div className="text-4xl mb-3">🛣️</div>
+                <div className="font-medium">Brak aktywnych zleceń</div>
               </div>
-            </div>
-            <div style={{ fontSize: 20, color: "#d1d5db" }}>›</div>
+            )}
           </div>
-          {/* Mini preview aktywnego zlecenia */}
-          {firstActive && firstKody && (
-            <div style={{ padding: "0 20px 16px" }}>
-              <div style={{ padding: "10px 14px", borderRadius: 12,
-                background: active.length > 0 ? "#f0fdf4" : "#eff6ff",
-                border: `1px solid ${active.length > 0 ? "#bbf7d0" : "#bfdbfe"}` }}>
-                <div className="flex items-center justify-between" style={{ marginBottom: 4 }}>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: active.length > 0 ? "#15803d" : "#2563eb" }}>
-                    {active.length > 0 ? "🚛 W trasie" : "📋 Nadchodzące"}
-                  </span>
-                  {firstActive.nrRef && <span style={{ fontSize: 11, color: "#9ca3af" }}>{firstActive.nrRef}</span>}
-                </div>
-                <div className="flex items-center gap-2">
-                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#3b82f6" }}></div>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{firstKody.zal.split(" / ")[0]}</span>
-                  <span style={{ color: "#d1d5db", fontSize: 12 }}>→</span>
-                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981" }}></div>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{firstKody.roz.split(" / ")[0]}</span>
-                  <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: "auto" }}>{fmtDate(firstActive.dataRozladunku)}</span>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
+        )}
 
-        {/* ═══ SIATKA KAFELKÓW (2 kolumny) ═══ */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          {[
-            { id: "serwis", icon: "🔧", label: "Serwis", gradient: "linear-gradient(135deg, #f59e0b, #d97706)",
-              sub: serwisAlert ? `${serwisAlert.label} za ${serwisAlert.days}d` : "Terminy OK",
-              subStyle: serwisAlert && serwisAlert.days <= 30 ? { background: "#fef2f2", color: "#dc2626" } : null },
-            { id: "dokumenty", icon: "📄", label: "Dokumenty", gradient: "linear-gradient(135deg, #8b5cf6, #7c3aed)", sub: "CMR, zlecenia" },
-            { id: "spalanie", icon: "⛽", label: "Tankowania", gradient: "linear-gradient(135deg, #06b6d4, #0891b2)",
-              sub: avgSpalanie ? `Śr. ${avgSpalanie} L/100` : fuelEntries.length > 0 ? `${fuelEntries.length} wpisów` : "Dodaj tankowanie" },
-            { id: "czas", icon: "⏱", label: "Czas pracy", gradient: "linear-gradient(135deg, #10b981, #059669)", sub: "Pauzy, jazda" },
-            { id: "mapa", icon: "🗺️", label: "Mapa", gradient: "linear-gradient(135deg, #ec4899, #db2777)", sub: "Wkrótce" },
-            { id: "pojazd", icon: "🚛", label: "Pojazd", gradient: "linear-gradient(135deg, #64748b, #475569)", sub: vehicle ? vehicle.brand || vehicle.type : "—" },
-          ].map(t => (
-            <div key={t.id} onClick={() => setDriverTab(t.id)}
-              style={{ background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", padding: "20px 16px", cursor: "pointer",
-                display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-              <div style={{ width: 44, height: 44, borderRadius: 12, background: t.gradient,
-                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>{t.icon}</div>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>{t.label}</div>
-              <div style={{ fontSize: 11, fontWeight: t.subStyle ? 600 : 400, padding: "2px 8px", borderRadius: 8,
-                background: t.subStyle?.background || "transparent", color: t.subStyle?.color || "#9ca3af" }}>{t.sub}</div>
-            </div>
-          ))}
-        </div>
+        {/* HISTORIA */}
+        {driverTab === "historia" && (
+          <div className="space-y-2">
+            {history.length === 0 ? (
+              <div className="text-center py-12 text-gray-400">
+                <div className="text-4xl mb-3">📋</div>
+                <div className="font-medium">Brak historii</div>
+              </div>
+            ) : history.map(f => renderFrachtCard(f, true))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -13794,7 +12602,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                             className="text-xs px-2 py-1 rounded-lg font-medium transition-all hover:bg-blue-100"
                             style={{background:"#f0fdf4", color:"#15803d"}}>📄 Otwórz</a>
                         : <ZlecenieUploadBtn frachtId={r.id}
-                            onUploaded={(url, parsed) => { const p = parsed || {}; const existing = frachtyList.find(x => x.id === r.id) || {}; const onlyNew = Object.fromEntries(Object.entries(p).filter(([k,v]) => v != null && v !== "" && !existing[k])); onUpdate(r.id, { urlZlecenie: url, ...onlyNew }); }} />
+                            onUploaded={(url, nr) => onUpdate(r.id, { urlZlecenie: url, ...(nr ? {nrZlecenia: nr} : {}) })} />
                       }
                       <button onClick={() => setEditFVId(r.id)}
                         className="w-6 h-6 rounded-lg flex items-center justify-center transition-all hover:bg-indigo-50 text-xs"
@@ -13905,21 +12713,10 @@ function KomentarzBaner({ frachtyList, vehicleId, onUpdate }) {
   );
 }
 
-function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete, onUpdate, onBulkAdd }) {
-  // Index driverEvents by frachtId for quick lookup
-  const eventsByFracht = useMemo(() => {
-    const map = {};
-    driverEvents.forEach(ev => {
-      if (!ev.frachtId) return;
-      if (!map[ev.frachtId]) map[ev.frachtId] = [];
-      map[ev.frachtId].push(ev);
-    });
-    return map;
-  }, [driverEvents]);
+function FrachtyTab({ frachtyList, vehicles, onAdd, onDelete, onUpdate, onBulkAdd }) {
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
-  const [driverStatusId, setDriverStatusId] = useState(null); // rozwinięty panel statusów kierowcy
   const [showImport, setShowImport] = useState(false);
   const [overviewYear, setOverviewYear] = useState(String(new Date().getFullYear()));
   const [overviewMonth, setOverviewMonth] = useState(String(new Date().getMonth() + 1).padStart(2, "0"));
@@ -14152,7 +12949,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-gray-100 text-gray-400 uppercase bg-gray-50">
-              {["#","Zlec.","Zał.","Rozł.","Załadunek","Rozładunek","Status","Klient","EUR","KM p.","KM ł.","KM w.","€/km ł.","€/km w.","Waga","Dysp.","FV","Uwagi",""].map(h => <th key={h} className="px-1.5 py-2 text-left whitespace-nowrap" style={{fontSize:11}}>{h}</th>)}
+              {["#","Data zlec.","Data zal.","Data rozl.","Zaladunek","Rozladunek","Status rozł.","Klient","Cena EUR","KM podj.","KM lad.","KM wsz.","EUR/km lad.","EUR/km wsz.","Waga kg","Dyspozytor","Nr FV","Uwagi",""].map(h => <th key={h} className="px-2 py-2.5 text-left whitespace-nowrap">{h}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -14166,14 +12963,14 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
                 { id: "przeterminowana", label: "Przeterminowana", bg: "#fef2f2", color: "#991b1b", dot: "#ef4444" },
                 { id: "zaplacona",    label: "Zapłacona",      bg: "#f0fdf4", color: "#166534", dot: "#22c55e" },
               ];
-              return [
-                <tr key={r.id} className="border-b border-gray-50 hover:bg-blue-50 transition-colors" style={{fontSize: 12}}>
-                  <td className="px-1.5 py-1.5 text-gray-400">{idx+1}</td>
-                  <td className="px-1.5 py-1.5 whitespace-nowrap">{r.dataZlecenia||"-"}</td>
-                  <td className="px-1.5 py-1.5 whitespace-nowrap text-gray-500">{r.dataZaladunku||"-"}</td>
-                  <td className="px-1.5 py-1.5 whitespace-nowrap text-gray-500">{r.dataRozladunku||"-"}</td>
-                  <td className="px-1.5 py-1.5 whitespace-nowrap" style={{maxWidth:120,overflow:"hidden",textOverflow:"ellipsis"}}>{[r.zaladunekKod,r.zaladunekKod2,r.zaladunekKod3].filter(s=>s&&s.trim()).join(" / ")||[r.skad].filter(Boolean).join("")||"-"}</td>
-                  <td className="px-1.5 py-1.5 whitespace-nowrap" style={{maxWidth:120,overflow:"hidden",textOverflow:"ellipsis"}}>{[r.dokod,r.dokod2,r.dokod3].filter(s=>s&&s.trim()).join(" / ")||"-"}</td>
+              return (
+                <tr key={r.id} className="border-b border-gray-50 hover:bg-blue-50 transition-colors">
+                  <td className="px-2 py-2 text-gray-400">{idx+1}</td>
+                  <td className="px-2 py-2 whitespace-nowrap">{r.dataZlecenia||"-"}</td>
+                  <td className="px-2 py-2 whitespace-nowrap text-gray-500">{r.dataZaladunku||"-"}</td>
+                  <td className="px-2 py-2 whitespace-nowrap text-gray-500">{r.dataRozladunku||"-"}</td>
+                  <td className="px-2 py-2 whitespace-nowrap">{[r.zaladunekKod,r.zaladunekKod2,r.zaladunekKod3].filter(s=>s&&s.trim()).join(" / ")||[r.skad].filter(Boolean).join("")||"-"}</td>
+                  <td className="px-2 py-2 whitespace-nowrap">{[r.dokod,r.dokod2,r.dokod3].filter(s=>s&&s.trim()).join(" / ")||"-"}</td>
                   <td className="px-2 py-2 whitespace-nowrap">
                     {(() => {
                       const s = r.statusRozladunku || "w_trasie";
@@ -14183,9 +12980,6 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
                         problem:     { emoji:"⚠️", label:"Problem",     bg:"#fef2f2", color:"#991b1b" },
                       };
                       const c = cfg[s] || cfg.w_trasie;
-                      const evts = eventsByFracht[r.id] || [];
-                      const hasZal = evts.some(e => e.type === "zaladowano");
-                      const hasRoz = evts.some(e => e.type === "rozladowano");
                       return (
                         <div className="flex items-center gap-1">
                           <select
@@ -14199,204 +12993,36 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
                             <option value="rozladowano">✅ Rozładowano</option>
                             <option value="problem">⚠️ Problem</option>
                           </select>
-                          {evts.length > 0 && (
-                            <button onClick={(ev) => { ev.stopPropagation(); setDriverStatusId(driverStatusId === r.id ? null : r.id); }}
-                              className="flex gap-0.5 ml-1 px-1.5 py-0.5 rounded-lg hover:bg-gray-100 transition-all cursor-pointer"
-                              title="Pokaż statusy kierowcy">
-                              {hasZal && <span className="text-[10px]">📦</span>}
-                              {hasRoz && <span className="text-[10px]">✅</span>}
-                              {evts.some(e=>e.type?.includes("cmr")) && <span className="text-[10px]">📄</span>}
-                              {evts.some(e=>e.type?.includes("photo")) && <span className="text-[10px]">📸</span>}
-                              <span className="text-[10px] text-gray-400">{driverStatusId === r.id ? "▲" : "▼"}</span>
-                            </button>
-                          )}
                         </div>
                       );
                     })()}
                   </td>
-                  <td className="px-1.5 py-1.5 whitespace-nowrap max-w-20 truncate">{r.klient||"-"}</td>
-                  <td className="px-1.5 py-1.5 text-right font-semibold text-green-700 whitespace-nowrap">{r.cenaEur ? fmt(r.cenaEur) : "-"}</td>
-                  <td className="px-1.5 py-1.5 text-right text-gray-600">{r.kmPodjazd||"-"}</td>
-                  <td className="px-1.5 py-1.5 text-right text-gray-600">{r.kmLadowne||"-"}</td>
-                  <td className="px-1.5 py-1.5 text-right text-gray-600">{r.kmWszystkie||"-"}</td>
-                  <td className="px-1.5 py-1.5 text-right text-amber-600 font-medium">{eurKmLad}</td>
-                  <td className="px-1.5 py-1.5 text-right text-blue-600 font-medium">{eurKmWsz}</td>
-                  <td className="px-1.5 py-1.5 text-gray-500">{r.wagaLadunku||"-"}</td>
-                  <td className="px-1.5 py-1.5 whitespace-nowrap text-gray-500">{r.dyspozytor||"-"}</td>
-                  <td className="px-1.5 py-1.5 whitespace-nowrap text-gray-500">{r.nrFV||"-"}</td>
-                  <td className="px-1.5 py-1.5 text-gray-500 max-w-20 truncate">{r.uwagi||""}</td>
-                  <td className="px-1.5 py-1.5 whitespace-nowrap text-right">
+                  <td className="px-2 py-2 whitespace-nowrap max-w-24 truncate">{r.klient||"-"}</td>
+                  <td className="px-2 py-2 text-right font-semibold text-green-700 whitespace-nowrap">{r.cenaEur ? fmt(r.cenaEur) : "-"}</td>
+                  <td className="px-2 py-2 text-right text-gray-600">{r.kmPodjazd||"-"}</td>
+                  <td className="px-2 py-2 text-right text-gray-600">{r.kmLadowne||"-"}</td>
+                  <td className="px-2 py-2 text-right text-gray-600">{r.kmWszystkie||"-"}</td>
+                  <td className="px-2 py-2 text-right text-amber-600 font-medium">{eurKmLad}</td>
+                  <td className="px-2 py-2 text-right text-blue-600 font-medium">{eurKmWsz}</td>
+                  <td className="px-2 py-2 text-gray-500">{r.wagaLadunku||"-"}</td>
+                  <td className="px-2 py-2 whitespace-nowrap text-gray-500">{r.dyspozytor||"-"}</td>
+                  <td className="px-2 py-2 whitespace-nowrap text-gray-500">{r.nrFV||"-"}</td>
+                  <td className="px-2 py-2 text-gray-500 max-w-24 truncate">{r.uwagi||""}</td>
+                  <td className="px-2 py-2 whitespace-nowrap text-right">
                     <div className="flex gap-1 justify-end items-center">
                       {r.urlZlecenie
                         ? <a href={safeHref(r.urlZlecenie)} target="_blank" rel="noopener noreferrer"
                             className="text-xs px-2 py-1 rounded-lg font-medium transition-all hover:bg-blue-100"
                             style={{background:"#f0fdf4", color:"#15803d"}}>📄 Otwórz</a>
                         : <ZlecenieUploadBtn frachtId={r.id}
-                            onUploaded={(url, parsed) => { const p = parsed || {}; const existing = frachtyList.find(x => x.id === r.id) || {}; const onlyNew = Object.fromEntries(Object.entries(p).filter(([k,v]) => v != null && v !== "" && !existing[k])); onUpdate(r.id, { urlZlecenie: url, ...onlyNew }); }} />
+                            onUploaded={(url, nr) => onUpdate(r.id, { urlZlecenie: url, ...(nr ? {nrZlecenia: nr} : {}) })} />
                       }
                       <button onClick={() => { setEditId(r.id); setShowForm(true); }} className="w-6 h-6 rounded-lg flex items-center justify-center transition-all hover:bg-indigo-50 text-xs" style={{background:"#f3f4f6"}} title="Edytuj">✏️</button>
                       <button onClick={() => { if(window.confirm("Usunac?")) onDelete(r.id); }} className="w-6 h-6 rounded-lg flex items-center justify-center text-xs bg-red-50 hover:bg-red-100 text-red-400">✕</button>
                     </div>
                   </td>
-                </tr>,
-                driverStatusId === r.id && (() => {
-                  const allEvts = (eventsByFracht[r.id] || []).sort((a,b) => (a.ts||"").localeCompare(b.ts||""));
-                  if (allEvts.length === 0) return null;
-                  // Filtruj: pokaż tylko aktualny stan (bez cofniętych)
-                  const lastZal = allEvts.filter(e => e.type === "zaladowano").pop();
-                  const lastZalUndo = allEvts.filter(e => e.type === "cofnij_zaladowano").pop();
-                  const lastRoz = allEvts.filter(e => e.type === "rozladowano").pop();
-                  const lastRozUndo = allEvts.filter(e => e.type === "cofnij_rozladowano").pop();
-                  const isZalActive = lastZal && (!lastZalUndo || lastZal.ts > lastZalUndo.ts);
-                  const isRozActive = lastRoz && (!lastRozUndo || lastRoz.ts > lastRozUndo.ts);
-                  // Zbierz tylko aktualne eventy
-                  const evts = [];
-                  if (isZalActive) evts.push(lastZal);
-                  // Zdjęcia towaru — wszystkie (nie cofane)
-                  allEvts.filter(e => e.type === "towar_photo").forEach(e => evts.push(e));
-                  // CMR załadunek
-                  const cmrZal = allEvts.find(e => e.type === "cmr_zaladunek_photo");
-                  if (cmrZal) evts.push(cmrZal);
-                  if (isRozActive) evts.push(lastRoz);
-                  // CMR rozładunek
-                  const cmrRoz = allEvts.find(e => e.type === "cmr_rozladunek_photo") || allEvts.find(e => e.type === "cmr_photo");
-                  if (cmrRoz) evts.push(cmrRoz);
-                  // Uwagi kierowcy
-                  allEvts.filter(e => e.type === "uwagi_zaladunek" || e.type === "uwagi_rozladunek").forEach(e => evts.push(e));
-                  // Zdjęcia uszkodzeń
-                  allEvts.filter(e => e.type === "towar_damage_photo").forEach(e => evts.push(e));
-                  // Nowe statusy
-                  const dotZal = allEvts.filter(e => e.type === "dotarcie_zaladunek").pop();
-                  const startRoz = allEvts.filter(e => e.type === "start_rozladunek").pop();
-                  const dotRoz = allEvts.filter(e => e.type === "dotarcie_rozladunek").pop();
-                  if (dotZal) evts.push(dotZal);
-                  if (startRoz) evts.push(startRoz);
-                  if (dotRoz) evts.push(dotRoz);
-                  // Sortuj po czasie
-                  evts.sort((a,b) => (a.ts||"").localeCompare(b.ts||""));
-                  const typeLabels = {
-                    dotarcie_zaladunek: { icon: "📍", label: "Dotarcie na załadunek", color: "#2563eb" },
-                    zaladowano: { icon: "📦", label: "Załadunek potwierdzony", color: "#2563eb" },
-                    towar_photo: { icon: "📸", label: "Zdjęcie towaru", color: "#7c3aed" },
-                    cmr_zaladunek_photo: { icon: "📄", label: "CMR załadunek", color: "#6366f1" },
-                    start_rozladunek: { icon: "🚛", label: "Start do rozładunku", color: "#0891b2" },
-                    dotarcie_rozladunek: { icon: "📍", label: "Dotarcie na rozładunek", color: "#059669" },
-                    rozladowano: { icon: "✅", label: "Rozładunek potwierdzony", color: "#15803d" },
-                    cmr_rozladunek_photo: { icon: "📄", label: "CMR rozładunek", color: "#6366f1" },
-                    cmr_photo: { icon: "📄", label: "CMR", color: "#6366f1" },
-                    towar_damage_photo: { icon: "⚠️", label: "Zdjęcie uszkodzenia", color: "#dc2626" },
-                    uwagi_zaladunek: { icon: "📝", label: "Uwagi — załadunek", color: "#6b7280" },
-                    uwagi_rozladunek: { icon: "📝", label: "Uwagi — rozładunek", color: "#6b7280" },
-                  };
-                  return (
-                    <tr key={`${r.id}_status`}>
-                      <td colSpan={19} style={{ padding: 0 }}>
-                        <div style={{ background: "#f8fafc", borderTop: "1px solid #e5e7eb", borderBottom: "2px solid #e5e7eb", padding: "12px 16px" }}>
-                          <div style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
-                            Status kierowcy — {evts[0]?.driverName || evts[0]?.driverEmail || "—"}
-                          </div>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                            {/* Załadunek: plan vs dotarł w jednej linii */}
-                            {r.dataZaladunku && (() => {
-                              const dotEv = evts.find(e => e.type === "dotarcie_zaladunek");
-                              const srEv = evts.find(e => e.type === "start_rozladunek");
-                              const planned = new Date(`${r.dataZaladunku}T${r.godzZaladunku || "23:59"}:00`);
-                              const dotTime = dotEv ? new Date(dotEv.value || dotEv.ts) : null;
-                              const diffMin = dotTime ? Math.round((dotTime - planned) / 60000) : null;
-                              const dotColor = diffMin === null ? "#6b7280" : diffMin <= 0 ? "#15803d" : diffMin <= 30 ? "#d97706" : "#dc2626";
-                              const dotStr = dotTime ? dotTime.toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : null;
-                              const srStr = srEv ? new Date(srEv.value||srEv.ts).toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : null;
-                              return (
-                                <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-                                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 20, flexShrink: 0 }}>
-                                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#3b82f6", marginTop: 4 }}></div>
-                                    <div style={{ width: 1, height: 20, background: "#d1d5db" }}></div>
-                                  </div>
-                                  <div style={{ flex: 1 }}>
-                                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1d4ed8", marginBottom: 3 }}>📦 Załadunek</div>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                                      <span style={{ fontSize: 12, color: "#6b7280" }}>Plan: {r.dataZaladunku?.slice(5)}{r.godzZaladunku ? ` · ${r.godzZaladunku}` : ""}</span>
-                                      {dotStr && <span style={{ fontSize: 12, fontWeight: 700, color: dotColor }}>→ Dotarł: {dotStr}</span>}
-                                    </div>
-                                    {srStr && <div style={{ fontSize: 12, color: "#0891b2", fontWeight: 600, marginTop: 2 }}>🚛 Ruszył: {srStr}</div>}
-                                  </div>
-                                </div>
-                              );
-                            })()}
-                            {/* Rozładunek: plan vs dotarł w jednej linii */}
-                            {r.dataRozladunku && (() => {
-                              const dotEv = evts.find(e => e.type === "dotarcie_rozladunek");
-                              const planned = new Date(`${r.dataRozladunku}T${r.godzRozladunku || "23:59"}:00`);
-                              const dotTime = dotEv ? new Date(dotEv.value || dotEv.ts) : null;
-                              const diffMin = dotTime ? Math.round((dotTime - planned) / 60000) : null;
-                              const dotColor = diffMin === null ? "#6b7280" : diffMin <= 0 ? "#15803d" : diffMin <= 30 ? "#d97706" : "#dc2626";
-                              const dotStr = dotTime ? dotTime.toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : null;
-                              return (
-                                <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-                                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 20, flexShrink: 0 }}>
-                                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#10b981", marginTop: 4 }}></div>
-                                    <div style={{ width: 1, height: 20, background: "#d1d5db" }}></div>
-                                  </div>
-                                  <div style={{ flex: 1 }}>
-                                    <div style={{ fontSize: 13, fontWeight: 600, color: "#059669", marginBottom: 3 }}>📦 Rozładunek</div>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                                      <span style={{ fontSize: 12, color: "#6b7280" }}>Plan: {r.dataRozladunku?.slice(5)}{r.godzRozladunku ? ` · ${r.godzRozladunku}` : ""}</span>
-                                      {dotStr && <span style={{ fontSize: 12, fontWeight: 700, color: dotColor }}>→ Dotarł: {dotStr}</span>}
-                                    </div>
-                                  </div>
-                                </div>
-                              );
-                            })()}
-                            {/* Pozostałe eventy (zdjęcia, CMR, uwagi) */}
-                            {evts.filter(e => !["dotarcie_zaladunek","start_rozladunek","dotarcie_rozladunek"].includes(e.type)).map((ev, i) => {
-                              const meta = typeLabels[ev.type] || { icon: "•", label: ev.type, color: "#6b7280" };
-                              const time = ev.value || ev.ts;
-                              const timeStr = time ? new Date(time).toLocaleString("pl-PL", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" }) : "";
-                              return (
-                                <div key={ev.id || i} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-                                  {/* Timeline line */}
-                                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 20, flexShrink: 0 }}>
-                                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: meta.color, marginTop: 4 }}></div>
-                                    {i < evts.length - 1 && <div style={{ width: 1, height: 20, background: "#d1d5db" }}></div>}
-                                  </div>
-                                  {/* Content */}
-                                  <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                      <span style={{ fontSize: 13, fontWeight: 600, color: meta.color }}>{meta.icon} {meta.label}</span>
-                                      <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: "auto", flexShrink: 0 }}>{timeStr}</span>
-                                      {ev.id && (
-                                        <button onClick={async () => {
-                                          if (!window.confirm("Usunąć ten wpis?")) return;
-                                          try { await deleteDoc(doc(db, "driverEvents", ev.id)); } catch(e) { console.error(e); }
-                                        }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "#d1d5db", padding: "2px 4px" }}
-                                          title="Usuń wpis">✕</button>
-                                      )}
-                                    </div>
-                                    {ev.photoUrl && (
-                                      <a href={ev.photoUrl} target="_blank" rel="noopener noreferrer"
-                                        style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 4,
-                                          fontSize: 11, color: "#6366f1", textDecoration: "none", padding: "3px 8px",
-                                          borderRadius: 6, background: "#f5f3ff", border: "1px solid #e9e5ff" }}>
-                                        🔍 Zobacz zdjęcie
-                                      </a>
-                                    )}
-                                    {ev.note && (
-                                      <div style={{ marginTop: 4, fontSize: 12, color: "#374151", padding: "6px 10px",
-                                        borderRadius: 6, background: "#f9fafb", border: "1px solid #f3f4f6", fontStyle: "italic" }}>
-                                        „{ev.note}"
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })()
-              ];
+                </tr>
+              );
             })}
             {rows.length > 0 && (
               <tr className="bg-gray-50 font-bold border-t-2 border-gray-200">
@@ -14723,7 +13349,7 @@ function FVEditModal({ record, onSave, onClose }) {
 
 // ─── ZLECENIE UPLOAD BTN ─────────────────────────────────────────────────────
 function ZlecenieUploadBtn({ frachtId, onUploaded, label = "+ Dodaj zlecenie", fullWidth = false }) {
-  // onUploaded(url, parsedData) — parsedData = { nrZlecenia, nrRef, zaladunekAdres, ... }
+  // onUploaded(url, nrZlecenia)
   const [status, setStatus] = useState("idle");
   const fileRef = useRef(null);
 
@@ -14737,7 +13363,7 @@ function ZlecenieUploadBtn({ frachtId, onUploaded, label = "+ Dodaj zlecenie", f
       await uploadBytes(sRef, file);
       const url = await getDownloadURL(sRef);
 
-      // AI parsowanie zlecenia — wyciąga pełne dane operacyjne
+      // AI odczyt nr zlecenia
       setStatus("reading");
       const base64 = await new Promise((res, rej) => {
         const reader = new FileReader();
@@ -14748,35 +13374,12 @@ function ZlecenieUploadBtn({ frachtId, onUploaded, label = "+ Dodaj zlecenie", f
       const isPDF = file.type === "application/pdf";
       const body = {
         model: "claude-sonnet-4-20250514",
-        max_tokens: 1200,
+        max_tokens: 500,
         messages: [{
           role: "user",
           content: [
             { type: isPDF ? "document" : "image", source: { type: "base64", media_type: file.type, data: base64 } },
-            { type: "text", text: `Przeanalizuj to zlecenie transportowe i wyciągnij dane operacyjne.
-Odpowiedz TYLKO w formacie JSON (bez markdown):
-{
-  "nrZlecenia": "numer zlecenia lub null",
-  "nrRef": "numer referencyjny lub skrócony identyfikator zlecenia",
-  "dataZaladunku": "YYYY-MM-DD lub null",
-  "godzZaladunku": "HH:MM lub null",
-  "dataRozladunku": "YYYY-MM-DD lub null",
-  "godzRozladunku": "HH:MM lub null",
-  "zaladunekKod": "kod pocztowy + miasto załadunku (np. ES 46720 Villalonga)",
-  "zaladunekAdres": "pełny adres ulicy załadunku",
-  "zaladunekTelefon": "telefon kontaktowy na załadunku lub null",
-  "dokod": "kod pocztowy + miasto rozładunku (np. IT 34151 Trieste)",
-  "rozladunekAdres": "pełny adres ulicy rozładunku",
-  "rozladunekTelefon": "telefon kontaktowy na rozładunku lub null",
-  "klient": "nazwa zleceniodawcy/klienta",
-  "towarOpis": "krótki opis towaru (np. Palety, Kartony)",
-  "towarIloscPalet": "ilość palet/sztuk (cyfra)",
-  "towarPalety": "wymiary towaru, każda pozycja w nowej linii (np. 2× 240x120x240\\n1× 120x120xH240)",
-  "wagaLadunku": "waga w kg (sama cyfra)",
-  "zaladunekTyp": "typ załadunku (bok, tył, góra) lub null",
-  "uwagi": "uwagi operacyjne istotne dla kierowcy (BEZ cen, BEZ warunków płatności, BEZ danych zleceniodawcy)"
-}
-NIE podawaj cen frachtu, warunków płatności, NIP, danych spedytora ani warunków umowy.` }
+            { type: "text", text: 'Znajdź numer zlecenia transportowego w tym dokumencie. Odpowiedz TYLKO w formacie JSON: {"nrZlecenia": "numer"} lub {"nrZlecenia": null} jeśli nie znalazłeś.' }
           ]
         }]
       };
@@ -14787,8 +13390,8 @@ NIE podawaj cen frachtu, warunków płatności, NIP, danych spedytora ani warunk
         const data = await resp.json();
         const text = data.content?.find(b => b.type === "text")?.text || "{}";
         const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
-        onUploaded(url, parsed);
-      } catch { onUploaded(url, { nrZlecenia: null }); }
+        onUploaded(url, parsed.nrZlecenia || null);
+      } catch { onUploaded(url, null); }
 
       setStatus("done");
     } catch (err) {
@@ -14815,135 +13418,15 @@ NIE podawaj cen frachtu, warunków płatności, NIP, danych spedytora ani warunk
   );
 }
 
-// ═══════ GEO PICKER — mini mapa Leaflet do wyboru lokalizacji ═══════
-function GeoPickerModal({ initialGeo, address, onSave, onClose }) {
-  const mapRef = useRef(null);
-  const mapInstance = useRef(null);
-  const markerRef = useRef(null);
-  const [searchQuery, setSearchQuery] = useState(address || "");
-  const [coords, setCoords] = useState(() => {
-    if (initialGeo) {
-      const [lat, lng] = initialGeo.split(",").map(Number);
-      if (lat && lng && !(Math.abs(lat - 51.5) < 0.01 && Math.abs(lng - 19.0) < 0.01)) return { lat, lng };
-    }
-    return { lat: 51.5, lng: 19.0 }; // Polska centrum
-  });
-  const hasRealGeo = initialGeo && (() => {
-    const [lat, lng] = initialGeo.split(",").map(Number);
-    return lat && lng && !(Math.abs(lat - 51.5) < 0.01 && Math.abs(lng - 19.0) < 0.01);
-  })();
-  const [searching, setSearching] = useState(false);
-
-  useEffect(() => {
-    if (!mapRef.current || mapInstance.current) return;
-    if (typeof window.L === "undefined") return;
-    const map = window.L.map(mapRef.current).setView([coords.lat, coords.lng], hasRealGeo ? 15 : 6);
-    window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "© OpenStreetMap",
-      maxZoom: 19,
-    }).addTo(map);
-    const marker = window.L.marker([coords.lat, coords.lng], { draggable: true }).addTo(map);
-    marker.on("dragend", () => {
-      const pos = marker.getLatLng();
-      setCoords({ lat: pos.lat, lng: pos.lng });
-    });
-    map.on("click", (e) => {
-      marker.setLatLng(e.latlng);
-      setCoords({ lat: e.latlng.lat, lng: e.latlng.lng });
-    });
-    mapInstance.current = map;
-    markerRef.current = marker;
-    // Zawsze szukaj adresu automatycznie jeśli jest dostępny
-    if (address) {
-      setTimeout(() => searchAddress(address), 500);
-    }
-    return () => { map.remove(); mapInstance.current = null; };
-  }, []);
-
-  const searchAddress = async (query) => {
-    if (!query?.trim()) return;
-    setSearching(true);
-    try {
-      const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`);
-      const data = await resp.json();
-      if (data.length > 0) {
-        const { lat, lon } = data[0];
-        const newCoords = { lat: parseFloat(lat), lng: parseFloat(lon) };
-        setCoords(newCoords);
-        if (mapInstance.current) {
-          mapInstance.current.setView([newCoords.lat, newCoords.lng], 16);
-          markerRef.current?.setLatLng([newCoords.lat, newCoords.lng]);
-        }
-      }
-    } catch (e) { console.error("Geocoding error:", e); }
-    setSearching(false);
-  };
-
-  return (
-    <div className="fixed inset-0 flex items-center justify-center p-4" style={{background:"rgba(0,0,0,0.6)", zIndex: 9999}}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl flex flex-col" style={{maxHeight:"90vh"}}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <h3 className="text-base font-bold text-gray-900">📍 Wybierz lokalizację</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
-        </div>
-        <div className="px-5 py-3">
-          <div className="flex gap-2">
-            <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && searchAddress(searchQuery)}
-              placeholder="Szukaj adresu..."
-              className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
-            <button onClick={() => searchAddress(searchQuery)} disabled={searching}
-              className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
-              style={{background: searching ? "#9ca3af" : "#3b82f6"}}>
-              {searching ? "..." : "Szukaj"}
-            </button>
-          </div>
-          <div className="text-xs text-gray-400 mt-1">Kliknij w mapę lub przeciągnij pin na dokładne miejsce (np. brama wjazdowa)</div>
-        </div>
-        <div ref={mapRef} style={{height: 350, width: "100%"}}></div>
-        <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between">
-          <span className="text-xs text-gray-500">
-            {coords.lat.toFixed(6)}, {coords.lng.toFixed(6)}
-          </span>
-          <div className="flex gap-2">
-            <button onClick={onClose}
-              className="px-4 py-2 rounded-lg text-sm font-medium text-gray-500 hover:bg-gray-100">Anuluj</button>
-            <button onClick={() => onSave(`${coords.lat.toFixed(6)},${coords.lng.toFixed(6)}`)}
-              className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
-              style={{background:"#111827"}}>
-              ✓ Zapisz lokalizację
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }) {
-  const empty = {dataZlecenia:"",dataZaladunku:"",dataRozladunku:"",godzZaladunku:"",godzRozladunku:"",skad:"",zaladunekKod:"",zaladunekKod2:"",zaladunekKod3:"",zaladunekAdres:"",zaladunekTelefon:"",zaladunekGeo:"",dokod:"",dokod2:"",dokod3:"",rozladunekAdres:"",rozladunekTelefon:"",rozladunekGeo:"",klient:"",cenaEur:"",kmPodjazd:"",kmLadowne:"",kmWszystkie:"",wagaLadunku:"",dyspozytor:"",nrFV:"",dataWyslania:"",terminPlatnosci:"",uwagi:"",urlZlecenie:"",nrZlecenia:"",nrRef:"",towarOpis:"",towarPalety:"",towarIloscPalet:"",zaladunekTyp:"",vehicleId:defaultVehicleId};
+  const empty = {dataZlecenia:"",dataZaladunku:"",dataRozladunku:"",godzZaladunku:"",godzRozladunku:"",skad:"",zaladunekKod:"",zaladunekKod2:"",zaladunekKod3:"",dokod:"",dokod2:"",dokod3:"",klient:"",cenaEur:"",kmPodjazd:"",kmLadowne:"",kmWszystkie:"",wagaLadunku:"",dyspozytor:"",nrFV:"",dataWyslania:"",terminPlatnosci:"",uwagi:"",urlZlecenie:"",nrZlecenia:"",vehicleId:defaultVehicleId};
   const [f, setF] = useState(record ? {...empty,...record} : empty);
   const set = (k,v) => setF(prev => { const next={...prev,[k]:v}; const pod=parseInt(next.kmPodjazd)||0; const lad=parseInt(next.kmLadowne)||0; next.kmWszystkie=pod+lad>0?String(pod+lad):""; return next; });
   const eurKmLad = f.kmLadowne && f.cenaEur ? (parseFloat(f.cenaEur)/parseInt(f.kmLadowne)).toFixed(2) : null;
   const eurKmWsz = f.kmWszystkie && f.cenaEur ? (parseFloat(f.cenaEur)/parseInt(f.kmWszystkie)).toFixed(2) : null;
-  const [geoPickerFor, setGeoPickerFor] = useState(null); // "zaladunek" | "rozladunek" | null
   const inp = "w-full text-sm px-3 py-2 rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-gray-400";
   const lbl = "text-xs font-semibold text-gray-500 mb-1 block";
   return (
-    <>
-    {geoPickerFor && (
-      <GeoPickerModal
-        initialGeo={geoPickerFor === "zaladunek" ? f.zaladunekGeo : f.rozladunekGeo}
-        address={geoPickerFor === "zaladunek"
-          ? [f.zaladunekAdres, f.zaladunekKod].filter(Boolean).join(", ")
-          : [f.rozladunekAdres, f.dokod].filter(Boolean).join(", ")}
-        onSave={(geo) => {
-          set(geoPickerFor === "zaladunek" ? "zaladunekGeo" : "rozladunekGeo", geo);
-          setGeoPickerFor(null);
-        }}
-        onClose={() => setGeoPickerFor(null)}
-      />
-    )}
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{background:"rgba(0,0,0,0.4)"}}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col" style={{maxHeight:"92vh"}}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
@@ -14951,17 +13434,7 @@ function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">x</button>
         </div>
         <div className="overflow-y-auto flex-1 px-6 py-4 space-y-4">
-          {/* Legenda */}
-          <div className="flex items-center gap-4 text-xs">
-            <span className="flex items-center gap-1"><span style={{width:10,height:10,borderRadius:3,background:"#ecfdf5",border:"1px solid #a7f3d0",display:"inline-block"}}></span> Widoczne dla kierowcy</span>
-            <span className="flex items-center gap-1"><span style={{width:10,height:10,borderRadius:3,background:"#fff",border:"1px solid #e5e7eb",display:"inline-block"}}></span> Tylko biuro</span>
-          </div>
-
           <div><label className={lbl}>Pojazd</label><select value={f.vehicleId} onChange={e => set("vehicleId",e.target.value)} className={inp}><option value="">wybierz pojazd</option>{vehicles.map(v => <option key={v.id} value={v.id}>{v.plate} {v.brand}</option>)}</select></div>
-
-          {/* ── SEKCJA KIEROWCY (zielona ramka) ── */}
-          <div style={{border:"2px solid #a7f3d0", borderRadius:12, padding:"12px", background:"#fafffe"}}>
-            <div className="text-xs font-semibold text-emerald-600 uppercase tracking-wider mb-3">🧑‍✈️ Dane widoczne dla kierowcy</div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <div><label className={lbl}>Data zlecenia</label><input type="date" value={f.dataZlecenia} onChange={e => set("dataZlecenia",e.target.value)} className={inp} /></div>
             <div><label className={lbl}>Data zaladunku</label><input type="date" value={f.dataZaladunku} onChange={e => set("dataZaladunku",e.target.value)} className={inp} /></div>
@@ -15029,54 +13502,11 @@ function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }
               </button>
             )}
           </div>
-          {/* ADRESY + TELEFONY + GEO */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label className={lbl}>Adres załadunku (pełny)</label>
-              <input placeholder="ulica, miasto" value={f.zaladunekAdres||""} onChange={e => set("zaladunekAdres",e.target.value)} className={inp} />
-              <div className="flex items-center gap-2 mt-1">
-                <button type="button" onClick={() => setGeoPickerFor("zaladunek")}
-                  className="text-xs font-medium px-2 py-1 rounded-lg transition-all hover:bg-blue-50"
-                  style={{ color: f.zaladunekGeo ? "#15803d" : "#3b82f6", background: f.zaladunekGeo ? "#f0fdf4" : "transparent" }}>
-                  {f.zaladunekGeo ? `✅ ${f.zaladunekGeo}` : "📍 Ustaw lokalizację"}
-                </button>
-                {f.zaladunekGeo && <button type="button" onClick={() => set("zaladunekGeo","")} className="text-xs text-gray-400 hover:text-red-400">✕</button>}
-              </div>
-            </div>
-            <div><label className={lbl}>Telefon na załadunku</label><input placeholder="+48..." value={f.zaladunekTelefon||""} onChange={e => set("zaladunekTelefon",e.target.value)} className={inp} /></div>
-            <div>
-              <label className={lbl}>Adres rozładunku (pełny)</label>
-              <input placeholder="ulica, miasto" value={f.rozladunekAdres||""} onChange={e => set("rozladunekAdres",e.target.value)} className={inp} />
-              <div className="flex items-center gap-2 mt-1">
-                <button type="button" onClick={() => setGeoPickerFor("rozladunek")}
-                  className="text-xs font-medium px-2 py-1 rounded-lg transition-all hover:bg-blue-50"
-                  style={{ color: f.rozladunekGeo ? "#15803d" : "#3b82f6", background: f.rozladunekGeo ? "#f0fdf4" : "transparent" }}>
-                  {f.rozladunekGeo ? `✅ ${f.rozladunekGeo}` : "📍 Ustaw lokalizację"}
-                </button>
-                {f.rozladunekGeo && <button type="button" onClick={() => set("rozladunekGeo","")} className="text-xs text-gray-400 hover:text-red-400">✕</button>}
-              </div>
-            </div>
-            <div><label className={lbl}>Telefon na rozładunku</label><input placeholder="+39..." value={f.rozladunekTelefon||""} onChange={e => set("rozladunekTelefon",e.target.value)} className={inp} /></div>
-          </div>
-          {/* TOWAR */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div><label className={lbl}>Nr referencyjny</label><input placeholder="np. ESTE-0097" value={f.nrRef||""} onChange={e => set("nrRef",e.target.value)} className={inp} /></div>
-            <div><label className={lbl}>Towar (opis)</label><input placeholder="Palety, kartony..." value={f.towarOpis||""} onChange={e => set("towarOpis",e.target.value)} className={inp} /></div>
-            <div><label className={lbl}>Ilość palet/szt</label><input placeholder="4" value={f.towarIloscPalet||""} onChange={e => set("towarIloscPalet",e.target.value)} className={inp} /></div>
-            <div><label className={lbl}>Typ załadunku</label><input placeholder="Bok, tył, góra" value={f.zaladunekTyp||""} onChange={e => set("zaladunekTyp",e.target.value)} className={inp} /></div>
-          </div>
-          <div><label className={lbl}>Wymiary palet / szczegóły towaru</label><textarea rows={2} placeholder="2× 240x120x240, 1× 240x120xH200..." value={f.towarPalety||""} onChange={e => set("towarPalety",e.target.value)} className={inp+" resize-none"} /></div>
-          <div><label className={lbl}>Uwagi dla kierowcy</label><textarea rows={2} placeholder="dodatkowe informacje..." value={f.uwagi} onChange={e => set("uwagi",e.target.value)} className={inp+" resize-none"} /></div>
-          </div>{/* zamknięcie zielonej sekcji kierowcy */}
-
-          {/* ── SEKCJA BIUROWA (szara) ── */}
-          <div style={{border:"1px solid #e5e7eb", borderRadius:12, padding:"12px", background:"#fafafa"}}>
-            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">🏢 Dane biurowe (kierowca nie widzi)</div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div><label className={lbl}>Klient</label><input placeholder="nazwa klienta" value={f.klient} onChange={e => set("klient",e.target.value)} className={inp} /></div>
             <div><label className={lbl}>Dyspozytor</label><input placeholder="imie dyspozytora" value={f.dyspozytor} onChange={e => set("dyspozytor",e.target.value)} className={inp} /></div>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div><label className={lbl}>Cena EUR</label><input type="number" placeholder="0.00" value={f.cenaEur} onChange={e => set("cenaEur",e.target.value)} className={inp} /></div>
             <div><label className={lbl}>KM podjazd</label><input type="number" placeholder="0" value={f.kmPodjazd} onChange={e => set("kmPodjazd",e.target.value)} className={inp} /></div>
             <div><label className={lbl}>KM ladowne</label><input type="number" placeholder="0" value={f.kmLadowne} onChange={e => set("kmLadowne",e.target.value)} className={inp} /></div>
@@ -15089,7 +13519,7 @@ function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }
             <div><label className={lbl}>Data wyslania FV</label><input type="date" value={f.dataWyslania} onChange={e => set("dataWyslania",e.target.value)} className={inp} /></div>
             <div><label className={lbl}>Termin platnosci</label><input type="date" value={f.terminPlatnosci} onChange={e => set("terminPlatnosci",e.target.value)} className={inp} /></div>
           </div>
-          </div>{/* zamknięcie szarej sekcji biurowej */}
+          <div><label className={lbl}>Uwagi</label><textarea rows={2} placeholder="dodatkowe informacje..." value={f.uwagi} onChange={e => set("uwagi",e.target.value)} className={inp+" resize-none"} /></div>
 
           {/* ZLECENIE */}
           <div className="pt-2 border-t border-gray-100">
@@ -15103,16 +13533,14 @@ function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }
                 </div>
                 <ZlecenieUploadBtn
                   frachtId={record?.id || "new"}
-                  onUploaded={(url, parsed) => { set("urlZlecenie", url); if(parsed) Object.entries(parsed).forEach(([k,v]) => { if(v != null && v !== "" && !f[k]) set(k, String(v)); }); }}
+                  onUploaded={(url, nr) => { set("urlZlecenie", url); if(nr) set("nrZlecenia", nr); }}
                   label="Zastąp"
                 />
-                <button type="button" onClick={() => set("urlZlecenie", "")}
-                  className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50" title="Usuń zlecenie">✕</button>
               </div>
             ) : (
               <ZlecenieUploadBtn
                 frachtId={record?.id || "new"}
-                onUploaded={(url, parsed) => { set("urlZlecenie", url); if(parsed) Object.entries(parsed).forEach(([k,v]) => { if(v != null && v !== "" && !f[k]) set(k, String(v)); }); }}
+                onUploaded={(url, nr) => { set("urlZlecenie", url); if(nr) set("nrZlecenia", nr); }}
                 label="📎 Wgraj zlecenie (PDF / JPG)"
                 fullWidth
               />
@@ -15125,6 +13553,5 @@ function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }
         </div>
       </div>
     </div>
-    </>
   );
 }

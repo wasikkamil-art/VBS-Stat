@@ -181,6 +181,17 @@ service cloud.firestore {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // FUEL ENTRIES — tankowania wpisywane przez kierowców
+    // Kierowca tworzy wpisy, może usuwać swoje. Admin/dyspozytor all.
+    // ═══════════════════════════════════════════════════════════════
+    match /fuelEntries/{docId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update: if canEdit();
+      allow delete: if canEdit() || (isAuth() && resource.data.driverEmail == request.auth.token.email);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // DRIVER EVENTS — zdarzenia kierowcy (załadunek, rozładunek, CMR)
     // Kierowca może tworzyć zdarzenia, wszyscy zalogowani mogą czytać.
     // ═══════════════════════════════════════════════════════════════
