@@ -7370,6 +7370,19 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
               }
             });
 
+            // Auto-fill: dni od tachoStart do dziś bez wpisu w pauzy → Jazda
+            const todayISO = now.toISOString().slice(0,10);
+            if (vehicle && vehicle.tachoStart) {
+              const tStart = new Date(vehicle.tachoStart + "T00:00:00");
+              const tEnd = new Date(todayISO + "T00:00:00");
+              for (let d = new Date(tStart); d <= tEnd; d.setDate(d.getDate() + 1)) {
+                const ds = d.toISOString().slice(0,10);
+                if (!dayMap[ds]) {
+                  dayMap[ds] = { status: "jazda", start: ds, end: ds, _auto: true };
+                }
+              }
+            }
+
             // Policz dni w bieżącym miesiącu wg statusu
             const daysInMonth = new Date(curY, curM + 1, 0).getDate();
             const statusCounts = {};
@@ -7385,12 +7398,8 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
             }
 
             // Znajdź aktualny status (dziś)
-            const todayISO = now.toISOString().slice(0,10);
             const todayEntry = dayMap[todayISO];
-            // Fallback: jeśli brak wpisu w pauzy ale jest aktywny fracht → Jazda
-            const hasActiveFracht = active.length > 0;
-            const todaySt = todayEntry ? stInfo(todayEntry.status)
-              : hasActiveFracht ? stInfo("jazda") : null;
+            const todaySt = todayEntry ? stInfo(todayEntry.status) : null;
 
             // Lista wpisów w tym miesiącu (oryginalne wpisy, nie rozwinięte)
             const monthEntries = pauzy
