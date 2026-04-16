@@ -7330,15 +7330,177 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
           })()}
 
           {/* CZAS PRACY */}
-          {driverTab === "czas" && (
-            <div className="bg-white rounded-2xl border border-gray-100 p-5">
-              {pauzy.length === 0 ? (
-                <div className="text-center py-8 text-gray-400"><div className="text-3xl mb-2">⏱</div><div className="text-sm">Brak zapisanych pauz</div></div>
-              ) : (
-                <div className="space-y-2">{pauzy.sort((a,b)=>(b.date||"").localeCompare(a.date||"")).slice(0,30).map((p,i)=>(<div key={p.id||i} className="flex items-center justify-between py-2 px-3 rounded-lg bg-gray-50 border border-gray-100"><div><div className="text-sm font-medium text-gray-700">{fmtDateFull(p.date)}</div>{p.location&&<div className="text-xs text-gray-400">{p.location}</div>}</div><div className="text-right">{p.status&&<span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{background:p.status==="pauza"?"#fef3c7":"#ecfdf5",color:p.status==="pauza"?"#92400e":"#059669"}}>{p.status}</span>}{p.hours&&<div className="text-xs text-gray-500 mt-0.5">{p.hours}h</div>}</div></div>))}</div>
-              )}
-            </div>
-          )}
+          {driverTab === "czas" && (() => {
+            const STATUSY = [
+              { id: "jazda",    label: "Jazda",       color: "#15803d", bg: "#f0fdf4" },
+              { id: "pauza9",   label: "Pauza 9h",    color: "#b45309", bg: "#fffbeb" },
+              { id: "pauza11",  label: "Pauza 11h",   color: "#c2410c", bg: "#fff7ed" },
+              { id: "pauza24",  label: "Pauza 24h",   color: "#dc2626", bg: "#fef2f2" },
+              { id: "pauza45",  label: "Pauza 45h",   color: "#9333ea", bg: "#faf5ff" },
+              { id: "pauzaInne",label: "Pauza inne",  color: "#0369a1", bg: "#f0f9ff" },
+              { id: "baza",     label: "Baza",        color: "#6b7280", bg: "#f3f4f6" },
+            ];
+            const stInfo = (id) => STATUSY.find(s => s.id === id) || { label: id, color: "#6b7280", bg: "#f3f4f6" };
+
+            // Bieżący miesiąc
+            const now = new Date();
+            const curY = now.getFullYear();
+            const curM = now.getMonth(); // 0-based
+            const fmtYM = (y,m) => `${y}-${String(m+1).padStart(2,"0")}`;
+            const curYM = fmtYM(curY, curM);
+            const monthLabel = new Date(curY, curM).toLocaleDateString("pl-PL", { month: "long", year: "numeric" });
+
+            // Rozwiń wpisy na poszczególne dni
+            const dayMap = {}; // "YYYY-MM-DD" → entry
+            pauzy.forEach(e => {
+              if (!e.start || !e.end) return;
+              const s = new Date(e.start + "T00:00:00");
+              const en = new Date(e.end + "T00:00:00");
+              for (let d = new Date(s); d <= en; d.setDate(d.getDate() + 1)) {
+                const ds = d.toISOString().slice(0,10);
+                dayMap[ds] = e;
+              }
+            });
+
+            // Policz dni w bieżącym miesiącu wg statusu
+            const daysInMonth = new Date(curY, curM + 1, 0).getDate();
+            const statusCounts = {};
+            let totalDays = 0;
+            for (let d = 1; d <= daysInMonth; d++) {
+              const ds = fmtYM(curY, curM) + "-" + String(d).padStart(2,"0");
+              const entry = dayMap[ds];
+              if (entry) {
+                const st = entry.status || "jazda";
+                statusCounts[st] = (statusCounts[st] || 0) + 1;
+                totalDays++;
+              }
+            }
+
+            // Znajdź aktualny status (dziś)
+            const todayISO = now.toISOString().slice(0,10);
+            const todayEntry = dayMap[todayISO];
+            const todaySt = todayEntry ? stInfo(todayEntry.status) : null;
+
+            // Lista wpisów w tym miesiącu (oryginalne wpisy, nie rozwinięte)
+            const monthEntries = pauzy
+              .filter(p => p.start && p.start.startsWith(curYM) || p.end && p.end.startsWith(curYM))
+              .sort((a,b) => (b.start||"").localeCompare(a.start||""));
+
+            // Mini kalendarz
+            const firstDow = (new Date(curY, curM, 1).getDay() + 6) % 7;
+
+            return (
+              <div>
+                {/* Aktualny status */}
+                <div style={{
+                  background: todaySt ? todaySt.bg : "#f9fafb",
+                  borderRadius: 14, padding: "14px 16px", marginBottom: 12,
+                  border: `2px solid ${todaySt ? todaySt.color : "#e5e7eb"}`,
+                }}>
+                  <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600, marginBottom: 4 }}>Dzisiaj</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: todaySt ? todaySt.color : "#9ca3af" }}>
+                    {todaySt ? todaySt.label : "Brak statusu"}
+                  </div>
+                  {todayEntry && todayEntry.note && (
+                    <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>{todayEntry.note}</div>
+                  )}
+                  {todayEntry && todayEntry.startTime && (
+                    <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>Start: {todayEntry.startTime}{todayEntry.hours > 0 ? ` · ${todayEntry.hours}h` : ""}</div>
+                  )}
+                </div>
+
+                {/* Statystyki miesiąca */}
+                <div style={{ background: "#fff", borderRadius: 14, padding: 14, boxShadow: "0 1px 3px rgba(0,0,0,0.06)", marginBottom: 12 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 10, textTransform: "capitalize" }}>{monthLabel}</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    {Object.entries(statusCounts).sort((a,b) => b[1] - a[1]).map(([st, cnt]) => {
+                      const info = stInfo(st);
+                      return (
+                        <div key={st} style={{
+                          padding: "8px 10px", borderRadius: 10, background: info.bg,
+                          display: "flex", alignItems: "center", justifyContent: "space-between",
+                        }}>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: info.color }}>{info.label}</span>
+                          <span style={{ fontSize: 16, fontWeight: 800, color: info.color }}>{cnt}d</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {totalDays > 0 && (
+                    <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 8, textAlign: "right" }}>
+                      Razem: {totalDays} dni z {daysInMonth}
+                    </div>
+                  )}
+                  {totalDays === 0 && (
+                    <div style={{ textAlign: "center", padding: "12px 0", color: "#9ca3af", fontSize: 12 }}>Brak wpisów w tym miesiącu</div>
+                  )}
+                </div>
+
+                {/* Mini kalendarz */}
+                <div style={{ background: "#fff", borderRadius: 14, padding: 14, boxShadow: "0 1px 3px rgba(0,0,0,0.06)", marginBottom: 12 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2, textAlign: "center" }}>
+                    {["Pn","Wt","Śr","Cz","Pt","Sb","Nd"].map(d => (
+                      <div key={d} style={{ fontSize: 9, color: "#94a3b8", fontWeight: 600, paddingBottom: 4 }}>{d}</div>
+                    ))}
+                    {Array.from({length: firstDow}).map((_,i) => <div key={`e${i}`}/>)}
+                    {Array.from({length: daysInMonth}).map((_,i) => {
+                      const d = i + 1;
+                      const ds = fmtYM(curY, curM) + "-" + String(d).padStart(2,"0");
+                      const entry = dayMap[ds];
+                      const info = entry ? stInfo(entry.status) : null;
+                      const isToday = ds === todayISO;
+                      return (
+                        <div key={d} style={{
+                          width: "100%", aspectRatio: "1", borderRadius: 8, display: "flex",
+                          alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: isToday ? 800 : 500,
+                          background: info ? info.bg : "transparent",
+                          color: info ? info.color : "#cbd5e1",
+                          border: isToday ? "2px solid #1e293b" : "none",
+                        }}>{d}</div>
+                      );
+                    })}
+                  </div>
+                  {/* Legenda */}
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                    {STATUSY.filter(s => statusCounts[s.id]).map(s => (
+                      <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: 2, background: s.color }}/>
+                        <span style={{ fontSize: 9, color: "#64748b" }}>{s.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Lista wpisów */}
+                {monthEntries.length > 0 && (
+                  <div style={{ background: "#fff", borderRadius: 14, padding: 14, boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", marginBottom: 8 }}>Wpisy</div>
+                    {monthEntries.map((p,i) => {
+                      const info = stInfo(p.status);
+                      const fmtD = (d) => { if (!d) return ""; const [y,m,day] = d.split("-"); return `${day}.${m}`; };
+                      const range = p.start === p.end ? fmtD(p.start) : `${fmtD(p.start)} – ${fmtD(p.end)}`;
+                      return (
+                        <div key={p.id||i} style={{
+                          display: "flex", alignItems: "center", gap: 10, padding: "8px 0",
+                          borderBottom: i < monthEntries.length - 1 ? "1px solid #f1f5f9" : "none",
+                        }}>
+                          <div style={{ width: 8, height: 8, borderRadius: 2, background: info.color, flexShrink: 0 }}/>
+                          <div style={{ flex: 1 }}>
+                            <span style={{ fontSize: 13, fontWeight: 600, color: info.color }}>{info.label}</span>
+                            {p.note && <span style={{ fontSize: 11, color: "#94a3b8", marginLeft: 6 }}>{p.note}</span>}
+                          </div>
+                          <div style={{ textAlign: "right" }}>
+                            <div style={{ fontSize: 12, color: "#475569", fontWeight: 500 }}>{range}</div>
+                            {p.startTime && <div style={{ fontSize: 10, color: "#94a3b8" }}>{p.startTime}{p.hours > 0 ? ` · ${p.hours}h` : ""}</div>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* DOKUMENTY */}
           {driverTab === "dokumenty" && (() => {
@@ -7639,7 +7801,13 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
             { id: "dokumenty", icon: "📄", label: "Dokumenty", gradient: "linear-gradient(135deg, #8b5cf6, #7c3aed)", sub: driverDocs.length > 0 ? `${driverDocs.length} dokumentów` : "Paragony, faktury" },
             { id: "spalanie", icon: "⛽", label: "Tankowania", gradient: "linear-gradient(135deg, #06b6d4, #0891b2)",
               sub: fuelEntries.length > 0 ? `${fuelEntries.length} tankowań` : "Dodaj tankowanie" },
-            { id: "czas", icon: "⏱", label: "Czas pracy", gradient: "linear-gradient(135deg, #10b981, #059669)", sub: "Pauzy, jazda" },
+            { id: "czas", icon: "⏱", label: "Czas pracy", gradient: "linear-gradient(135deg, #10b981, #059669)",
+              sub: (() => {
+                const todayISO = new Date().toISOString().slice(0,10);
+                const todayP = pauzy.find(p => p.start && p.end && p.start <= todayISO && p.end >= todayISO);
+                if (todayP) { const labels = {jazda:"Jazda",pauza9:"Pauza 9h",pauza11:"Pauza 11h",pauza24:"Pauza 24h",pauza45:"Pauza 45h",baza:"Baza"}; return labels[todayP.status] || todayP.status; }
+                return "Pauzy, jazda";
+              })() },
             { id: "mapa", icon: "🗺️", label: "Mapa", gradient: "linear-gradient(135deg, #ec4899, #db2777)", sub: "Wkrótce" },
             { id: "pojazd", icon: "🚛", label: "Pojazd", gradient: "linear-gradient(135deg, #64748b, #475569)", sub: vehicle ? vehicle.brand || vehicle.type : "—" },
           ].map(t => (
