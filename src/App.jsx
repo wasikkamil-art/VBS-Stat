@@ -6133,7 +6133,7 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
   const [selectedFracht, setSelectedFracht] = useState(null);
   const [driverTab, setDriverTab] = useState("home"); // "home" | "zlecenia" | "pojazd" | "serwis" | "spalanie" | "czas" | "dokumenty" | "mapa"
   const [fuelView, setFuelView] = useState("list"); // "list" | "form" | "stats"
-  const [fuelForm, setFuelForm] = useState({ date: new Date().toISOString().slice(0,10), liters: "", mileage: "", station: "", cardNr: "", pricePerL: "", country: "PL", fullTank: true });
+  const [fuelForm, setFuelForm] = useState({ date: new Date().toISOString().slice(0,10), liters: "", mileage: "", station: "", cardNr: "", pricePerL: "", country: "PL", currency: "PLN", fullTank: true });
   const [driverZoom, setDriverZoom] = useState(() => {
     try { return localStorage.getItem("fleetstat_driver_zoom") || "normal"; } catch { return "normal"; }
   }); // "normal" | "large"
@@ -6852,11 +6852,12 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                   cardNr: fuelForm.cardNr || "",
                   pricePerL: fuelForm.pricePerL ? parseFloat(fuelForm.pricePerL) : null,
                   country: fuelForm.country || "PL",
+                  currency: fuelForm.currency || "EUR",
                   fullTank: !!fuelForm.fullTank,
                   createdAt: ts,
                 });
                 showToast("Tankowanie zapisane");
-                setFuelForm(f => ({ ...f, liters: "", mileage: "", station: "", pricePerL: "" }));
+                setFuelForm(f => ({ ...f, liters: "", mileage: "", station: "", pricePerL: "", currency: f.country === "PL" ? "PLN" : "EUR" }));
                 setFuelView("list");
               } catch (err) {
                 console.error("fuelEntry save error", err);
@@ -6930,7 +6931,7 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                         </div>
                         <div style={{ textAlign: "right" }}>
                           <div style={{ fontSize: 12, fontWeight: 600, color: "#334155" }}>{e.mileage ? e.mileage.toLocaleString("pl-PL")+" km" : ""}</div>
-                          {e.pricePerL > 0 && <div style={{ fontSize: 10, color: "#94a3b8" }}>{e.country === "PL" ? `${e.pricePerL.toFixed(2)} PLN/L` : `${e.pricePerL.toFixed(3)} €/L`}</div>}
+                          {e.pricePerL > 0 && <div style={{ fontSize: 10, color: "#94a3b8" }}>{e.pricePerL.toFixed(e.currency === "EUR" ? 3 : 2)} {e.currency || (e.country === "PL" ? "PLN" : "EUR")}/L</div>}
                         </div>
                         <button onClick={() => deleteFuel(e.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: "#d1d5db", padding: 4 }} title="Usuń">✕</button>
                       </div>
@@ -7066,13 +7067,22 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                           style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 15, color: "#1e293b", background: "#f8fafc", boxSizing: "border-box" }}/>
                       </div>
                     </div>
-                    {/* Country */}
-                    <div style={{ marginBottom: 10 }}>
-                      <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 3 }}>Kraj</label>
-                      <select value={fuelForm.country} onChange={e => setFuelForm(f => ({...f, country: e.target.value}))}
-                        style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 15, color: "#1e293b", background: "#f8fafc", boxSizing: "border-box" }}>
-                        {FUEL_COUNTRIES.map(c => <option key={c} value={c}>{countryFlag(c)} {c}</option>)}
-                      </select>
+                    {/* Country + Currency */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                      <div>
+                        <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 3 }}>Kraj</label>
+                        <select value={fuelForm.country} onChange={e => { const c = e.target.value; setFuelForm(f => ({...f, country: c, currency: c === "PL" ? "PLN" : "EUR"})); }}
+                          style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 15, color: "#1e293b", background: "#f8fafc", boxSizing: "border-box" }}>
+                          {FUEL_COUNTRIES.map(c => <option key={c} value={c}>{countryFlag(c)} {c}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 3 }}>Waluta</label>
+                        <select value={fuelForm.currency} onChange={e => setFuelForm(f => ({...f, currency: e.target.value}))}
+                          style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 15, color: "#1e293b", background: "#f8fafc", boxSizing: "border-box" }}>
+                          {["EUR","PLN","CZK","HUF","SEK","DKK","RON","BGN","HRK","GBP"].map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </div>
                     </div>
                     {/* Full tank toggle */}
                     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", marginBottom: 10 }}>
