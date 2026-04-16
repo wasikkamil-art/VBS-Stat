@@ -6133,7 +6133,7 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
   const [selectedFracht, setSelectedFracht] = useState(null);
   const [driverTab, setDriverTab] = useState("home"); // "home" | "zlecenia" | "pojazd" | "serwis" | "spalanie" | "czas" | "dokumenty" | "mapa"
   const [fuelView, setFuelView] = useState("list"); // "list" | "form" | "stats"
-  const [fuelForm, setFuelForm] = useState({ date: new Date().toISOString().slice(0,10), liters: "", mileage: "", station: "", cardNr: "", pricePerL: "", country: "PL", currency: "PLN", fullTank: true });
+  const [fuelForm, setFuelForm] = useState({ date: new Date().toISOString().slice(0,10), liters: "", mileage: "", station: "", cardNr: "", pricePerL: "", country: "PL", currency: "PLN", fullTank: true, isAdblue: false, adblueL: "" });
   const [driverZoom, setDriverZoom] = useState(() => {
     try { return localStorage.getItem("fleetstat_driver_zoom") || "normal"; } catch { return "normal"; }
   }); // "normal" | "large"
@@ -6854,10 +6854,12 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                   country: fuelForm.country || "PL",
                   currency: fuelForm.currency || "EUR",
                   fullTank: !!fuelForm.fullTank,
+                  isAdblue: !!fuelForm.isAdblue,
+                  adblueL: fuelForm.adblueL ? parseFloat(fuelForm.adblueL) : 0,
                   createdAt: ts,
                 });
                 showToast("Tankowanie zapisane");
-                setFuelForm(f => ({ ...f, liters: "", mileage: "", station: "", pricePerL: "", currency: f.country === "PL" ? "PLN" : "EUR" }));
+                setFuelForm(f => ({ ...f, liters: "", mileage: "", station: "", pricePerL: "", adblueL: "", isAdblue: false, currency: f.country === "PL" ? "PLN" : "EUR" }));
                 setFuelView("list");
               } catch (err) {
                 console.error("fuelEntry save error", err);
@@ -6878,20 +6880,25 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
             return (
               <div>
                 {/* SUMMARY CARDS */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
-                  <div style={{ background: "#fff", borderRadius: 12, padding: "10px 8px", textAlign: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", borderTop: "3px solid #2563eb" }}>
-                    <div style={{ fontSize: 15, fontWeight: 800, color: "#2563eb" }}>{avgFuel ? `${avgFuel}` : "—"}</div>
-                    <div style={{ fontSize: 10, color: "#64748b" }}>L/100km</div>
-                  </div>
-                  <div style={{ background: "#fff", borderRadius: 12, padding: "10px 8px", textAlign: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", borderTop: "3px solid #059669" }}>
-                    <div style={{ fontSize: 15, fontWeight: 800, color: "#059669" }}>{totalL > 0 ? totalL.toLocaleString("pl-PL") : "—"}</div>
-                    <div style={{ fontSize: 10, color: "#64748b" }}>Litry</div>
-                  </div>
-                  <div style={{ background: "#fff", borderRadius: 12, padding: "10px 8px", textAlign: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", borderTop: "3px solid #7c3aed" }}>
-                    <div style={{ fontSize: 15, fontWeight: 800, color: "#7c3aed" }}>{totalKm > 0 ? totalKm.toLocaleString("pl-PL") : "—"}</div>
-                    <div style={{ fontSize: 10, color: "#64748b" }}>km</div>
-                  </div>
-                </div>
+                {(() => {
+                  const totalAdblue = fuelEntries.reduce((s,e) => s + (e.adblueL||0), 0);
+                  return (
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
+                      <div style={{ background: "#fff", borderRadius: 12, padding: "10px 8px", textAlign: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", borderTop: "3px solid #059669" }}>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: "#059669" }}>{totalL > 0 ? totalL.toLocaleString("pl-PL") : "—"}</div>
+                        <div style={{ fontSize: 10, color: "#64748b" }}>Diesel L</div>
+                      </div>
+                      <div style={{ background: "#fff", borderRadius: 12, padding: "10px 8px", textAlign: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", borderTop: "3px solid #2563eb" }}>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: "#2563eb" }}>{totalAdblue > 0 ? totalAdblue.toLocaleString("pl-PL") : "—"}</div>
+                        <div style={{ fontSize: 10, color: "#64748b" }}>AdBlue L</div>
+                      </div>
+                      <div style={{ background: "#fff", borderRadius: 12, padding: "10px 8px", textAlign: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", borderTop: "3px solid #7c3aed" }}>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: "#7c3aed" }}>{totalKm > 0 ? totalKm.toLocaleString("pl-PL") : "—"}</div>
+                        <div style={{ fontSize: 10, color: "#64748b" }}>km</div>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* TAB BAR: Lista / Statystyki */}
                 <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
@@ -6926,8 +6933,12 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                           <div style={{ fontWeight: 600, fontSize: 14, color: "#1e293b" }}>
                             {(e.liters||0).toLocaleString("pl-PL")} L
                             {e.fullTank && <span style={{ fontSize: 9, background: "#dbeafe", color: "#1d4ed8", padding: "1px 5px", borderRadius: 6, marginLeft: 5, verticalAlign: "middle" }}>FULL</span>}
+                            {e.isAdblue && <span style={{ fontSize: 9, background: "#e0f2fe", color: "#0369a1", padding: "1px 5px", borderRadius: 6, marginLeft: 5, verticalAlign: "middle" }}>AdBlue</span>}
                           </div>
-                          <div style={{ fontSize: 11, color: "#64748b" }}>{e.station || "—"}</div>
+                          <div style={{ fontSize: 11, color: "#64748b" }}>
+                            {e.station || "—"}
+                            {e.adblueL > 0 && !e.isAdblue && <span style={{ color: "#0284c7", marginLeft: 6 }}>+{e.adblueL}L AdBlue</span>}
+                          </div>
                         </div>
                         <div style={{ textAlign: "right" }}>
                           <div style={{ fontSize: 12, fontWeight: 600, color: "#334155" }}>{e.mileage ? e.mileage.toLocaleString("pl-PL")+" km" : ""}</div>
@@ -7084,6 +7095,21 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                         </select>
                       </div>
                     </div>
+                    {/* AdBlue toggle + liters */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", marginBottom: 6 }}>
+                      <div onClick={() => setFuelForm(f => ({...f, isAdblue: !f.isAdblue}))}
+                        style={{ width: 48, height: 26, borderRadius: 13, cursor: "pointer", background: fuelForm.isAdblue ? "#0284c7" : "#cbd5e1", position: "relative", transition: "background 0.2s" }}>
+                        <div style={{ width: 22, height: 22, borderRadius: 11, background: "#fff", position: "absolute", top: 2, left: fuelForm.isAdblue ? 24 : 2, transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }}/>
+                      </div>
+                      <span style={{ fontSize: 13, color: "#334155", fontWeight: 500 }}>To jest AdBlue (nie diesel)</span>
+                    </div>
+                    {!fuelForm.isAdblue && (
+                      <div style={{ marginBottom: 10 }}>
+                        <label style={{ fontSize: 11, fontWeight: 600, color: "#0284c7", display: "block", marginBottom: 3 }}>AdBlue litry (opcjonalnie)</label>
+                        <input type="number" placeholder="np. 50" value={fuelForm.adblueL} onChange={e => setFuelForm(f => ({...f, adblueL: e.target.value}))}
+                          style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #bae6fd", borderRadius: 10, fontSize: 15, color: "#1e293b", background: "#f0f9ff", boxSizing: "border-box" }}/>
+                      </div>
+                    )}
                     {/* Full tank toggle */}
                     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", marginBottom: 10 }}>
                       <div onClick={() => setFuelForm(f => ({...f, fullTank: !f.fullTank}))}
@@ -7244,7 +7270,7 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
               subStyle: serwisAlert && serwisAlert.days <= 30 ? { background: "#fef2f2", color: "#dc2626" } : null },
             { id: "dokumenty", icon: "📄", label: "Dokumenty", gradient: "linear-gradient(135deg, #8b5cf6, #7c3aed)", sub: "CMR, zlecenia" },
             { id: "spalanie", icon: "⛽", label: "Tankowania", gradient: "linear-gradient(135deg, #06b6d4, #0891b2)",
-              sub: avgSpalanie ? `Śr. ${avgSpalanie} L/100` : fuelEntries.length > 0 ? `${fuelEntries.length} wpisów` : "Dodaj tankowanie" },
+              sub: fuelEntries.length > 0 ? `${fuelEntries.length} tankowań` : "Dodaj tankowanie" },
             { id: "czas", icon: "⏱", label: "Czas pracy", gradient: "linear-gradient(135deg, #10b981, #059669)", sub: "Pauzy, jazda" },
             { id: "mapa", icon: "🗺️", label: "Mapa", gradient: "linear-gradient(135deg, #ec4899, #db2777)", sub: "Wkrótce" },
             { id: "pojazd", icon: "🚛", label: "Pojazd", gradient: "linear-gradient(135deg, #64748b, #475569)", sub: vehicle ? vehicle.brand || vehicle.type : "—" },
