@@ -844,6 +844,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   const [operacyjne, setOperacyjne] = useState([]);
   const [driverEvents, setDriverEvents] = useState([]);
   const [fuelEntries, setFuelEntries] = useState([]);
+  const [driverDocs, setDriverDocs] = useState([]);
   const [pauzy, setPauzy] = useState([]);
   const [loaded, setLoaded]         = useState(false);
   const [toast, setToast]           = useState(null);
@@ -972,6 +973,14 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     const unsub = onSnapshot(collection(db, "fuelEntries"), (snap) => {
       setFuelEntries(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }, (err) => console.error("fuelEntries onSnapshot error", err));
+    return () => unsub();
+  }, []);
+
+  // ── DRIVER DOCS — paragony, faktury, mandaty od kierowców ──
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "driverDocs"), (snap) => {
+      setDriverDocs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error("driverDocs onSnapshot error", err));
     return () => unsub();
   }, []);
 
@@ -2002,6 +2011,9 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
       ? fuelEntries.filter(fe => fe.vehicleId === myVehicle.id)
       : [];
 
+    // Dokumenty kierowcy filtrowane po emailu (nie po pojeździe — dokumenty osobiste)
+    const myDriverDocs = driverDocs.filter(dd => dd.driverEmail === user.email);
+
     return (
       <DriverPanel
         user={user}
@@ -2011,6 +2023,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
         operacyjne={myOperacyjne}
         driverEvents={driverEvents}
         fuelEntries={myFuelEntries}
+        driverDocs={myDriverDocs}
         showToast={showToast}
       />
     );
@@ -6129,11 +6142,14 @@ const STATUS_META = {
 // ═══════════════════════════════════════════════════════════════════
 //  PANEL KIEROWCY — mobile-first, osobny layout
 // ═══════════════════════════════════════════════════════════════════
-function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEvents = [], fuelEntries = [], showToast }) {
+function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEvents = [], fuelEntries = [], driverDocs = [], showToast }) {
   const [selectedFracht, setSelectedFracht] = useState(null);
   const [driverTab, setDriverTab] = useState("home"); // "home" | "zlecenia" | "pojazd" | "serwis" | "spalanie" | "czas" | "dokumenty" | "mapa"
   const [fuelView, setFuelView] = useState("list"); // "list" | "form" | "stats"
   const [fuelForm, setFuelForm] = useState({ date: new Date().toISOString().slice(0,10), liters: "", mileage: "", station: "", cardNr: "", pricePerL: "", country: "PL", currency: "PLN", fullTank: true, isAdblue: false, adblueL: "" });
+  const [docView, setDocView] = useState("list"); // "list" | "form"
+  const [docForm, setDocForm] = useState({ description: "", type: "paragon", photoFile: null, photoPreview: null });
+  const [docUploading, setDocUploading] = useState(false);
   const [driverZoom, setDriverZoom] = useState(() => {
     try { return localStorage.getItem("fleetstat_driver_zoom") || "normal"; } catch { return "normal"; }
   }); // "normal" | "large"
@@ -7122,11 +7138,193 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
             </div>
           )}
 
-          {/* DOKUMENTY / MAPA — placeholder */}
-          {(driverTab === "dokumenty" || driverTab === "mapa") && (
+          {/* DOKUMENTY */}
+          {driverTab === "dokumenty" && (() => {
+            const DOC_TYPES = [
+              { id: "paragon", label: "Paragon", icon: "🧾" },
+              { id: "faktura", label: "Faktura", icon: "📄" },
+              { id: "mandat", label: "Mandat", icon: "⚠️" },
+              { id: "serwis", label: "Serwis / Naprawa", icon: "🔧" },
+              { id: "opony", label: "Opony", icon: "🔄" },
+              { id: "mycie", label: "Mycie", icon: "🚿" },
+              { id: "parking", label: "Parking", icon: "🅿️" },
+              { id: "autostrada", label: "Autostrada / Myto", icon: "🛣️" },
+              { id: "hotel", label: "Hotel / Nocleg", icon: "🏨" },
+              { id: "inne", label: "Inne", icon: "📋" },
+            ];
+            const typeInfo = (id) => DOC_TYPES.find(t => t.id === id) || { label: id, icon: "📋" };
+            const sorted = [...driverDocs].sort((a,b) => (b.createdAt||"").localeCompare(a.createdAt||""));
+            const fmtD = (d) => { if (!d) return "—"; const parts = d.split(/[-T ]/); return parts.length >= 3 ? `${parts[2]}.${parts[1]}.${parts[0]}` : d; };
+
+            const submitDoc = async () => {
+              if (!docForm.description.trim()) { showToast("Podaj opis dokumentu"); return; }
+              setDocUploading(true);
+              try {
+                let photoUrl = null;
+                if (docForm.photoFile) {
+                  const path = `driverDocs/${user.email}/${docForm.type}_${Date.now()}_${docForm.photoFile.name}`;
+                  const sRef = storageRef(storage, path);
+                  await uploadBytes(sRef, docForm.photoFile);
+                  photoUrl = await getDownloadURL(sRef);
+                }
+                const now = new Date();
+                const ts = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")} ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+                await addDoc(collection(db, "driverDocs"), {
+                  driverEmail: user.email,
+                  driverName: user.displayName || user.email,
+                  vehicleId: vehicle?.id || null,
+                  type: docForm.type,
+                  description: docForm.description.trim(),
+                  photoUrl: photoUrl,
+                  createdAt: ts,
+                });
+                showToast("Dokument zapisany");
+                setDocForm({ description: "", type: "paragon", photoFile: null, photoPreview: null });
+                setDocView("list");
+              } catch (err) {
+                console.error("driverDoc save error", err);
+                showToast("Błąd: " + err.message);
+              } finally { setDocUploading(false); }
+            };
+
+            const deleteDocEntry = async (d) => {
+              if (!window.confirm("Usunąć ten dokument?")) return;
+              try {
+                await deleteDoc(doc(db, "driverDocs", d.id));
+                showToast("Usunięto");
+              } catch (err) { showToast("Błąd: " + err.message); }
+            };
+
+            return (
+              <div>
+                {/* LIST VIEW */}
+                {docView === "list" && (
+                  <div>
+                    {sorted.length === 0 && (
+                      <div style={{ textAlign: "center", padding: "32px 0", color: "#9ca3af" }}>
+                        <div style={{ fontSize: 32, marginBottom: 8 }}>📄</div>
+                        <div style={{ fontSize: 14 }}>Brak dokumentów</div>
+                        <div style={{ fontSize: 12, marginTop: 4 }}>Dodaj paragon, fakturę lub inny dokument</div>
+                      </div>
+                    )}
+                    {sorted.map(d => {
+                      const ti = typeInfo(d.type);
+                      return (
+                        <div key={d.id} style={{ background: "#fff", borderRadius: 12, padding: "12px 14px", marginBottom: 8, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <div style={{ fontSize: 24, minWidth: 32, textAlign: "center" }}>{ti.icon}</div>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontWeight: 600, fontSize: 14, color: "#1e293b" }}>{d.description}</div>
+                              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
+                                <span style={{ background: "#f1f5f9", padding: "1px 6px", borderRadius: 6, fontSize: 10, fontWeight: 600, color: "#475569" }}>{ti.label}</span>
+                                <span style={{ marginLeft: 8 }}>{fmtD(d.createdAt)}</span>
+                              </div>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              {d.photoUrl && (
+                                <a href={d.photoUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 18, textDecoration: "none" }} title="Zobacz zdjęcie">📷</a>
+                              )}
+                              <button onClick={() => deleteDocEntry(d)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: "#d1d5db", padding: 4 }} title="Usuń">✕</button>
+                            </div>
+                          </div>
+                          {d.photoUrl && (
+                            <div style={{ marginTop: 8 }}>
+                              <img src={d.photoUrl} alt="Zdjęcie dokumentu" style={{ width: "100%", maxHeight: 200, objectFit: "cover", borderRadius: 8, border: "1px solid #e2e8f0" }}/>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {/* Dodaj dokument button */}
+                    <div style={{ textAlign: "center", marginTop: 16 }}>
+                      <button onClick={() => setDocView("form")} style={{
+                        background: "linear-gradient(135deg, #7c3aed, #8b5cf6)", color: "#fff", border: "none", borderRadius: 14,
+                        padding: "12px 28px", fontSize: 14, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 12px rgba(124,58,237,0.3)"
+                      }}>+ Dodaj dokument</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* FORM VIEW */}
+                {docView === "form" && (
+                  <div style={{ background: "#fff", borderRadius: 14, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: "#1e293b", marginBottom: 14 }}>Nowy dokument</div>
+
+                    {/* Type selector — chip grid */}
+                    <div style={{ marginBottom: 12 }}>
+                      <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 6 }}>Typ dokumentu</label>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {DOC_TYPES.map(t => (
+                          <button key={t.id} onClick={() => setDocForm(f => ({...f, type: t.id}))}
+                            style={{
+                              padding: "6px 12px", borderRadius: 10, fontSize: 12, fontWeight: 600, cursor: "pointer",
+                              border: docForm.type === t.id ? "2px solid #7c3aed" : "1.5px solid #e2e8f0",
+                              background: docForm.type === t.id ? "#f5f3ff" : "#fff",
+                              color: docForm.type === t.id ? "#7c3aed" : "#475569",
+                            }}>
+                            {t.icon} {t.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Description */}
+                    <div style={{ marginBottom: 12 }}>
+                      <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 3 }}>Opis *</label>
+                      <input type="text" placeholder="np. Faktura za wymianę opon, Mandat DE..." value={docForm.description}
+                        onChange={e => setDocForm(f => ({...f, description: e.target.value}))}
+                        style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 15, color: "#1e293b", background: "#f8fafc", boxSizing: "border-box" }}/>
+                    </div>
+
+                    {/* Photo */}
+                    <div style={{ marginBottom: 14 }}>
+                      <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 6 }}>Zdjęcie (opcjonalnie)</label>
+                      {docForm.photoPreview ? (
+                        <div style={{ position: "relative" }}>
+                          <img src={docForm.photoPreview} alt="Podgląd" style={{ width: "100%", maxHeight: 200, objectFit: "cover", borderRadius: 10, border: "1px solid #e2e8f0" }}/>
+                          <button onClick={() => setDocForm(f => ({...f, photoFile: null, photoPreview: null}))}
+                            style={{ position: "absolute", top: 6, right: 6, background: "rgba(0,0,0,0.6)", color: "#fff", border: "none", borderRadius: 8, width: 28, height: 28, fontSize: 14, cursor: "pointer" }}>✕</button>
+                        </div>
+                      ) : (
+                        <label style={{
+                          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                          padding: "20px", border: "2px dashed #d1d5db", borderRadius: 12, cursor: "pointer",
+                          background: "#fafafa", color: "#64748b", fontSize: 13, fontWeight: 500,
+                        }}>
+                          <span style={{ fontSize: 24 }}>📷</span> Zrób zdjęcie lub wybierz z galerii
+                          <input type="file" accept="image/*" capture="environment" style={{ display: "none" }}
+                            onChange={e => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                setDocForm(f => ({...f, photoFile: file, photoPreview: URL.createObjectURL(file)}));
+                              }
+                              e.target.value = "";
+                            }}/>
+                        </label>
+                      )}
+                    </div>
+
+                    {/* Submit */}
+                    <button onClick={submitDoc} disabled={docUploading} style={{
+                      width: "100%", padding: "13px",
+                      background: docUploading ? "#94a3b8" : "linear-gradient(135deg, #7c3aed, #8b5cf6)",
+                      color: "#fff", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: docUploading ? "wait" : "pointer",
+                    }}>{docUploading ? "Wysyłanie..." : "Zapisz dokument"}</button>
+                    <button onClick={() => { setDocView("list"); setDocForm({ description: "", type: "paragon", photoFile: null, photoPreview: null }); }} style={{
+                      width: "100%", padding: "10px", marginTop: 8, background: "transparent",
+                      color: "#64748b", border: "1px solid #e2e8f0", borderRadius: 12, fontSize: 13, fontWeight: 600, cursor: "pointer",
+                    }}>Anuluj</button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* MAPA — placeholder */}
+          {driverTab === "mapa" && (
             <div className="text-center py-16 text-gray-400">
-              <div className="text-4xl mb-3">{driverTab === "mapa" ? "🗺️" : "📄"}</div>
-              <div className="font-medium">{driverTab === "mapa" ? "Wkrótce — integracja GPS" : "Wkrótce"}</div>
+              <div className="text-4xl mb-3">🗺️</div>
+              <div className="font-medium">Wkrótce — integracja GPS</div>
             </div>
           )}
 
@@ -7236,7 +7434,7 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
             { id: "serwis", icon: "🔧", label: "Serwis", gradient: "linear-gradient(135deg, #f59e0b, #d97706)",
               sub: serwisAlert ? `${serwisAlert.label} za ${serwisAlert.days}d` : "Terminy OK",
               subStyle: serwisAlert && serwisAlert.days <= 30 ? { background: "#fef2f2", color: "#dc2626" } : null },
-            { id: "dokumenty", icon: "📄", label: "Dokumenty", gradient: "linear-gradient(135deg, #8b5cf6, #7c3aed)", sub: "CMR, zlecenia" },
+            { id: "dokumenty", icon: "📄", label: "Dokumenty", gradient: "linear-gradient(135deg, #8b5cf6, #7c3aed)", sub: driverDocs.length > 0 ? `${driverDocs.length} dokumentów` : "Paragony, faktury" },
             { id: "spalanie", icon: "⛽", label: "Tankowania", gradient: "linear-gradient(135deg, #06b6d4, #0891b2)",
               sub: fuelEntries.length > 0 ? `${fuelEntries.length} tankowań` : "Dodaj tankowanie" },
             { id: "czas", icon: "⏱", label: "Czas pracy", gradient: "linear-gradient(135deg, #10b981, #059669)", sub: "Pauzy, jazda" },

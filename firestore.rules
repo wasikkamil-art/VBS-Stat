@@ -181,6 +181,17 @@ service cloud.firestore {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // DRIVER DOCS — paragony, faktury, mandaty od kierowców
+    // Kierowca tworzy i usuwa swoje. Admin/dyspozytor pełny dostęp.
+    // ═══════════════════════════════════════════════════════════════
+    match /driverDocs/{docId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update: if canEdit();
+      allow delete: if canEdit() || (isAuth() && resource.data.driverEmail == request.auth.token.email);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // FUEL ENTRIES — tankowania wpisywane przez kierowców
     // Kierowca tworzy wpisy, może usuwać swoje. Admin/dyspozytor all.
     // ═══════════════════════════════════════════════════════════════
