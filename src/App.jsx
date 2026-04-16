@@ -7098,8 +7098,8 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                   </div>
                 )}
 
-                {/* FAB — Dodaj tankowanie */}
-                {fuelView !== "form" && (
+                {/* FAB — Dodaj tankowanie (tylko na liście) */}
+                {fuelView === "list" && (
                   <div style={{ textAlign: "center", marginTop: 16 }}>
                     <button onClick={() => setFuelView("form")} style={{
                       background: "linear-gradient(135deg, #1e40af, #3b82f6)", color: "#fff", border: "none", borderRadius: 14,
