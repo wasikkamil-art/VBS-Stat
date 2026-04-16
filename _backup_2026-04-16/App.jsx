@@ -1,0 +1,15767 @@
+import { useState, useEffect, useMemo, useRef } from "react";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, CartesianGrid } from "recharts";
+// v2025.03.31 — YoY Scorecard rebuild
+
+// ─── FIREBASE CONFIG ────────────────────────────────────────────────────────
+// 👇 WKLEJ TUTAJ SWÓJ firebaseConfig z Firebase Console
+import { initializeApp } from "firebase/app";
+import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, orderBy, arrayUnion, serverTimestamp, writeBatch, limit as firestoreLimit } from "firebase/firestore";
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, browserLocalPersistence, setPersistence } from "firebase/auth";
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
+import { getMessaging, getToken, onMessage } from "firebase/messaging";
+import { getFunctions, httpsCallable } from "firebase/functions";
+
+// ─── STORAGE HELPERS (per-user, per-key documents) ───────────────────────────
+// Każdy klucz to osobny dokument: fleet/{uid}/{key}
+// Omija limit 1MB na dokument i izoluje dane per użytkownik
+
+const firebaseConfig = {
+  apiKey:            "AIzaSyBJ_1_i_OS3DQ7g0hjJyF6ZTgU9_7LkHcQ",
+  authDomain:        "vbs-stats.firebaseapp.com",
+  projectId:         "vbs-stats",
+  storageBucket:     "vbs-stats.firebasestorage.app",
+  messagingSenderId: "331217061974",
+  appId:             "1:331217061974:web:375c8931f0cda74ec413f7",
+  measurementId:     "G-EJTBVPYH1X",
+};
+
+const app = initializeApp(firebaseConfig);
+const db        = getFirestore(app);
+const auth      = getAuth(app);
+setPersistence(auth, browserLocalPersistence).catch(e => console.warn("setPersistence error", e));
+const storage   = getStorage(app);
+const functions = getFunctions(app, "europe-west1");
+
+// ─── FCM (Push Notifications) ───────────────────────────────────────────────
+let messaging = null;
+try { messaging = getMessaging(app); } catch (e) { console.warn("FCM init skip:", e.message); }
+
+// Diagnostyka push notifications
+const pushDiag = {
+  supported: "serviceWorker" in navigator && "PushManager" in window && "Notification" in window,
+  isIOS: /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.userAgent.includes("Mac") && "ontouchend" in document),
+  isStandalone: window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true,
+};
+
+// Rejestracja FCM token i zapis do Firestore
+// Zwraca obiekt z wynikiem diagnostyki
+async function registerFCMToken(uid) {
+  const result = { success: false, error: null, step: "", token: null };
+
+  // Krok 1: Sprawdź wsparcie przeglądarki
+  if (!("serviceWorker" in navigator)) { result.error = "Brak Service Worker"; result.step = "sw-check"; return result; }
+  if (!("PushManager" in window)) { result.error = "Brak PushManager (iOS wymaga dodania do ekranu głównego)"; result.step = "push-check"; return result; }
+  if (!("Notification" in window)) { result.error = "Brak Notification API"; result.step = "notif-check"; return result; }
+
+  // Krok 2: FCM messaging
+  if (!messaging) {
+    try { messaging = getMessaging(app); } catch (e) {
+      result.error = "FCM init error: " + e.message; result.step = "fcm-init"; return result;
+    }
+  }
+
+  try {
+    // Krok 3: Permission
+    result.step = "permission";
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") { result.error = `Permission: ${permission}`; return result; }
+
+    // Krok 4: Service Worker registration
+    result.step = "sw-register";
+    const sw = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
+    // Czekaj aż SW będzie aktywny (ważne na iOS)
+    if (sw.installing) {
+      await new Promise((resolve) => {
+        sw.installing.addEventListener("statechange", function handler(e) {
+          if (e.target.state === "activated") { e.target.removeEventListener("statechange", handler); resolve(); }
+        });
+        setTimeout(resolve, 5000); // timeout safety
+      });
+    }
+
+    // Krok 5: Token
+    result.step = "get-token";
+    const token = await getToken(messaging, {
+      vapidKey: "BFS79b5DBeiWgH98Uzmw4nbdK4vn7ggvop2W4acNbPBgO9Q2QaChaxOH5u9sNEdmXnG9cf-7sXzRdRg_-l1OO8M",
+      serviceWorkerRegistration: sw,
+    });
+
+    if (!token) { result.error = "Token pusty"; return result; }
+
+    // Krok 6: Zapis do Firestore
+    result.step = "save-token";
+    const tokenId = token.slice(0, 20).replace(/[^a-zA-Z0-9]/g, "");
+    const platform = pushDiag.isIOS ? "ios" : (navigator.userAgent.includes("Android") ? "android" : "desktop");
+    await setDoc(doc(db, "fcmTokens", `${uid}_${tokenId}`), {
+      token, updatedAt: new Date().toISOString(), uid, platform,
+      userAgent: navigator.userAgent.slice(0, 200),
+    }, { merge: true });
+
+    result.success = true;
+    result.token = token.slice(0, 12) + "...";
+    console.log(`✅ FCM token saved (${platform}):`, token.slice(0, 20));
+    return result;
+  } catch (e) {
+    result.error = e.message || String(e);
+    console.warn("FCM registration failed at step:", result.step, e);
+    return result;
+  }
+}
+
+// Foreground message handler — pokaż powiadomienie gdy apka jest otwarta
+if (messaging) {
+  try {
+    onMessage(messaging, (payload) => {
+      console.log("📩 Foreground push:", payload);
+      // Pokaż natywne powiadomienie nawet gdy apka jest otwarta
+      if (Notification.permission === "granted" && payload.notification) {
+        new Notification(payload.notification.title || "FleetStat", {
+          body: payload.notification.body,
+          icon: "/icon-192.png",
+          tag: payload.data?.roomId || "chat",
+        });
+      }
+    });
+  } catch (e) { /* ignore */ }
+}
+
+// ─── SECURITY: walidacja URL (chroni przed javascript: / data: injection) ───
+// Helper: normalizuj timestamp (Firestore Timestamp / string ISO / null) do milisekund
+const tsToMs = (ts) => {
+  if (!ts) return 0;
+  if (typeof ts === "object" && ts.seconds) return ts.seconds * 1000 + (ts.nanoseconds || 0) / 1e6;
+  if (typeof ts === "object" && ts.toDate) return ts.toDate().getTime();
+  const d = new Date(ts);
+  return isNaN(d.getTime()) ? 0 : d.getTime();
+};
+
+const safeHref = (url) => {
+  if (!url || typeof url !== "string") return "#";
+  try {
+    const parsed = new URL(url, window.location.origin);
+    return ["http:", "https:"].includes(parsed.protocol) ? url : "#";
+  } catch { return "#"; }
+};
+
+// ─── STORAGE (Firebase Firestore) ────────────────────────────────────────────
+// Dane w jednym dokumencie fleet/data (merge strategy)
+
+const DATA_REF = () => doc(db, "fleet", "data");
+
+async function dbGet(key) {
+  try {
+    const snap = await getDoc(DATA_REF());
+    if (!snap.exists()) return null;
+    const val = snap.data()[key];
+    return val !== undefined ? val : null;
+  } catch (e) {
+    console.error("dbGet error", e);
+    return null;
+  }
+}
+
+// Flaga blokująca onSnapshot podczas lokalnych zapisów
+// Zapobiega race condition: zmiana statusu → dbSet → onSnapshot nadpisuje starymi danymi
+const _pendingWrites = new Set();
+const WRITE_COOLDOWN = 2000; // 2s blokada onSnapshot po zapisie
+
+async function dbSet(key, value) {
+  try {
+    _pendingWrites.add(key);
+    await setDoc(DATA_REF(), { [key]: value }, { merge: true });
+    // Daj czas na propagację — onSnapshot ignoruje zmiany przez WRITE_COOLDOWN
+    setTimeout(() => _pendingWrites.delete(key), WRITE_COOLDOWN);
+  } catch (e) {
+    console.error("dbSet error", e);
+    _pendingWrites.delete(key);
+  }
+}
+
+// ── Audit log ──
+// Zapisuje każdą akcję CRUD do kolekcji auditLog.
+// Wywołanie fire-and-forget (nie blokuje UI, nie rzuca błędów).
+function logAction(action, module, details = {}) {
+  try {
+    const u = auth.currentUser;
+    addDoc(collection(db, "auditLog"), {
+      action,          // "add" | "update" | "delete" | "login" | "logout" | "toggleStatus" ...
+      module,          // "payments" | "sprawy" | "pauzy" | "chat" | "vehicles" | "users" | "config" ...
+      details,         // { id, name, ... } — dowolne kontekstowe dane
+      uid: u?.uid || null,
+      email: u?.email || null,
+      displayName: u?.displayName || u?.email || null,
+      ts: new Date().toISOString(),
+    }).catch(e => console.warn("auditLog write fail", e));
+  } catch(e) { console.warn("auditLog error", e); }
+}
+
+const SK = { vehicles: "fleetv2_vehicles", costs: "fleetv2_costs", categories: "fleetv2_categories", docs: "fleetv2_docs", imi: "fleetv2_imi", rent: "fleetv2_rent", frachty: "fleetv2_frachty" };
+
+// ─── SEED DATA ─────────────────────────────────────────────────────────────────
+const SEED_VEHICLES = [
+  { id: "v1", plate: "WGM 0475M", plate2: "", type: "Solo", brand: "Iveco", year: 2021,
+    equipment: ["paleciak", "winda", "pasy", "gasnica", "apteczka", "trójkąt", "tachograf"],
+    customEquipment: [],
+    dimensions: "607x243x245", dimensions2: "", loadingType: "Bok, tył, góra", maxWeight: "3000", maxWeight2: "",
+    driverHistory: [{ id: "dh1", name: "Jan Kowalski", phone: "", from: "2024-01-01", to: "" }] },
+  { id: "v2", plate: "TK 130EF",  plate2: "", type: "Bus",  brand: "Renault Master", year: 2020,
+    equipment: ["pasy", "gasnica", "apteczka", "trójkąt", "tachograf"],
+    customEquipment: [],
+    dimensions: "460x220x230", dimensions2: "", loadingType: "Bok, tył", maxWeight: "820", maxWeight2: "",
+    driverHistory: [{ id: "dh2", name: "Adam Nowak", phone: "", from: "2023-06-01", to: "" }] },
+  { id: "v3", plate: "WGM 5367K", plate2: "", type: "Solo", brand: "Iveco", year: 2022,
+    equipment: ["paleciak", "winda", "pasy", "gasnica", "apteczka", "trójkąt", "tachograf", "gps"],
+    customEquipment: [],
+    dimensions: "620x245x260", dimensions2: "", loadingType: "Bok, tył, góra", maxWeight: "3000", maxWeight2: "",
+    driverHistory: [{ id: "dh3", name: "Piotr Wiśniewski", phone: "", from: "2022-03-15", to: "" }] },
+  { id: "v4", plate: "TK 314CL", plate2: "TK 760AP", type: "Bus", brand: "Iveco Bus + Przyczepa", year: 2020,
+    equipment: ["pasy", "gasnica", "apteczka", "trójkąt", "tachograf"],
+    customEquipment: [],
+    dimensions: "420x225x245", dimensions2: "640x245x250", loadingType: "Bok", maxWeight: "895", maxWeight2: "2100",
+    driverHistory: [{ id: "dh4", name: "Mirosław Teper", phone: "530127238", from: "2023-01-01", to: "" }] },
+  { id: "v5", plate: "WGM 0507M", plate2: "", type: "Solo", brand: "Iveco", year: 2025,
+    equipment: ["gasnica", "apteczka", "trojkat", "tachograf"],
+    customEquipment: [],
+    dimensions: "", dimensions2: "", loadingType: "Bok", maxWeight: "", maxWeight2: "",
+    driverHistory: [] },
+  { id: "v6", plate: "TK 315CL", plate2: "TK 761AP", type: "Bus", brand: "Iveco Bus + Przyczepa", year: 2020,
+    equipment: ["pasy", "gasnica", "apteczka", "trojkat", "tachograf"],
+    customEquipment: [],
+    dimensions: "420x225x245", dimensions2: "640x245x250", loadingType: "Bok", maxWeight: "895", maxWeight2: "2100",
+    driverHistory: [{ id: "dh6", name: "Marcin Gieliniewski", phone: "", from: "2025-01-01", to: "2025-06-30" }] },
+];
+
+const SEED_CATEGORIES = [
+  { id: "paliwo",        label: "Paliwo",             color: "#f59e0b", icon: "⛽" },
+  { id: "leasing",       label: "Leasing",             color: "#6366f1", icon: "🏦" },
+  { id: "serwis",        label: "Serwis",              color: "#ef4444", icon: "🔧" },
+  { id: "ubezpieczenie", label: "Ubezpieczenie",       color: "#10b981", icon: "🛡️" },
+  { id: "opony",         label: "Opony",               color: "#3b82f6", icon: "🔄" },
+  { id: "oplaty",        label: "E-toll / Autostrady",  color: "#8b5cf6", icon: "🛣️" },
+  { id: "wyplata",       label: "Wynagrodzenie",       color: "#f43f5e", icon: "👤" },
+  { id: "zus",           label: "ZUS + podatki",       color: "#a855f7", icon: "📋" },
+  { id: "polisa",        label: "Polisa / OC / AC",    color: "#10b981", icon: "🛡️" },
+  { id: "hotele",        label: "Hotele",              color: "#f97316", icon: "🏨" },
+  { id: "mandaty",       label: "Mandaty",             color: "#dc2626", icon: "⚠️" },
+  { id: "slickshift",    label: "SlickShift",          color: "#06b6d4", icon: "📡" },
+  { id: "telefon",       label: "Telefon",             color: "#8b5cf6", icon: "📱" },
+  { id: "uruchomienie",  label: "Koszt uruchomienia",  color: "#ec4899", icon: "🔑" },
+  { id: "imi",           label: "IMI / SIPSI",         color: "#14b8a6", icon: "🌍" },
+  { id: "ocpd",          label: "OCPD (2x OC)",        color: "#f59e0b", icon: "🛡️" },
+  { id: "przyczepa",     label: "Przyczepa",           color: "#78716c", icon: "🚛" },
+  { id: "inne",          label: "Inne",                color: "#94a3b8", icon: "📋" },
+];
+
+const SEED_COSTS = [
+  { id: "c1", vehicleId: "v1", category: "paliwo",        amountPLN: 3200, amountEUR: null, currency: "PLN", date: "2026-02-05", note: "Tankowanie DE+PL", liters: 480 },
+  { id: "c2", vehicleId: "v2", category: "leasing",       amountPLN: 2800, amountEUR: null, currency: "PLN", date: "2026-02-01", note: "Rata lutowa" },
+  { id: "c3", vehicleId: "v3", category: "naprawa",       amountPLN: 1450, amountEUR: null, currency: "PLN", date: "2026-02-12", note: "Wymiana sprzęgła" },
+  { id: "c4", vehicleId: "v1", category: "paliwo",        amountPLN: 3100, amountEUR: null, currency: "PLN", date: "2026-03-03", note: "Tankowanie NL", liters: 460 },
+  { id: "c5", vehicleId: "v3", category: "leasing",       amountPLN: 3400, amountEUR: null, currency: "PLN", date: "2026-03-01", note: "Rata marcowa" },
+  { id: "c6", vehicleId: "v2", category: "ubezpieczenie", amountPLN: 620,  amountEUR: null, currency: "PLN", date: "2026-03-08", note: "OC marzec" },
+  { id: "c7", vehicleId: "v1", category: "naprawa",       amountPLN: 880,  amountEUR: null, currency: "PLN", date: "2026-03-07", note: "Przegląd + olej" },
+];
+
+// ─── HELPERS ───────────────────────────────────────────────────────────────────
+function uid() { return Math.random().toString(36).slice(2, 10); }
+function fmtPLN(n) { return Number(n).toLocaleString("pl-PL", { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + " zł"; }
+function fmtEUR(n) { return Number(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €"; }
+function fmtDate(d) { try { return new Date(d).toLocaleDateString("pl-PL"); } catch { return d; } }
+
+// ─── SERVICE HELPERS ────────────────────────────────────────────────────────
+function serviceStatus(daysLeft) {
+  if (daysLeft === null) return null;
+  if (daysLeft < 0)   return "expired";
+  if (daysLeft <= 14) return "critical";
+  if (daysLeft <= 30) return "warning";
+  return "ok";
+}
+function serviceStatusBadge(daysLeft, label) {
+  const s = serviceStatus(daysLeft);
+  if (!s) return null;
+  const styles = {
+    expired:  { bg:"#fef2f2", color:"#dc2626", text:`⚠ ${label} — wygasło` },
+    critical: { bg:"#fef2f2", color:"#dc2626", text:`🔴 ${label} — ${daysLeft}d` },
+    warning:  { bg:"#fffbeb", color:"#d97706", text:`🟡 ${label} — ${daysLeft}d` },
+    ok:       { bg:"#f0fdf4", color:"#16a34a", text:`🟢 ${label} — ${daysLeft}d` },
+  }[s];
+  return <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background:styles.bg, color:styles.color }}>{styles.text}</span>;
+}
+function kmStatus(kmLeft) {
+  if (kmLeft === null) return null;
+  if (kmLeft <= 0)    return "expired";
+  if (kmLeft <= 500)  return "critical";
+  if (kmLeft <= 1500) return "warning";
+  return "ok";
+}
+function kmStatusBadge(kmLeft, label) {
+  const s = kmStatus(kmLeft);
+  if (!s) return null;
+  const styles = {
+    expired:  { bg:"#fef2f2", color:"#dc2626", text:`⚠ ${label} — przekroczono` },
+    critical: { bg:"#fef2f2", color:"#dc2626", text:`🔴 ${label} — ${kmLeft} km` },
+    warning:  { bg:"#fffbeb", color:"#d97706", text:`🟡 ${label} — ${kmLeft} km` },
+    ok:       { bg:"#f0fdf4", color:"#16a34a", text:`🟢 ${label} — ${kmLeft} km` },
+  }[s];
+  return <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background:styles.bg, color:styles.color }}>{styles.text}</span>;
+}
+
+const PALETTE = ["#f59e0b","#6366f1","#ef4444","#10b981","#3b82f6","#8b5cf6","#ec4899","#14b8a6","#f97316","#06b6d4"];
+
+const DEFAULT_EQUIPMENT = [
+  { id: "paleciak",    label: "Paleciak" },
+  { id: "winda",       label: "Winda załadunkowa" },
+  { id: "pasy",        label: "Pasy mocujące" },
+  { id: "gasnica",     label: "Gaśnica" },
+  { id: "apteczka",    label: "Apteczka" },
+  { id: "trójkąt",     label: "Trójkąt ostrzegawczy" },
+  { id: "tachograf",   label: "Tachograf cyfrowy" },
+  { id: "gps",         label: "GPS / lokalizator" },
+  { id: "chłodnia",    label: "Agregat chłodniczy" },
+  { id: "plandeka",    label: "Plandeka" },
+];
+
+const DOC_TYPES = [
+  { id: "oc",        label: "OC",               icon: "🛡️",  color: "#3b82f6", group: "Ubezpieczenia" },
+  { id: "ac",        label: "AC",               icon: "🚗",  color: "#6366f1", group: "Ubezpieczenia" },
+  { id: "gap",       label: "GAP",              icon: "📊",  color: "#8b5cf6", group: "Ubezpieczenia" },
+  { id: "nnw",       label: "NNW",              icon: "🏥",  color: "#ec4899", group: "Ubezpieczenia" },
+  { id: "assistance",label: "Assistance",       icon: "🆘",  color: "#f97316", group: "Ubezpieczenia" },
+  { id: "cargo",     label: "Ubezp. ładunku",   icon: "📦",  color: "#14b8a6", group: "Ubezpieczenia" },
+  { id: "licencja",  label: "Licencja transp.", icon: "📜",  color: "#f59e0b", group: "Licencje" },
+  { id: "zezwolenie",label: "Zezwolenie PL/EU", icon: "🌍",  color: "#10b981", group: "Licencje" },
+  { id: "przeglad",  label: "Przegląd tech.",   icon: "🔩",  color: "#6b7280", group: "Badania" },
+  { id: "tachlegalizacja", label: "Legalizacja tachografu", icon: "⏱️", color: "#ef4444", group: "Badania" },
+  { id: "prawo_jazdy",label: "Prawo jazdy",     icon: "🪪",  color: "#0ea5e9", group: "Kierowca" },
+  { id: "karta_kierowcy",label: "Karta kierowcy",icon: "💳", color: "#64748b", group: "Kierowca" },
+  { id: "inne",      label: "Inne",             icon: "📋",  color: "#9ca3af", group: "Inne" },
+];
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN APP
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Vehicle icons (SVG)
+const IconTruck = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="6" width="11" height="10" rx="2"/><path d="M14 10h3.5l3 3v3a1 1 0 0 1-1 1h-1"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M9 17h6"/><path d="M3 16h1.5"/></svg>;
+
+const IconTruckTrailer = ({size=20}) => <svg width={size*1.4} height={size} viewBox="0 0 28 18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="4" width="9" height="7" rx="1.5"/><circle cx="3.5" cy="12.5" r="1.5"/><circle cx="8" cy="12.5" r="1.5"/><line x1="10" y1="8.5" x2="12" y2="8.5"/><rect x="12" y="4" width="5.5" height="7" rx="1.5"/><path d="M17.5 6.5h4l3 3v1.5h-7"/><circle cx="14.5" cy="12.5" r="1.5"/><circle cx="22" cy="12.5" r="1.5"/></svg>;
+
+const VehicleIcon = ({v, size=20, className=""}) => <span className={className}>{v?.plate2 ? <IconTruckTrailer size={size}/> : <IconTruck size={size}/>}</span>;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LOGIN SCREEN
+// ═══════════════════════════════════════════════════════════════════════════════
+let _justLoggedIn = false; // module-level flaga: true tuż po login, false po pierwszym onAuthStateChanged
+
+function LoginScreen() {
+  const [email, setEmail]       = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError]       = useState(null);
+  const [loading, setLoading]   = useState(false);
+
+  async function handleLogin(e) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      _justLoggedIn = true;
+      await signInWithEmailAndPassword(auth, email, password);
+      logAction("login", "auth", { email });
+    } catch (err) {
+      setError("Nieprawidłowy email lub hasło");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div style={{ minHeight:"100vh", background:"#f8f9fb", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
+      <div style={{ background:"#fff", borderRadius:20, padding:"32px", width:360, maxWidth:"100%", boxShadow:"0 8px 32px rgba(0,0,0,0.08)" }}>
+        <div style={{ display:"flex", justifyContent:"center", marginBottom:28 }}>
+          <img src="/logodologowania.png" alt="FleetStat" style={{ width:220 }} />
+        </div>
+        <form onSubmit={handleLogin}>
+          <div style={{ marginBottom:14 }}>
+            <label style={{ display:"block", fontSize:12, fontWeight:600, color:"#6b7280", marginBottom:5, textTransform:"uppercase", letterSpacing:"0.5px" }}>Email</label>
+            <input
+              type="email" value={email} onChange={e => setEmail(e.target.value)} required
+              style={{ width:"100%", padding:"11px 14px", border:"1.5px solid #e5e7eb", borderRadius:10, fontSize:14, outline:"none", boxSizing:"border-box", background:"#f9fafb", transition:"border 0.2s" }}
+              placeholder="twoj@email.com"
+              onFocus={e => e.target.style.borderColor="#1d4ed8"}
+              onBlur={e => e.target.style.borderColor="#e5e7eb"}
+            />
+          </div>
+          <div style={{ marginBottom:20 }}>
+            <label style={{ display:"block", fontSize:12, fontWeight:600, color:"#6b7280", marginBottom:5, textTransform:"uppercase", letterSpacing:"0.5px" }}>Hasło</label>
+            <input
+              type="password" value={password} onChange={e => setPassword(e.target.value)} required
+              style={{ width:"100%", padding:"11px 14px", border:"1.5px solid #e5e7eb", borderRadius:10, fontSize:14, outline:"none", boxSizing:"border-box", background:"#f9fafb", transition:"border 0.2s" }}
+              placeholder="••••••••"
+              onFocus={e => e.target.style.borderColor="#1d4ed8"}
+              onBlur={e => e.target.style.borderColor="#e5e7eb"}
+            />
+          </div>
+          {error && <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:10, padding:"10px 14px", color:"#dc2626", fontSize:13, marginBottom:14 }}>{error}</div>}
+          <button type="submit" disabled={loading}
+            style={{ width:"100%", padding:"12px", background:"#111827", border:"none", borderRadius:10, fontWeight:700, fontSize:15, color:"#fff", cursor:"pointer", transition:"opacity 0.2s" }}
+            onMouseOver={e => e.target.style.opacity="0.9"}
+            onMouseOut={e => e.target.style.opacity="1"}>
+            {loading ? "Logowanie..." : "Zaloguj się"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ROOT — auth wrapper
+// ═══════════════════════════════════════════════════════════════════════════════
+export default function Root() {
+  const [user, setUser]         = useState(undefined);
+  const [role, setRole]         = useState(null);
+  const [roleLoaded, setRoleLoaded] = useState(false);
+  const [appUsers, setAppUsers] = useState([]);
+  const [allowedTabs, setAllowedTabs] = useState(null); // null = fallback do roli
+  const autoLogoutTimer = useRef(null);
+  const lastActivity = useRef(Date.now());
+  const resetAutoLogout = useRef(() => {
+    lastActivity.current = Date.now();
+    if (autoLogoutTimer.current) clearTimeout(autoLogoutTimer.current);
+    autoLogoutTimer.current = setTimeout(() => {
+      if (Date.now() - lastActivity.current >= 30 * 60 * 1000) { logAction("logout", "auth", { reason: "inactivity" }); signOut(auth); }
+    }, 30 * 60 * 1000);
+  });
+  useEffect(() => {
+    const events = ["mousemove","mousedown","keydown","keyup","click","scroll","touchstart","touchmove","input","change","focus"];
+    const handler = () => resetAutoLogout.current();
+    events.forEach(e => window.addEventListener(e, handler, { passive: true }));
+    resetAutoLogout.current();
+    return () => {
+      events.forEach(e => window.removeEventListener(e, handler));
+      if (autoLogoutTimer.current) clearTimeout(autoLogoutTimer.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    let unsubClaims = null;
+
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      setUser(u);
+      // Wyczyść poprzedni listener na claimsUpdatedAt
+      if (unsubClaims) { unsubClaims(); unsubClaims = null; }
+
+      if (u) {
+        try {
+          // 1. Odczytaj rolę z Custom Claims (token Auth) + Firestore
+          // Force refresh tylko przy świeżym logowaniu, nie przy reload strony
+          if (_justLoggedIn) {
+            await u.getIdToken(true);
+            _justLoggedIn = false;
+          }
+          const tokenResult = await u.getIdTokenResult();
+          let tokenRole = tokenResult.claims.role;
+
+          // 2. Zawsze sprawdź Firestore — jest source of truth (Cloud Function może mieć opóźnienie)
+          const userSnap = await getDoc(doc(db, "users", u.uid));
+          if (userSnap.exists()) {
+            const firestoreRole = userSnap.data().role;
+            if (firestoreRole) {
+              tokenRole = firestoreRole; // Firestore wygrywa
+            }
+          } else {
+            // Dokument z UID nie istnieje — szukaj po emailu (mógł być dodany z losowym ID)
+            const allUsersSnap = await getDocs(collection(db, "users"));
+            const byEmail = allUsersSnap.docs.find(d => d.data().email === u.email);
+            if (byEmail) {
+              // Znaleziono dokument z emailem ale złym ID — napraw: utwórz z prawidłowym UID
+              const existingData = byEmail.data();
+              tokenRole = existingData.role || "podglad";
+              await setDoc(doc(db, "users", u.uid), {
+                ...existingData,
+                email: u.email,
+                role: tokenRole,
+                migratedFrom: byEmail.id,
+                migratedAt: new Date().toISOString(),
+              });
+              // Usuń stary dokument z losowym ID
+              try { await deleteDoc(doc(db, "users", byEmail.id)); } catch {}
+            } else {
+              // Nowy użytkownik — utwórz dokument
+              if (!tokenRole) {
+                const isFirst = allUsersSnap.empty;
+                tokenRole = isFirst ? "admin" : "podglad";
+                await setDoc(doc(db, "users", u.uid), {
+                  email: u.email,
+                  role: tokenRole,
+                  createdAt: new Date().toISOString(),
+                });
+              }
+            }
+          }
+
+          setRole(tokenRole);
+
+          // Rejestruj FCM token do push notifications
+          registerFCMToken(u.uid);
+
+          // 3. Nasłuchuj zmian roli (claimsUpdatedAt) — kiedy admin zmieni rolę,
+          //    Cloud Function zaktualizuje claimsUpdatedAt → odświeżamy token
+          //    Dodatkowo synchronizujemy allowedTabs (per-user custom tab access)
+          unsubClaims = onSnapshot(doc(db, "users", u.uid), async (snap) => {
+            if (!snap.exists()) return;
+            const data = snap.data();
+
+            // Aktualizuj allowedTabs na żywo (jeśli admin zmieni uprawnienia)
+            setAllowedTabs(Array.isArray(data.allowedTabs) ? data.allowedTabs : null);
+
+            const freshToken = await u.getIdTokenResult();
+            const currentTokenRole = freshToken.claims.role;
+
+            // Jeśli rola w Firestore różni się od tokena — wymuś odświeżenie
+            if (data.role && data.role !== currentTokenRole) {
+              await u.getIdToken(true); // force refresh
+              const refreshed = await u.getIdTokenResult();
+              if (refreshed.claims.role && refreshed.claims.role !== currentTokenRole) {
+                setRole(refreshed.claims.role);
+              } else if (data.role) {
+                // Fallback: Claims nie zaktualizowane (Cloud Function problem) — użyj roli z Firestore
+                setRole(data.role);
+              }
+            }
+          });
+
+        } catch (e) {
+          console.error("Blad ladowania roli:", e);
+          setRole("podglad");
+        }
+        setRoleLoaded(true);
+        // Wczytaj wszystkich użytkowników
+        getDocs(collection(db, "users")).then(snap => {
+          setAppUsers(snap.docs.map(d => ({ uid: d.id, ...d.data() })));
+        }).catch(() => {});
+      } else {
+        setRole(null);
+        setRoleLoaded(false);
+      }
+    });
+
+    return () => {
+      unsub();
+      if (unsubClaims) unsubClaims();
+    };
+  }, []);
+
+  if (user === undefined) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f8f9fb",fontSize:32}}><IconTruck size={32}/></div>;
+  if (!user) return <LoginScreen />;
+  if (!roleLoaded) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f8f9fb",fontSize:32}}><IconTruck size={32}/></div>;
+  return <App user={user} role={role} appUsers={appUsers} allowedTabs={allowedTabs} />;
+}
+
+
+
+function ExportCostsModal({ costs, vehicles, categories, onClose }) {
+  const MONTHS = ["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paz","Lis","Gru"];
+  const [year, setYear] = useState("2026");
+  const [monthFrom, setMonthFrom] = useState("all");
+  const [monthTo, setMonthTo] = useState("all");
+  const [vehicle, setVehicle] = useState("all");
+  const [category, setCategory] = useState("all");
+
+  const filtered = costs.filter(c => {
+    const d = c.date || "";
+    if (year !== "all" && !d.startsWith(year)) return false;
+    if (monthFrom !== "all" && d.slice(5,7) < monthFrom) return false;
+    if (monthTo !== "all" && d.slice(5,7) > monthTo) return false;
+    if (vehicle !== "all" && c.vehicleId !== vehicle) return false;
+    if (category !== "all" && c.category !== category) return false;
+    return true;
+  });
+
+  const totalEUR = filtered.reduce((s,c) => s + (c.amountEUR ? parseFloat(c.amountEUR) : 0), 0);
+
+  const handleExport = () => {
+    exportCostsToExcel(filtered, vehicles, categories, year, monthFrom === monthTo ? monthFrom : "all");
+    onClose();
+  };
+
+  const selStyle = {width:"100%", padding:"8px 10px", borderRadius:8, border:"1.5px solid #e5e7eb", fontSize:13, outline:"none", background:"#fff"};
+  const lbl = {display:"block", fontSize:12, fontWeight:600, color:"#6b7280", marginBottom:4};
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.35)",backdropFilter:"blur(4px)"}}>
+      <div style={{background:"#fff",borderRadius:16,padding:28,width:440,maxWidth:"95vw",boxShadow:"0 8px 32px rgba(0,0,0,0.12)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+          <h3 style={{fontWeight:700,fontSize:16,color:"#111827"}}>📊 Export kosztów</h3>
+          <button onClick={onClose} style={{background:"#f3f4f6",border:"none",borderRadius:8,width:28,height:28,cursor:"pointer",fontSize:14}}>✕</button>
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+          <div style={{gridColumn:"1/-1"}}>
+            <label style={lbl}>Rok</label>
+            <div style={{display:"flex",gap:6}}>
+              {["2025","2026","all"].map(y => (
+                <button key={y} onClick={() => setYear(y)}
+                  style={{flex:1,padding:"7px",borderRadius:8,border:"1.5px solid",fontSize:13,fontWeight:600,cursor:"pointer",
+                    borderColor: year===y ? "#111827" : "#e5e7eb",
+                    background: year===y ? "#111827" : "#fff",
+                    color: year===y ? "#fff" : "#6b7280"}}>
+                  {y === "all" ? "Wszystkie" : y}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label style={lbl}>Miesiąc od</label>
+            <select value={monthFrom} onChange={e => setMonthFrom(e.target.value)} style={selStyle}>
+              <option value="all">Wszystkie</option>
+              {MONTHS.map((m,i) => <option key={i} value={String(i+1).padStart(2,"0")}>{m}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={lbl}>Miesiąc do</label>
+            <select value={monthTo} onChange={e => setMonthTo(e.target.value)} style={selStyle}>
+              <option value="all">Wszystkie</option>
+              {MONTHS.map((m,i) => <option key={i} value={String(i+1).padStart(2,"0")}>{m}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label style={lbl}>Pojazd</label>
+            <select value={vehicle} onChange={e => setVehicle(e.target.value)} style={selStyle}>
+              <option value="all">Wszystkie</option>
+              {vehicles.filter(v => !v.archived).map(v => <option key={v.id} value={v.id}>{v.plate}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={lbl}>Kategoria</label>
+            <select value={category} onChange={e => setCategory(e.target.value)} style={selStyle}>
+              <option value="all">Wszystkie</option>
+              {categories.map(c => <option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div style={{background:"#f9fafb",borderRadius:10,padding:"10px 14px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontSize:13,color:"#6b7280"}}>{filtered.length} wpisów</span>
+          <span style={{fontSize:14,fontWeight:700,color:"#111827"}}>{totalEUR.toLocaleString("pl-PL",{minimumFractionDigits:2,maximumFractionDigits:2})} €</span>
+        </div>
+
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+          <button onClick={onClose} style={{padding:"9px 18px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer",color:"#6b7280"}}>Anuluj</button>
+          <button onClick={handleExport} disabled={filtered.length === 0}
+            style={{padding:"9px 18px",borderRadius:8,border:"none",background:filtered.length===0?"#d1d5db":"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:filtered.length===0?"not-allowed":"pointer"}}>
+            📊 Pobierz Excel ({filtered.length})
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// UPLOAD ZAŁĄCZNIKA DO FIREBASE STORAGE
+// ═══════════════════════════════════════════════════════════════════════════════
+async function uploadSprawaFile(file, sprawaId, subfolder) {
+  const ext = file.name.split(".").pop();
+  const name = `sprawy/${sprawaId}/${subfolder}/${Date.now()}_${file.name}`;
+  const ref = storageRef(storage, name);
+  await uploadBytes(ref, file);
+  const url = await getDownloadURL(ref);
+  return { url, name: file.name, type: file.type, size: file.size };
+}
+
+// Upload oryginału faktury (Płatności) → Storage, zwraca metadata
+async function uploadPaymentFile(file) {
+  // Bezpieczna nazwa — usuń niebezpieczne znaki
+  const safeName = file.name.replace(/[^\w.\-]/g, "_");
+  const name = `payments/${Date.now()}_${Math.random().toString(36).slice(2,8)}_${safeName}`;
+  const ref = storageRef(storage, name);
+  await uploadBytes(ref, file);
+  const url = await getDownloadURL(ref);
+  return {
+    fileUrl:  url,
+    filePath: name,
+    fileName: file.name,
+    fileType: file.type,
+    fileSize: file.size,
+  };
+}
+
+function SprawaFileUpload({ sprawaId, subfolder, onUploaded, label = "📎 Dodaj załącznik" }) {
+  const [uploading, setUploading] = useState(false);
+  const inputRef = useRef(null);
+
+  const handleFile = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const allowed = ["application/pdf","image/jpeg","image/png","image/jpg","application/msword","application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
+    if (!allowed.includes(file.type)) { alert("Dozwolone: PDF, JPG, PNG, DOC, DOCX"); return; }
+    if (file.size > 10 * 1024 * 1024) { alert("Maks. 10 MB"); return; }
+    setUploading(true);
+    try {
+      const result = await uploadSprawaFile(file, sprawaId, subfolder);
+      onUploaded(result);
+    } catch(e) {
+      alert("Błąd uploadu: " + e.message);
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  };
+
+  return (
+    <>
+      <input ref={inputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" className="hidden" onChange={handleFile} />
+      <button onClick={() => inputRef.current?.click()} disabled={uploading}
+        className="px-3 py-1.5 rounded-lg text-xs font-medium border border-dashed border-gray-300 text-gray-500 hover:bg-gray-50 transition-all disabled:opacity-50">
+        {uploading ? "Uploading..." : label}
+      </button>
+    </>
+  );
+}
+
+function AttachmentList({ files, onDelete }) {
+  if (!files || files.length === 0) return null;
+  const fileIcon = (url) => {
+    if (!url) return '📄';
+    const ext = url.split('?')[0].split('.').pop().toLowerCase();
+    if (ext==='pdf') return '📄';
+    if (ext==='docx'||ext==='doc') return '📝';
+    return '🖼️';
+  };
+  const fileName = (url) => {
+    try { const p=url.split('?')[0].split('%2F').pop(); return decodeURIComponent(p).substring(0,30); } catch { return 'plik'; }
+  };
+  return (
+    <div className="flex flex-wrap gap-2 mt-2">
+      {files.map((f, i) => (
+        <div key={i} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-xs">
+          <span>{f.type === "application/pdf" ? "📄" : (f.name?.endsWith(".docx")||f.name?.endsWith(".doc")) ? "📝" : "🖼️"}</span>
+          <a href={safeHref(f.url)} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline max-w-32 truncate">{f.name}</a>
+          {onDelete && <button onClick={() => onDelete(i)} className="text-gray-300 hover:text-red-400 ml-1">✕</button>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EXPORT KOSZTOW DO EXCEL
+// ═══════════════════════════════════════════════════════════════════════════════
+function exportCostsToExcel(costs, vehicles, categories, filterYear, filterMonth) {
+  const XLSX = window.XLSX;
+  if (!XLSX) { alert('Biblioteka Excel nie jest zaladowana, odswiez strone'); return; }
+
+  const CAT_FALLBACKS = {
+    wyplata:'Wynagrodzenie', zus:'ZUS + podatki', paliwo:'Paliwo',
+    leasing:'Leasing', naprawa:'Naprawa', serwis:'Serwis', ubezpieczenie:'Ubezpieczenie',
+    oplaty:'E-toll / Autostrady', mandaty:'Mandaty', slickshift:'SlickShift',
+    telefon:'Telefon', hotele:'Hotele', przyczepa:'Przyczepa', polisa:'Polisa / OC / AC',
+    ocpd:'OCPD (2x OC)', uruchomienie:'Koszt uruchomienia', imi:'IMI / SIPSI', imi_spisi:'IMI/SIPSI',
+    inne:'Inne', opony:'Opony',
+  };
+  const catLabel = (id) => {
+    const cat = categories.find(c => c.id === id);
+    return cat ? cat.label : (CAT_FALLBACKS[id] || id);
+  };
+  const vLabel = (id) => {
+    const v = vehicles.find(v => v.id === id);
+    return v ? v.plate : id;
+  };
+
+  const headers = ['Data','Pojazd','Kategoria','Kwota EUR','Kwota PLN','Waluta','Opis'];
+  const rows = costs.map(c => [
+    c.date || '',
+    vLabel(c.vehicleId),
+    catLabel(c.category),
+    c.amountEUR ? parseFloat(c.amountEUR).toFixed(2) : '',
+    c.amountPLN ? parseFloat(c.amountPLN).toFixed(2) : '',
+    c.currency || 'EUR',
+    c.note || '',
+  ]);
+
+  const totalEUR = costs.reduce((s,c) => s + (c.amountEUR ? parseFloat(c.amountEUR) : 0), 0);
+  rows.push(['','','SUMA', totalEUR.toFixed(2), '', '', '']);
+
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  ws['!cols'] = [{wch:12},{wch:14},{wch:22},{wch:12},{wch:12},{wch:8},{wch:30}];
+
+  const wb = XLSX.utils.book_new();
+  const sheetName = filterYear === 'all' ? 'Koszty' : filterMonth === 'all' ? 'Koszty_'+filterYear : 'Koszty_'+filterYear+'_'+filterMonth;
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+  const fileName = 'FleetStat_Koszty' + (filterYear !== 'all' ? '_'+filterYear : '') + (filterMonth !== 'all' ? '_'+filterMonth : '') + '.xlsx';
+  XLSX.writeFile(wb, fileName);
+}
+
+// ── Per-role default tab access (fallback kiedy user nie ma jeszcze allowedTabs) ──
+const DEFAULT_TABS_BY_ROLE = {
+  admin:      ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","payments","users","email","logi","sprawy","kierowcy","chat"],
+  dyspozytor: ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","sprawy","chat"],
+  podglad:    ["dashboard","frachty","vehicles","serwis","docs","imi","chat"],
+  kierowca:   ["driver"],  // kierowca widzi TYLKO swój panel
+};
+// Zakładki zawsze admin-only (nie da się ich przyznać przez checkboxy)
+const ADMIN_ONLY_TABS = ["users", "email", "kierowcy"];
+
+function App({ user, role, appUsers = [], allowedTabs = null }) {
+  const isAdmin      = role === "admin";
+  const [showExportModal, setShowExportModal] = useState(false);
+  const isDyspozytor = role === "dyspozytor";
+  const isPodglad    = role === "podglad";
+  const isKierowca   = role === "kierowca";
+  const canEdit      = isAdmin || isDyspozytor;  // może edytować
+  const canFinance   = isAdmin || isDyspozytor;  // widzi finanse
+
+  // ── Efektywna lista zakładek dla tego usera ──
+  // Admin zawsze widzi wszystko. Dla pozostałych: allowedTabs z Firestore,
+  // fallback do DEFAULT_TABS_BY_ROLE[role]. Zawsze wykluczamy ADMIN_ONLY_TABS dla non-adminów.
+  const effectiveTabs = useMemo(() => {
+    if (isAdmin) return DEFAULT_TABS_BY_ROLE.admin;
+    const base = Array.isArray(allowedTabs) && allowedTabs.length > 0
+      ? allowedTabs
+      : (DEFAULT_TABS_BY_ROLE[role] || DEFAULT_TABS_BY_ROLE.podglad);
+    return base.filter(t => !ADMIN_ONLY_TABS.includes(t));
+  }, [isAdmin, allowedTabs, role]);
+  const canSeeTab = (id) => effectiveTabs.includes(id);
+  const [tab, setTab]               = useState("dashboard");
+  const [dkFilter, setDkFilter]     = useState("all"); // filtr panelu kierowców
+  const [dkSection, setDkSection]   = useState("tankowania"); // sekcja panelu kierowców
+  // Auto-switch z niedozwolonej zakładki na pierwszą dostępną (np. gdy admin odbierze dostęp)
+  useEffect(() => {
+    if (!canSeeTab(tab)) {
+      setTab(effectiveTabs[0] || "dashboard");
+    }
+  }, [effectiveTabs, tab]);
+  const [chatFloat, setChatFloat]   = useState(false); // floating chat popup (widoczny na innych zakładkach)
+  const [chatHasActiveRoom, setChatHasActiveRoom] = useState(false); // czy w czacie jest otwarty pokój
+  const [chatSize, setChatSize]     = useState("normal"); // "normal" | "large"
+  const [vehicles, setVehicles]     = useState([]);
+  const [costs, setCosts]           = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [docs, setDocs]             = useState([]);
+  const [imiRecords, setImiRecords] = useState([]);
+  const [rentRecords, setRentRecords] = useState([]);
+  const [frachtyList, setFrachtyList] = useState([]);
+  const [sprawyList, setSprawyList] = useState([]);
+  const [payments, setPayments] = useState([]);
+  const [chatUnreadCount, setChatUnreadCount] = useState(0);      // ile pokojów z nieprzeczytanymi
+  const [chatUnreadMsgCount, setChatUnreadMsgCount] = useState(0); // ile wiadomości łącznie nieprzeczytanych
+  const [operacyjne, setOperacyjne] = useState([]);
+  const [driverEvents, setDriverEvents] = useState([]);
+  const [fuelEntries, setFuelEntries] = useState([]);
+  const [driverDocs, setDriverDocs] = useState([]);
+  const [pauzy, setPauzy] = useState([]);
+  const [loaded, setLoaded]         = useState(false);
+  const [toast, setToast]           = useState(null);
+  const [eurRate, setEurRate]       = useState(null);
+  const [eurRateDate, setEurRateDate] = useState(null);
+  const [eurLoading, setEurLoading] = useState(true);
+
+  const [showAddCost, setShowAddCost]         = useState(false);
+  const [editCostId, setEditCostId]           = useState(null);
+  const [showCostsImport, setShowCostsImport]   = useState(false);
+  const [showAddVehicle, setShowAddVehicle]   = useState(false);
+  const [editVehicleId, setEditVehicleId]     = useState(null);
+  const [deleteVehicleModal, setDeleteVehicleModal] = useState(null); // { id, plate }
+  const [czasPracyVehicleId, setCzasPracyVehicleId] = useState(null); // otwarty panel czasu pracy na dashboardzie
+  const [filterVehicle, setFilterVehicle]     = useState("all");
+  const [filterCat, setFilterCat]             = useState("all");
+  const [filterMonth, setFilterMonth]         = useState(`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,"0")}`);
+  const [filterYear, setCostFilterYear]       = useState(String(new Date().getFullYear()));
+  const [filterNote, setFilterNote]           = useState("all");
+
+  // ── TAB TITLE — pokaż liczbę nieprzeczytanych w tytule zakładki ──
+  useEffect(() => {
+    const base = "FleetStat";
+    if (chatUnreadCount > 0 && chatUnreadMsgCount > 0) {
+      document.title = `(${chatUnreadCount}/${chatUnreadMsgCount}) ${base}`;
+    } else if (chatUnreadCount > 0) {
+      document.title = `(${chatUnreadCount}) ${base}`;
+    } else {
+      document.title = base;
+    }
+  }, [chatUnreadCount, chatUnreadMsgCount]);
+
+  // ── LOAD — real-time onSnapshot ──
+  useEffect(() => {
+    const unsub = onSnapshot(DATA_REF(), (snap) => {
+      if (!snap.exists()) { setLoaded(true); return; }
+      const data = snap.data();
+
+      // Aktualizuj tylko te klucze, które NIE mają aktywnego zapisu
+      // Zapobiega race condition przy zmianie statusów
+      if (!_pendingWrites.has(SK.vehicles)) {
+        const v = data[SK.vehicles];
+        // Migracja: dodaj assignedDriver jeśli brak (sync z driverHistory)
+        const migrated = (v || SEED_VEHICLES).map(veh => {
+          if (veh.assignedDriver !== undefined) return veh;
+          const active = (veh.driverHistory || []).find(d => !d.to);
+          return { ...veh, assignedDriver: active?.email || "" };
+        });
+        setVehicles(migrated);
+      }
+
+      if (!_pendingWrites.has(SK.costs)) {
+        const rawCosts = data[SK.costs] || SEED_COSTS;
+        const patchedCosts = rawCosts.map(cost => {
+          const n = (cost.note || "").toLowerCase();
+          if (n.includes("nego") || n.includes("negometal")) return { ...cost, category: "oplaty" };
+          if (cost.category === "myto") return { ...cost, category: "oplaty" };
+          if (cost.category === "nego") return { ...cost, category: "oplaty" };
+          if (cost.category === "etoll") return { ...cost, category: "oplaty" };
+          if (cost.category === "naprawa") return { ...cost, category: "serwis" };
+          return cost;
+        });
+        setCosts(patchedCosts);
+      }
+
+      if (!_pendingWrites.has(SK.categories)) {
+        const loadedCats = data[SK.categories] || SEED_CATEGORIES;
+        const REQUIRED_CATS = [
+          { id: "wyplata",       label: "Wynagrodzenie", color: "#f43f5e", icon: "👤" },
+          { id: "ubezpieczenie", label: "Ubezpieczenie",  color: "#10b981", icon: "🛡️" },
+        ];
+        const mergedCats = [...loadedCats].map(cat => {
+          if (cat.id === "wyplata") return { ...cat, label: "Wynagrodzenie", icon: "👤", color: "#f43f5e" };
+          // Migracja: naprawa → serwis
+          if (cat.id === "naprawa") return { ...cat, id: "serwis", label: "Serwis", icon: "🔧", color: "#ef4444" };
+          return cat;
+        });
+        // Dodaj serwis jeśli brak (ani naprawa ani serwis)
+        if (!mergedCats.find(c => c.id === "serwis")) mergedCats.push({ id: "serwis", label: "Serwis", color: "#ef4444", icon: "🔧" });
+        REQUIRED_CATS.forEach(req => {
+          if (!mergedCats.find(c => c.id === req.id)) mergedCats.push(req);
+        });
+        setCategories(mergedCats);
+      }
+
+      if (!_pendingWrites.has(SK.docs))    setDocs(data[SK.docs] || []);
+      if (!_pendingWrites.has(SK.imi))     setImiRecords(data[SK.imi] || []);
+      if (!_pendingWrites.has(SK.rent))    setRentRecords(data[SK.rent] || []);
+      if (!_pendingWrites.has(SK.frachty)) setFrachtyList(data[SK.frachty] || []);
+
+      // 🛡️ Zapamiętaj ilości z snapshot — używane przez safeDbSet
+      Object.values(SK).forEach(key => {
+        const arr = data[key];
+        if (Array.isArray(arr)) snapshotCounts.current[key] = arr.length;
+      });
+
+      setLoaded(true);
+    }, (err) => {
+      console.error("onSnapshot error", err);
+      // ⚠️ NIE ustawiaj loaded=true przy błędzie!
+      // To zapobiegnie nadpisaniu danych pustymi tablicami przez efekty zapisu.
+      // Zamiast tego pokaż komunikat o błędzie połączenia.
+      showToast("⚠️ Błąd połączenia z bazą danych. Odśwież stronę.");
+    });
+    return () => unsub(); // cleanup przy odmontowaniu
+  }, []);
+
+  // ── OPERACYJNE — osobna kolekcja ──
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "operacyjne"), (snap) => {
+      setOperacyjne(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error("operacyjne onSnapshot error", err));
+    return () => unsub();
+  }, []);
+
+  // ── DRIVER EVENTS — potwierdzenia załadunków/rozładunków od kierowców ──
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "driverEvents"), (snap) => {
+      setDriverEvents(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error("driverEvents onSnapshot error", err));
+    return () => unsub();
+  }, []);
+
+  // ── FUEL ENTRIES — tankowania od kierowców ──
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "fuelEntries"), (snap) => {
+      setFuelEntries(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error("fuelEntries onSnapshot error", err));
+    return () => unsub();
+  }, []);
+
+  // ── DRIVER DOCS — paragony, faktury, mandaty od kierowców ──
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "driverDocs"), (snap) => {
+      setDriverDocs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error("driverDocs onSnapshot error", err));
+    return () => unsub();
+  }, []);
+
+  // ── SPRAWY — osobna kolekcja ──
+  useEffect(() => {
+    const q = query(collection(db, "sprawy"), orderBy("dataUtworzenia", "desc"));
+    const unsub = onSnapshot(q, (snap) => {
+      setSprawyList(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error("sprawy onSnapshot error", err));
+    return () => unsub();
+  }, []);
+
+  // ── PŁATNOŚCI — osobna kolekcja (moduł księgowy, niezależny od Rejestru kosztów) ──
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "payments"), (snap) => {
+      setPayments(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error("payments onSnapshot error", err));
+    return () => unsub();
+  }, []);
+
+  // ── CZAT — liczba nieprzeczytanych pokojów (badge w sidebar) ──
+  useEffect(() => {
+    if (!user) { setChatUnreadCount(0); return; }
+    const q = query(collection(db, "chatRooms"), orderBy("lastMessageAt", "desc"));
+    const unsub = onSnapshot(q, (snap) => {
+      const norm = (v) => {
+        if (!v || typeof v !== "object") return v;
+        if (typeof v.toDate === "function") return v.toDate().toISOString();
+        if (typeof v.seconds === "number") return new Date(v.seconds * 1000).toISOString();
+        return v;
+      };
+      const rooms = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const myRooms = rooms.filter(r => r.type === "channel" || (r.members || []).includes(user.uid));
+      const unreadRooms = myRooms.filter(r => {
+        if (r.type === "self") return false;
+        if (!r.lastMessageAt || r.lastSender === user.email) return false;
+        const myRead = norm(r.lastRead?.[user.uid]);
+        const lma = norm(r.lastMessageAt);
+        return !myRead || tsToMs(lma) - tsToMs(myRead) > 5000;
+      });
+      setChatUnreadCount(unreadRooms.length);
+      // Policz łączną liczbę nieprzeczytanych wiadomości
+      if (unreadRooms.length > 0) {
+        Promise.all(unreadRooms.map(async (r) => {
+          try {
+            const myRead = norm(r.lastRead?.[user.uid]);
+            const myReadMs = myRead ? tsToMs(myRead) : 0;
+            const msgsRef = collection(db, "chatRooms", r.id, "messages");
+            const msgsSnap = await getDocs(query(msgsRef, orderBy("timestamp", "desc"), firestoreLimit(50)));
+            return msgsSnap.docs.filter(d => {
+              const data = d.data();
+              if (data.senderId === user.uid) return false;
+              const ts = norm(data.timestamp);
+              return ts && tsToMs(ts) > myReadMs + 5000;
+            }).length;
+          } catch { return 0; }
+        })).then(counts => {
+          setChatUnreadMsgCount(counts.reduce((a, b) => a + b, 0));
+        });
+      } else {
+        setChatUnreadMsgCount(0);
+      }
+    }, () => {});
+    return () => unsub();
+  }, [user?.uid]);
+
+  // ── PAUZY KIEROWCÓW — osobna kolekcja ──
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "pauzy"), (snap) => {
+      setPauzy(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error("pauzy onSnapshot error", err));
+    return () => unsub();
+  }, []);
+
+  // ── PERSIST (z debounce 300ms — zapobiega wielokrotnemu zapisowi) ──
+  const debounceTimers = useRef({});
+  const debouncedDbSet = (key, value, delay = 300) => {
+    if (debounceTimers.current[key]) clearTimeout(debounceTimers.current[key]);
+    debounceTimers.current[key] = setTimeout(() => { dbSet(key, value); }, delay);
+  };
+
+  // ── SAFE WRITE — dodatkowa warstwa ochrony przed utratą danych ──
+  // Zapamiętuje ilości z pierwszego snapshot i blokuje zapis jeśli dane spadną
+  // nagle do zera (co oznaczałoby bug, nie realną zmianę użytkownika).
+  const snapshotCounts = useRef({});  // ilości z ostatniego onSnapshot
+  const safeDbSet = (key, value) => {
+    const prevCount = snapshotCounts.current[key] || 0;
+    const newCount = Array.isArray(value) ? value.length : 0;
+    // Blokuj jeśli: było > 3 rekordów i nagle spadło do 0
+    if (prevCount > 3 && newCount === 0) {
+      console.error(`🛡️ BLOCKED: zapis ${key} zablokowany — spadek z ${prevCount} do 0 rekordów`);
+      return;
+    }
+    debouncedDbSet(key, value);
+  };
+
+  // ⚠️ WAŻNE: Wszystkie zapisy mają guard length > 0
+  // + safeDbSet blokuje nagły spadek do zera (podwójna ochrona)
+  useEffect(() => { if (loaded && vehicles.length > 0) safeDbSet(SK.vehicles, vehicles); },       [vehicles, loaded]);
+  useEffect(() => { if (loaded && costs.length > 0) safeDbSet(SK.costs, costs); },                [costs, loaded]);
+  useEffect(() => { if (loaded && categories.length > 0) safeDbSet(SK.categories, categories); }, [categories, loaded]);
+  useEffect(() => { if (loaded && docs.length > 0) safeDbSet(SK.docs, docs); },                   [docs, loaded]);
+  useEffect(() => { if (loaded && imiRecords.length > 0) safeDbSet(SK.imi, imiRecords); },        [imiRecords, loaded]);
+  useEffect(() => { if (loaded && rentRecords.length > 0) safeDbSet(SK.rent, rentRecords); },     [rentRecords, loaded]);
+  useEffect(() => { if (loaded && frachtyList.length > 0) safeDbSet(SK.frachty, frachtyList); },  [frachtyList, loaded]);
+
+
+  // ── CSS INJECTION ──
+  useEffect(() => {
+    const style = document.createElement("style");
+    style.textContent = `.no-scrollbar::-webkit-scrollbar{display:none}.no-scrollbar{-ms-overflow-style:none;scrollbar-width:none}`;
+    document.head.appendChild(style);
+    if (!window.XLSX) {
+      const script = document.createElement("script");
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+      script.async = true;
+      document.head.appendChild(script);
+    }
+    return () => { try { document.head.removeChild(style); } catch {} };
+  }, []);
+
+  // ── EUR RATE (NBP API) ──
+  useEffect(() => {
+    (async () => {
+      try {
+        setEurLoading(true);
+        const res  = await fetch("https://api.nbp.pl/api/exchangerates/rates/a/eur/?format=json");
+        const data = await res.json();
+        setEurRate(data.rates[0].mid);
+        setEurRateDate(data.rates[0].effectiveDate);
+      } catch {
+        setEurRate(4.25);
+        setEurRateDate("kurs zastępczy");
+      } finally {
+        setEurLoading(false);
+      }
+    })();
+  }, []);
+
+  const toEUR = (pln) => eurRate ? pln / eurRate : null;
+  const toPLN = (eur) => eurRate ? eur * eurRate : null;
+
+  // ── ACTIONS ──
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2500); };
+
+  const addCost = async (entry) => {
+    const costId = uid();
+    setCosts((p) => [...p, { ...entry, id: costId }]);
+    logAction("add", "costs", { id: costId, vehicleId: entry.vehicleId, category: entry.category, amount: entry.amount, currency: entry.currency });
+    setShowAddCost(false);
+    // Serwis bez kwoty → utwórz sprawę automatycznie
+    if (entry.pendingSerwis) {
+      const veh = vehicles.find(v => v.id === entry.vehicleId);
+      const vehLabel = veh ? `${veh.plate} — ${veh.brand}` : entry.vehicleId;
+      try {
+        await addDoc(collection(db, "sprawy"), {
+          typ: "serwis",
+          status: "otwarta",
+          klient: vehLabel,
+          uwagi: entry.note || "",
+          kwota: "",
+          waluta: entry.currency || "EUR",
+          vehicleId: entry.vehicleId,
+          linkedCostId: costId,
+          dataUtworzenia: new Date().toISOString(),
+          zdarzenia: [],
+        });
+        showToast("🔧 Serwis zapisany — sprawa utworzona");
+      } catch (e) {
+        console.error("Auto-sprawa serwis error:", e);
+        showToast("✅ Koszt zapisany (błąd tworzenia sprawy)");
+      }
+    } else {
+      showToast("✅ Koszt zapisany");
+    }
+  };
+  // ── IMPORT ALL COSTS FROM EXCEL (Total_26) ──
+  const importAllCosts = () => {
+    // All cost data extracted from "Auta VBS 2025 (17).xlsx" → Total_26 sheet
+    // Costs are stored as positive EUR values (were negative in Excel)
+    // Nego + E-Toll + Telepass + Myto Cz → merged into "oplaty" (E-toll / Autostrady)
+    const EXCEL_COSTS = [
+      // ── v3 / WGM 5367K (Siergiej) ──
+      // Styczeń
+      {v:"v3",c:"paliwo",e:1248.89,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v3",c:"leasing",e:1342.29,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v3",c:"wyplata",e:1495.3,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v3",c:"zus",e:400.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v3",c:"polisa",e:105.11,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v3",c:"oplaty",e:266.99,d:"2026-01-15",n:"Import Excel v17 (Nego)"},
+      {v:"v3",c:"oplaty",e:27.42,d:"2026-01-15",n:"Import Excel v17 (E-Toll)"},
+      {v:"v3",c:"slickshift",e:15.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v3",c:"telefon",e:10.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v3",c:"uruchomienie",e:250.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v3",c:"imi",e:13.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v3",c:"ocpd",e:104.0,d:"2026-01-15",n:"Import Excel v17"},
+      // Luty
+      {v:"v3",c:"paliwo",e:1541.21,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v3",c:"leasing",e:1342.29,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v3",c:"wyplata",e:1524.71,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v3",c:"zus",e:400.0,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v3",c:"polisa",e:105.11,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v3",c:"oplaty",e:427.93,d:"2026-02-15",n:"Import Excel v17 (Nego)"},
+      {v:"v3",c:"oplaty",e:87.0,d:"2026-02-15",n:"Import Excel v17 (E-Toll)"},
+      {v:"v3",c:"slickshift",e:15.0,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v3",c:"telefon",e:10.0,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v3",c:"hotele",e:96.22,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v3",c:"uruchomienie",e:250.0,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v3",c:"imi",e:13.0,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v3",c:"ocpd",e:104.0,d:"2026-02-15",n:"Import Excel v17"},
+      // Marzec
+      {v:"v3",c:"paliwo",e:2357.37,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v3",c:"leasing",e:1342.29,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v3",c:"wyplata",e:2130.53,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v3",c:"zus",e:400.0,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v3",c:"serwis",e:117.0,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v3",c:"polisa",e:105.11,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v3",c:"oplaty",e:185.5,d:"2026-03-15",n:"Import Excel v17 (Nego)"},
+      {v:"v3",c:"oplaty",e:108.73,d:"2026-03-15",n:"Import Excel v17 (E-Toll)"},
+      {v:"v3",c:"inne",e:14.15,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v3",c:"slickshift",e:15.0,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v3",c:"telefon",e:10.0,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v3",c:"hotele",e:101.3,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v3",c:"uruchomienie",e:250.0,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v3",c:"imi",e:13.0,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v3",c:"ocpd",e:104.0,d:"2026-03-15",n:"Import Excel v17"},
+      // Kwiecień
+      {v:"v3",c:"zus",e:400.0,d:"2026-04-15",n:"Import Excel v17"},
+      {v:"v3",c:"polisa",e:105.11,d:"2026-04-15",n:"Import Excel v17"},
+      {v:"v3",c:"slickshift",e:15.0,d:"2026-04-15",n:"Import Excel v17"},
+      {v:"v3",c:"telefon",e:10.0,d:"2026-04-15",n:"Import Excel v17"},
+      {v:"v3",c:"uruchomienie",e:250.0,d:"2026-04-15",n:"Import Excel v17"},
+      // Maj
+      {v:"v3",c:"zus",e:400.0,d:"2026-05-15",n:"Import Excel v17"},
+      {v:"v3",c:"polisa",e:105.11,d:"2026-05-15",n:"Import Excel v17"},
+      {v:"v3",c:"slickshift",e:15.0,d:"2026-05-15",n:"Import Excel v17"},
+      {v:"v3",c:"telefon",e:10.0,d:"2026-05-15",n:"Import Excel v17"},
+      {v:"v3",c:"uruchomienie",e:250.0,d:"2026-05-15",n:"Import Excel v17"},
+      // Czerwiec
+      {v:"v3",c:"zus",e:400.0,d:"2026-06-15",n:"Import Excel v17"},
+      {v:"v3",c:"polisa",e:105.11,d:"2026-06-15",n:"Import Excel v17"},
+      {v:"v3",c:"slickshift",e:15.0,d:"2026-06-15",n:"Import Excel v17"},
+      {v:"v3",c:"telefon",e:10.0,d:"2026-06-15",n:"Import Excel v17"},
+      {v:"v3",c:"uruchomienie",e:250.0,d:"2026-06-15",n:"Import Excel v17"},
+      // Lipiec
+      {v:"v3",c:"zus",e:400.0,d:"2026-07-15",n:"Import Excel v17"},
+      {v:"v3",c:"polisa",e:105.11,d:"2026-07-15",n:"Import Excel v17"},
+      {v:"v3",c:"slickshift",e:15.0,d:"2026-07-15",n:"Import Excel v17"},
+      {v:"v3",c:"telefon",e:10.0,d:"2026-07-15",n:"Import Excel v17"},
+      {v:"v3",c:"uruchomienie",e:250.0,d:"2026-07-15",n:"Import Excel v17"},
+      // Sierpień
+      {v:"v3",c:"zus",e:400.0,d:"2026-08-15",n:"Import Excel v17"},
+      {v:"v3",c:"polisa",e:105.11,d:"2026-08-15",n:"Import Excel v17"},
+      {v:"v3",c:"slickshift",e:15.0,d:"2026-08-15",n:"Import Excel v17"},
+      {v:"v3",c:"telefon",e:10.0,d:"2026-08-15",n:"Import Excel v17"},
+      {v:"v3",c:"uruchomienie",e:250.0,d:"2026-08-15",n:"Import Excel v17"},
+      // Wrzesień
+      {v:"v3",c:"zus",e:400.0,d:"2026-09-15",n:"Import Excel v17"},
+      {v:"v3",c:"polisa",e:105.11,d:"2026-09-15",n:"Import Excel v17"},
+      {v:"v3",c:"slickshift",e:15.0,d:"2026-09-15",n:"Import Excel v17"},
+      {v:"v3",c:"telefon",e:10.0,d:"2026-09-15",n:"Import Excel v17"},
+      {v:"v3",c:"uruchomienie",e:250.0,d:"2026-09-15",n:"Import Excel v17"},
+      // Październik
+      {v:"v3",c:"zus",e:400.0,d:"2026-10-15",n:"Import Excel v17"},
+      {v:"v3",c:"polisa",e:105.11,d:"2026-10-15",n:"Import Excel v17"},
+      {v:"v3",c:"slickshift",e:15.0,d:"2026-10-15",n:"Import Excel v17"},
+      {v:"v3",c:"telefon",e:10.0,d:"2026-10-15",n:"Import Excel v17"},
+      {v:"v3",c:"uruchomienie",e:250.0,d:"2026-10-15",n:"Import Excel v17"},
+      // Listopad
+      {v:"v3",c:"zus",e:400.0,d:"2026-11-15",n:"Import Excel v17"},
+      {v:"v3",c:"polisa",e:105.11,d:"2026-11-15",n:"Import Excel v17"},
+      {v:"v3",c:"slickshift",e:15.0,d:"2026-11-15",n:"Import Excel v17"},
+      {v:"v3",c:"telefon",e:10.0,d:"2026-11-15",n:"Import Excel v17"},
+      {v:"v3",c:"uruchomienie",e:250.0,d:"2026-11-15",n:"Import Excel v17"},
+      // Grudzień
+      {v:"v3",c:"zus",e:400.0,d:"2026-12-15",n:"Import Excel v17"},
+      {v:"v3",c:"polisa",e:105.11,d:"2026-12-15",n:"Import Excel v17"},
+      {v:"v3",c:"slickshift",e:15.0,d:"2026-12-15",n:"Import Excel v17"},
+      {v:"v3",c:"telefon",e:10.0,d:"2026-12-15",n:"Import Excel v17"},
+      {v:"v3",c:"uruchomienie",e:250.0,d:"2026-12-15",n:"Import Excel v17"},
+      // ── v1 / WGM 0475M (Ivan) ──
+      // Styczeń
+      {v:"v1",c:"paliwo",e:1767.8,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v1",c:"leasing",e:1461.79,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v1",c:"wyplata",e:2136.14,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v1",c:"zus",e:400.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v1",c:"polisa",e:85.11,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v1",c:"oplaty",e:665.4,d:"2026-01-15",n:"Import Excel v17 (Nego)"},
+      {v:"v1",c:"oplaty",e:93.39,d:"2026-01-15",n:"Import Excel v17 (E-Toll)"},
+      {v:"v1",c:"inne",e:99.72,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v1",c:"slickshift",e:15.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v1",c:"telefon",e:10.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v1",c:"mandaty",e:750.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v1",c:"uruchomienie",e:250.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v1",c:"imi",e:13.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v1",c:"ocpd",e:104.0,d:"2026-01-15",n:"Import Excel v17"},
+      // Luty
+      {v:"v1",c:"paliwo",e:1225.36,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v1",c:"leasing",e:1461.79,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v1",c:"wyplata",e:1524.71,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v1",c:"zus",e:400.0,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v1",c:"polisa",e:85.11,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v1",c:"oplaty",e:252.46,d:"2026-02-15",n:"Import Excel v17 (Nego)"},
+      {v:"v1",c:"oplaty",e:46.0,d:"2026-02-15",n:"Import Excel v17 (E-Toll)"},
+      {v:"v1",c:"slickshift",e:15.0,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v1",c:"telefon",e:10.0,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v1",c:"hotele",e:80.0,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v1",c:"uruchomienie",e:250.0,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v1",c:"imi",e:13.0,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v1",c:"ocpd",e:104.0,d:"2026-02-15",n:"Import Excel v17"},
+      // Marzec
+      {v:"v1",c:"paliwo",e:2202.65,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v1",c:"leasing",e:1461.79,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v1",c:"wyplata",e:1948.24,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v1",c:"zus",e:400.0,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v1",c:"polisa",e:85.11,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v1",c:"oplaty",e:185.41,d:"2026-03-15",n:"Import Excel v17 (Nego)"},
+      {v:"v1",c:"oplaty",e:103.92,d:"2026-03-15",n:"Import Excel v17 (E-Toll)"},
+      {v:"v1",c:"slickshift",e:15.0,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v1",c:"telefon",e:10.0,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v1",c:"uruchomienie",e:250.0,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v1",c:"imi",e:13.0,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v1",c:"ocpd",e:104.0,d:"2026-03-15",n:"Import Excel v17"},
+      // Kwiecień
+      {v:"v1",c:"zus",e:400.0,d:"2026-04-15",n:"Import Excel v17"},
+      {v:"v1",c:"polisa",e:85.11,d:"2026-04-15",n:"Import Excel v17"},
+      {v:"v1",c:"slickshift",e:15.0,d:"2026-04-15",n:"Import Excel v17"},
+      {v:"v1",c:"telefon",e:10.0,d:"2026-04-15",n:"Import Excel v17"},
+      {v:"v1",c:"hotele",e:137.0,d:"2026-04-15",n:"Import Excel v17"},
+      {v:"v1",c:"uruchomienie",e:250.0,d:"2026-04-15",n:"Import Excel v17"},
+      {v:"v1",c:"imi",e:13.0,d:"2026-04-15",n:"Import Excel v17"},
+      // Maj
+      {v:"v1",c:"zus",e:400.0,d:"2026-05-15",n:"Import Excel v17"},
+      {v:"v1",c:"polisa",e:85.11,d:"2026-05-15",n:"Import Excel v17"},
+      {v:"v1",c:"slickshift",e:15.0,d:"2026-05-15",n:"Import Excel v17"},
+      {v:"v1",c:"telefon",e:10.0,d:"2026-05-15",n:"Import Excel v17"},
+      {v:"v1",c:"uruchomienie",e:250.0,d:"2026-05-15",n:"Import Excel v17"},
+      // Czerwiec
+      {v:"v1",c:"zus",e:400.0,d:"2026-06-15",n:"Import Excel v17"},
+      {v:"v1",c:"polisa",e:85.11,d:"2026-06-15",n:"Import Excel v17"},
+      {v:"v1",c:"slickshift",e:15.0,d:"2026-06-15",n:"Import Excel v17"},
+      {v:"v1",c:"telefon",e:10.0,d:"2026-06-15",n:"Import Excel v17"},
+      {v:"v1",c:"uruchomienie",e:250.0,d:"2026-06-15",n:"Import Excel v17"},
+      // Lipiec
+      {v:"v1",c:"zus",e:400.0,d:"2026-07-15",n:"Import Excel v17"},
+      {v:"v1",c:"polisa",e:85.11,d:"2026-07-15",n:"Import Excel v17"},
+      {v:"v1",c:"slickshift",e:15.0,d:"2026-07-15",n:"Import Excel v17"},
+      {v:"v1",c:"telefon",e:10.0,d:"2026-07-15",n:"Import Excel v17"},
+      {v:"v1",c:"uruchomienie",e:250.0,d:"2026-07-15",n:"Import Excel v17"},
+      // Sierpień
+      {v:"v1",c:"zus",e:400.0,d:"2026-08-15",n:"Import Excel v17"},
+      {v:"v1",c:"polisa",e:85.11,d:"2026-08-15",n:"Import Excel v17"},
+      {v:"v1",c:"slickshift",e:15.0,d:"2026-08-15",n:"Import Excel v17"},
+      {v:"v1",c:"telefon",e:10.0,d:"2026-08-15",n:"Import Excel v17"},
+      {v:"v1",c:"uruchomienie",e:250.0,d:"2026-08-15",n:"Import Excel v17"},
+      // Wrzesień
+      {v:"v1",c:"zus",e:400.0,d:"2026-09-15",n:"Import Excel v17"},
+      {v:"v1",c:"polisa",e:85.11,d:"2026-09-15",n:"Import Excel v17"},
+      {v:"v1",c:"slickshift",e:15.0,d:"2026-09-15",n:"Import Excel v17"},
+      {v:"v1",c:"telefon",e:10.0,d:"2026-09-15",n:"Import Excel v17"},
+      {v:"v1",c:"uruchomienie",e:250.0,d:"2026-09-15",n:"Import Excel v17"},
+      // Październik
+      {v:"v1",c:"zus",e:400.0,d:"2026-10-15",n:"Import Excel v17"},
+      {v:"v1",c:"polisa",e:85.11,d:"2026-10-15",n:"Import Excel v17"},
+      {v:"v1",c:"slickshift",e:15.0,d:"2026-10-15",n:"Import Excel v17"},
+      {v:"v1",c:"telefon",e:10.0,d:"2026-10-15",n:"Import Excel v17"},
+      {v:"v1",c:"uruchomienie",e:250.0,d:"2026-10-15",n:"Import Excel v17"},
+      // Listopad
+      {v:"v1",c:"zus",e:400.0,d:"2026-11-15",n:"Import Excel v17"},
+      {v:"v1",c:"polisa",e:85.11,d:"2026-11-15",n:"Import Excel v17"},
+      {v:"v1",c:"slickshift",e:15.0,d:"2026-11-15",n:"Import Excel v17"},
+      {v:"v1",c:"telefon",e:10.0,d:"2026-11-15",n:"Import Excel v17"},
+      {v:"v1",c:"uruchomienie",e:250.0,d:"2026-11-15",n:"Import Excel v17"},
+      // Grudzień
+      {v:"v1",c:"zus",e:400.0,d:"2026-12-15",n:"Import Excel v17"},
+      {v:"v1",c:"polisa",e:85.11,d:"2026-12-15",n:"Import Excel v17"},
+      {v:"v1",c:"slickshift",e:15.0,d:"2026-12-15",n:"Import Excel v17"},
+      {v:"v1",c:"telefon",e:10.0,d:"2026-12-15",n:"Import Excel v17"},
+      {v:"v1",c:"uruchomienie",e:250.0,d:"2026-12-15",n:"Import Excel v17"},
+      // ── v5 / WGM 0507M (Włodziu) ──
+      // Styczeń
+      {v:"v5",c:"paliwo",e:1639.69,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v5",c:"leasing",e:1461.79,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v5",c:"wyplata",e:2392.48,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v5",c:"zus",e:400.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v5",c:"polisa",e:82.78,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v5",c:"oplaty",e:617.0,d:"2026-01-15",n:"Import Excel v17 (Nego)"},
+      {v:"v5",c:"oplaty",e:48.19,d:"2026-01-15",n:"Import Excel v17 (E-Toll)"},
+      {v:"v5",c:"inne",e:53.7,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v5",c:"slickshift",e:15.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v5",c:"telefon",e:10.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v5",c:"uruchomienie",e:250.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v5",c:"imi",e:13.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v5",c:"ocpd",e:104.0,d:"2026-01-15",n:"Import Excel v17"},
+      // Luty
+      {v:"v5",c:"paliwo",e:1566.4,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v5",c:"leasing",e:1461.79,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v5",c:"wyplata",e:1948.24,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v5",c:"zus",e:400.0,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v5",c:"polisa",e:82.78,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v5",c:"oplaty",e:437.9,d:"2026-02-15",n:"Import Excel v17 (Nego)"},
+      {v:"v5",c:"oplaty",e:36.5,d:"2026-02-15",n:"Import Excel v17 (E-Toll)"},
+      {v:"v5",c:"slickshift",e:15.0,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v5",c:"telefon",e:10.0,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v5",c:"uruchomienie",e:250.0,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v5",c:"imi",e:13.0,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v5",c:"ocpd",e:104.0,d:"2026-02-15",n:"Import Excel v17"},
+      // Marzec
+      {v:"v5",c:"paliwo",e:2468.8,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v5",c:"leasing",e:1461.79,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v5",c:"wyplata",e:2287.06,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v5",c:"zus",e:400.0,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v5",c:"polisa",e:82.78,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v5",c:"oplaty",e:291.69,d:"2026-03-15",n:"Import Excel v17 (Nego)"},
+      {v:"v5",c:"oplaty",e:115.98,d:"2026-03-15",n:"Import Excel v17 (E-Toll)"},
+      {v:"v5",c:"inne",e:6.0,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v5",c:"slickshift",e:15.0,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v5",c:"telefon",e:10.0,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v5",c:"hotele",e:114.0,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v5",c:"uruchomienie",e:250.0,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v5",c:"imi",e:13.0,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v5",c:"ocpd",e:104.0,d:"2026-03-15",n:"Import Excel v17"},
+      // Kwiecień
+      {v:"v5",c:"polisa",e:82.78,d:"2026-04-15",n:"Import Excel v17"},
+      {v:"v5",c:"slickshift",e:15.0,d:"2026-04-15",n:"Import Excel v17"},
+      {v:"v5",c:"telefon",e:10.0,d:"2026-04-15",n:"Import Excel v17"},
+      {v:"v5",c:"uruchomienie",e:250.0,d:"2026-04-15",n:"Import Excel v17"},
+      {v:"v5",c:"imi",e:13.0,d:"2026-04-15",n:"Import Excel v17"},
+      {v:"v5",c:"ocpd",e:104.0,d:"2026-04-15",n:"Import Excel v17"},
+      // Maj
+      {v:"v5",c:"polisa",e:82.78,d:"2026-05-15",n:"Import Excel v17"},
+      {v:"v5",c:"slickshift",e:15.0,d:"2026-05-15",n:"Import Excel v17"},
+      {v:"v5",c:"telefon",e:10.0,d:"2026-05-15",n:"Import Excel v17"},
+      {v:"v5",c:"uruchomienie",e:250.0,d:"2026-05-15",n:"Import Excel v17"},
+      // Czerwiec
+      {v:"v5",c:"polisa",e:82.78,d:"2026-06-15",n:"Import Excel v17"},
+      {v:"v5",c:"slickshift",e:15.0,d:"2026-06-15",n:"Import Excel v17"},
+      {v:"v5",c:"telefon",e:10.0,d:"2026-06-15",n:"Import Excel v17"},
+      {v:"v5",c:"uruchomienie",e:250.0,d:"2026-06-15",n:"Import Excel v17"},
+      // Lipiec
+      {v:"v5",c:"polisa",e:82.78,d:"2026-07-15",n:"Import Excel v17"},
+      {v:"v5",c:"slickshift",e:15.0,d:"2026-07-15",n:"Import Excel v17"},
+      {v:"v5",c:"telefon",e:10.0,d:"2026-07-15",n:"Import Excel v17"},
+      {v:"v5",c:"uruchomienie",e:250.0,d:"2026-07-15",n:"Import Excel v17"},
+      // Sierpień
+      {v:"v5",c:"polisa",e:82.78,d:"2026-08-15",n:"Import Excel v17"},
+      {v:"v5",c:"slickshift",e:15.0,d:"2026-08-15",n:"Import Excel v17"},
+      {v:"v5",c:"telefon",e:10.0,d:"2026-08-15",n:"Import Excel v17"},
+      {v:"v5",c:"uruchomienie",e:250.0,d:"2026-08-15",n:"Import Excel v17"},
+      // Wrzesień
+      {v:"v5",c:"polisa",e:82.78,d:"2026-09-15",n:"Import Excel v17"},
+      {v:"v5",c:"slickshift",e:15.0,d:"2026-09-15",n:"Import Excel v17"},
+      {v:"v5",c:"telefon",e:10.0,d:"2026-09-15",n:"Import Excel v17"},
+      {v:"v5",c:"uruchomienie",e:250.0,d:"2026-09-15",n:"Import Excel v17"},
+      // Październik
+      {v:"v5",c:"polisa",e:82.78,d:"2026-10-15",n:"Import Excel v17"},
+      {v:"v5",c:"slickshift",e:15.0,d:"2026-10-15",n:"Import Excel v17"},
+      {v:"v5",c:"telefon",e:10.0,d:"2026-10-15",n:"Import Excel v17"},
+      {v:"v5",c:"uruchomienie",e:250.0,d:"2026-10-15",n:"Import Excel v17"},
+      // Listopad
+      {v:"v5",c:"polisa",e:82.78,d:"2026-11-15",n:"Import Excel v17"},
+      {v:"v5",c:"slickshift",e:15.0,d:"2026-11-15",n:"Import Excel v17"},
+      {v:"v5",c:"telefon",e:10.0,d:"2026-11-15",n:"Import Excel v17"},
+      {v:"v5",c:"uruchomienie",e:250.0,d:"2026-11-15",n:"Import Excel v17"},
+      // Grudzień
+      {v:"v5",c:"polisa",e:82.78,d:"2026-12-15",n:"Import Excel v17"},
+      {v:"v5",c:"slickshift",e:15.0,d:"2026-12-15",n:"Import Excel v17"},
+      {v:"v5",c:"telefon",e:10.0,d:"2026-12-15",n:"Import Excel v17"},
+      {v:"v5",c:"uruchomienie",e:250.0,d:"2026-12-15",n:"Import Excel v17"},
+      // ── v4 / TK 314CL + TK 760AP (Mirek) ──
+      // Styczeń
+      {v:"v4",c:"paliwo",e:1446.22,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v4",c:"wyplata",e:2032.0,d:"2026-01-15",n:"Import Excel v17 (FV)"},
+      {v:"v4",c:"polisa",e:132.32,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v4",c:"oplaty",e:2.5,d:"2026-01-15",n:"Import Excel v17 (Nego)"},
+      {v:"v4",c:"oplaty",e:88.42,d:"2026-01-15",n:"Import Excel v17 (E-Toll)"},
+      {v:"v4",c:"inne",e:24.46,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v4",c:"slickshift",e:15.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v4",c:"telefon",e:10.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v4",c:"inne",e:665.0,d:"2026-01-15",n:"Import Excel v17 (Przyczepa)"},
+      {v:"v4",c:"uruchomienie",e:250.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v4",c:"imi",e:13.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v4",c:"ocpd",e:104.0,d:"2026-01-15",n:"Import Excel v17"},
+      // Luty
+      {v:"v4",c:"paliwo",e:1336.03,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v4",c:"wyplata",e:1777.2,d:"2026-02-15",n:"Import Excel v17 (FV)"},
+      {v:"v4",c:"polisa",e:132.32,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v4",c:"oplaty",e:2.58,d:"2026-02-15",n:"Import Excel v17 (Nego)"},
+      {v:"v4",c:"oplaty",e:56.4,d:"2026-02-15",n:"Import Excel v17 (E-Toll)"},
+      {v:"v4",c:"inne",e:37.8,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v4",c:"slickshift",e:15.0,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v4",c:"telefon",e:10.0,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v4",c:"uruchomienie",e:250.0,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v4",c:"imi",e:13.0,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v4",c:"ocpd",e:104.0,d:"2026-02-15",n:"Import Excel v17"},
+      // Marzec
+      {v:"v4",c:"paliwo",e:2925.72,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v4",c:"wyplata",e:2588.33,d:"2026-03-15",n:"Import Excel v17 (FV)"},
+      {v:"v4",c:"polisa",e:132.32,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v4",c:"oplaty",e:184.3,d:"2026-03-15",n:"Import Excel v17 (Nego)"},
+      {v:"v4",c:"oplaty",e:41.3,d:"2026-03-15",n:"Import Excel v17 (E-Toll)"},
+      {v:"v4",c:"inne",e:23.7,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v4",c:"slickshift",e:15.0,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v4",c:"telefon",e:10.0,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v4",c:"uruchomienie",e:250.0,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v4",c:"imi",e:13.0,d:"2026-03-15",n:"Import Excel v17"},
+      {v:"v4",c:"ocpd",e:104.0,d:"2026-03-15",n:"Import Excel v17"},
+      // Kwiecień
+      {v:"v4",c:"polisa",e:132.32,d:"2026-04-15",n:"Import Excel v17"},
+      {v:"v4",c:"slickshift",e:15.0,d:"2026-04-15",n:"Import Excel v17"},
+      {v:"v4",c:"telefon",e:10.0,d:"2026-04-15",n:"Import Excel v17"},
+      {v:"v4",c:"uruchomienie",e:250.0,d:"2026-04-15",n:"Import Excel v17"},
+      {v:"v4",c:"imi",e:13.0,d:"2026-04-15",n:"Import Excel v17"},
+      {v:"v4",c:"ocpd",e:104.0,d:"2026-04-15",n:"Import Excel v17"},
+      // Maj
+      {v:"v4",c:"polisa",e:132.32,d:"2026-05-15",n:"Import Excel v17"},
+      {v:"v4",c:"slickshift",e:15.0,d:"2026-05-15",n:"Import Excel v17"},
+      {v:"v4",c:"telefon",e:10.0,d:"2026-05-15",n:"Import Excel v17"},
+      {v:"v4",c:"uruchomienie",e:250.0,d:"2026-05-15",n:"Import Excel v17"},
+      // Czerwiec
+      {v:"v4",c:"polisa",e:132.32,d:"2026-06-15",n:"Import Excel v17"},
+      {v:"v4",c:"slickshift",e:15.0,d:"2026-06-15",n:"Import Excel v17"},
+      {v:"v4",c:"telefon",e:10.0,d:"2026-06-15",n:"Import Excel v17"},
+      {v:"v4",c:"uruchomienie",e:250.0,d:"2026-06-15",n:"Import Excel v17"},
+      // Lipiec
+      {v:"v4",c:"polisa",e:132.32,d:"2026-07-15",n:"Import Excel v17"},
+      {v:"v4",c:"slickshift",e:15.0,d:"2026-07-15",n:"Import Excel v17"},
+      {v:"v4",c:"telefon",e:10.0,d:"2026-07-15",n:"Import Excel v17"},
+      {v:"v4",c:"uruchomienie",e:250.0,d:"2026-07-15",n:"Import Excel v17"},
+      // Sierpień
+      {v:"v4",c:"polisa",e:132.32,d:"2026-08-15",n:"Import Excel v17"},
+      {v:"v4",c:"slickshift",e:15.0,d:"2026-08-15",n:"Import Excel v17"},
+      {v:"v4",c:"telefon",e:10.0,d:"2026-08-15",n:"Import Excel v17"},
+      {v:"v4",c:"uruchomienie",e:250.0,d:"2026-08-15",n:"Import Excel v17"},
+      // Wrzesień
+      {v:"v4",c:"polisa",e:132.32,d:"2026-09-15",n:"Import Excel v17"},
+      {v:"v4",c:"slickshift",e:15.0,d:"2026-09-15",n:"Import Excel v17"},
+      {v:"v4",c:"telefon",e:10.0,d:"2026-09-15",n:"Import Excel v17"},
+      {v:"v4",c:"uruchomienie",e:250.0,d:"2026-09-15",n:"Import Excel v17"},
+      // Październik
+      {v:"v4",c:"polisa",e:132.32,d:"2026-10-15",n:"Import Excel v17"},
+      {v:"v4",c:"slickshift",e:15.0,d:"2026-10-15",n:"Import Excel v17"},
+      {v:"v4",c:"telefon",e:10.0,d:"2026-10-15",n:"Import Excel v17"},
+      {v:"v4",c:"uruchomienie",e:250.0,d:"2026-10-15",n:"Import Excel v17"},
+      // Listopad
+      {v:"v4",c:"polisa",e:132.32,d:"2026-11-15",n:"Import Excel v17"},
+      {v:"v4",c:"slickshift",e:15.0,d:"2026-11-15",n:"Import Excel v17"},
+      {v:"v4",c:"telefon",e:10.0,d:"2026-11-15",n:"Import Excel v17"},
+      {v:"v4",c:"uruchomienie",e:250.0,d:"2026-11-15",n:"Import Excel v17"},
+      // Grudzień
+      {v:"v4",c:"polisa",e:132.32,d:"2026-12-15",n:"Import Excel v17"},
+      {v:"v4",c:"slickshift",e:15.0,d:"2026-12-15",n:"Import Excel v17"},
+      {v:"v4",c:"telefon",e:10.0,d:"2026-12-15",n:"Import Excel v17"},
+      {v:"v4",c:"uruchomienie",e:250.0,d:"2026-12-15",n:"Import Excel v17"},
+      // ── v2 / TK 130EF (Mykola) ──
+      // Styczeń
+      {v:"v2",c:"paliwo",e:1040.08,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v2",c:"wyplata",e:1200.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v2",c:"serwis",e:518.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v2",c:"oplaty",e:9.41,d:"2026-01-15",n:"Import Excel v17 (Nego)"},
+      {v:"v2",c:"inne",e:750.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v2",c:"telefon",e:10.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v2",c:"mandaty",e:1068.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v2",c:"inne",e:110.0,d:"2026-01-15",n:"Import Excel v17 (Przyczepa)"},
+      {v:"v2",c:"uruchomienie",e:250.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v2",c:"imi",e:13.0,d:"2026-01-15",n:"Import Excel v17"},
+      {v:"v2",c:"ocpd",e:104.0,d:"2026-01-15",n:"Import Excel v17"},
+      // Luty
+      {v:"v2",c:"telefon",e:10.0,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v2",c:"imi",e:13.0,d:"2026-02-15",n:"Import Excel v17"},
+      {v:"v2",c:"ocpd",e:104.0,d:"2026-02-15",n:"Import Excel v17"},
+      // Marzec
+      {v:"v2",c:"telefon",e:10.0,d:"2026-03-15",n:"Import Excel v17"},
+      // Kwiecień
+      {v:"v2",c:"telefon",e:10.0,d:"2026-04-15",n:"Import Excel v17"},
+      // Maj
+      {v:"v2",c:"telefon",e:10.0,d:"2026-05-15",n:"Import Excel v17"},
+      // Czerwiec
+      {v:"v2",c:"telefon",e:10.0,d:"2026-06-15",n:"Import Excel v17"},
+      // Lipiec
+      {v:"v2",c:"telefon",e:10.0,d:"2026-07-15",n:"Import Excel v17"},
+      // Sierpień
+      {v:"v2",c:"telefon",e:10.0,d:"2026-08-15",n:"Import Excel v17"},
+      // Wrzesień
+      {v:"v2",c:"telefon",e:10.0,d:"2026-09-15",n:"Import Excel v17"},
+      // Październik
+      {v:"v2",c:"telefon",e:10.0,d:"2026-10-15",n:"Import Excel v17"},
+      // Listopad
+      {v:"v2",c:"telefon",e:10.0,d:"2026-11-15",n:"Import Excel v17"},
+      // Grudzień
+      {v:"v2",c:"telefon",e:10.0,d:"2026-12-15",n:"Import Excel v17"},
+    ];
+
+    // Determine which vehicle+month combos the import covers
+    const IMPORT_VIDS = ["v1", "v2", "v3", "v4", "v5"];
+    const IMPORT_MONTHS = ["2026-01","2026-02","2026-03","2026-04","2026-05","2026-06","2026-07","2026-08","2026-09","2026-10","2026-11","2026-12"];
+
+    const existingCount = costs.filter(c =>
+      IMPORT_VIDS.includes(c.vehicleId) &&
+      IMPORT_MONTHS.some(m => (c.date || "").startsWith(m))
+    ).length;
+
+    if (existingCount > 0) {
+      if (!window.confirm(
+        `W systemie jest już ${existingCount} wpisów kosztowych za 2026 dla importowanych pojazdów.\n` +
+        `Import ZASTĄPI wszystkie te wpisy danymi z Excel v17.\n\nKontynuować?`
+      )) return;
+    }
+
+    // Build new cost entries
+    const newCosts = EXCEL_COSTS.map(r => ({
+      id: uid(),
+      vehicleId: r.v,
+      category: r.c,
+      amountPLN: null,
+      amountEUR: r.e,
+      currency: "EUR",
+      date: r.d,
+      note: r.n,
+    }));
+
+    // Remove ALL existing costs for imported vehicles+months, then add new ones
+    setCosts(p => [
+      ...p.filter(c => !(IMPORT_VIDS.includes(c.vehicleId) && IMPORT_MONTHS.some(m => (c.date || "").startsWith(m)))),
+      ...newCosts,
+    ]);
+
+    // Also update rentRecords for all 3 months
+    const CAT_TO_RENT_MAP = {
+      paliwo:"paliwo", leasing:"leasing", wyplata:"wyplata", zus:"zus",
+      serwis:"serwis", polisa:"polisa", oplaty:"etoll",
+      hotele:"hotele", mandaty:"mandaty", slickshift:"slickshift",
+      telefon:"telefon", uruchomienie:"uruchomienie", imi:"imi", ocpd:"ocpd",
+      przyczepa:"inne", inne:"inne",
+    };
+
+    Array.from({length: 12}, (_, i) => i).forEach(month => {
+      const monthStr = `2026-${String(month + 1).padStart(2, "0")}`;
+      const monthCosts = EXCEL_COSTS.filter(r => r.d.startsWith(monthStr));
+      const byVehicle = {};
+      monthCosts.forEach(r => {
+        if (!byVehicle[r.v]) byVehicle[r.v] = {};
+        const rentCat = CAT_TO_RENT_MAP[r.c] || "inne";
+        byVehicle[r.v][rentCat] = (byVehicle[r.v][rentCat] || 0) + r.e;
+      });
+
+      Object.entries(byVehicle).forEach(([vid, costsObj]) => {
+        const rounded = Object.fromEntries(Object.entries(costsObj).map(([k, v]) => [k, Math.round(v)]));
+        setRentRecords(p => {
+          const existing = p.find(r => r.vehicleId === vid && r.year === 2026 && r.month === month);
+          if (existing) {
+            return p.map(r => r.id === existing.id ? { ...r, costs: rounded } : r);
+          }
+          return [...p, { id: uid(), vehicleId: vid, year: 2026, month, frachty: 0, costs: rounded }];
+        });
+      });
+    });
+
+    showToast(`✅ Import Excel v17: dodano ${newCosts.length} wpisów kosztów (2026)`);
+  };
+
+  // ── IMPORT COSTS FROM RENTOWNOŚĆ (rent→costs) for a given year ──
+  const importFromRent = (year) => {
+    // Reverse mapping: RENT_COSTS category → costs category
+    const RENT_TO_COST = {
+      paliwo:"paliwo", leasing:"leasing", wyplata:"wyplata", zus:"zus",
+      serwis:"serwis", polisa:"polisa", etoll:"oplaty", nego:"oplaty",
+      hotele:"hotele", mandaty:"mandaty", slickshift:"slickshift",
+      telefon:"telefon", uruchomienie:"uruchomienie", imi:"imi", ocpd:"ocpd",
+      telepass:"oplaty", inne:"inne",
+    };
+
+    const yearRecords = rentRecords.filter(r => r.year === year);
+    if (yearRecords.length === 0) {
+      showToast(`⚠️ Brak danych w Rentowności za ${year}`);
+      return;
+    }
+
+    // Check how many cost entries already exist for this year
+    const yearPrefix = `${year}-`;
+    const existingCount = costs.filter(c => (c.date || "").startsWith(yearPrefix)).length;
+
+    if (existingCount > 0) {
+      if (!window.confirm(
+        `W rejestrze kosztów jest już ${existingCount} wpisów za ${year}.\n` +
+        `Import ZASTĄPI je danymi z Rentowności (${yearRecords.length} rekordów).\n\nKontynuować?`
+      )) return;
+    }
+
+    const newCosts = [];
+    yearRecords.forEach(rec => {
+      if (!rec.costs) return;
+      const monthStr = `${year}-${String(rec.month + 1).padStart(2, "0")}`;
+      Object.entries(rec.costs).forEach(([rentCat, value]) => {
+        const eur = parseFloat(value) || 0;
+        if (eur <= 0) return;
+        const costCat = RENT_TO_COST[rentCat] || "inne";
+        newCosts.push({
+          id: uid(),
+          vehicleId: rec.vehicleId,
+          category: costCat,
+          amountPLN: null,
+          amountEUR: eur,
+          currency: "EUR",
+          date: `${monthStr}-15`,
+          note: `Import z Rentowności ${year} (${rentCat})`,
+        });
+      });
+    });
+
+    if (newCosts.length === 0) {
+      showToast(`⚠️ Brak kosztów w Rentowności za ${year}`);
+      return;
+    }
+
+    // Remove existing costs for this year, add new ones
+    setCosts(p => [
+      ...p.filter(c => !(c.date || "").startsWith(yearPrefix)),
+      ...newCosts,
+    ]);
+
+    const totalEUR = newCosts.reduce((s, c) => s + (c.amountEUR || 0), 0);
+    showToast(`✅ Import z Rentowności ${year}: ${newCosts.length} wpisów (${Math.round(totalEUR).toLocaleString("pl-PL")} €)`);
+  };
+
+  // ── FIX 2025 FRACHTY FROM EXCEL (Total25 → Podsumowanie total) ──
+  const fix2025Frachty = () => {
+    // Exact frachty values from "Auta VBS 2025 (15).xlsx" → Total25 sheet
+    // Index = month (0=Sty, 1=Lut, ..., 11=Gru), values in EUR
+    const EXCEL_FRACHTY = {
+      v3: [4930,11530,8594,10060,11200,10685,0,7720,8600,8280,9815,6100],     // WGM 5367K, sum=97514
+      v4: [7494,6245,5870,8230,9450,7480,9580,3580,6130,1900,3900,7150],      // TK 314CL,  sum=77009
+      v6: [8950,1150,4850,9350,0,0,0,0,0,0,0,0],                              // TK 315CL,  sum=24300
+      v2: [7870,6190,5650,1130,990,11050,4280,7079,4020,7050,8000,4780],      // TK 130EF,  sum=68089
+      v5: [8250,6203,8165,11635,9420,11820,11010,7400,8930,10380,7590,8104],  // WGM 0507M, sum=108907
+      v1: [0,0,0,3100,8150,10310,9280,6680,9000,6320,5755,8050],              // WGM 0475M, sum=66645
+    };
+    // Total: 442,464 EUR
+
+    if (!window.confirm(
+      "Napraw frachty 2025 z Excela (Total25)?\n\n" +
+      "To zaktualizuje wartości frachtów w Rentowności za 2025\n" +
+      "na dokładne wartości z arkusza Excel.\n\n" +
+      "Łączna wartość frachtów: 442 464 €"
+    )) return;
+
+    let updated = 0;
+    let created = 0;
+
+    setRentRecords(prev => {
+      let records = [...prev];
+      Object.entries(EXCEL_FRACHTY).forEach(([vid, monthlyFrachty]) => {
+        monthlyFrachty.forEach((frachty, month) => {
+          const existing = records.find(r => r.vehicleId === vid && r.year === 2025 && r.month === month);
+          if (existing) {
+            if (existing.frachty !== frachty) {
+              records = records.map(r => r.id === existing.id ? { ...r, frachty } : r);
+              updated++;
+            }
+          } else if (frachty > 0) {
+            records = [...records, { id: uid(), vehicleId: vid, year: 2025, month, frachty, costs: {} }];
+            created++;
+          }
+        });
+      });
+      return records;
+    });
+
+    showToast(`✅ Frachty 2025 naprawione z Excela (${updated} zaktualizowanych, ${created} nowych)`);
+  };
+
+  // ── Jednorazowa migracja 2025: dopisuje wpisy korekcyjne do frachtyList i costs,
+  //    tak aby sumy miesięczne per pojazd zgadzały się z Excelem.
+  //    Zachowuje wszystkie istniejące granularne dane (trasy, wpisy kosztów).
+  //    Po uruchomieniu można bezpiecznie usunąć hardkody EXCEL_VEH_*_2025 z getRecord.
+  const migrate2025ToFirestore = () => {
+    const EXCEL_FR = {
+      v1:[0,0,0,3100,8150,10310,9280,6680,9000,6320,5755,8050],
+      v2:[7870,6190,5650,1130,990,11050,4280,7079,4020,7050,8000,4780],
+      v3:[4930,11530,8594,10060,11200,10685,0,7720,8600,8280,9815,6100],
+      v4:[7494,6245,5870,8230,9450,7480,9580,3580,6130,1900,3900,7150],
+      v5:[8250,6203,8165,11635,9420,11820,11010,7400,8930,10380,7590,8104],
+      v6:[8950,1150,4850,9350,0,0,0,0,0,0,0,0],
+    };
+    const EXCEL_VEH_C = {
+      v1:[1658,1658,1658,2362,6916,6772,6723,6732,6043,6764,5998,6440],
+      v2:[4062,5702,5050,3571,1866,6839,4133,4816,3415,4975,6190,5772],
+      v3:[4843,6936,8597,6834,6837,7470,1909,5976,6193,5892,6986,5426],
+      v4:[5146,6859,5682,6077,7663,5839,6816,4507,6171,4200,5336,5648],
+      v5:[6308,6122,7177,6975,7094,7424,8162,7043,6592,5732,9400,6722],
+      v6:[6602,1511,5283,5994,1217,1217,1213,1213,1213,1213,1213,1213],
+    };
+    const EXCEL_FLEET_C = [29015,29193,33853,32276,32000,36107,29367,30692,30327,29508,35937,32007];
+    const MARK = "KOREKTA_2025_EXCEL";
+
+    if (!window.confirm(
+      "Migracja danych 2025 do Firestore?\n\n" +
+      "• Usunie wcześniejsze wpisy korekcyjne (KOREKTA_2025_EXCEL)\n" +
+      "• Doda nowe korekty tak, żeby sumy miesięczne frachtów i kosztów\n" +
+      "  zgadzały się dokładnie z Excelem (per pojazd, per miesiąc)\n" +
+      "• NIE usuwa istniejących granularnych wpisów (tras, kosztów)\n\n" +
+      "Po migracji hardkody EXCEL_VEH_*_2025 zostaną usunięte z kodu."
+    )) return;
+
+    // Usuń istniejące wpisy korekcyjne
+    const cleanFr = frachtyList.filter(f => f.uwagi !== MARK);
+    const cleanC = costs.filter(c => c.note !== MARK);
+
+    const newFr = [...cleanFr];
+    const newC = [...cleanC];
+
+    let frCount = 0, cCount = 0;
+
+    for (let m = 0; m < 12; m++) {
+      const monthStr = String(m + 1).padStart(2, "0");
+      const ymPrefix = `2025-${monthStr}`;
+      const midDate = `2025-${monthStr}-15`;
+      const vehMonthSum = Object.values(EXCEL_VEH_C).reduce((s, a) => s + a[m], 0);
+
+      // Iterujemy po WSZYSTKICH pojazdach (łącznie z archiwalnymi),
+      // nie tylko v1-v6 z Excela. Dla pojazdów spoza Excela target = 0,
+      // żeby ich frachty/koszty 2025 zostały wyzerowane korektą.
+      const allVehicleIds = [...new Set([
+        ...vehicles.map(v => v.id),
+        ...Object.keys(EXCEL_FR),
+      ])];
+      allVehicleIds.forEach(vid => {
+        // Frachty — używamy tej samej logiki co dynData (dataZaladunku || dataZlecenia)
+        const targetFr = EXCEL_FR[vid] ? EXCEL_FR[vid][m] : 0;
+        const currFr = cleanFr
+          .filter(f => {
+            if (f.vehicleId !== vid) return false;
+            const d = f.dataZaladunku || f.dataZlecenia || "";
+            return d.startsWith(ymPrefix);
+          })
+          .reduce((s, f) => s + (parseFloat(f.cenaEur) || 0), 0);
+        const delFr = Math.round((targetFr - currFr) * 100) / 100;
+        if (Math.abs(delFr) >= 0.5) {
+          newFr.push({
+            id: uid(), vehicleId: vid,
+            dataZlecenia: midDate, dataZaladunku: midDate, dataRozladunku: midDate,
+            godzZaladunku: "", godzRozladunku: "",
+            skad: "", zaladunekKod: "", dokod: "",
+            klient: "", cenaEur: delFr,
+            kmPodjazd: 0, kmLadowne: 0, kmWszystkie: 0, wagaLadunku: 0,
+            dyspozytor: "", nrFV: "", dataWyslania: "", terminPlatnosci: "",
+            uwagi: MARK,
+          });
+          frCount++;
+        }
+
+        // Koszty (scaled to match fleet total) — target=0 dla pojazdów spoza Excela
+        const vehCost = EXCEL_VEH_C[vid] ? EXCEL_VEH_C[vid][m] : 0;
+        const targetC = vehMonthSum > 0 && EXCEL_VEH_C[vid]
+          ? Math.round(vehCost * EXCEL_FLEET_C[m] / vehMonthSum)
+          : vehCost;
+        const currC = cleanC
+          .filter(c => c.vehicleId === vid && (c.date || "").startsWith(ymPrefix))
+          .reduce((s, c) => {
+            const eur = c.amountEUR ? parseFloat(c.amountEUR) : (c.amountPLN && eurRate ? c.amountPLN / eurRate : 0);
+            return s + eur;
+          }, 0);
+        const delC = Math.round((targetC - currC) * 100) / 100;
+        if (Math.abs(delC) >= 0.5) {
+          newC.push({
+            id: uid(), vehicleId: vid,
+            category: "inne", currency: "EUR",
+            amountPLN: null, amountEUR: delC,
+            date: midDate, note: MARK,
+          });
+          cCount++;
+        }
+      });
+    }
+
+    setFrachtyList(newFr);
+    setCosts(newC);
+    showToast(`✅ Migracja 2025: ${frCount} korekt frachtów, ${cCount} korekt kosztów`);
+  };
+
+  const deleteCost   = (id)    => { setCosts((p) => p.filter((c) => c.id !== id)); logAction("delete", "costs", { id }); showToast("Usunięto wpis"); };
+  const updateCost   = (updated) => { setCosts((p) => p.map((c) => c.id === updated.id ? updated : c)); logAction("update", "costs", { id: updated.id, vehicleId: updated.vehicleId }); showToast("✅ Koszt zaktualizowany"); setEditCostId(null); };
+  // Sync assignedDriver from driverHistory — aktywny kierowca (bez daty 'to')
+  const syncAssignedDriver = (veh) => {
+    const active = (veh.driverHistory || []).find(d => !d.to);
+    return { ...veh, assignedDriver: active?.email || "" };
+  };
+  const addVehicle   = (v)     => { const vid = uid(); const veh = syncAssignedDriver({ ...v, id: vid, driverHistory: v.driverHistory || [] }); setVehicles((p) => [...p, veh]); logAction("add", "vehicles", { id: vid, type: v.type, plate: v.plate }); showToast("Pojazd dodany"); setShowAddVehicle(false); };
+  const delVehicle   = (id, reason) => {
+    const veh = vehicles.find(v => v.id === id);
+    setVehicles((p) => p.map((v) => v.id !== id ? v : {
+      ...v,
+      archived: true,
+      archivedDate: new Date().toISOString().slice(0,10),
+      archivedReason: reason || "",
+    }));
+    logAction("delete", "vehicles", { id, plate: veh?.plate, reason });
+    showToast("✅ Pojazd przeniesiony do archiwum");
+  };
+  const updateVehicle= (updated) => { const veh = syncAssignedDriver(updated); setVehicles((p) => p.map((v) => v.id === veh.id ? veh : v)); logAction("update", "vehicles", { id: veh.id, plate: veh.plate }); showToast("✅ Zmiany zapisane"); setEditVehicleId(null); };
+  const addCategory  = (cat)   => setCategories((p) => [...p, cat]);
+
+  const CAT_FALLBACKS = {
+    wyplata:       { label: "Wynagrodzenie",    color: "#f43f5e", icon: "👤" },
+    ubezpieczenie: { label: "Ubezpieczenie",    color: "#10b981", icon: "🛡️" },
+    opony:         { label: "Opony",            color: "#3b82f6", icon: "🔄" },
+    oplaty:        { label: "E-toll / Autostrady",   color: "#8b5cf6", icon: "🛣️" },
+    myto:          { label: "E-toll / Autostrady",   color: "#8b5cf6", icon: "🛣️" },
+    nego:          { label: "E-toll / Autostrady",   color: "#8b5cf6", icon: "🛣️" },
+    etoll:         { label: "E-toll / Autostrady",   color: "#8b5cf6", icon: "🛣️" },
+    naprawa:       { label: "Serwis",           color: "#ef4444", icon: "🔧" },
+    serwis:        { label: "Serwis",           color: "#ef4444", icon: "🔧" },
+    paliwo:        { label: "Paliwo",           color: "#f59e0b", icon: "⛽" },
+    leasing:       { label: "Leasing",          color: "#6366f1", icon: "🏦" },
+    zus:           { label: "ZUS + podatki",    color: "#a855f7", icon: "📋" },
+    polisa:        { label: "Polisa / OC / AC", color: "#10b981", icon: "🛡️" },
+    hotele:        { label: "Hotele",           color: "#f97316", icon: "🏨" },
+    mandaty:       { label: "Mandaty",          color: "#dc2626", icon: "⚠️" },
+    slickshift:    { label: "SlickShift",       color: "#06b6d4", icon: "📡" },
+    telefon:       { label: "Telefon",          color: "#8b5cf6", icon: "📱" },
+    uruchomienie:  { label: "Koszt uruchomienia", color: "#ec4899", icon: "🔑" },
+    imi:           { label: "IMI / SIPSI",      color: "#14b8a6", icon: "🌍" },
+    ocpd:          { label: "OCPD (2x OC)",     color: "#f59e0b", icon: "🛡️" },
+    przyczepa:     { label: "Przyczepa",        color: "#78716c", icon: "🚛" },
+    inne:          { label: "Inne",             color: "#94a3b8", icon: "📋" },
+  };
+  const catById  = (id) => categories.find((c) => c.id === id) || (CAT_FALLBACKS[id] ? { id, ...CAT_FALLBACKS[id] } : null);
+  const catColor = (id) => catById(id)?.color || "#94a3b8";
+  const catLabel = (id) => { const c = catById(id); return c ? `${c.icon} ${c.label}` : id; };
+
+  // current active driver for a vehicle (assignedDriver + driverHistory)
+  const currentDriver = (v) => {
+    const hist = v.driverHistory || [];
+    const active = hist.find((d) => !d.to);
+    if (active) return active;
+    // fallback: szukaj po assignedDriver email
+    if (v.assignedDriver) {
+      const byEmail = hist.find(d => d.email === v.assignedDriver);
+      if (byEmail) return byEmail;
+    }
+    return hist[hist.length - 1] || null;
+  };
+
+  // ── GET PLN VALUE ──
+  const getPLN = (c) => c.currency === "EUR" ? (toPLN(c.amountEUR) || 0) : (c.amountPLN || 0);
+
+  // ── GET EUR VALUE — używa amountEUR bezpośrednio gdy dostępne ──
+  const getEUR = (c) => {
+    if (c.amountEUR) return parseFloat(c.amountEUR);
+    if (c.amountPLN && eurRate) return c.amountPLN / eurRate;
+    return 0;
+  };
+
+  // ── STATS ──
+  const stats = useMemo(() => {
+    const rate      = eurRate || 4.25;
+    const totalPLN  = costs.reduce((s, c) => s + getPLN(c), 0);
+    const thisMonth = new Date().toISOString().slice(0, 7);
+    const monthPLN  = costs.filter((c) => c.date?.startsWith(thisMonth)).reduce((s, c) => s + getPLN(c), 0);
+
+    const byVehicle = vehicles.map((v) => {
+      const vc = costs.filter((c) => c.vehicleId === v.id);
+      const hist = v.driverHistory || [];
+      const active = hist.find((d) => !d.to) || hist[hist.length - 1];
+      return { ...v, total: vc.reduce((s, c) => s + getPLN(c), 0), count: vc.length, activeDriver: active?.name || "—" };
+    });
+
+    const byCategory = categories.map((cat) => ({
+      ...cat,
+      total: costs.filter((c) => c.category === cat.id).reduce((s, c) => s + getPLN(c), 0),
+    })).filter((c) => c.total > 0);
+
+    const monthMap = {};
+    costs.forEach((c) => {
+      const m = c.date?.slice(0, 7); if (!m) return;
+      if (!monthMap[m]) monthMap[m] = { month: m, total: 0 };
+      monthMap[m].total += getPLN(c);
+    });
+    const monthly = Object.values(monthMap).sort((a, b) => a.month.localeCompare(b.month)).slice(-6);
+
+    return { totalPLN, monthPLN, byVehicle, byCategory, monthly, rate };
+  }, [costs, vehicles, categories, eurRate]);
+
+  // ── FILTERED COSTS ──
+  const filteredCosts = useMemo(() => costs.filter((c) => {
+    if (filterVehicle !== "all" && c.vehicleId !== filterVehicle) return false;
+    if (filterCat     !== "all" && c.category  !== filterCat)     return false;
+    if (filterMonth   !== "all" && !c.date?.startsWith(filterMonth)) return false;
+    if (filterYear    !== "all" && !c.date?.startsWith(filterYear))  return false;
+    if (filterNote    !== "all" && c.note !== filterNote)             return false;
+    return true;
+  }).sort((a, b) => (b.date||"").localeCompare(a.date||"")), [costs, filterVehicle, filterCat, filterMonth, filterYear, filterNote]);
+
+  const months = useMemo(() => {
+    const s = new Set(costs.map((c) => c.date?.slice(0, 7)).filter(Boolean));
+    return [...s].sort((a, b) => b.localeCompare(a));
+  }, [costs]);
+
+  const filteredTotal = filteredCosts.reduce((s, c) => s + getPLN(c), 0);
+
+  // ── LOADING ──
+  if (!loaded) return (
+    <div className="min-h-screen bg-white flex items-center justify-center text-gray-400 text-base">
+      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+      Ładowanie danych…
+    </div>
+  );
+
+  // ─── PANEL KIEROWCY (osobny layout, mobile-first) ───────────────────────────
+  if (isKierowca) {
+    // Znajdź pojazd przypisany do tego kierowcy (szybki lookup po assignedDriver, fallback na driverHistory)
+    const myVehicle = vehicles.find(v => v.assignedDriver === user.email)
+      || vehicles.find(v => (v.driverHistory || []).some(d => !d.to && d.email === user.email));
+    // DEBUG: log vehicle matching
+    console.log("[DriverPanel] user.email:", user.email, "vehicles:", vehicles.length, "assignedDrivers:", vehicles.map(v => v.assignedDriver).filter(Boolean), "myVehicle:", myVehicle?.plate || "NOT FOUND");
+    // Frachty przypisane do mojego pojazdu
+    const myFrachty = myVehicle
+      ? frachtyList.filter(f => f.vehicleId === myVehicle.id).sort((a,b) => (b.dataZaladunku||"").localeCompare(a.dataZaladunku||""))
+      : [];
+
+    // Dane operacyjne (spalanie) filtrowane po pojeździe kierowcy
+    const myOperacyjne = myVehicle
+      ? operacyjne.filter(o => o.vehicleId === myVehicle.id)
+      : [];
+
+    // Tankowania filtrowane po pojeździe kierowcy
+    const myFuelEntries = myVehicle
+      ? fuelEntries.filter(fe => fe.vehicleId === myVehicle.id)
+      : [];
+
+    // Dokumenty kierowcy filtrowane po emailu (nie po pojeździe — dokumenty osobiste)
+    const myDriverDocs = driverDocs.filter(dd => dd.driverEmail === user.email);
+
+    return (
+      <DriverPanel
+        user={user}
+        vehicle={myVehicle}
+        frachty={myFrachty}
+        pauzy={pauzy.filter(p => myVehicle && p.vehicleId === myVehicle.id)}
+        operacyjne={myOperacyjne}
+        driverEvents={driverEvents}
+        fuelEntries={myFuelEntries}
+        driverDocs={myDriverDocs}
+        showToast={showToast}
+      />
+    );
+  }
+
+  // ─── RENDER ──────────────────────────────────────────────────────────────────
+  return (
+    <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", color: "#111827" }}>
+      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+
+
+      {/* TOAST */}
+      {toast && (
+        <div className="fixed top-5 right-5 z-50 px-5 py-3 rounded-xl text-sm font-medium shadow-lg"
+          style={{ background: "#111827", color: "#fff" }}>
+          {toast}
+        </div>
+      )}
+
+      {/* MODALS */}
+      {showAddCost && (
+        <AddCostModal
+          vehicles={vehicles} categories={categories}
+          eurRate={eurRate} eurRateDate={eurRateDate} eurLoading={eurLoading}
+          toPLN={toPLN} toEUR={toEUR}
+          onSave={addCost} onClose={() => setShowAddCost(false)}
+          onAddCategory={addCategory}
+        />
+      )}
+      {showAddVehicle && <AddVehicleModal onSave={addVehicle} onClose={() => setShowAddVehicle(false)} />}
+      {czasPracyVehicleId && (() => {
+        const czV = vehicles.find(x => x.id === czasPracyVehicleId);
+        if (!czV) return null;
+        const czEntries = pauzy.filter(p => p.vehicleId === czasPracyVehicleId);
+        return <CzasPracyModal
+          vehicle={czV}
+          entries={czEntries}
+          onSave={async (data) => {
+            try { await addDoc(collection(db, "pauzy"), data); logAction("add", "pauzy", { vehicleId: data.vehicleId, status: data.status, start: data.start, end: data.end }); showToast("Zapisano"); } catch(e) { console.error("addPauza", e); }
+          }}
+          onDelete={async (id) => {
+            try { await deleteDoc(doc(db, "pauzy", id)); logAction("delete", "pauzy", { id }); } catch(e) { console.error("delPauza", e); }
+          }}
+          onClose={() => setCzasPracyVehicleId(null)}
+        />;
+      })()}
+      {editCostId && (
+        <AddCostModal
+          vehicles={vehicles} categories={categories}
+          eurRate={eurRate} eurRateDate={eurRateDate} eurLoading={eurLoading}
+          toPLN={toPLN} toEUR={toEUR}
+          editRecord={costs.find(c => c.id === editCostId)}
+          onSave={(entry) => updateCost({ ...entry, id: editCostId })}
+          onClose={() => setEditCostId(null)}
+          onAddCategory={addCategory}
+        />
+      )}
+      {showExportModal && (
+        <ExportCostsModal
+          costs={costs}
+          vehicles={vehicles}
+          categories={categories}
+          onClose={() => setShowExportModal(false)}
+        />
+      )}
+      {deleteVehicleModal && <DeleteVehicleModal
+        plate={deleteVehicleModal.plate}
+        onConfirm={(reason) => {
+          delVehicle(deleteVehicleModal.id, reason);
+          setDeleteVehicleModal(null);
+        }}
+        onClose={() => setDeleteVehicleModal(null)}
+      />}
+
+      <div className="flex min-h-screen">
+
+        {/* ── SIDEBAR ───────────────────────────────────────────────────── */}
+        <aside className="hidden md:flex flex-col w-56 bg-white border-r border-gray-100 py-7 px-4 sticky top-0 h-screen">
+          <div className="px-2 mb-8">
+            <div className="flex items-center gap-2.5">
+              <img src="/icon-192.png" alt="FS" className="w-10 h-10 rounded-xl" />
+              <div>
+                <div className="font-bold text-base text-gray-900 leading-tight">FleetStat</div>
+                <div className="text-xs text-gray-400">Zarządzanie flotą</div>
+              </div>
+            </div>
+          </div>
+
+          <nav className="space-y-0.5 flex-1">
+            {[
+              { id: "dashboard", label: "Przegląd", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></svg> },
+              { id: "frachty", label: "Frachty", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 17V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a1 1 0 0 0 1 1h1.5"/><path d="M13 8h4l4 4v4h-1.5"/><circle cx="7.5" cy="17.5" r="2.5"/><circle cx="17" cy="17.5" r="2.5"/><path d="M10 17.5h4.5"/></svg> },
+              { id: "fv", label: "Faktury sprzedaży", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 8h6"/><path d="M14 12c0-1.5-3-1.5-3 0s3 1.5 3 0"/><path d="M9 17h3"/></svg> },
+              { id: "costs", label: "Koszty", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="13" rx="2.5"/><path d="M2 10h20"/><path d="M6 15h4"/></svg> },
+              { id: "vehicles", label: "Pojazdy", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="6" width="11" height="10" rx="2"/><path d="M14 10h3.5l3 3v3a1 1 0 0 1-1 1h-1"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M9 17h6"/><path d="M3 16h1.5"/></svg> },
+              { id: "serwis", label: "Serwis", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> },
+              { id: "rent", label: "Rentowność", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg> },
+              { id: "docs", label: "Dokumenty", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> },
+              { id: "imi", label: "IMI / SIPSI", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> },
+              { id: "payments", label: "Płatności", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/></svg> },
+              { id: "users", label: "Użytkownicy", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
+              { id: "email", label: "Email statusy", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> },
+              { id: "logi", label: "Logi aktywności", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> },
+              { id: "sprawy", label: "Sprawy", badge: sprawyList.filter(s => !['zamknieta','wygrana','przegrana'].includes(s.status) && (s.przypisani||[]).includes(user?.email)).length || null, icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v6"/><line x1="7" y1="13" x2="12" y2="13"/><line x1="7" y1="17" x2="10" y2="17"/></svg> },
+              { id: "kierowcy", label: "Panel kierowców", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/><path d="M8 12a4 4 0 0 0 8 0"/><path d="M17 21v-2a4 4 0 0 0-4-4H5"/></svg> },
+              { id: "chat", label: "Czat", badge: chatUnreadCount || null, icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> },
+            ].filter(item => canSeeTab(item.id)).map((item) => (
+              <button key={item.id} onClick={() => setTab(item.id)}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm text-left transition-all"
+                style={{
+                  background:  tab === item.id ? "#f3f4f6" : "transparent",
+                  color:       tab === item.id ? "#111827" : "#6b7280",
+                  fontWeight:  tab === item.id ? 600 : 400,
+                }}>
+                <span className="w-5 flex items-center justify-center" style={{opacity: tab === item.id ? 0.9 : 0.5}}>{item.icon}</span>
+                {item.label}
+                {item.badge ? <span className="ml-auto px-1.5 py-0.5 rounded-full text-xs font-bold" style={{background:"#ef4444",color:"#fff"}}>{item.badge}</span> : null}
+              </button>
+            ))}
+          </nav>
+
+
+
+          <div className="space-y-2 px-1">
+            <div style={{ borderTop:"1px solid #f3f4f6", paddingTop:8, marginTop:4 }}>
+              <div className="text-xs text-gray-400 px-1 mb-0.5 truncate flex items-center gap-1">
+                {user?.email}
+                {(() => {
+                  const mentions = sprawyList.reduce((acc, s) => {
+                    return acc + (s.zdarzenia||[]).filter(z => z.mentions && z.mentions.includes(user?.email) && !z.seenBy?.includes(user?.email)).length;
+                  }, 0);
+                  return mentions > 0 ? <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs font-bold" style={{background:"#ef4444",color:"#fff"}}>{mentions}</span> : null;
+                })()}
+              </div>
+              <div className="px-1 mb-2">
+                <span className="inline-block px-2 py-0.5 rounded-full text-xs font-semibold"
+                  style={{
+                    background: isAdmin ? "#fef3c7" : isDyspozytor ? "#eff6ff" : "#f3f4f6",
+                    color: isAdmin ? "#92400e" : isDyspozytor ? "#1d4ed8" : "#6b7280",
+                  }}>
+                  {isAdmin ? "👑 Admin" : isDyspozytor ? "🚚 Dyspozytor" : "👁 Podgląd"}
+                </span>
+              </div>
+              <button onClick={() => { logAction("logout", "auth", { reason: "manual" }); signOut(auth); }}
+                className="w-full py-2 rounded-lg text-sm font-medium transition-all hover:bg-red-50"
+                style={{ color: "#ef4444", background: "transparent" }}>
+                🚪 Wyloguj
+              </button>
+            </div>
+          </div>
+        </aside>
+
+        {/* ── MAIN ──────────────────────────────────────────────────────── */}
+        <main className="flex-1 px-4 py-6 md:px-8 md:py-8 pb-32 md:pb-8 overflow-y-auto">
+
+          {/* Mobile header — ukryty w zakładce czat */}
+          {tab !== "chat" && (
+            <div className="flex md:hidden items-center justify-between mb-4" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
+              <div className="flex items-center">
+                <img src="/icon-192.png" alt="FS" className="w-8 h-8 rounded-lg mr-2" />
+                <span className="font-bold text-base text-gray-900">FleetStat</span>
+              </div>
+              <button onClick={() => { logAction("logout", "auth", { reason: "manual" }); signOut(auth); }}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-500 hover:bg-red-50 border border-red-100">
+                Wyloguj
+              </button>
+            </div>
+          )}
+
+          {/* ══ DASHBOARD — TABLICA DYSPOZYTORSKA ═══════════════════════════ */}
+          {tab === "dashboard" && canSeeTab("dashboard") && (
+            <div>
+              {/* NAGŁÓWEK */}
+              <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+                <div>
+                  <div className="font-bold text-gray-900 text-lg leading-tight">Przegląd</div>
+                  <div className="text-xs text-gray-400">{new Date().toLocaleDateString("pl-PL",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>
+                </div>
+                {!eurLoading && (
+                  <div className="px-3 py-2 rounded-xl text-sm flex items-center gap-2"
+                    style={{ background: "#fffbeb", border: "1px solid #fde68a", color: "#92400e" }}>
+                    <span>💱</span>
+                    <span className="font-semibold">1 € = {eurRate?.toFixed(4)} zł</span>
+                    <span className="text-xs opacity-60 hidden sm:inline">· NBP {eurRateDate}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* KARTY POJAZDÓW — główna sekcja */}
+              {(() => {
+                const today = new Date();
+                return (
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
+                    {vehicles.filter(v => {
+                      const tISO = new Date().toLocaleDateString("sv-SE");
+                      // Pokaż jeśli pojazd ma aktywną pauzę
+                      const hasPauza = pauzy.some(p => p.vehicleId === v.id && p.status !== "jazda" && p.start <= tISO && p.end >= tISO);
+                      if (hasPauza) return true;
+                      const vf = frachtyList.filter(r => r.vehicleId === v.id && (r.dataZaladunku || r.dataZlecenia))
+                        .sort((a,b) => (b.dataZaladunku||b.dataZlecenia||"").localeCompare(a.dataZaladunku||a.dataZlecenia||""));
+                      if (vf.length === 0) return false;
+                      const lastDone = vf.find(r => r.dataRozladunku && r.dataRozladunku < tISO);
+                      if (!lastDone) return true;
+                      const daysSince = Math.round((new Date(tISO + "T00:00:00") - new Date(lastDone.dataRozladunku + "T00:00:00")) / 86400000);
+                      return daysSince <= 30;
+                    }).map(v => {
+                      const driverName = (v.driverHistory||[]).find(d => !d.to)?.name || "—";
+                      // Ostatni fracht dla tego pojazdu
+                      const vFrachty = frachtyList
+                        .filter(r => r.vehicleId === v.id && (r.dataZaladunku || r.dataZlecenia))
+                        .sort((a,b) => (b.dataZaladunku||b.dataZlecenia||"").localeCompare(a.dataZaladunku||a.dataZlecenia||""));
+                      const lastF = vFrachty[0] || null;
+
+                      // ── NOWA LOGIKA STATUSÓW ──
+                      // 1. W trasie — aktywny fracht
+                      // 2. Pauza — zaciągana z czasu pracy (kolekcja pauzy)
+                      // 3. Załadunek za Xd (data) — następny fracht w przyszłości
+                      // 4. Czeka na zlecenie · Xd — brak frachtu, ile dni stoi
+                      let status = "czeka";
+                      let statusLabel = "Czeka na zlecenie";
+                      let statusColor = "#d97706";
+                      let statusBg = "#fffbeb";
+                      let statusIcon = "⏳";
+
+                      // Porównania na stringach YYYY-MM-DD — bez problemów z timezone
+                      const todayISO = new Date().toLocaleDateString("sv-SE"); // "2026-04-02" w lokalnym timezone
+                      const todayMs = new Date(todayISO + "T00:00:00").getTime();
+
+                      // Szukaj aktywnego frachtu (zał <= dziś <= rozł, nie rozładowany)
+                      const activeF = vFrachty.find(r => {
+                        if (!r.dataZaladunku || !r.dataRozladunku) return false;
+                        if (r.statusRozladunku === "rozladowano") return false;
+                        return r.dataZaladunku <= todayISO && todayISO <= r.dataRozladunku;
+                      });
+
+                      // Szukaj następnego zaplanowanego (zał > dziś)
+                      const nextF = vFrachty
+                        .filter(r => r.dataZaladunku && r.dataZaladunku > todayISO)
+                        .sort((a,b) => a.dataZaladunku.localeCompare(b.dataZaladunku))[0] || null;
+
+                      // Ostatni rozładowany (rozł < dziś) — do wyliczenia dni postoju
+                      const lastDoneF = vFrachty
+                        .filter(r => r.dataRozladunku && r.dataRozladunku < todayISO)
+                        .sort((a,b) => (b.dataRozladunku||"").localeCompare(a.dataRozladunku||""))[0] || null;
+
+                      // Aktywna pauza dla tego pojazdu (z kolekcji pauzy)
+                      const vehiclePauza = pauzy.find(p =>
+                        p.vehicleId === v.id &&
+                        p.status !== "jazda" &&
+                        p.start <= todayISO &&
+                        p.end >= todayISO
+                      );
+
+                      // Ile dni stoi (od ostatniego rozładunku)
+                      const daysSinceUnload = lastDoneF
+                        ? Math.round((todayMs - new Date(lastDoneF.dataRozladunku + "T00:00:00").getTime()) / 86400000)
+                        : null;
+
+                      // PRIORYTET 1: W trasie
+                      if (activeF) {
+                        status = "trasa";
+                        statusLabel = "W trasie";
+                        statusIcon = <IconTruck size={14}/>;
+                        statusColor = "#15803d";
+                        statusBg = "#f0fdf4";
+                      }
+                      // PRIORYTET 2: Pauza (z czasu pracy)
+                      else if (vehiclePauza) {
+                        const pauzaLabels = { pauza9: "Pauza 9h", pauza11: "Pauza 11h", pauza24: "Pauza 24h", pauza45: "Pauza 45h", pauzaInne: "Pauza", baza: "Baza" };
+                        const pauzaColors = { pauza9: "#b45309", pauza11: "#c2410c", pauza24: "#dc2626", pauza45: "#9333ea", pauzaInne: "#0369a1", baza: "#6b7280" };
+                        const pauzaBgs =    { pauza9: "#fffbeb", pauza11: "#fff7ed", pauza24: "#fef2f2", pauza45: "#faf5ff", pauzaInne: "#f0f9ff", baza: "#f3f4f6" };
+                        const pauzaIcons =  { pauza9: "🛏️", pauza11: "🛏️", pauza24: "🛏️", pauza45: "🛏️", pauzaInne: "⏸️", baza: "🏠" };
+                        const ps = vehiclePauza.status;
+                        const endDate = new Date(vehiclePauza.end + "T00:00:00").toLocaleDateString("pl-PL", { day:"numeric", month:"short" });
+                        status = "pauza";
+                        statusLabel = `${pauzaLabels[ps] || "Pauza"} · do ${endDate}`;
+                        statusIcon = pauzaIcons[ps] || "⏸️";
+                        statusColor = pauzaColors[ps] || "#6b7280";
+                        statusBg = pauzaBgs[ps] || "#f3f4f6";
+                      }
+                      // PRIORYTET 3: Załadunek za X dni (data)
+                      else if (nextF) {
+                        const nextZalMs = new Date(nextF.dataZaladunku + "T00:00:00").getTime();
+                        const diffDays = Math.round((nextZalMs - todayMs) / 86400000);
+                        const dateStr = new Date(nextF.dataZaladunku + "T00:00:00").toLocaleDateString("pl-PL", { day:"numeric", month:"short" });
+                        status = "planowany";
+                        if (diffDays === 0) {
+                          statusLabel = `Dziś załadunek`;
+                        } else if (diffDays === 1) {
+                          statusLabel = `Załadunek jutro (${dateStr})`;
+                        } else {
+                          statusLabel = `Załadunek za ${diffDays}d (${dateStr})`;
+                        }
+                        statusIcon = "📋";
+                        statusColor = "#1d4ed8";
+                        statusBg = "#eff6ff";
+                      }
+                      // PRIORYTET 4: Czeka na zlecenie (z liczbą dni)
+                      else {
+                        status = "czeka";
+                        if (daysSinceUnload !== null && daysSinceUnload > 0) {
+                          statusLabel = `Czeka na zlecenie · ${daysSinceUnload}d`;
+                        } else {
+                          statusLabel = "Czeka na zlecenie";
+                        }
+                        statusIcon = "⏳";
+                        statusColor = "#d97706";
+                        statusBg = "#fffbeb";
+                      }
+
+                      // Aktywny fracht do wyświetlenia na karcie
+                      // Dla trasy: pokaż OSTATNI rozładunek w ciągu (nie pierwszy aktywny)
+                      const pendingFF = vFrachty
+                        .filter(r => r.statusRozladunku !== "rozladowano" && r.dataRozladunku && r.dataRozladunku >= todayISO)
+                        .sort((a, b) => (b.dataRozladunku || "").localeCompare(a.dataRozladunku || ""));
+                      const displayF = pendingFF[0] || activeF || nextF || lastF;
+
+                      // Dane trasy z ostatniego pending / aktywnego / następnego frachtu
+                      const skad = displayF ? [displayF.zaladunekKod,displayF.zaladunekKod2,displayF.zaladunekKod3].filter(s=>s&&s.trim()).join(" / ") || displayF.skad || "—" : "—";
+                      const dokad = displayF ? [displayF.dokod,displayF.dokod2,displayF.dokod3].filter(s=>s&&s.trim()).join(" / ") || displayF.dokad || "—" : "—";
+                      const cena = displayF?.cenaEur ? parseFloat(displayF.cenaEur) : null;
+                      const km = displayF?.kmWszystkie ? parseInt(displayF.kmWszystkie) : (displayF?.kmLadowne ? parseInt(displayF.kmLadowne) : null);
+                      const eurKm = cena && km ? (cena/km).toFixed(2) : null;
+                      const klient = displayF?.klient || "—";
+                      const dataZal = displayF?.dataZaladunku || null;
+                      const dataRozl = displayF?.dataRozladunku || null;
+                      const fmtD = (d) => d ? new Date(d).toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit"}) : "—";
+
+                      return (
+                        <div key={v.id} className="bg-white rounded-2xl border overflow-hidden"
+                          style={{ borderColor: status === "trasa" ? "#bbf7d0" : status === "pauza" ? "#e9d5ff" : status === "czeka" ? "#fde68a" : status === "planowany" ? "#bfdbfe" : "#f3f4f6" }}>
+
+                          {/* HEADER karty */}
+                          <div className="px-4 pt-4 pb-3 flex items-start justify-between"
+                            style={{ borderBottom: "1px solid #f9fafb" }}>
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0"
+                                style={{ background: "#f3f4f6" }}>
+                                <VehicleIcon v={v} size={20}/>
+                              </div>
+                              <div>
+                                <div className="font-semibold text-gray-900 text-sm">{v.plate}</div>
+                                <div className="text-xs text-gray-400">{v.brand} · {driverName}</div>
+                              </div>
+                            </div>
+                            <span className="text-xs px-2.5 py-1 rounded-full font-semibold flex items-center gap-1"
+                              style={{ background: statusBg, color: statusColor }}>
+                              <span>{statusIcon}</span>
+                              <span>{statusLabel}</span>
+                            </span>
+                          </div>
+
+                          {/* TRASA */}
+                          {displayF ? (
+                            <div className="px-4 py-3">
+                              {/* Trasa skąd → dokąd */}
+                              <div className="flex items-center gap-2 mb-2.5">
+                                <span className="text-xs font-mono font-semibold text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded">{skad}</span>
+                                <span className="text-gray-300 text-sm">→</span>
+                                <span className="text-xs font-mono font-semibold text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded">{dokad}</span>
+                              </div>
+
+                              {/* Klient */}
+                              <div className="text-xs text-gray-500 mb-2 truncate">👤 {klient}{displayF?.dyspozytor ? <span className="text-gray-300 ml-2">· {displayF.dyspozytor}</span> : null}</div>
+
+                              {/* Daty */}
+                              <div className="flex items-center gap-3 mb-2.5">
+                                <div className="flex items-center gap-1">
+                                  <span className="text-xs text-gray-400">Zał.</span>
+                                  <span className="text-xs font-semibold text-gray-700">{fmtD(dataZal)}</span>
+                                </div>
+                                <span className="text-gray-200">·</span>
+                                <div className="flex items-center gap-1">
+                                  <span className="text-xs text-gray-400">Rozł.</span>
+                                  <span className="text-xs font-semibold text-gray-700">{fmtD(dataRozl)}</span>
+                                </div>
+                              </div>
+
+                              {/* LICZNIK TACHOGRAFU 28 DNI — ręczny z kalendarzem */}
+                              {(() => {
+                                // Parsuj datę jako lokalną (nie UTC) żeby uniknąć błędu strefy czasowej
+                                const parseDateLocal = (str) => {
+                                  if (!str) return null;
+                                  const [y,m,d] = str.split("-").map(Number);
+                                  const dt = new Date(y, m-1, d);
+                                  dt.setHours(0,0,0,0);
+                                  return dt;
+                                };
+                                const tachoStart = parseDateLocal(v.tachoStart);
+                                const today = new Date(); today.setHours(0,0,0,0);
+
+                                const handleTachoChange = (dateStr) => {
+                                  if (!dateStr) {
+                                    const { tachoStart: _, ...rest } = v;
+                                    updateVehicle(rest);
+                                  } else {
+                                    updateVehicle({ ...v, tachoStart: dateStr });
+                                  }
+                                };
+
+                                if (!tachoStart) {
+                                  return (
+                                    <div className="mb-2">
+                                      <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg"
+                                        style={{ background: "#f3f4f6", border: "1.5px dashed #d1d5db" }}>
+                                        <span className="text-xs text-gray-400 flex-shrink-0">⏱️ Start tacho:</span>
+                                        <input type="date"
+                                          onChange={e => handleTachoChange(e.target.value)}
+                                          className="flex-1 text-xs outline-none bg-transparent text-gray-600"
+                                          style={{ fontFamily: "'DM Sans', sans-serif" }} />
+                                      </div>
+                                    </div>
+                                  );
+                                }
+
+                                const daysSinceStart = Math.round((today - tachoStart) / 86400000);
+                                const daysLeft = 28 - daysSinceStart;
+                                const stopDate = new Date(tachoStart); stopDate.setDate(stopDate.getDate() + 28);
+                                const stopStr = stopDate.toLocaleDateString("pl-PL", {day:"2-digit", month:"2-digit"});
+                                const startStr = v.tachoStart; // użyj oryginalnego stringa z Firebase, nie konwertuj przez UTC
+
+                                const isRed    = daysLeft < 5;
+                                const isYellow = daysLeft >= 5 && daysLeft < 10;
+                                const bg    = isRed ? "#fef2f2" : isYellow ? "#fffbeb" : "#f0fdf4";
+                                const color = isRed ? "#b91c1c" : isYellow ? "#92400e" : "#15803d";
+                                const icon  = isRed ? "🔴" : isYellow ? "🟡" : "🟢";
+
+                                return (
+                                  <div className="mb-2 space-y-1">
+                                    <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg"
+                                      style={{ background: bg }}>
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-sm">{icon}</span>
+                                        <span className="text-xs font-semibold" style={{ color }}>
+                                          {daysLeft > 0 ? `Tacho: ${daysLeft} dni (do ${stopStr})` : daysLeft === 0 ? `Tacho: dziś powrót!` : `Tacho: przekroczone o ${Math.abs(daysLeft)} dni`}
+                                        </span>
+                                      </div>
+                                      <span className="text-xs" style={{ color, opacity: 0.7 }}>{daysSinceStart}/28d</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg"
+                                      style={{ background: "#f9fafb", border: "1px solid #e5e7eb" }}>
+                                      <span className="text-xs text-gray-400 flex-shrink-0">⏱️ Start:</span>
+                                      <input type="date"
+                                        value={startStr}
+                                        onChange={e => handleTachoChange(e.target.value)}
+                                        className="flex-1 text-xs outline-none bg-transparent text-gray-700"
+                                        style={{ fontFamily: "'DM Sans', sans-serif" }} />
+                                      <button onClick={() => handleTachoChange("")}
+                                        className="text-xs text-gray-400 hover:text-red-400 transition-all flex-shrink-0">
+                                        Reset
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+
+                              {/* Cena po lewej + EUR/km po prawej */}
+                              <div className="flex items-center justify-between pt-2"
+                                style={{ borderTop: "1px solid #f3f4f6" }}>
+                                <span className="text-base font-bold text-gray-900">
+                                  {cena ? `${cena.toLocaleString("pl-PL")} €` : "—"}
+                                </span>
+                                {eurKm && km && (
+                                  <span className="text-xs text-gray-400">
+                                    {eurKm} €/km · {km?.toLocaleString("pl-PL")} km
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="px-4 py-5 text-center text-gray-400 text-xs">
+                              Brak zleceń w systemie
+                            </div>
+                          )}
+
+                          {/* PRZYCISK CZAS PRACY — otwiera modal */}
+                          <div className="px-4 pb-3">
+                            <button onClick={() => setCzasPracyVehicleId(v.id)}
+                              className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all"
+                              style={{ background: "#f3f4f6", color: "#6b7280" }}>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                              Czas pracy
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              {/* ALERTY + SZYBKIE AKCJE */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Alerty */}
+                {(() => {
+                  const today = new Date();
+                  const todayStr = today.toISOString().slice(0,10);
+                  const in30 = new Date(today); in30.setDate(in30.getDate()+30);
+                  const in30Str = in30.toISOString().slice(0,10);
+
+                  const overdueInv = frachtyList.filter(r => {
+                    if (!r.terminPlatnosci || !r.statusFV) return false;
+                    return r.terminPlatnosci < todayStr && !["paid","zapłacona"].includes(r.statusFV?.toLowerCase());
+                  }).length;
+
+                  const docAlerts = docs.filter(d => d.validTo && d.validTo <= in30Str && d.validTo >= todayStr).length;
+                  const expiredDocs = docs.filter(d => d.validTo && d.validTo < todayStr).length;
+
+                  // Sprawdź tachografy — ręczny start
+                  const tachoAlerts = vehicles.map(v => {
+                    if (!v.tachoStart) return null;
+                    const [ty,tm,td] = v.tachoStart.split("-").map(Number);
+                    const startDate = new Date(ty, tm-1, td); startDate.setHours(0,0,0,0);
+                    const todayD = new Date(); todayD.setHours(0,0,0,0);
+                    const daysLeft = 28 - Math.round((todayD - startDate) / 86400000);
+                    if (daysLeft < 5 && daysLeft >= -30) return { plate: v.plate, daysLeft };
+                    return null;
+                  }).filter(Boolean);
+
+                  const alerts = [
+                    ...tachoAlerts.map(t => ({ type: "red", text: t.daysLeft >= 0 ? `${t.plate} — tacho: ${t.daysLeft} dni do powrotu` : `${t.plate} — tacho: przekroczone o ${Math.abs(t.daysLeft)} dni` })),
+                    overdueInv > 0 && { type: "red", text: `${overdueInv} ${overdueInv===1?"faktura":"faktury"} po terminie płatności` },
+                    expiredDocs > 0 && { type: "red", text: `${expiredDocs} ${expiredDocs===1?"dokument wygasł":"dokumenty wygasły"}` },
+                    docAlerts > 0 && { type: "yellow", text: `${docAlerts} ${docAlerts===1?"dokument wygasa":"dokumenty wygasają"} w ciągu 30 dni` },
+                  ].filter(Boolean);
+
+                  const sprawyAlerts = sprawyList.filter(s =>
+                    !["zamknieta","wygrana","przegrana"].includes(s.status) &&
+                    (s.przypisani||[]).includes(user?.email)
+                  ).map(s => ({ type: "orange", text: `⚡ Sprawa: ${s.numer ? s.numer+" · " : ""}${s.klient}${s.przypomnienie && s.przypomnienie <= todayStr ? " ⏰ dziś!" : s.przypomnienie ? " ("+s.przypomnienie+")" : ""}` }));
+
+                  const allAlerts = [...alerts, ...sprawyAlerts];
+
+                  return (
+                    <div className="bg-white rounded-2xl border border-gray-100 p-4">
+                      <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Wymaga uwagi</div>
+                      {allAlerts.length === 0 ? (
+                        <div className="flex items-center gap-2 text-sm text-green-600">
+                          <span>✅</span> Wszystko w porządku
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {allAlerts.map((a,i) => (
+                            <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium"
+                              style={{
+                                background: a.type==="red" ? "#fef2f2" : a.type==="orange" ? "#fff7ed" : "#fffbeb",
+                                color: a.type==="red" ? "#b91c1c" : a.type==="orange" ? "#c2410c" : "#92400e"
+                              }}>
+                              <span>{a.type==="red" ? "🔴" : "🟡"}</span>
+                              {a.text}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Szybkie akcje */}
+                <div className="bg-white rounded-2xl border border-gray-100 p-4">
+                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Szybkie akcje</div>
+                  <div className="space-y-2">
+                    <button onClick={() => setTab("frachty")}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-gray-700 border border-gray-200 bg-white hover:bg-gray-50 transition-all">
+                      <span className="w-5 flex items-center justify-center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 17V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a1 1 0 0 0 1 1h1.5"/><path d="M13 8h4l4 4v4h-1.5"/><circle cx="7.5" cy="17.5" r="2.5"/><circle cx="17" cy="17.5" r="2.5"/><path d="M10 17.5h4.5"/></svg></span> Dodaj fracht
+                    </button>
+                    <button onClick={() => setShowAddCost(true)}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-gray-700 border border-gray-200 bg-white hover:bg-gray-50 transition-all">
+                      <span className="w-5 flex items-center justify-center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="13" rx="2.5"/><path d="M2 10h20"/><path d="M6 15h4"/></svg></span> Dodaj koszt
+                    </button>
+                    <button onClick={() => setTab("fv")}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-gray-700 border border-gray-200 bg-white hover:bg-gray-50 transition-all">
+                      <span className="w-5 flex items-center justify-center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 8h6"/><path d="M14 12c0-1.5-3-1.5-3 0s3 1.5 3 0"/><path d="M9 17h3"/></svg></span> FV / Płatności
+                    </button>
+                    <button onClick={() => setTab("docs")}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-gray-700 border border-gray-200 bg-white hover:bg-gray-50 transition-all">
+                      <span className="w-5 flex items-center justify-center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-7l-2-2H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/></svg></span> Dokumenty
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* CZAS PRACY — przegląd statusów kierowców */}
+              {(() => {
+                const now = new Date();
+                const todayStr = now.toISOString().slice(0,10);
+                const getStatusLabel = (s) => {
+                  const map = { jazda: "Jazda", pauza9: "Pauza 9h", pauza11: "Pauza 11h", pauza24: "Pauza 24h", pauza45: "Pauza 45h", pauzaInne: "Pauza inne", baza: "Baza" };
+                  return map[s] || s || "—";
+                };
+                const getStatusColor = (s) => {
+                  const map = { jazda: "#15803d", pauza9: "#b45309", pauza11: "#c2410c", pauza24: "#dc2626", pauza45: "#9333ea", pauzaInne: "#0369a1", baza: "#6b7280" };
+                  return map[s] || "#6b7280";
+                };
+                const getStatusBg = (s) => {
+                  const map = { jazda: "#f0fdf4", pauza9: "#fffbeb", pauza11: "#fff7ed", pauza24: "#fef2f2", pauza45: "#faf5ff", pauzaInne: "#f0f9ff", baza: "#f3f4f6" };
+                  return map[s] || "#f9fafb";
+                };
+                const getStatusBorder = (s) => {
+                  const map = { jazda: "#bbf7d0", pauza9: "#fde68a", pauza11: "#fed7aa", pauza24: "#fecaca", pauza45: "#e9d5ff", pauzaInne: "#bae6fd", baza: "#d1d5db" };
+                  return map[s] || "#e5e7eb";
+                };
+
+                const activePauzy = pauzy.filter(p => {
+                  if (p.status === "jazda") return false;
+                  return p.start <= todayStr && p.end >= todayStr;
+                });
+                const futurePauzy = pauzy.filter(p => {
+                  return p.start > todayStr;
+                }).sort((a,b) => a.start.localeCompare(b.start)).slice(0, 5);
+
+                if (activePauzy.length === 0 && futurePauzy.length === 0) return null;
+
+                return (
+                  <div className="bg-white rounded-2xl border border-gray-100 p-4 mt-4">
+                    <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Czas pracy — statusy kierowców</div>
+                    <div className="space-y-2">
+                      {activePauzy.map(p => (
+                        <div key={p.id} className="flex items-center justify-between px-3 py-2.5 rounded-xl text-sm"
+                          style={{ background: getStatusBg(p.status), border: `1px solid ${getStatusBorder(p.status)}` }}>
+                          <div className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: getStatusColor(p.status) }} />
+                            <span className="font-semibold" style={{ color: getStatusColor(p.status) }}>{p.plate}</span>
+                            <span style={{ color: getStatusColor(p.status), opacity: 0.8 }}>{p.driver}</span>
+                          </div>
+                          <div className="text-xs" style={{ color: getStatusColor(p.status) }}>
+                            {getStatusLabel(p.status)} · do {new Date(p.end + "T00:00:00").toLocaleDateString("pl-PL", { day:"numeric", month:"short" })}
+                          </div>
+                        </div>
+                      ))}
+                      {futurePauzy.map(p => {
+                        const startD = new Date(p.start + "T00:00:00");
+                        const daysUntil = Math.ceil((startD - now) / 86400000);
+                        return (
+                          <div key={p.id} className="flex items-center justify-between px-3 py-2.5 rounded-xl text-sm"
+                            style={{ background: "#f0f9ff", border: "1px solid #bfdbfe" }}>
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-blue-500" />
+                              <span className="font-semibold text-blue-700">{p.plate}</span>
+                              <span className="text-blue-600">{p.driver}</span>
+                            </div>
+                            <div className="text-xs text-blue-500">
+                              {getStatusLabel(p.status)} · za {daysUntil} {daysUntil === 1 ? "dzień" : "dni"} ({startD.toLocaleDateString("pl-PL", { day:"numeric", month:"short" })})
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* ══ KOSZTY ══════════════════════════════════════════════════════ */}
+          {tab === "costs" && canSeeTab("costs") && (
+            <div>
+              {showCostsImport && (
+                <CostsImportModal
+                  vehicles={vehicles}
+                  categories={categories}
+                  onImport={(rows) => {
+                    const withIds = rows.map(r => ({ ...r, id: uid() }));
+                    setCosts(p => [...p, ...withIds]);
+                    showToast(`✅ Zaimportowano ${withIds.length} kosztów`);
+                    setShowCostsImport(false);
+                  }}
+                  onClose={() => setShowCostsImport(false)}
+                />
+              )}
+              <div className="flex items-center justify-between mb-5">
+                <PageTitle>Rejestr kosztów</PageTitle>
+                <div className="flex gap-2">
+                  {isAdmin && (
+                    <>
+                      <button onClick={() => setShowCostsImport(true)}
+                        className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 flex items-center gap-2">
+                        📥 Importuj z Excel
+                      </button>
+                      <button onClick={() => setShowExportModal(true)}
+                        className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 flex items-center gap-2">
+                        📊 Exportuj Excel
+                      </button>
+                      <button onClick={importAllCosts}
+                        className="px-4 py-2 rounded-lg text-sm font-semibold border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-700 flex items-center gap-2">
+                        📊 Import 2026
+                      </button>
+                    </>
+                  )}
+                  <button onClick={() => setShowAddCost(true)}
+                    className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
+                    style={{ background: "#111827" }}>
+                    + Dodaj koszt
+                  </button>
+                </div>
+              </div>
+
+              {/* ── FILTR ROK + MIESIĄCE ── */}
+              <div className="flex items-center gap-2 flex-wrap mb-3">
+                <div className="flex gap-1.5 flex-shrink-0">
+                  {[["2026","2026","#0ea5e9","#f0f9ff","#bae6fd"],["2025","2025","#6366f1","#eef2ff","#c7d2fe"],["all","Wszystkie","#111827","#f9fafb","#e5e7eb"]].map(([key,label,color,bg,border]) => {
+                    const active = filterYear===key && filterMonth==="all";
+                    return (
+                      <button key={key} onClick={() => { setCostFilterYear(key); setFilterMonth("all"); }}
+                        className="rounded-xl px-3 py-1.5 transition-all whitespace-nowrap"
+                        style={{ background: active ? bg : "#fff", border: `2px solid ${active ? border : "#f3f4f6"}`, color: active ? color : "#9ca3af", fontWeight: active ? 700 : 500, fontSize: "13px" }}>
+                        {active && "✓ "}{label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {filterYear !== "all" && (
+                  <div className="flex gap-1 flex-wrap">
+                    {["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paź","Lis","Gru"].map((m,i) => {
+                      const mm = `${filterYear}-${String(i+1).padStart(2,"0")}`;
+                      return (
+                        <button key={mm} onClick={() => setFilterMonth(filterMonth===mm ? "all" : mm)}
+                          className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
+                          style={{ background: filterMonth===mm ? "#111827" : "#f3f4f6", color: filterMonth===mm ? "#fff" : "#6b7280" }}>
+                          {m}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* ── FILTRY ── */}
+              <div className="flex flex-wrap gap-2 mb-5">
+                <FSel value={filterVehicle} onChange={setFilterVehicle}
+                  options={[{ value: "all", label: "Wszystkie pojazdy" }, ...vehicles.map((v) => ({ value: v.id, label: v.plate }))]} />
+                <FSel value={filterCat} onChange={setFilterCat}
+                  options={[{ value: "all", label: "Wszystkie kategorie" }, ...categories.map((c) => ({ value: c.id, label: `${c.icon} ${c.label}` }))]} />
+                <FSel value={filterNote} onChange={setFilterNote}
+                  options={[{ value: "all", label: "Wszystkie opisy" }, ...[...new Set(costs.map(c => c.note).filter(Boolean))].sort().map(n => ({ value: n, label: n }))]} />
+              </div>
+
+              {/* ── MINI DASHBOARD ── */}
+              {(() => {
+                const byVehicle = vehicles.map(v => ({
+                  ...v,
+                  total: filteredCosts.filter(c => c.vehicleId === v.id).reduce((s,c) => s + getEUR(c), 0),
+                })).filter(v => v.total > 0).sort((a,b) => b.total - a.total);
+
+                let allCats = [...categories];
+                if (!allCats.find(c => c.id === "wyplata")) allCats.push({ id:"wyplata", label:"Wynagrodzenie", color:"#f43f5e", icon:"👤" });
+                if (!allCats.find(c => c.id === "ubezpieczenie")) allCats.push({ id:"ubezpieczenie", label:"Ubezpieczenie", color:"#10b981", icon:"🛡️" });
+                if (!allCats.find(c => c.id === "oplaty")) allCats.push({ id:"oplaty", label:"E-toll / Autostrady", color:"#8b5cf6", icon:"🛣️" });
+                allCats = allCats.filter(c => c.id !== "myto" && c.id !== "nego" && c.id !== "etoll");
+                const byCat = allCats.map(cat => ({
+                  ...cat,
+                  total: filteredCosts.filter(c => c.category === cat.id).reduce((s,c) => s + getEUR(c), 0),
+                })).filter(c => c.total > 0).sort((a,b) => b.total - a.total);
+
+                const totalEUR = filteredCosts.reduce((s,c) => s + getEUR(c), 0);
+                const totalPLN = filteredTotal;
+
+                // Średnia cena €/L paliwa — łączymy 2 źródła:
+                // A) rekordy kosztów z litrami (importy marzec+)
+                // B) operacyjne.cenaPaliwa ważone paliwoL (starsze miesiące)
+                const fuelWithL = filteredCosts.filter(c => c.category === "paliwo" && (c.liters || 0) > 0);
+                let sumEUR = fuelWithL.reduce((s,c) => s + getEUR(c), 0);
+                let sumL   = fuelWithL.reduce((s,c) => s + (parseFloat(c.liters) || 0), 0);
+                // Zbierz miesiące pokryte przez koszty z litrami
+                const coveredMonths = new Set(fuelWithL.map(c => c.date?.slice(0,7)));
+                // Dodaj z operacyjne miesiące których NIE pokrywają koszty
+                if (operacyjne && operacyjne.length > 0) {
+                  operacyjne.forEach(op => {
+                    if (filterYear !== "all" && op.year !== parseInt(filterYear)) return;
+                    if (filterMonth !== "all") {
+                      const opM = `${op.year}-${String(op.month).padStart(2,"0")}`;
+                      if (opM !== filterMonth) return;
+                    }
+                    const opKey = `${op.year}-${String(op.month).padStart(2,"0")}`;
+                    if (coveredMonths.has(opKey)) return; // ten miesiąc już z kosztów
+                    if (op.cenaPaliwa > 0 && op.paliwoL > 0) {
+                      sumEUR += op.cenaPaliwa * op.paliwoL;
+                      sumL   += op.paliwoL;
+                    }
+                  });
+                }
+                const avgEurPerL = sumL > 0 ? (sumEUR / sumL) : 0;
+
+                return (
+                  <div className="mb-5 space-y-3">
+                    {/* KPI */}
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                      <div className="bg-white rounded-xl p-3 border border-gray-100">
+                        <div className="text-xs text-gray-400 mb-1">Łącznie EUR</div>
+                        <div className="text-lg font-bold text-gray-900">{totalEUR.toLocaleString("pl-PL",{minimumFractionDigits:2,maximumFractionDigits:2})} €</div>
+                      </div>
+                      <div className="bg-white rounded-xl p-3 border border-gray-100">
+                        <div className="text-xs text-gray-400 mb-1">Wpisów</div>
+                        <div className="text-lg font-bold text-gray-900">{filteredCosts.length}</div>
+                      </div>
+                      <div className="bg-white rounded-xl p-3 border border-gray-100">
+                        <div className="text-xs text-gray-400 mb-1">Najdroższe auto</div>
+                        <div className="text-sm font-bold text-gray-900 truncate">{byVehicle[0] ? `${vehicles.find(v=>v.id===byVehicle[0].id)?.plate} · ${byVehicle[0].total.toLocaleString("pl-PL",{maximumFractionDigits:0})} €` : "—"}</div>
+                      </div>
+                      <div className="bg-white rounded-xl p-3 border border-gray-100">
+                        <div className="text-xs text-gray-400 mb-1">Główna kategoria</div>
+                        <div className="text-sm font-bold text-gray-900 truncate">{byCat[0] ? `${byCat[0].icon} ${byCat[0].label}` : "—"}</div>
+                      </div>
+                      <div className="bg-white rounded-xl p-3 border border-gray-100">
+                        <div className="text-xs text-gray-400 mb-1">Śr. cena paliwa</div>
+                        <div className="text-lg font-bold text-gray-900">{avgEurPerL > 0 ? avgEurPerL.toFixed(3) : "—"} €/L</div>
+                      </div>
+                    </div>
+
+                    {/* Paski per pojazd */}
+                    <div className="bg-white rounded-xl p-4 border border-gray-100">
+                      <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Koszty per pojazd</div>
+                      <div className="space-y-2">
+                        {byVehicle.map(v => {
+                          const pct = totalEUR > 0 ? (v.total / totalEUR * 100) : 0;
+                          return (
+                            <div key={v.id} className="flex items-center gap-3">
+                              <div className="text-xs font-medium text-gray-600 w-24 flex-shrink-0">{v.plate}</div>
+                              <div className="flex-1 h-2 rounded-full bg-gray-100 overflow-hidden">
+                                <div className="h-full rounded-full" style={{ width:`${pct}%`, background:"#111827" }} />
+                              </div>
+                              <div className="text-xs font-semibold text-gray-700 w-20 text-right">{v.total.toLocaleString("pl-PL",{maximumFractionDigits:0})} €</div>
+                              <div className="text-xs text-gray-400 w-10 text-right">{pct.toFixed(0)}%</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Paski per kategoria */}
+                    <div className="bg-white rounded-xl p-4 border border-gray-100">
+                      <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Struktura kosztów</div>
+                      <div className="space-y-2">
+                        {byCat.map(cat => {
+                          const pct = totalEUR > 0 ? (cat.total / totalEUR * 100) : 0;
+                          return (
+                            <div key={cat.id} className="flex items-center gap-3">
+                              <div className="text-xs font-medium text-gray-600 w-28 flex-shrink-0">{cat.icon} {cat.label}</div>
+                              <div className="flex-1 h-2 rounded-full bg-gray-100 overflow-hidden">
+                                <div className="h-full rounded-full" style={{ width:`${pct}%`, background: cat.color || "#111827" }} />
+                              </div>
+                              <div className="text-xs font-semibold text-gray-700 w-20 text-right">{cat.total.toLocaleString("pl-PL",{maximumFractionDigits:0})} €</div>
+                              <div className="text-xs text-gray-400 w-10 text-right">{pct.toFixed(0)}%</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+                <div className="hidden md:grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-medium text-gray-400 uppercase tracking-wider">
+                  <span className="col-span-2">Data</span>
+                  <span className="col-span-2">Pojazd</span>
+                  <span className="col-span-2">Kategoria</span>
+                  <span className="col-span-3">Opis</span>
+                  <span className="col-span-2 text-right">Kwota</span>
+                  <span className="col-span-1"></span>
+                </div>
+                {filteredCosts.map((c, i) => {
+                  const v      = vehicles.find((vv) => vv.id === c.vehicleId);
+                  const amtPLN = getPLN(c);
+                  const amtEUR = c.currency === "EUR" ? c.amountEUR : toEUR(c.amountPLN);
+                  return (
+                    <div key={c.id}
+                      className="md:grid md:grid-cols-12 flex flex-wrap gap-y-1 px-5 py-3.5 items-center border-b border-gray-50 hover:bg-gray-50 transition-colors text-sm"
+                      style={{ borderBottomColor: i === filteredCosts.length - 1 ? "transparent" : undefined }}>
+                      <span className="col-span-2 text-gray-400 text-xs w-full md:w-auto" style={{ fontFamily: "'DM Mono', monospace" }}>{fmtDate(c.date)}</span>
+                      <span className="col-span-2 font-medium text-gray-800 text-xs">{v?.plate || "?"}</span>
+                      <div className="col-span-2">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                          style={{ background: catColor(c.category) + "18", color: catColor(c.category) }}>
+                          {catLabel(c.category)}
+                        </span>
+                      </div>
+                      <span className="col-span-3 text-gray-400 text-xs truncate">{c.note || "—"}{c.liters ? ` · ${c.liters} L` : ""}</span>
+                      <div className="col-span-2 text-right">
+                        <div className="font-semibold text-gray-900 text-sm">{fmtEUR(getEUR(c))}</div>
+                        {amtEUR != null && <div className="text-xs text-gray-400">{fmtPLN(amtPLN)}</div>}
+                      </div>
+                      <div className="col-span-1 flex justify-end gap-1">
+                        {canEdit && (
+                        <>
+                        <button onClick={() => setEditCostId(c.id)}
+                          className="w-6 h-6 rounded flex items-center justify-center text-gray-300 hover:text-blue-400 hover:bg-blue-50 transition-all text-xs">✏️</button>
+                        <button onClick={() => deleteCost(c.id)}
+                          className="w-6 h-6 rounded flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-all text-xs">✕</button>
+                        </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {filteredCosts.length === 0 && (
+                  <div className="px-5 py-10 text-center text-gray-400 text-sm">Brak wyników dla wybranych filtrów</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ══ POJAZDY ═════════════════════════════════════════════════════ */}
+          {tab === "vehicles" && canSeeTab("vehicles") && (
+            <div>
+              <div className="flex items-center justify-between mb-5">
+                <PageTitle>Flota pojazdów</PageTitle>
+                {canEdit && (
+                <button onClick={() => setShowAddVehicle(true)}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
+                  style={{ background: "#111827" }}>
+                  + Dodaj pojazd
+                </button>
+                )}
+              </div>
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                {vehicles.filter(v => !v.archived).map((v) => {
+                  const vc      = costs.filter((c) => c.vehicleId === v.id);
+                  const total   = vc.reduce((s, c) => s + getPLN(c), 0);
+                  const topCat  = categories.map((cat) => ({
+                    ...cat, t: vc.filter((c) => c.category === cat.id).reduce((s, c) => s + getPLN(c), 0),
+                  })).sort((a, b) => b.t - a.t)[0];
+                  const hist    = v.driverHistory || [];
+                  const active  = hist.find((d) => !d.to) || null;
+                  const isEditing = editVehicleId === v.id;
+
+                  return (
+                    <div key={v.id} className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+                      {/* ── VEHICLE HEADER ── */}
+                      <div className="flex items-center justify-between px-5 py-4 border-b border-gray-50">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center text-lg">
+                            <VehicleIcon v={v} size={20}/>
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-normal text-gray-500 tracking-wide text-sm">{v.plate}</span>
+                              {v.plate2 && (
+                                <>
+                                  <span className="text-gray-300 text-xs">+</span>
+                                  <span className="font-normal tracking-wide text-sm" style={{ color: "#6366f1" }}>{v.plate2}</span>
+                                  <span className="text-xs px-1.5 py-0.5 rounded-md font-medium" style={{ background: "#eef2ff", color: "#6366f1" }}>przyczepa</span>
+                                </>
+                              )}
+                            </div>
+                            <div className="text-xs text-gray-400">{v.brand} · {v.year} · {v.type}</div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setEditVehicleId(isEditing ? null : v.id)}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                            style={{
+                              background: isEditing ? "#111827" : "#f3f4f6",
+                              color: isEditing ? "#fff" : "#6b7280",
+                            }}>
+                            {isEditing ? "Zamknij" : "✏️ Edytuj"}
+                          </button>
+                          <button onClick={() => setDeleteVehicleModal({ id: v.id, plate: v.plate })}
+                            className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-all text-xs">✕</button>
+                        </div>
+                      </div>
+
+                      {/* ── STATS ROW ── */}
+                      <div className="grid grid-cols-2 divide-x divide-gray-50 border-b border-gray-50">
+                        <div className="px-4 py-3">
+                          <div className="text-xs text-gray-400 mb-0.5">We flocie od</div>
+                          <div className="font-bold text-gray-900 text-sm">{v.fleetJoinDate ? new Date(v.fleetJoinDate).toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric"}) : "—"}</div>
+                          {v.fleetLeaveDate && <div className="text-xs text-red-400">do {new Date(v.fleetLeaveDate).toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric"})}</div>}
+                        </div>
+                        <div className="px-4 py-3">
+                          <div className="text-xs text-gray-400 mb-0.5">Rodzaj</div>
+                          <div className="text-xs font-medium text-gray-700 leading-tight">
+                            {v.type}{v.plate2 ? " + Przyczepa" : ""}
+                            {(v.equipment||[]).includes("winda") ? " + winda" : ""}
+                            {(v.equipment||[]).includes("paleciak") ? " + paleciak" : ""}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* ── TECH SPECS ── */}
+                      <div className="px-5 py-3 border-b border-gray-50">
+                        <div className="grid grid-cols-1 gap-1.5">
+                          {/* VIN + Wartość */}
+                          {(v.vin || v.wartoscNet) && (
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pb-1.5 mb-0.5 border-b border-dashed border-gray-100">
+                              {v.vin && (
+                                <div className="col-span-2 flex items-center gap-2">
+                                  <span className="text-xs text-gray-400 w-20 flex-shrink-0">VIN</span>
+                                  <span className="text-xs font-medium text-gray-700" style={{ fontFamily: "'DM Mono', monospace" }}>{v.vin}</span>
+                                </div>
+                              )}
+                              {v.wartoscNet && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs text-gray-400 w-20 flex-shrink-0">Wartość</span>
+                                  <span className="text-xs font-medium text-gray-700">{Number(v.wartoscNet).toLocaleString("pl-PL")} zł</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          <div className={`grid gap-x-4 gap-y-1.5 ${v.plate2 ? "grid-cols-2" : "grid-cols-2"}`}>
+                            {v.dimensions && (
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-gray-400 w-20 flex-shrink-0">{v.plate2 ? `${v.plate} wym.` : "Wymiary"}</span>
+                                <span className="text-xs font-medium text-gray-700" style={{ fontFamily: "'DM Mono', monospace" }}>{v.dimensions}</span>
+                              </div>
+                            )}
+                            {v.maxWeight && (
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-gray-400 w-20 flex-shrink-0">{v.plate2 ? `${v.plate} waga` : "Max waga"}</span>
+                                <span className="text-xs font-medium text-gray-700">{v.maxWeight} kg</span>
+                              </div>
+                            )}
+                          </div>
+                          {/* Ubezpieczenia */}
+                          {(v.ocNumber || v.ocAmount || v.acNumber || v.acAmount || v.caloscPolis || v.gap || v.assistance || v.autoszyba || v.nnw) && (
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-1.5 mt-0.5 border-t border-dashed border-gray-100">
+                              {v.ocNumber && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">OC nr</span><span className="text-xs font-medium text-gray-700" style={{fontFamily:"'DM Mono',monospace"}}>{v.ocNumber}</span></div>}
+                              {v.ocAmount && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">OC składka</span><span className="text-xs font-medium text-gray-700">{v.ocAmount} zł</span></div>}
+                              {v.acNumber && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">AC nr</span><span className="text-xs font-medium text-gray-700" style={{fontFamily:"'DM Mono',monospace"}}>{v.acNumber}</span></div>}
+                              {v.acAmount && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">AC składka</span><span className="text-xs font-medium text-gray-700">{v.acAmount} zł</span></div>}
+                              {v.assistance && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">Assistance</span><span className="text-xs font-medium text-gray-700">{v.assistance} zł</span></div>}
+                              {v.autoszyba && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">Autoszyba</span><span className="text-xs font-medium text-gray-700">{v.autoszyba} zł</span></div>}
+                              {v.nnw && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">NNW</span><span className="text-xs font-medium text-gray-700">{v.nnw} zł</span></div>}
+                              {v.ochronaZnizki && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">Ochr. zniżki</span><span className="text-xs font-medium text-gray-700">{v.ochronaZnizki} zł</span></div>}
+                              {v.caloscPolis && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">Polisy łącznie</span><span className="text-xs font-semibold text-gray-900">{v.caloscPolis} zł</span></div>}
+                              {v.gap && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">GAP</span><span className="text-xs font-medium text-gray-700">{v.gap} zł{v.gapExpiry ? ` · do ${new Date(v.gapExpiry).toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric"})}` : ""}</span></div>}
+                            </div>
+                          )}
+                          {v.plate2 && (
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-1.5 mt-0.5 border-t border-dashed border-gray-100">
+                              {v.dimensions2 && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs w-20 flex-shrink-0" style={{ color: "#6366f1" }}>{v.plate2} wym.</span>
+                                  <span className="text-xs font-medium text-gray-700" style={{ fontFamily: "'DM Mono', monospace" }}>{v.dimensions2}</span>
+                                </div>
+                              )}
+                              {v.maxWeight2 && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs w-20 flex-shrink-0" style={{ color: "#6366f1" }}>{v.plate2} waga</span>
+                                  <span className="text-xs font-medium text-gray-700">{v.maxWeight2} kg</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {v.loadingType && (
+                            <div className="flex items-center gap-2 pt-1">
+                              <span className="text-xs text-gray-400 w-20 flex-shrink-0">Załadunek</span>
+                              <span className="text-xs font-medium text-gray-700">{v.loadingType}</span>
+                            </div>
+                          )}
+                        </div>
+                        {/* WYPOSAŻENIE */}
+                        {((v.equipment?.length > 0) || (v.customEquipment?.length > 0)) && (
+                          <div className="mt-2.5 pt-2.5 border-t border-gray-50">
+                            <div className="text-xs text-gray-400 mb-1.5">Wyposażenie</div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {(v.equipment || []).map((id) => {
+                                const eq = DEFAULT_EQUIPMENT.find((e) => e.id === id);
+                                return eq ? (
+                                  <span key={id} className="px-2 py-0.5 rounded-full text-xs font-medium"
+                                    style={{ background: "#f3f4f6", color: "#374151" }}>
+                                    {eq.label}
+                                  </span>
+                                ) : null;
+                              })}
+                              {(v.customEquipment || []).map((item, i) => (
+                                <span key={i} className="px-2 py-0.5 rounded-full text-xs font-medium"
+                                  style={{ background: "#eff6ff", color: "#3b82f6" }}>
+                                  {item}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* ── SERVICE & INSURANCE PANEL ── */}
+                      <VehicleServicePanel vehicle={v} />
+
+                      {/* ── CURRENT DRIVER ── */}
+                      <DriverCopyRow vehicle={v} active={active} />
+
+                      {/* ── EDIT PANEL ── */}
+                      {isEditing && (
+                        <VehicleEditPanel
+                          vehicle={v}
+                          onSave={updateVehicle}
+                          onClose={() => setEditVehicleId(null)}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* ARCHIWUM POJAZDÓW */}
+              {vehicles.filter(v => v.archived).length > 0 && (
+                <div className="mt-8">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="h-px flex-1 bg-gray-100" />
+                    <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-2">Archiwum pojazdów</span>
+                    <div className="h-px flex-1 bg-gray-100" />
+                  </div>
+                  <div className="space-y-2">
+                    {vehicles.filter(v => v.archived).map(v => (
+                      <div key={v.id} className="flex items-center justify-between px-4 py-3 rounded-xl border border-dashed border-gray-200 bg-gray-50">
+                        <div className="flex items-center gap-3">
+                          <span className="text-xl opacity-30"><VehicleIcon v={v} size={20}/></span>
+                          <div>
+                            <div className="text-sm font-semibold text-gray-400">{v.plate}{v.plate2 ? ` / ${v.plate2}` : ""}</div>
+                            <div className="text-xs text-gray-400">{v.brand} · {v.year}</div>
+                          </div>
+                        </div>
+                        <div className="flex-1 mx-4 text-right">
+                          {v.archivedReason && <div className="text-xs text-gray-500">{v.archivedReason}</div>}
+                          {v.archivedDate && <div className="text-xs text-gray-300">{v.archivedDate}</div>}
+                        </div>
+                        <button onClick={() => { setVehicles(p => p.map(vv => vv.id===v.id ? (({archived, archivedDate, archivedReason, ...rest}) => rest)(vv) : vv)); logAction("update", "vehicles", { id: v.id, plate: v.plate, action: "restore" }); }}
+                          className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-400 hover:text-gray-700 hover:border-gray-300 transition-all flex-shrink-0">
+                          Przywróć
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ══ DOKUMENTY ══════════════════════════════════════════════════ */}
+          {tab === "docs" && canSeeTab("docs") && (
+            <DocsTab
+              docs={docs} vehicles={vehicles}
+              onAdd={(d) => setDocs((p) => [...p, { ...d, id: uid() }])}
+              onDelete={(id) => setDocs((p) => p.filter((d) => d.id !== id))}
+              onEdit={(id, data) => setDocs((p) => p.map((d) => d.id === id ? { ...d, ...data } : d))}
+            />
+          )}
+
+          {tab === "rent" && canSeeTab("rent") && (
+            <RentownoscTab
+              vehicles={vehicles}
+              records={rentRecords}
+              frachtyList={frachtyList}
+              costs={costs}
+              eurRate={eurRate}
+              operacyjne={operacyjne}
+              onSaveOperacyjne={async (id, data) => {
+                try { await updateDoc(doc(db, "operacyjne", id), data); logAction("update", "operacyjne", { id }); }
+                catch { await addDoc(collection(db, "operacyjne"), {...data, id}); logAction("add", "operacyjne", { id }); }
+              }}
+              onAdd={(r) => setRentRecords(p => [...p, { ...r, id: uid() }])}
+              onUpdate={(id, data) => setRentRecords(p => p.map(r => r.id === id ? { ...r, ...data } : r))}
+              onDelete={(id) => setRentRecords(p => p.filter(r => r.id !== id))}
+            />
+          )}
+
+          {tab === "serwis" && canSeeTab("serwis") && (
+            <ServisTab vehicles={vehicles} onUpdateVehicle={updateVehicle} />
+          )}
+
+          {tab === "frachty" && canSeeTab("frachty") && (
+            <FrachtyTab
+              frachtyList={frachtyList}
+              vehicles={vehicles}
+              driverEvents={driverEvents}
+              onAdd={(r) => { const fid = uid(); setFrachtyList(p => [{ ...r, id: fid }, ...p]); logAction("add", "frachty", { id: fid, vehicleId: r.vehicleId, dokod: r.dokod }); }}
+              onDelete={(id) => { setFrachtyList(p => p.filter(r => r.id !== id)); logAction("delete", "frachty", { id }); }}
+              onUpdate={(id, data) => { setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r)); logAction("update", "frachty", { id }); }}
+              onBulkAdd={(rows) => {
+                const withIds = rows.map(r => ({ ...r, id: uid() }));
+                setFrachtyList(p => [...p, ...withIds]);
+                logAction("bulkAdd", "frachty", { count: withIds.length });
+                showToast(`✅ Zaimportowano ${withIds.length} frachtów`);
+              }}
+            />
+          )}
+          {tab === "fv" && canSeeTab("fv") && (
+            <FVTab
+              frachtyList={frachtyList}
+              vehicles={vehicles}
+              onUpdate={(id, data) => setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r))}
+            />
+          )}
+          {tab === "imi" && canSeeTab("imi") && (
+            <ImiTab
+              imiRecords={imiRecords}
+              vehicles={vehicles}
+              onAdd={(r) => setImiRecords(p => [...p, { ...r, id: uid() }])}
+              onDelete={(id) => setImiRecords(p => p.filter(r => r.id !== id))}
+            />
+          )}
+
+          {tab === "payments" && canSeeTab("payments") && (
+            <PaymentsTab
+              payments={payments}
+              showToast={showToast}
+              isAdmin={isAdmin}
+            />
+          )}
+
+          {tab === "users" && isAdmin && (
+            <UsersTab currentUid={user.uid} showToast={showToast} vehicles={vehicles} setVehicles={setVehicles} />
+          )}
+
+          {tab === "email" && isAdmin && (
+            <EmailStatusTab showToast={showToast} />
+          )}
+
+          {tab === "logi" && isAdmin && (
+            <AuditLogTab />
+          )}
+
+          {tab === "chat" && canSeeTab("chat") && (() => {
+            const isMob = typeof window !== 'undefined' && window.innerWidth < 768;
+            // Na mobile chat renderuje się w overlay poniżej
+            if (isMob) return null;
+            return (
+              <div style={{ height: "calc(100vh - 2rem)" }}>
+                <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} onActiveRoomChange={setChatHasActiveRoom} />
+              </div>
+            );
+          })()}
+
+          {tab === "kierowcy" && canSeeTab("kierowcy") && (() => {
+            // ── PANEL KIEROWCÓW — podgląd tankowań, dokumentów, statusów ──
+            // Drivers list (from users with role kierowca + assigned vehicles)
+            const drivers = appUsers.filter(u => u.role === "kierowca");
+            const driverEmails = drivers.map(d => d.email);
+
+            // Filtered data
+            const filteredFuel = dkFilter === "all"
+              ? fuelEntries
+              : fuelEntries.filter(fe => fe.driverEmail === dkFilter || fe.vehicleId === dkFilter);
+            const filteredDocs = dkFilter === "all"
+              ? driverDocs
+              : driverDocs.filter(dd => dd.driverEmail === dkFilter);
+            const filteredEvents = dkFilter === "all"
+              ? driverEvents
+              : driverEvents.filter(de => de.driverEmail === dkFilter || de.vehicleId === dkFilter);
+
+            const fmtD = (d) => { if (!d) return "—"; const parts = d.split(/[-T ]/); return parts.length >= 3 ? `${parts[2]}.${parts[1]}.${parts[0]}` : d; };
+            const countryFlag = (c) => ({PL:"\u{1F1F5}\u{1F1F1}",DE:"\u{1F1E9}\u{1F1EA}",NL:"\u{1F1F3}\u{1F1F1}",BE:"\u{1F1E7}\u{1F1EA}",FR:"\u{1F1EB}\u{1F1F7}",CZ:"\u{1F1E8}\u{1F1FF}",AT:"\u{1F1E6}\u{1F1F9}",IT:"\u{1F1EE}\u{1F1F9}"})[c]||c||"";
+            const DOC_TYPES = {paragon:"🧾",faktura:"📄",mandat:"⚠️",serwis:"🔧",opony:"🔄",mycie:"🚿",parking:"🅿️",autostrada:"🛣️",hotel:"🏨",inne:"📋"};
+            const driverLabel = (email) => {
+              const u = appUsers.find(a => a.email === email);
+              return u ? (u.displayName || u.name || email.split("@")[0]) : email;
+            };
+            const vehicleLabel = (vid) => {
+              const v = vehicles.find(x => x.id === vid);
+              return v ? v.plate : vid;
+            };
+
+            return (
+              <div>
+                <h2 className="text-xl font-bold text-gray-800 mb-4">Panel kierowców</h2>
+
+                {/* Filter bar */}
+                <div className="flex flex-wrap items-center gap-2 mb-4">
+                  <select value={dkFilter} onChange={e => setDkFilter(e.target.value)}
+                    className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white" style={{minWidth:200}}>
+                    <option value="all">Wszyscy kierowcy</option>
+                    {drivers.map(d => (
+                      <option key={d.email} value={d.email}>{d.displayName || d.name || d.email}</option>
+                    ))}
+                  </select>
+
+                  {/* Section tabs */}
+                  <div className="flex gap-1 ml-auto">
+                    {[["tankowania","⛽ Tankowania"],["dokumenty","📄 Dokumenty"],["statusy","🚛 Statusy"]].map(([k,l]) => (
+                      <button key={k} onClick={() => setDkSection(k)}
+                        className="px-3 py-2 rounded-lg text-sm font-medium transition-all"
+                        style={{
+                          background: dkSection === k ? "#1e40af" : "#f1f5f9",
+                          color: dkSection === k ? "#fff" : "#64748b",
+                        }}>{l}</button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* ── TANKOWANIA ── */}
+                {dkSection === "tankowania" && (
+                  <div className="space-y-2">
+                    {filteredFuel.length === 0 && <div className="text-center py-8 text-gray-400">Brak tankowań</div>}
+                    <div className="overflow-x-auto">
+                      {filteredFuel.length > 0 && (
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-left text-xs text-gray-500 border-b border-gray-100">
+                              <th className="pb-2 pr-3">Data</th>
+                              <th className="pb-2 pr-3">Kierowca</th>
+                              <th className="pb-2 pr-3">Pojazd</th>
+                              <th className="pb-2 pr-3 text-right">Litry</th>
+                              <th className="pb-2 pr-3 text-right">Przebieg</th>
+                              <th className="pb-2 pr-3">Stacja</th>
+                              <th className="pb-2 pr-3">Kraj</th>
+                              <th className="pb-2 pr-3 text-right">Cena/L</th>
+                              <th className="pb-2 pr-3">Typ</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {[...filteredFuel].sort((a,b) => (b.date||"").localeCompare(a.date||"")).map(fe => (
+                              <tr key={fe.id} className="border-b border-gray-50 hover:bg-gray-50">
+                                <td className="py-2 pr-3 text-gray-700">{fmtD(fe.date)}</td>
+                                <td className="py-2 pr-3 text-gray-600">{driverLabel(fe.driverEmail)}</td>
+                                <td className="py-2 pr-3 font-medium text-gray-800">{vehicleLabel(fe.vehicleId)}</td>
+                                <td className="py-2 pr-3 text-right font-semibold" style={{color: fe.isAdblue ? "#0284c7" : "#059669"}}>{(fe.liters||0).toLocaleString("pl-PL")} L</td>
+                                <td className="py-2 pr-3 text-right text-gray-600">{fe.mileage ? fe.mileage.toLocaleString("pl-PL") : "—"}</td>
+                                <td className="py-2 pr-3 text-gray-500">{fe.station || "—"}</td>
+                                <td className="py-2 pr-3">{countryFlag(fe.country)}</td>
+                                <td className="py-2 pr-3 text-right text-gray-500">{fe.pricePerL ? `${fe.pricePerL.toFixed(2)} ${fe.currency||"EUR"}` : "—"}</td>
+                                <td className="py-2 pr-3">
+                                  {fe.isAdblue && <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-sky-100 text-sky-700">AdBlue</span>}
+                                  {fe.fullTank && !fe.isAdblue && <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">FULL</span>}
+                                  {!fe.fullTank && !fe.isAdblue && <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-500">Diesel</span>}
+                                  {fe.adblueL > 0 && !fe.isAdblue && <span className="ml-1 text-xs text-sky-600">+{fe.adblueL}L AB</span>}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                    {/* Podsumowanie */}
+                    {filteredFuel.length > 0 && (() => {
+                      const diesel = filteredFuel.filter(f => !f.isAdblue).reduce((s,f) => s + (f.liters||0), 0);
+                      const adblue = filteredFuel.reduce((s,f) => s + (f.isAdblue ? (f.liters||0) : 0) + (f.adblueL||0), 0);
+                      return (
+                        <div className="flex gap-4 mt-3 pt-3 border-t border-gray-100 text-sm">
+                          <span className="text-gray-500">Razem: <strong className="text-green-700">{diesel.toLocaleString("pl-PL")} L diesel</strong></span>
+                          {adblue > 0 && <span className="text-gray-500">| <strong className="text-sky-700">{adblue.toLocaleString("pl-PL")} L AdBlue</strong></span>}
+                          <span className="text-gray-500">| <strong className="text-gray-800">{filteredFuel.length} tankowań</strong></span>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {/* ── DOKUMENTY ── */}
+                {dkSection === "dokumenty" && (
+                  <div className="space-y-2">
+                    {filteredDocs.length === 0 && <div className="text-center py-8 text-gray-400">Brak dokumentów</div>}
+                    {[...filteredDocs].sort((a,b) => (b.createdAt||"").localeCompare(a.createdAt||"")).map(dd => (
+                      <div key={dd.id} className="bg-white rounded-xl border border-gray-100 p-4 flex items-start gap-3">
+                        <div className="text-2xl">{DOC_TYPES[dd.type] || "📋"}</div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-gray-800 text-sm">{dd.description}</div>
+                          <div className="text-xs text-gray-400 mt-1">
+                            <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">{dd.type}</span>
+                            <span className="ml-2">{driverLabel(dd.driverEmail)}</span>
+                            <span className="ml-2">{fmtD(dd.createdAt)}</span>
+                            {dd.vehicleId && <span className="ml-2 text-gray-500">{vehicleLabel(dd.vehicleId)}</span>}
+                          </div>
+                        </div>
+                        {dd.photoUrl && (
+                          <a href={dd.photoUrl} target="_blank" rel="noopener noreferrer">
+                            <img src={dd.photoUrl} alt="" className="w-16 h-16 object-cover rounded-lg border border-gray-200"/>
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* ── STATUSY (driverEvents) ── */}
+                {dkSection === "statusy" && (
+                  <div className="space-y-2">
+                    {filteredEvents.length === 0 && <div className="text-center py-8 text-gray-400">Brak zdarzeń</div>}
+                    <div className="overflow-x-auto">
+                      {filteredEvents.length > 0 && (
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-left text-xs text-gray-500 border-b border-gray-100">
+                              <th className="pb-2 pr-3">Czas</th>
+                              <th className="pb-2 pr-3">Kierowca</th>
+                              <th className="pb-2 pr-3">Typ</th>
+                              <th className="pb-2 pr-3">Pojazd</th>
+                              <th className="pb-2 pr-3">Zdjęcie</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {[...filteredEvents].sort((a,b) => (b.ts||"").localeCompare(a.ts||"")).slice(0, 100).map(de => {
+                              const typeLabels = {
+                                dotarcie_zaladunek: "📍 Dotarcie załadunek",
+                                zaladowano: "📦 Załadowano",
+                                start_rozladunek: "🚛 Start do rozładunku",
+                                dotarcie_rozladunek: "📍 Dotarcie rozładunek",
+                                rozladowano: "✅ Rozładowano",
+                                towar_photo: "📷 Zdjęcie towaru",
+                                cmr_zaladunek_photo: "📄 CMR załadunek",
+                                cmr_rozladunek_photo: "📄 CMR rozładunek",
+                                towar_damage_photo: "⚠️ Uszkodzenia",
+                                uwagi_zaladunek: "📝 Uwagi załadunek",
+                                uwagi_rozladunek: "📝 Uwagi rozładunek",
+                              };
+                              const tLabel = typeLabels[de.type] || de.type;
+                              const tsStr = de.ts ? de.ts.replace("T"," ").slice(0,16) : "—";
+                              return (
+                                <tr key={de.id} className="border-b border-gray-50 hover:bg-gray-50">
+                                  <td className="py-2 pr-3 text-gray-600 text-xs">{tsStr}</td>
+                                  <td className="py-2 pr-3 text-gray-700">{driverLabel(de.driverEmail)}</td>
+                                  <td className="py-2 pr-3">{tLabel}</td>
+                                  <td className="py-2 pr-3 text-gray-500">{vehicleLabel(de.vehicleId)}</td>
+                                  <td className="py-2 pr-3">
+                                    {de.photoUrl && <a href={de.photoUrl} target="_blank" rel="noopener noreferrer"><img src={de.photoUrl} alt="" className="w-10 h-10 object-cover rounded border border-gray-200"/></a>}
+                                    {de.note && <span className="text-xs text-gray-500 italic">{de.note.slice(0,50)}{de.note.length > 50 ? "…" : ""}</span>}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {tab === "sprawy" && canSeeTab("sprawy") && (
+            <SprawyTab
+              sprawyList={sprawyList}
+              vehicles={vehicles}
+              costs={costs}
+              updateCost={updateCost}
+              currentUser={user}
+              appUsers={appUsers}
+              eurRate={eurRate}
+              eurRateDate={eurRateDate}
+              showToast={showToast}
+              onAdd={async (s) => { try { const ref = await addDoc(collection(db, "sprawy"), { ...s, dataUtworzenia: new Date().toISOString() }); logAction("add", "sprawy", { id: ref.id, typ: s.typ, kierowca: s.kierowca }); showToast("✅ Sprawa dodana"); } catch(e) { console.error("onAdd sprawa", e); showToast("❌ Błąd dodawania sprawy"); } }}
+              onUpdate={async (id, data) => {
+                try {
+                  if (data._addZdarzenie) {
+                    const { _addZdarzenie, ...rest } = data;
+                    const updates = { ...rest };
+                    if (Object.keys(updates).length > 0) await updateDoc(doc(db, "sprawy", id), updates);
+                    await updateDoc(doc(db, "sprawy", id), { zdarzenia: arrayUnion(_addZdarzenie) });
+                    logAction("update", "sprawy", { id, addedZdarzenie: true });
+                  } else {
+                    await updateDoc(doc(db, "sprawy", id), data);
+                    logAction("update", "sprawy", { id });
+                  }
+                } catch(e) { console.error("onUpdate sprawa", e); }
+              }}
+              onDelete={async (id) => { try { await deleteDoc(doc(db, "sprawy", id)); logAction("delete", "sprawy", { id }); showToast("✅ Sprawa usunięta"); } catch(e) { console.error("onDelete sprawa", e); showToast("❌ Błąd usuwania"); } }}
+            />
+          )}
+
+        </main>
+      </div>
+
+      {/* ═══ FLOATING CHAT POPUP ═══ */}
+      {chatFloat && tab !== "chat" && (() => {
+        const isMobile = window.innerWidth < 768;
+        // Na mobile → redirect do pełnego czatu zamiast floating popup
+        if (isMobile) { setChatFloat(false); setTab("chat"); return null; }
+        const sizes = {
+          normal: { w: "min(650px, 52vw)", h: "min(72vh, 600px)" },
+          large:  { w: "min(850px, 68vw)", h: "min(88vh, 780px)" },
+        };
+        const s = sizes[chatSize] || sizes.normal;
+        return (
+        <div className="fixed z-40" style={{
+          bottom: 12, right: 16,
+          width: s.w, height: s.h,
+          borderRadius: "16px",
+          transition: "width 0.3s ease, height 0.3s ease",
+        }}>
+          <div className="flex flex-col h-full shadow-2xl overflow-hidden" style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '16px' }}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-2 flex-shrink-0" style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+              <span className="font-semibold text-sm flex items-center gap-2" style={{ color: '#1e293b' }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                Czat
+                {chatUnreadCount > 0 && <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold" style={{ background: '#3b82f6', color: '#fff' }}>{chatUnreadCount}</span>}
+              </span>
+              <div className="flex items-center gap-1">
+                {/* Przełącznik rozmiaru */}
+                {!isMobile && (
+                  <button onClick={() => setChatSize(chatSize === "normal" ? "large" : "normal")}
+                    className="p-1.5 rounded-lg transition-colors text-gray-400 hover:bg-gray-200 hover:text-gray-600"
+                    title={chatSize === "normal" ? "Powiększ" : "Pomniejsz"}>
+                    {chatSize === "normal"
+                      ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/></svg>
+                      : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/></svg>
+                    }
+                  </button>
+                )}
+                {/* Pełny ekran */}
+                <button onClick={() => { setTab("chat"); setChatFloat(false); }} className="p-1.5 rounded-lg transition-colors text-gray-400 hover:bg-gray-200 hover:text-gray-600" title="Pełny ekran">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                </button>
+                {/* Zamknij */}
+                <button onClick={() => setChatFloat(false)} className="p-1.5 rounded-lg transition-colors text-gray-400 hover:bg-gray-200 hover:text-gray-600" title="Zamknij">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+            </div>
+            {/* ChatTab */}
+            <div className="flex-1 overflow-hidden">
+              <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} />
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* FLOATING CHAT BUBBLE — widoczna gdy czat nie jest otwarty */}
+      {!chatFloat && tab !== "chat" && (
+        <button onClick={() => { if (window.innerWidth < 768) { setTab("chat"); } else { setChatFloat(true); } }}
+          className={`fixed z-40 shadow-lg hover:shadow-xl transition-all hover:scale-105 active:scale-95 ${chatUnreadCount > 0 ? "animate-bounce" : ""}`}
+          style={{
+            bottom: window.innerWidth < 768 ? "calc(70px + env(safe-area-inset-bottom, 0px))" : "24px",
+            right: "20px",
+            width: "56px", height: "56px", borderRadius: "50%",
+            background: chatUnreadCount > 0 ? "linear-gradient(135deg, #ef4444, #dc2626)" : "linear-gradient(135deg, #3b82f6, #1d4ed8)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            animationIterationCount: chatUnreadCount > 0 ? 3 : 0,
+          }}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          {chatUnreadCount > 0 && (<>
+            {/* Pulsujący ping */}
+            <span className="absolute inset-0 rounded-full animate-ping opacity-30" style={{ background: "#ef4444" }}/>
+            {/* Badge z liczbą */}
+            <span className="absolute -top-1 -right-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-500 text-white min-w-[20px] text-center shadow-md">{chatUnreadCount}</span>
+          </>)}
+        </button>
+      )}
+
+      {/* MOBILE BOTTOM NAV — ukryty gdy czat z otwartą rozmową (mobile fullscreen) */}
+      <div className={`fixed bottom-0 left-0 right-0 md:hidden bg-white border-t border-gray-100 safe-area-pb ${tab === "chat" && chatHasActiveRoom ? "hidden" : ""}`}
+        style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+        <div className="flex overflow-x-auto px-2 py-1.5 gap-1 no-scrollbar">
+          {[
+            { id: "dashboard", label: "Przegląd", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></svg> },
+            { id: "frachty", label: "Frachty", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 17V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a1 1 0 0 0 1 1h1.5"/><path d="M13 8h4l4 4v4h-1.5"/><circle cx="7.5" cy="17.5" r="2.5"/><circle cx="17" cy="17.5" r="2.5"/><path d="M10 17.5h4.5"/></svg> },
+            ...(canFinance ? [
+              { id: "fv", label: "FV", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 8h6"/><path d="M14 12c0-1.5-3-1.5-3 0s3 1.5 3 0"/><path d="M9 17h3"/></svg> },
+              { id: "costs", label: "Koszty", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="13" rx="2.5"/><path d="M2 10h20"/><path d="M6 15h4"/></svg> },
+            ] : []),
+            { id: "vehicles", label: "Pojazdy", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="6" width="11" height="10" rx="2"/><path d="M14 10h3.5l3 3v3a1 1 0 0 1-1 1h-1"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M9 17h6"/><path d="M3 16h1.5"/></svg> },
+            ...(canFinance ? [
+              { id: "rent", label: "Rentow.", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg> },
+            ] : []),
+            { id: "docs", label: "Dok.", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> },
+            { id: "imi", label: "IMI", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> },
+            { id: "serwis", label: "Serwis", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> },
+            ...((isAdmin||isDyspozytor) ? [
+              { id: "sprawy", label: "Sprawy", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v6"/><line x1="7" y1="13" x2="12" y2="13"/><line x1="7" y1="17" x2="10" y2="17"/></svg> },
+            ] : []),
+            ...(isAdmin ? [
+              { id: "kierowcy", label: "Kierowcy", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><circle cx="12" cy="12" r="10"/></svg> },
+            ] : []),
+            { id: "chat", label: "Czat", badge: chatUnreadCount || null, icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> },
+            ...(isAdmin ? [
+              { id: "users", label: "Osoby", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
+              { id: "email", label: "Email", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> },
+            ] : []),
+          ].map((item) => (
+            <button key={item.id} onClick={() => setTab(item.id)}
+              className="flex-shrink-0 flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all min-w-14"
+              style={{ color: tab === item.id ? "#111827" : "#9ca3af", background: tab === item.id ? "#f3f4f6" : "transparent", fontWeight: tab === item.id ? 600 : 400 }}>
+              <span className="leading-none relative">
+                {item.icon}
+                {item.badge ? <span className="absolute -top-1.5 -right-2.5 px-1 py-0 rounded-full text-[9px] font-bold leading-tight" style={{background:"#ef4444",color:"#fff",minWidth:"14px",textAlign:"center"}}>{item.badge}</span> : null}
+              </span>
+              <span className="text-xs leading-none mt-0.5">{item.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── MOBILE FULLSCREEN CHAT OVERLAY ── */}
+      {tab === "chat" && typeof window !== 'undefined' && window.innerWidth < 768 && (
+        <MobileChatOverlay hasActiveRoom={chatHasActiveRoom}>
+          <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} onActiveRoomChange={setChatHasActiveRoom} />
+        </MobileChatOverlay>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MOBILE CHAT OVERLAY — uses visualViewport to perfectly match keyboard
+// ═══════════════════════════════════════════════════════════════════════════════
+function MobileChatOverlay({ children, hasActiveRoom }) {
+  const ref = useRef(null);
+
+  // Lock body scroll when overlay is mounted
+  useEffect(() => {
+    const orig = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = orig; };
+  }, []);
+
+  // visualViewport tracking — only resize (keyboard open/close), no scroll
+  useEffect(() => {
+    if (!hasActiveRoom) return;
+    const el = ref.current;
+    if (!el) return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const onResize = () => {
+      el.style.height = `${vv.height}px`;
+      // Delayed offsetTop — iOS updates it after resize animation
+      setTimeout(() => {
+        el.style.top = `${vv.offsetTop}px`;
+        // Scroll chat to bottom
+        const scrollable = el.querySelector('[data-chat-messages]');
+        if (scrollable) scrollable.scrollTop = scrollable.scrollHeight;
+      }, 100);
+    };
+
+    onResize();
+    vv.addEventListener('resize', onResize);
+
+    return () => {
+      vv.removeEventListener('resize', onResize);
+      el.style.height = '';
+      el.style.top = '0px';
+    };
+  }, [hasActiveRoom]);
+
+  return (
+    <div ref={ref} style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      zIndex: 50,
+      display: 'flex',
+      flexDirection: 'column',
+      background: '#fff',
+      paddingTop: 'env(safe-area-inset-top, 0px)',
+      paddingBottom: hasActiveRoom ? '0px' : 'calc(60px + env(safe-area-inset-bottom, 0px))',
+      overflow: hasActiveRoom ? 'hidden' : 'auto',
+      overscrollBehavior: 'contain',
+      WebkitOverflowScrolling: 'touch',
+    }}>
+      {children}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CHAT TAB — pełna wersja z edycją, usuwaniem, reply, reakcjami, zarządzaniem pokojami
+// ═══════════════════════════════════════════════════════════════════════════════
+function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) {
+  const [rooms, setRooms] = useState([]);
+  const [activeRoom, setActiveRoom] = useState(null);
+
+  // Powiadom rodzica o zmianie aktywnego pokoju (mobile nav)
+  useEffect(() => { if (onActiveRoomChange) onActiveRoomChange(!!activeRoom); }, [activeRoom]);
+  const [messages, setMessages] = useState([]);
+  const [msgText, setMsgText] = useState("");
+  const [showNewRoom, setShowNewRoom] = useState(false);
+  const [newRoomName, setNewRoomName] = useState("");
+  const [newRoomType, setNewRoomType] = useState("channel");
+  const [newRoomMembers, setNewRoomMembers] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [showMembers, setShowMembers] = useState(false);
+  const [editingMsg, setEditingMsg] = useState(null);
+  const [editText, setEditText] = useState("");
+  const [replyTo, setReplyTo] = useState(null);
+  const [contextMenu, setContextMenu] = useState(null);
+  const [showRoomSettings, setShowRoomSettings] = useState(false);
+  const [editRoomName, setEditRoomName] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showSearch, setShowSearch] = useState(false);
+  const [typingUsers, setTypingUsers] = useState({});
+  const [lastReadMap, setLastReadMap] = useState({});
+  const [pushStatus, setPushStatus] = useState(null); // null | "checking" | {success, error, step, token}
+  const [showPushPanel, setShowPushPanel] = useState(false);
+  const [pushRegistered, setPushRegistered] = useState(() => {
+    try { return localStorage.getItem("pushRegistered") === "1"; } catch { return false; }
+  });
+  const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const prevMsgCountRef = useRef(0);
+  const chatContainerRef = useRef(null);
+  const lastMsgIdRef = useRef(null);
+  const typingTimeoutRef = useRef(null);
+  const msgInputRef = useRef(null);
+  const activeRoomIdRef = useRef(null);
+
+  // Dźwięk powiadomienia
+  const playNotifSound = useRef(() => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.setValueAtTime(1047, ctx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+      osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.3);
+    } catch (e) {}
+  }).current;
+
+  const lastRoomTimestamps = useRef({});
+
+  // ── MIGRACJA TIMESTAMPÓW (admin-only, jednorazowa) ──
+  const [migrateStatus, setMigrateStatus] = useState(null); // null | "running" | "done" | "error"
+  const [migrateLog, setMigrateLog] = useState("");
+  const isAdminChat = appUsers.find(u => u.uid === currentUser.uid)?.role === "admin";
+
+  const runTimestampMigration = async (dryRun = true) => {
+    setMigrateStatus("running");
+    setMigrateLog("");
+    const addLog = (msg) => setMigrateLog(prev => prev + msg + "\n");
+    const mode = dryRun ? "DRY RUN" : "PRODUKCJA";
+    addLog(`${"=".repeat(50)}\n  MIGRACJA — ${mode}\n${"=".repeat(50)}`);
+    let totalRooms = 0, totalMsgs = 0, migratedMsgs = 0, migratedFields = 0;
+    const isFTS = (v) => v && typeof v === "object" && (typeof v.seconds === "number" || typeof v.toDate === "function");
+    const toI = (v) => typeof v.toDate === "function" ? v.toDate().toISOString() : typeof v.seconds === "number" ? new Date(v.seconds * 1000 + (v.nanoseconds||0)/1e6).toISOString() : null;
+    try {
+      const roomsSnap = await getDocs(collection(db, "chatRooms"));
+      totalRooms = roomsSnap.size;
+      addLog(`\n📦 ${totalRooms} pokojów\n`);
+      for (const rd of roomsSnap.docs) {
+        const rData = rd.data(), rName = rData.name || rd.id, updates = {};
+        if (isFTS(rData.lastMessageAt)) { updates.lastMessageAt = toI(rData.lastMessageAt); addLog(`  🔄 [${rName}] lastMessageAt`); }
+        if (rData.lastRead) for (const [u,v] of Object.entries(rData.lastRead)) { if (isFTS(v)) { updates[`lastRead.${u}`] = toI(v); addLog(`  🔄 [${rName}] lastRead.${u}`); } }
+        if (rData.typing) for (const [u,v] of Object.entries(rData.typing)) { if (isFTS(v)) { updates[`typing.${u}`] = toI(v); } }
+        if (Object.keys(updates).length > 0) { migratedFields += Object.keys(updates).length; if (!dryRun) await updateDoc(doc(db, "chatRooms", rd.id), updates); }
+        const msgsSnap = await getDocs(collection(db, "chatRooms", rd.id, "messages"));
+        totalMsgs += msgsSnap.size;
+        let rm = 0, batch = writeBatch(db), bc = 0;
+        for (const md of msgsSnap.docs) {
+          if (isFTS(md.data().timestamp)) {
+            if (!dryRun) { batch.update(doc(db, "chatRooms", rd.id, "messages", md.id), { timestamp: toI(md.data().timestamp) }); bc++; }
+            rm++; migratedMsgs++;
+            if (bc >= 450) { if (!dryRun) { await batch.commit(); batch = writeBatch(db); } bc = 0; }
+          }
+        }
+        if (!dryRun && bc > 0) await batch.commit();
+        addLog(rm > 0 ? `  ✅ [${rName}] ${rm}/${msgsSnap.size} msg, ${Object.keys(updates).length} pól` : `  ⏭️  [${rName}] ${msgsSnap.size} msg — OK`);
+      }
+      addLog(`\n${"=".repeat(50)}\n  Pokoje: ${totalRooms} | Msg: ${totalMsgs} | Zmigr. msg: ${migratedMsgs} | Pola: ${migratedFields}\n${"=".repeat(50)}`);
+      setMigrateStatus("done");
+      if (!dryRun && migratedMsgs > 0) showToast(`✅ Zmigrowano ${migratedMsgs} wiadomości`);
+    } catch (e) { addLog(`\n❌ BŁĄD: ${e.message}`); setMigrateStatus("error"); }
+  };
+
+  // ── Auto-rejestracja push tokena — rejestruj w tle i ukryj przycisk jeśli sukces ──
+  useEffect(() => {
+    if (!currentUser?.uid) return;
+    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+      registerFCMToken(currentUser.uid).then(r => {
+        console.log("Push auto-reg result:", r);
+        if (r.success) {
+          setPushRegistered(true);
+          try { localStorage.setItem("pushRegistered", "1"); } catch {}
+        }
+      });
+    }
+  }, [currentUser?.uid]);
+
+  // ── POKOJE (real-time) ──
+  useEffect(() => {
+    const q = query(collection(db, "chatRooms"), orderBy("lastMessageAt", "desc"));
+    const unsub = onSnapshot(q, (snap) => {
+      const all = snap.docs.map(d => {
+        const data = { id: d.id, ...d.data() };
+        // Normalizuj serverTimestamp() pola: Firestore Timestamp → ISO string
+        const norm = (v) => {
+          if (!v || typeof v !== "object") return v;
+          if (typeof v.toDate === "function") return v.toDate().toISOString();
+          if (typeof v.seconds === "number") return new Date(v.seconds * 1000).toISOString();
+          return v;
+        };
+        data.lastMessageAt = norm(data.lastMessageAt);
+        // Normalizuj lastRead map values
+        if (data.lastRead) {
+          for (const uid of Object.keys(data.lastRead)) { data.lastRead[uid] = norm(data.lastRead[uid]); }
+        }
+        return data;
+      });
+      const myRooms = all.filter(r => r.type === "channel" || (r.members || []).includes(currentUser.uid))
+        .sort((a, b) => tsToMs(b.lastMessageAt) - tsToMs(a.lastMessageAt)); // desc — najnowsze na górze
+      myRooms.forEach(r => {
+        const prev = lastRoomTimestamps.current[r.id];
+        const curMs = tsToMs(r.lastMessageAt);
+        const prevMs = prev || 0;
+        if (prevMs > 0 && curMs > prevMs && r.lastSender !== currentUser.email && r.id !== activeRoomIdRef.current) playNotifSound();
+        lastRoomTimestamps.current[r.id] = curMs;
+      });
+      setRooms(myRooms);
+      // NIE aktualizujemy activeRoom z rooms listenera — to powodowało kaskadę re-renderów
+      // activeRoom jest aktualizowany tylko przez dedykowany listener pokoju (poniżej)
+      setActiveRoom(prev => {
+        if (!prev) return null;
+        const updated = myRooms.find(r => r.id === prev.id);
+        if (!updated) return null; // pokój usunięty
+        // Aktualizuj TYLKO jeśli zmienił się name, members, type (strukturalne zmiany)
+        if (updated.name !== prev.name || updated.type !== prev.type
+          || JSON.stringify(updated.members) !== JSON.stringify(prev.members)) return updated;
+        return prev; // ten sam obiekt = brak re-renderu
+      });
+    });
+    return () => unsub();
+  }, [currentUser.uid]);
+
+  // ── WIADOMOŚCI (real-time, chronologicznie wg Firestore) ──
+  useEffect(() => {
+    if (!activeRoom) { setMessages([]); return; }
+    const q = query(collection(db, "chatRooms", activeRoom.id, "messages"), orderBy("timestamp", "asc"));
+    const unsub = onSnapshot(q, (snap) => {
+      // Normalizacja: serverTimestamp() zwraca null w pending write, potem Firestore Timestamp
+      // Konwertujemy wszystko na ISO string i sortujemy client-side
+      const nowISO = new Date().toISOString();
+      const newMsgs = snap.docs.map(d => {
+        const data = { id: d.id, ...d.data() };
+        const ts = data.timestamp;
+        // Normalizuj timestamp: Firestore Timestamp → ISO, null (pending) → teraz
+        if (!ts) { data.timestamp = nowISO; }
+        else if (typeof ts === "object" && typeof ts.toDate === "function") { data.timestamp = ts.toDate().toISOString(); }
+        else if (typeof ts === "object" && typeof ts.seconds === "number") { data.timestamp = new Date(ts.seconds * 1000).toISOString(); }
+        return data;
+      }).sort((a, b) => tsToMs(a.timestamp) - tsToMs(b.timestamp));
+      // Dźwięk tylko gdy przybyła nowa wiadomość od kogoś innego
+      if (prevMsgCountRef.current > 0 && newMsgs.length > prevMsgCountRef.current) {
+        const added = snap.docChanges().filter(c => c.type === "added");
+        if (added.length > 0 && added[added.length - 1].doc.data().senderId !== currentUser.uid) playNotifSound();
+      }
+      prevMsgCountRef.current = newMsgs.length;
+      setMessages(newMsgs);
+    });
+    return () => { unsub(); prevMsgCountRef.current = 0; };
+  }, [activeRoom?.id]);
+
+  // ── ROOM DETAIL LISTENER (typing + lastRead) ──
+  useEffect(() => {
+    if (!activeRoom) { setTypingUsers({}); setLastReadMap({}); return; }
+    activeRoomIdRef.current = activeRoom.id;
+    const unsub = onSnapshot(doc(db, "chatRooms", activeRoom.id), (snap) => {
+      const data = snap.data();
+      if (data) {
+        setTypingUsers(data.typing || {});
+        setLastReadMap(data.lastRead || {});
+      }
+    });
+    return () => { unsub(); activeRoomIdRef.current = null; };
+  }, [activeRoom?.id]);
+
+  const setTyping = (isTyping) => {
+    if (!activeRoom) return;
+    const field = `typing.${currentUser.uid}`;
+    updateDoc(doc(db, "chatRooms", activeRoom.id), {
+      [field]: isTyping ? new Date().toISOString() : null,
+    }).catch(() => {});
+  };
+
+  const handleTyping = () => {
+    setTyping(true);
+    clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => setTyping(false), 3000);
+  };
+
+  // Aktywni piszący (nie starsze niż 5s)
+  const activeTypers = Object.entries(typingUsers)
+    .filter(([uid, ts]) => uid !== currentUser.uid && ts && (Date.now() - new Date(ts).getTime()) < 5000)
+    .map(([uid]) => appUsers.find(u => u.uid === uid)?.email?.split("@")[0] || "?");
+
+  // ── AUTO-SCROLL ──
+  // Reset ref przy zmianie pokoju, żeby zawsze scrollować na dół przy wejściu
+  useEffect(() => {
+    lastMsgIdRef.current = null;
+    lastReadTsRef.current = null;
+  }, [activeRoom?.id]);
+
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const lastMsg = messages[messages.length - 1];
+    const lastId = lastMsg?.id;
+    if (lastId === lastMsgIdRef.current) return;
+    const isRoomSwitch = lastMsgIdRef.current === null; // pierwsze załadowanie pokoju
+    lastMsgIdRef.current = lastId;
+    const c = chatContainerRef.current;
+    if (!c) return;
+    // Scrolluj na dół gdy:
+    // 1. Właśnie wszedłem do pokoju (zawsze na dół)
+    // 2. To moja własna wiadomość
+    // 3. Jestem blisko dołu (< 200px)
+    const isNearBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 200;
+    const isMyMessage = lastMsg?.senderId === currentUser.uid;
+    if (isRoomSwitch || isMyMessage || isNearBottom) {
+      requestAnimationFrame(() => { c.scrollTop = c.scrollHeight; });
+    }
+  }, [messages]);
+
+  // ── LAST READ — aktualizuj przy wejściu do pokoju i przy nowych wiadomościach ──
+  const lastReadTsRef = useRef(null);
+  useEffect(() => {
+    if (!activeRoom || messages.length === 0) return;
+    const lastMsg = messages[messages.length - 1];
+    const ts = lastMsg?.timestamp;
+    if (!ts) return;
+    const tsKey = String(ts);
+    if (tsKey === lastReadTsRef.current) return;
+    lastReadTsRef.current = tsKey;
+    // Używamy serverTimestamp() — ten sam zegar co lastMessageAt, eliminuje rozbieżności
+    updateDoc(doc(db, "chatRooms", activeRoom.id), {
+      [`lastRead.${currentUser.uid}`]: serverTimestamp()
+    }).catch(() => {});
+  }, [activeRoom?.id, messages]);
+
+  // ── WYŚLIJ WIADOMOŚĆ ──
+  const sendMessage = async (text, fileUrl, fileName) => {
+    if (!activeRoom) return;
+    if (!text?.trim() && !fileUrl) return;
+    const msg = {
+      text: text?.trim() || "",
+      senderId: currentUser.uid,
+      senderEmail: currentUser.email,
+      senderName: appUsers.find(u => u.uid === currentUser.uid)?.email?.split("@")[0] || currentUser.email,
+      timestamp: serverTimestamp(), // Czas serwera Firebase — niezależny od zegara urządzenia
+    };
+    if (fileUrl) { msg.fileUrl = fileUrl; msg.fileName = fileName; }
+    if (replyTo) { msg.replyTo = { id: replyTo.id, text: replyTo.text?.slice(0, 100) || "📎 Plik", senderName: replyTo.senderName || replyTo.senderEmail?.split("@")[0] }; }
+    try {
+      await addDoc(collection(db, "chatRooms", activeRoom.id, "messages"), msg);
+      // Łączymy update lastMessage + wyłączenie typing w JEDEN zapis (mniej snapshotów)
+      clearTimeout(typingTimeoutRef.current);
+      await updateDoc(doc(db, "chatRooms", activeRoom.id), {
+        lastMessage: text?.trim() || fileName || "📎 Plik",
+        lastMessageAt: serverTimestamp(),
+        lastSender: currentUser.email,
+        [`typing.${currentUser.uid}`]: null,
+      });
+      setMsgText(""); setReplyTo(null);
+    } catch (e) { console.error("sendMessage", e); showToast("Błąd wysyłania"); }
+  };
+
+  // ── EDYCJA WIADOMOŚCI ──
+  const saveEdit = async () => {
+    if (!editingMsg || !editText.trim()) return;
+    try {
+      await updateDoc(doc(db, "chatRooms", activeRoom.id, "messages", editingMsg.id), {
+        text: editText.trim(), edited: true, editedAt: new Date().toISOString(),
+      });
+      setEditingMsg(null); setEditText("");
+    } catch (e) { showToast("Błąd edycji"); }
+  };
+
+  // ── USUWANIE WIADOMOŚCI ──
+  const deleteMessage = async (m) => {
+    try {
+      await updateDoc(doc(db, "chatRooms", activeRoom.id, "messages", m.id), {
+        text: "", deleted: true, deletedAt: new Date().toISOString(), fileUrl: null, fileName: null,
+      });
+      showToast("Wiadomość usunięta");
+    } catch (e) { showToast("Błąd usuwania"); }
+  };
+
+  // ── REAKCJE EMOJI ──
+  const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
+  const toggleReaction = async (m, emoji) => {
+    const reactions = { ...(m.reactions || {}) };
+    const users = reactions[emoji] || [];
+    if (users.includes(currentUser.uid)) {
+      reactions[emoji] = users.filter(u => u !== currentUser.uid);
+      if (reactions[emoji].length === 0) delete reactions[emoji];
+    } else {
+      reactions[emoji] = [...users, currentUser.uid];
+    }
+    try {
+      await updateDoc(doc(db, "chatRooms", activeRoom.id, "messages", m.id), { reactions });
+    } catch (e) {}
+    setContextMenu(null);
+  };
+
+  // ── KOMPRESJA OBRAZU ──
+  const compressImage = (file, maxWidth = 1200, quality = 0.7) => {
+    return new Promise((resolve) => {
+      if (!file.type.startsWith("image/") || file.type === "image/gif") { resolve(file); return; }
+      const img = new Image(); const reader = new FileReader();
+      reader.onload = (e) => { img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let w = img.width, h = img.height;
+        if (w > maxWidth) { h = Math.round(h * maxWidth / w); w = maxWidth; }
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        canvas.toBlob((blob) => { resolve(blob && blob.size < file.size ? new File([blob], file.name, { type: "image/jpeg" }) : file); }, "image/jpeg", quality);
+      }; img.src = e.target.result; }; reader.readAsDataURL(file);
+    });
+  };
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    if (file.size > 10 * 1024 * 1024) { showToast("Maks. 10MB"); return; }
+    setUploading(true);
+    try {
+      const toUpload = await compressImage(file);
+      const path = `chat/${activeRoom.id}/${Date.now()}_${file.name}`;
+      const sRef = storageRef(storage, path);
+      await uploadBytes(sRef, toUpload);
+      const url = await getDownloadURL(sRef);
+      await sendMessage("", url, file.name);
+    } catch (e) { showToast("Błąd uploadu"); }
+    setUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  // ── ZARZĄDZANIE POKOJAMI ──
+  const createRoom = async () => {
+    const isSelf = newRoomType === "self";
+    const name = isSelf ? `📝 ${currentUser.email?.split("@")[0] || "Notatki"}` : newRoomName.trim();
+    if (!isSelf && !newRoomName.trim()) { showToast("Podaj nazwę"); return; }
+    const room = {
+      name, type: isSelf ? "self" : newRoomType,
+      members: newRoomType === "channel" ? appUsers.map(u => u.uid) : isSelf ? [currentUser.uid] : [currentUser.uid, ...newRoomMembers],
+      createdBy: currentUser.uid, createdAt: new Date().toISOString(),
+      lastMessage: "", lastMessageAt: new Date().toISOString(), lastSender: "",
+    };
+    try {
+      const docRef = await addDoc(collection(db, "chatRooms"), room);
+      logAction("add", "chat", { roomId: docRef.id, roomName: name, type: room.type });
+      setShowNewRoom(false); setNewRoomName(""); setNewRoomMembers([]);
+      setActiveRoom({ id: docRef.id, ...room }); showToast("Pokój utworzony");
+    } catch (e) { showToast("Błąd tworzenia"); }
+  };
+
+  const renameRoom = async () => {
+    if (!editRoomName.trim() || !activeRoom) return;
+    try {
+      await updateDoc(doc(db, "chatRooms", activeRoom.id), { name: editRoomName.trim() });
+      logAction("update", "chat", { roomId: activeRoom.id, action: "rename", newName: editRoomName.trim() });
+      showToast("Nazwa zmieniona"); setShowRoomSettings(false);
+    } catch (e) { showToast("Błąd zmiany nazwy"); }
+  };
+
+  const deleteRoom = async () => {
+    if (!activeRoom || !window.confirm("Usunąć pokój i wszystkie wiadomości?")) return;
+    try {
+      await deleteDoc(doc(db, "chatRooms", activeRoom.id));
+      logAction("delete", "chat", { roomId: activeRoom.id, roomName: activeRoom.name });
+      setActiveRoom(null); setShowRoomSettings(false); showToast("Pokój usunięty");
+    } catch (e) { showToast("Błąd usuwania pokoju"); }
+  };
+
+  const leaveRoom = async () => {
+    if (!activeRoom) return;
+    const newMembers = (activeRoom.members || []).filter(uid => uid !== currentUser.uid);
+    try {
+      await updateDoc(doc(db, "chatRooms", activeRoom.id), { members: newMembers });
+      logAction("update", "chat", { roomId: activeRoom.id, action: "leave" });
+      setActiveRoom(null); setShowRoomSettings(false); showToast("Opuszczono pokój");
+    } catch (e) { showToast("Błąd"); }
+  };
+
+  const addMember = async (uid) => {
+    if (!activeRoom) return;
+    const members = [...new Set([...(activeRoom.members || []), uid])];
+    try {
+      await updateDoc(doc(db, "chatRooms", activeRoom.id), { members });
+      logAction("update", "chat", { roomId: activeRoom.id, action: "addMember", memberUid: uid });
+      showToast("Dodano członka");
+    } catch (e) { showToast("Błąd"); }
+  };
+
+  const removeMember = async (uid) => {
+    if (!activeRoom || uid === activeRoom.createdBy) return;
+    const members = (activeRoom.members || []).filter(u => u !== uid);
+    try {
+      await updateDoc(doc(db, "chatRooms", activeRoom.id), { members });
+      logAction("update", "chat", { roomId: activeRoom.id, action: "removeMember", memberUid: uid });
+      showToast("Usunięto członka");
+    } catch (e) { showToast("Błąd"); }
+  };
+
+  // ── HELPERS ──
+  const fmtTime = (ts) => {
+    if (!ts) return "";
+    // Obsługa Firestore Timestamp (object z seconds) i string ISO
+    let d;
+    if (typeof ts === "object" && ts.seconds) {
+      d = new Date(ts.seconds * 1000);
+    } else if (typeof ts === "object" && ts.toDate) {
+      d = ts.toDate();
+    } else {
+      d = new Date(ts);
+    }
+    if (isNaN(d.getTime())) return "";
+    const now = new Date();
+    const time = d.toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
+    return d.toDateString() === now.toDateString() ? time : `${d.toLocaleDateString("pl-PL", { day: "numeric", month: "short" })} ${time}`;
+  };
+
+  const roomIcon = (r) => {
+    if (r.type === "self") return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>;
+    if (r.type === "dm") return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>;
+    if (r.type === "group") return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>;
+    return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
+  };
+
+  const roomDisplayName = (r) => {
+    if (r.type === "dm" && r.members) {
+      const other = r.members.find(uid => uid !== currentUser.uid);
+      return appUsers.find(u => u.uid === other)?.email?.split("@")[0] || r.name;
+    }
+    return r.name;
+  };
+
+  // Wyszukiwanie
+  const filteredMessages = showSearch && searchQuery.trim()
+    ? messages.filter(m => m.text?.toLowerCase().includes(searchQuery.toLowerCase()))
+    : messages;
+
+  return (
+    <div className="flex h-full rounded-xl overflow-hidden" style={{ minHeight: 0, background: '#fff' }}>
+      {/* ── LISTA POKOJÓW ── */}
+      <div className={`${activeRoom ? "hidden md:flex" : "flex"} flex-col w-full md:w-72`} style={{ background: '#f8fafc', borderRight: '1px solid #e2e8f0' }}>
+        <div className="p-4 flex items-center justify-between" style={{ borderBottom: '1px solid #e2e8f0' }}>
+          <h2 className="font-bold flex items-center gap-2" style={{ fontSize: '18px', color: '#1e293b' }}>Czat <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: '#3b82f6', color: '#fff', fontSize: '12px' }}>{rooms.length}</span></h2>
+          <button onClick={() => setShowNewRoom(true)} className="p-1.5 rounded-lg transition-colors hover:bg-gray-100" style={{ color: '#64748b' }} title="Nowy pokój">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+        </div>
+        {/* Push notification banner — ZAWSZE widoczny dopóki nie zarejestrowano tokena z tego urządzenia */}
+        {!pushRegistered && (
+          <button onClick={async () => {
+            setPushStatus("checking");
+            const result = await registerFCMToken(currentUser.uid);
+            setPushStatus(result);
+            if (result.success) { setPushRegistered(true); try { localStorage.setItem("pushRegistered", "1"); } catch {} showToast("Powiadomienia push włączone!"); }
+          }} className="mx-3 mt-2 mb-1 px-4 py-2.5 rounded-xl text-white text-sm font-medium flex items-center gap-2 hover:opacity-90 transition-colors shadow-sm"
+            style={{ minHeight: 44, background: 'linear-gradient(135deg, #3b82f6, #2563eb)' }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            {pushStatus === "checking" ? "Rejestracja..." : "Włącz powiadomienia push"}
+          </button>
+        )}
+        {/* Push status info */}
+        {pushStatus && pushStatus !== "checking" && !pushStatus.success && (
+          <div className="mx-3 mt-1 mb-1 px-4 py-2 rounded-xl text-xs" style={{ background: '#fef2f2' }}>
+            <div className="font-medium" style={{ color: '#dc2626' }}>Błąd: {pushStatus.error}</div>
+            <div style={{ color: '#6b7280' }}>Krok: {pushStatus.step}</div>
+            {pushDiag.isIOS && !pushDiag.isStandalone && (
+              <div className="mt-1 text-amber-700 font-medium">📱 Dodaj stronę do ekranu głównego (Share → Dodaj do ekranu głównego)</div>
+            )}
+          </div>
+        )}
+        {/* Migracja timestampów — admin only, jednorazowa */}
+        {isAdminChat && !localStorage.getItem("tsMigrationDone") && (
+          <div className="mx-3 mt-2 mb-1 p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs">
+            <div className="font-semibold text-amber-800 mb-1">🔧 Migracja timestampów</div>
+            {!migrateStatus && (
+              <div className="flex gap-2">
+                <button onClick={() => runTimestampMigration(true)} className="px-3 py-1.5 rounded-lg bg-amber-500 text-white font-medium hover:bg-amber-600 transition-colors">Dry Run</button>
+                <button onClick={() => { if(confirm("Uruchomić migrację? Zmieni dane w Firestore.")) runTimestampMigration(false); }} className="px-3 py-1.5 rounded-lg bg-green-500 text-white font-medium hover:bg-green-600 transition-colors">Migruj</button>
+                <button onClick={() => { localStorage.setItem("tsMigrationDone","1"); setMigrateStatus("hidden"); }} className="px-2 py-1.5 rounded-lg text-gray-400 hover:text-gray-600" title="Ukryj">✕</button>
+              </div>
+            )}
+            {migrateStatus === "running" && <div className="text-amber-700 font-medium">⏳ Trwa migracja...</div>}
+            {migrateStatus === "done" && <div className="text-green-700 font-medium">✅ Zakończono! <button onClick={() => { localStorage.setItem("tsMigrationDone","1"); setMigrateStatus("hidden"); }} className="underline ml-1">Ukryj</button></div>}
+            {migrateStatus === "error" && <div className="text-red-600 font-medium">❌ Błąd — sprawdź log</div>}
+            {migrateLog && <pre className="mt-2 p-2 bg-gray-900 text-green-300 rounded-lg text-[10px] max-h-48 overflow-y-auto whitespace-pre-wrap">{migrateLog}</pre>}
+          </div>
+        )}
+        <div className="flex-1 overflow-y-auto">
+          {rooms.length === 0 && <div className="p-6 text-center text-sm text-gray-400">Brak pokojów. Utwórz pierwszy!</div>}
+          {rooms.map((r, ri) => {
+            const myRead = r.lastRead?.[currentUser.uid];
+            // Aktywny pokój = czytany (nie czekamy na serverTimestamp round-trip)
+            const hasUnread = r.id !== activeRoom?.id && r.lastMessageAt && r.lastSender !== currentUser.email && (!myRead || tsToMs(r.lastMessageAt) - tsToMs(myRead) > 5000);
+            const isActive = activeRoom?.id === r.id;
+            const avatarColors = ['linear-gradient(135deg, #3b82f6, #6366f1)', 'linear-gradient(135deg, #22c55e, #14b8a6)', 'linear-gradient(135deg, #f59e0b, #ef4444)', 'linear-gradient(135deg, #8b5cf6, #ec4899)'];
+            const avatarBg = avatarColors[ri % avatarColors.length];
+            const initials = roomDisplayName(r).slice(0, 2).toUpperCase();
+            return (
+              <button key={r.id} onClick={() => { setActiveRoom(r); setShowSearch(false); setSearchQuery(""); setContextMenu(null); }}
+                className="w-full text-left px-4 py-3 flex items-center gap-3 transition-colors hover:bg-gray-100/60"
+                style={{ background: isActive ? '#eff6ff' : 'transparent', borderLeft: isActive ? '3px solid #3b82f6' : '3px solid transparent' }}>
+                {/* Avatar */}
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm flex-shrink-0" style={{ background: avatarBg }}>{initials}</div>
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className={`text-sm truncate ${hasUnread ? "font-bold text-gray-900" : "font-semibold text-gray-700"}`}>{roomDisplayName(r)}</span>
+                    <span className="text-xs flex-shrink-0 ml-2 text-gray-400">{fmtTime(r.lastMessageAt)}</span>
+                  </div>
+                  {r.lastMessage && (
+                    <div className="mt-0.5 flex items-center gap-1">
+                      <span className={`text-xs truncate max-w-[160px] ${hasUnread ? "text-gray-600 font-medium" : "text-gray-400"}`}>
+                        {r.lastSender ? `${r.lastSender.split("@")[0]}: ` : ""}{r.lastMessage}
+                      </span>
+                      {hasUnread && <span className="ml-auto px-1.5 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0" style={{ background: '#3b82f6', color: '#fff' }}>1</span>}
+                    </div>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── OKNO ROZMOWY ── */}
+      <div className={`${activeRoom ? "flex" : "hidden md:flex"} flex-col flex-1`}>
+        {activeRoom ? (
+          <>
+            {/* Header */}
+            <div className="px-4 py-3 flex items-center gap-3" style={{ borderBottom: '1px solid #e2e8f0', background: '#fff' }}>
+              <button onClick={() => setActiveRoom(null)} className="md:hidden p-1" style={{ color: '#64748b' }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
+              </button>
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-xs flex-shrink-0" style={{ background: 'linear-gradient(135deg, #22c55e, #14b8a6)' }}>{roomDisplayName(activeRoom).slice(0, 2).toUpperCase()}</div>
+              <div>
+                <h3 className="font-semibold" style={{ fontSize: '15px', color: '#1e293b' }}>{roomDisplayName(activeRoom)}</h3>
+                <div className="flex items-center gap-1" style={{ fontSize: '12px', color: '#22c55e' }}>
+                  <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: '#22c55e' }}/> online
+                </div>
+              </div>
+              <div className="ml-auto flex items-center gap-1.5">
+                <button onClick={() => { setShowSearch(!showSearch); setSearchQuery(""); }} className="flex items-center justify-center" style={{ width: '34px', height: '34px', borderRadius: '10px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', cursor: 'pointer' }} title="Szukaj">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                </button>
+                <button onClick={() => { setShowRoomSettings(!showRoomSettings); setEditRoomName(activeRoom.name); setShowMembers(false); }} className="flex items-center justify-center" style={{ width: '34px', height: '34px', borderRadius: '10px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', cursor: 'pointer' }} title="Ustawienia pokoju">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+                </button>
+              </div>
+            </div>
+
+            {/* Wyszukiwanie */}
+            {showSearch && (
+              <div className="px-4 py-2" style={{ borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
+                <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Szukaj w wiadomościach..."
+                  className="w-full text-sm outline-none" style={{ padding: '8px 14px', borderRadius: '10px', border: '1.5px solid #e2e8f0', background: '#fff' }}
+                  onFocus={e => e.target.style.borderColor = '#3b82f6'} onBlur={e => e.target.style.borderColor = '#e2e8f0'} autoFocus />
+                {searchQuery && <div className="text-xs mt-1" style={{ color: '#94a3b8' }}>Znaleziono: {filteredMessages.length}</div>}
+              </div>
+            )}
+
+            {/* Ustawienia pokoju */}
+            {showRoomSettings && (
+              <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 space-y-3">
+                {activeRoom.type !== "dm" && (
+                  <div>
+                    <label className="text-xs text-gray-500">Nazwa pokoju</label>
+                    <div className="flex gap-2 mt-1">
+                      <input type="text" value={editRoomName} onChange={e => setEditRoomName(e.target.value)}
+                        className="flex-1 px-2 py-1 border rounded text-sm focus:outline-none focus:border-blue-400" />
+                      <button onClick={renameRoom} className="px-3 py-1 bg-blue-500 text-white rounded text-xs hover:bg-blue-600">Zmień</button>
+                    </div>
+                  </div>
+                )}
+                {/* Członkowie */}
+                <div>
+                  <label className="text-xs text-gray-500">Członkowie ({(activeRoom.members || []).length})</label>
+                  <div className="mt-1 max-h-32 overflow-y-auto space-y-1">
+                    {(activeRoom.members || []).map(uid => {
+                      const u = appUsers.find(a => a.uid === uid);
+                      const isCreator = uid === activeRoom.createdBy;
+                      return (
+                        <div key={uid} className="flex items-center gap-2 text-sm py-1">
+                          <span className="text-gray-700">{u?.email?.split("@")[0] || uid}</span>
+                          {isCreator && <span className="text-xs bg-yellow-100 text-yellow-700 px-1.5 rounded">twórca</span>}
+                          {!isCreator && activeRoom.createdBy === currentUser.uid && activeRoom.type !== "dm" && (
+                            <button onClick={() => removeMember(uid)} className="ml-auto text-xs text-red-400 hover:text-red-600">Usuń</button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {/* Dodaj członka */}
+                  {activeRoom.type !== "dm" && activeRoom.createdBy === currentUser.uid && (
+                    <div className="mt-2">
+                      <label className="text-xs text-gray-500">Dodaj osobę</label>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {appUsers.filter(u => !(activeRoom.members || []).includes(u.uid)).map(u => (
+                          <button key={u.uid} onClick={() => addMember(u.uid)}
+                            className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100">+ {u.email?.split("@")[0]}</button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {/* Akcje */}
+                <div className="flex gap-2 pt-2 border-t border-gray-200">
+                  {activeRoom.type !== "dm" && (
+                    <button onClick={leaveRoom} className="text-xs px-3 py-1.5 text-orange-600 hover:bg-orange-50 rounded">Opuść pokój</button>
+                  )}
+                  {activeRoom.createdBy === currentUser.uid && (
+                    <button onClick={deleteRoom} className="text-xs px-3 py-1.5 text-red-600 hover:bg-red-50 rounded">Usuń pokój</button>
+                  )}
+                  <button onClick={() => setShowRoomSettings(false)} className="ml-auto text-xs px-3 py-1.5 text-gray-500 hover:bg-gray-100 rounded">Zamknij</button>
+                </div>
+              </div>
+            )}
+
+            {/* Wiadomości */}
+            <div ref={chatContainerRef} data-chat-messages className="flex-1 overflow-y-auto px-2 sm:px-3 py-3 space-y-1" style={{ background: '#fafbfc' }} onClick={() => setContextMenu(null)}>
+              {filteredMessages.length === 0 && <div className="text-center text-sm py-12" style={{ color: '#94a3b8' }}>{searchQuery ? "Brak wyników" : "Brak wiadomości. Napisz pierwszą!"}</div>}
+              {filteredMessages.map((m, i) => {
+                const isMine = m.senderId === currentUser.uid;
+                const showSender = !isMine && (i === 0 || filteredMessages[i - 1]?.senderId !== m.senderId);
+                const showAvatar = i === 0 || filteredMessages[i - 1]?.senderId !== m.senderId;
+                const isDeleted = m.deleted;
+                return (
+                  <div key={m.id} className={`flex items-end gap-1 sm:gap-1.5 ${isMine ? "flex-row-reverse" : ""} group`}>
+                    {/* Small avatar — hidden on very small screens */}
+                    {showAvatar ? (
+                      <div className="hidden sm:flex w-6 h-6 rounded-md items-center justify-center text-white text-[9px] font-bold flex-shrink-0" style={{ background: isMine ? 'linear-gradient(135deg, #3b82f6, #6366f1)' : 'linear-gradient(135deg, #22c55e, #14b8a6)' }}>
+                        {(m.senderName || m.senderEmail?.split("@")[0] || "?").slice(0, 2).toUpperCase()}
+                      </div>
+                    ) : <div className="hidden sm:block w-6 flex-shrink-0"/>}
+                    <div className="max-w-[85%] sm:max-w-[70%] relative">
+                      {showSender && <div className="text-xs mb-0.5 ml-2" style={{ fontSize: '11px', fontWeight: 600, color: '#64748b' }}>{m.senderName || m.senderEmail?.split("@")[0]}</div>}
+
+                      {/* Reply quote */}
+                      {m.replyTo && !isDeleted && (
+                        <div className={`text-xs px-2 py-1 mb-0.5 rounded-t-lg border-l-2 ${isMine ? "border-blue-300 text-blue-100" : "border-gray-400 text-gray-600"}`} style={{ background: isMine ? 'rgba(59,130,246,0.2)' : '#e2e8f0' }}>
+                          <span className="font-medium">{m.replyTo.senderName}</span>: {m.replyTo.text}
+                        </div>
+                      )}
+
+                      <div className={`px-4 py-2.5 text-sm relative`} style={{
+                        borderRadius: '18px',
+                        ...(isDeleted ? { background: '#f1f5f9', color: '#94a3b8', fontStyle: 'italic' } :
+                          isMine ? { background: 'linear-gradient(135deg, #3b82f6, #2563eb)', color: '#fff', borderBottomRightRadius: '6px' } :
+                          { background: '#f1f5f9', color: '#1e293b', borderBottomLeftRadius: '6px' }),
+                        lineHeight: '1.5',
+                      }}
+                        onContextMenu={(e) => { if (!isDeleted) { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, msg: m }); } }}
+                        onClick={(e) => { if (!isDeleted && e.detail === 2) { setContextMenu({ x: e.clientX, y: e.clientY, msg: m }); } }}>
+                        {isDeleted ? "Wiadomość usunięta" : (
+                          <>
+                            {m.text && <div style={{whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{m.text}</div>}
+                            {m.edited && <span className={`text-xs ${isMine ? "text-blue-200" : "text-gray-400"}`}> (edytowano)</span>}
+                            {m.fileUrl && (
+                              <a href={safeHref(m.fileUrl)} target="_blank" rel="noopener noreferrer"
+                                className={`flex items-center gap-1.5 mt-1 text-xs ${isMine ? "text-blue-100 hover:text-white" : "text-blue-600 hover:text-blue-700"}`}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                                {m.fileName || "Plik"}
+                              </a>
+                            )}
+                            {m.fileUrl && m.fileName?.match(/\.(jpg|jpeg|png|gif|webp)$/i) && (
+                              <img src={m.fileUrl} alt={m.fileName} className="mt-2 rounded-lg max-w-full max-h-48 object-cover cursor-pointer" onClick={() => window.open(m.fileUrl, "_blank")} />
+                            )}
+                          </>
+                        )}
+                      </div>
+
+                      {/* Reakcje */}
+                      {!isDeleted && m.reactions && Object.keys(m.reactions).length > 0 && (
+                        <div className={`flex flex-wrap gap-1 mt-0.5 ${isMine ? "justify-end" : ""}`}>
+                          {Object.entries(m.reactions).filter(([,u]) => u.length > 0).map(([emoji, users]) => (
+                            <button key={emoji} onClick={() => toggleReaction(m, emoji)}
+                              className={`text-xs px-1.5 py-0.5 rounded-full border ${users.includes(currentUser.uid) ? "bg-blue-50 border-blue-200" : "bg-gray-50 border-gray-200"}`}
+                              title={users.map(uid => appUsers.find(u => u.uid === uid)?.email?.split("@")[0] || "?").join(", ")}>
+                              {emoji} {users.length}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className={`text-xs mt-1 flex items-center gap-1 ${isMine ? "justify-end mr-2" : "ml-2"}`} style={{ color: '#94a3b8', fontSize: '10px' }}>
+                        <span>{fmtTime(m.timestamp)}</span>
+                        {isMine && !isDeleted && (() => {
+                          const msgMs = tsToMs(m.timestamp);
+                          const readers = Object.entries(lastReadMap).filter(([uid, ts]) => uid !== currentUser.uid && tsToMs(ts) >= msgMs).map(([uid]) => uid);
+                          if (readers.length === 0) return <span title="Wysłano"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>;
+                          const names = readers.map(uid => appUsers.find(u => u.uid === uid)?.email?.split("@")[0] || "?").join(", ");
+                          return <span title={`Przeczytane: ${names}`} className="cursor-default"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 6 7 17 2 12"/><polyline points="22 6 11 17"/></svg></span>;
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* Typing indicator */}
+            {activeTypers.length > 0 && (
+              <div className="px-4 py-1 text-xs text-gray-400 italic">
+                {activeTypers.join(", ")} {activeTypers.length === 1 ? "pisze" : "piszą"}...
+              </div>
+            )}
+
+            {/* Reply bar */}
+            {replyTo && (
+              <div className="px-4 py-2 bg-blue-50 border-t border-blue-100 flex items-center gap-2">
+                <div className="flex-1 text-xs text-blue-700 truncate">
+                  Odpowiedź do <strong>{replyTo.senderName || replyTo.senderEmail?.split("@")[0]}</strong>: {replyTo.text?.slice(0, 60) || "📎 Plik"}
+                </div>
+                <button onClick={() => setReplyTo(null)} className="text-blue-400 hover:text-blue-600">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+            )}
+
+            {/* Edit bar */}
+            {editingMsg && (
+              <div className="px-4 py-2 bg-yellow-50 border-t border-yellow-200">
+                <div className="text-xs text-yellow-700 mb-1">Edytujesz wiadomość</div>
+                <div className="flex gap-2">
+                  <input type="text" value={editText} onChange={e => setEditText(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") setEditingMsg(null); }}
+                    className="flex-1 px-2 py-1 border rounded text-sm focus:outline-none focus:border-yellow-400" autoFocus />
+                  <button onClick={saveEdit} className="px-3 py-1 bg-yellow-500 text-white rounded text-xs">Zapisz</button>
+                  <button onClick={() => setEditingMsg(null)} className="px-3 py-1 text-gray-500 text-xs">Anuluj</button>
+                </div>
+              </div>
+            )}
+
+            {/* Input */}
+            <div className="px-2 sm:px-4 py-2 sm:py-3 bg-white flex-shrink-0" style={{ borderTop: '1px solid #e2e8f0', paddingBottom: '8px' }}>
+              <div className="flex items-center gap-2">
+                <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
+                <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
+                  className="flex items-center justify-center flex-shrink-0 transition-colors disabled:opacity-50" style={{ width: '36px', height: '36px', borderRadius: '10px', color: '#94a3b8', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Dodaj plik">
+                  {uploading
+                    ? <svg width="18" height="18" viewBox="0 0 24 24" className="animate-spin" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v4m0 12v4m-7.07-3.93l2.83-2.83m8.48-8.48l2.83-2.83M2 12h4m12 0h4m-3.93 7.07l-2.83-2.83M7.76 7.76L4.93 4.93"/></svg>
+                    : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>}
+                </button>
+                <input ref={msgInputRef} type="text" value={msgText}
+                  enterKeyHint="send" autoComplete="off" autoCorrect="off" spellCheck="false"
+                  onChange={e => { setMsgText(e.target.value); handleTyping(); }}
+                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(msgText); } }}
+                  placeholder="Napisz wiadomość..."
+                  className="flex-1 min-w-0 text-sm outline-none" style={{ padding: '10px 14px', borderRadius: '14px', border: '1.5px solid #e2e8f0', background: '#fafbfc', fontFamily: 'inherit', fontSize: '16px', transition: 'border-color 0.2s' }}
+                  onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.background = '#fff'; setTimeout(() => { if (chatContainerRef.current) chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight; }, 300); }}
+                  onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.background = '#fafbfc'; }} />
+                <button onClick={() => sendMessage(msgText)} disabled={!msgText.trim()}
+                  className="flex items-center justify-center flex-shrink-0 text-white transition-transform disabled:opacity-30" style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'linear-gradient(135deg, #3b82f6, #2563eb)', border: 'none', cursor: 'pointer' }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                </button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 flex items-center justify-center" style={{ background: '#fafbfc' }}>
+            <div className="text-center" style={{ color: '#94a3b8' }}>
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mx-auto mb-3" style={{ opacity: 0.3 }}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              <div className="text-sm">Wybierz pokój lub utwórz nowy</div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── CONTEXT MENU (prawy klik / double tap) ── */}
+      {contextMenu && (
+        <div className="fixed z-50 rounded-xl shadow-xl py-1 min-w-[180px]" style={{ background: '#fff', border: '1px solid #e2e8f0' }}
+          style={{ top: Math.min(contextMenu.y, window.innerHeight - 280), left: Math.min(contextMenu.x, window.innerWidth - 200) }}>
+          {/* Reakcje */}
+          <div className="flex gap-1 px-3 py-2 border-b border-gray-100">
+            {REACTIONS.map(emoji => (
+              <button key={emoji} onClick={() => toggleReaction(contextMenu.msg, emoji)}
+                className="text-lg hover:scale-125 transition-transform p-0.5">{emoji}</button>
+            ))}
+          </div>
+          {/* Odpowiedz */}
+          <button onClick={() => { setReplyTo(contextMenu.msg); setContextMenu(null); msgInputRef.current?.focus(); }}
+            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
+            Odpowiedz
+          </button>
+          {/* Edytuj (tylko swoje) */}
+          {contextMenu.msg.senderId === currentUser.uid && !contextMenu.msg.deleted && (
+            <button onClick={() => { setEditingMsg(contextMenu.msg); setEditText(contextMenu.msg.text || ""); setContextMenu(null); }}
+              className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              Edytuj
+            </button>
+          )}
+          {/* Usuń (tylko swoje) */}
+          {contextMenu.msg.senderId === currentUser.uid && !contextMenu.msg.deleted && (
+            <button onClick={() => { deleteMessage(contextMenu.msg); setContextMenu(null); }}
+              className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              Usuń
+            </button>
+          )}
+          <button onClick={() => setContextMenu(null)} className="w-full text-left px-4 py-2 text-xs text-gray-400 hover:bg-gray-50">Zamknij</button>
+        </div>
+      )}
+
+      {/* ── MODAL — NOWY POKÓJ ── */}
+      {showNewRoom && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowNewRoom(false)}>
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-lg mb-4">Nowy pokój czatu</h3>
+            {newRoomType !== "self" && (<>
+              <label className="block text-sm text-gray-600 mb-1">Nazwa</label>
+              <input type="text" value={newRoomName} onChange={e => setNewRoomName(e.target.value)} placeholder="np. Ogólny, Trasa FR, ..."
+                className="w-full px-3 py-2 border rounded-lg text-sm mb-3 focus:outline-none focus:border-blue-400" />
+            </>)}
+            <label className="block text-sm text-gray-600 mb-1">Typ</label>
+            <div className="flex gap-2 mb-3">
+              {[{ id: "self", label: "Notatki", desc: "Do siebie" }, { id: "channel", label: "Kanał", desc: "Wszyscy" }, { id: "group", label: "Grupa", desc: "Wybrane osoby" }, { id: "dm", label: "Prywatna", desc: "1 na 1" }].map(t => (
+                <button key={t.id} onClick={() => { setNewRoomType(t.id); setNewRoomMembers([]); }}
+                  className={`flex-1 p-2 rounded-lg border text-xs text-center transition-colors ${newRoomType === t.id ? "border-blue-400 bg-blue-50 text-blue-700" : "border-gray-200 text-gray-500 hover:bg-gray-50"}`}>
+                  <div className="font-medium">{t.label}</div><div className="text-gray-400 mt-0.5">{t.desc}</div>
+                </button>
+              ))}
+            </div>
+            {(newRoomType === "group" || newRoomType === "dm") && (
+              <div className="mb-3">
+                <label className="block text-sm text-gray-600 mb-1">{newRoomType === "dm" ? "Wybierz osobę" : "Wybierz członków"}</label>
+                <div className="max-h-40 overflow-y-auto border rounded-lg">
+                  {appUsers.filter(u => u.uid !== currentUser.uid).map(u => (
+                    <label key={u.uid} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-50 last:border-0">
+                      <input type={newRoomType === "dm" ? "radio" : "checkbox"} name="member" checked={newRoomMembers.includes(u.uid)}
+                        onChange={() => newRoomType === "dm" ? setNewRoomMembers([u.uid]) : setNewRoomMembers(prev => prev.includes(u.uid) ? prev.filter(id => id !== u.uid) : [...prev, u.uid])}
+                        className="accent-blue-500" />
+                      <span className="text-sm text-gray-700">{u.email}</span>
+                      <span className="text-xs text-gray-400 ml-auto">{u.role || "user"}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setShowNewRoom(false)} className="px-4 py-2 text-sm text-gray-500 hover:bg-gray-100 rounded-lg">Anuluj</button>
+              <button onClick={createRoom} className="px-4 py-2 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600">Utwórz</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SPRAWY TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+const SPRAWA_TYPY = [
+  { id: "brak_zaplaty",  label: "Brak zapłaty",       icon: "💸", color: "#ef4444" },
+  { id: "nota",          label: "Nota obciążeniowa",  icon: "📋", color: "#f97316" },
+  { id: "reklamacja",    label: "Reklamacja",          icon: "⚠️", color: "#eab308" },
+  { id: "spor",          label: "Spór",               icon: "⚖️", color: "#8b5cf6" },
+  { id: "serwis",        label: "Serwis pojazdu",     icon: "🔧", color: "#ef4444" },
+  { id: "inne",          label: "Inne",               icon: "📌", color: "#6b7280" },
+];
+
+const SPRAWA_STATUSY = [
+  { id: "otwarta",    label: "Otwarta",    color: "#ef4444", bg: "#fef2f2" },
+  { id: "w_toku",     label: "W toku",     color: "#f97316", bg: "#fff7ed" },
+  { id: "zamknieta",  label: "Zamknięta",  color: "#10b981", bg: "#f0fdf4" },
+  { id: "wygrana",    label: "Wygrana",    color: "#3b82f6", bg: "#eff6ff" },
+  { id: "przegrana",  label: "Przegrana",  color: "#6b7280", bg: "#f9fafb" },
+];
+
+const ZDARZENIE_TYPY = [
+  { id: "email",    label: "Email",           icon: "📧" },
+  { id: "telefon",  label: "Rozmowa tel.",    icon: "📞" },
+  { id: "notatka",  label: "Notatka wewn.",   icon: "📝" },
+  { id: "dokument", label: "Dokument",        icon: "📄" },
+  { id: "akcja",    label: "Podjęte działanie", icon: "✅" },
+];
+
+function NowaSprawaModal({ allTypy, vehicles, appUsers = [], onSave, onClose }) {
+  const [f, setF] = useState({
+    numer:"", typ: allTypy[0]?.id || "brak_zaplaty", klient:"", kwota:"", waluta:"EUR",
+    nrZlecenia:"", nrNoty:"", terminPlatnosci:"", nrNadania:"",
+    telefon:"", vehicleId:"", przypomnienie:"", uwagi:"", przypisani:[]
+  });
+  const set = (k,v) => setF(p => ({...p,[k]:v}));
+  const inp = "w-full px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none focus:border-gray-400";
+  const lbl = "block text-xs font-semibold text-gray-500 mb-1";
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.35)",backdropFilter:"blur(4px)"}}>
+      <div style={{background:"#fff",borderRadius:16,width:520,maxWidth:"95vw",maxHeight:"90vh",overflow:"hidden",display:"flex",flexDirection:"column",boxShadow:"0 8px 32px rgba(0,0,0,0.12)"}}>
+        <div style={{padding:"20px 24px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <h3 style={{fontWeight:700,fontSize:16,color:"#111827"}}>Nowa sprawa</h3>
+          <button onClick={onClose} style={{background:"#f3f4f6",border:"none",borderRadius:8,width:28,height:28,cursor:"pointer"}}>✕</button>
+        </div>
+        <div style={{padding:"20px 24px",overflowY:"auto",display:"flex",flexDirection:"column",gap:12}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div><label className={lbl}>Numer sprawy</label><input className={inp} placeholder="SP/001/2026" value={f.numer} onChange={e=>set("numer",e.target.value)} /></div>
+            <div><label className={lbl}>Typ</label>
+              <select className={inp} value={f.typ} onChange={e=>set("typ",e.target.value)}>
+                {allTypy.map(t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
+              </select>
+            </div>
+          </div>
+          {f.typ === "inne" && (
+            <div><label className={lbl}>Opisz typ sprawy</label><input className={inp} placeholder="np. Windykacja, Reklamacja celna..." value={f.podtyp||""} onChange={e=>set("podtyp",e.target.value)} /></div>
+          )}
+          <div><label className={lbl}>Klient / Firma</label><input className={inp} placeholder="Nazwa firmy" value={f.klient} onChange={e=>set("klient",e.target.value)} /></div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div>
+              <label className={lbl}>Kwota</label>
+              <div style={{display:"flex",gap:4}}>
+                <input className={inp} type="number" placeholder="0.00" value={f.kwota} style={{flex:1}}
+                  onChange={e => { set("kwota", e.target.value); }} />
+                <div style={{display:"flex",borderRadius:8,border:"1.5px solid #e5e7eb",overflow:"hidden",flexShrink:0}}>
+                  {["EUR","PLN"].map(w => (
+                    <button key={w} type="button" onClick={() => set("waluta", w)}
+                      style={{padding:"0 10px",fontSize:12,fontWeight:600,border:"none",cursor:"pointer",
+                        background: f.waluta===w ? "#111827" : "#fff",
+                        color: f.waluta===w ? "#fff" : "#6b7280"}}>
+                      {w}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {f.kwota && (
+                <div style={{fontSize:11,color:"#9ca3af",marginTop:3}}>
+                  {f.waluta==="EUR"
+                    ? `≈ ${(parseFloat(f.kwota)*4.27).toFixed(2)} zł`
+                    : `≈ ${(parseFloat(f.kwota)/4.27).toFixed(2)} €`}
+                  <span style={{marginLeft:4,color:"#d1d5db"}}>· kurs ~4.27</span>
+                </div>
+              )}
+            </div>
+            <div><label className={lbl}>Termin płatności</label><input className={inp} type="date" value={f.terminPlatnosci} onChange={e=>set("terminPlatnosci",e.target.value)} /></div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div><label className={lbl}>Nr zlecenia</label><input className={inp} placeholder="ZL/001" value={f.nrZlecenia} onChange={e=>set("nrZlecenia",e.target.value)} /></div>
+            <div><label className={lbl}>Nr noty</label><input className={inp} placeholder="NT/001" value={f.nrNoty} onChange={e=>set("nrNoty",e.target.value)} /></div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div><label className={lbl}>Nr nadania poczty</label><input className={inp} placeholder="PL000000000" value={f.nrNadania} onChange={e=>set("nrNadania",e.target.value)} /></div>
+            <div><label className={lbl}>Telefon kontaktowy</label><input className={inp} placeholder="+48 000 000 000" value={f.telefon} onChange={e=>set("telefon",e.target.value)} /></div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div><label className={lbl}>Pojazd (opcjonalnie)</label>
+              <select className={inp} value={f.vehicleId} onChange={e=>set("vehicleId",e.target.value)}>
+                <option value="">Brak</option>
+                {vehicles.filter(v=>!v.archived).map(v=><option key={v.id} value={v.id}>{v.plate}</option>)}
+              </select>
+            </div>
+            <div><label className={lbl}>Przypomnienie</label><input className={inp} type="date" value={f.przypomnienie} onChange={e=>set("przypomnienie",e.target.value)} /></div>
+          </div>
+          <div><label className={lbl}>Uwagi</label><textarea className={inp+" resize-none"} rows={2} placeholder="Opis sprawy..." value={f.uwagi} onChange={e=>set("uwagi",e.target.value)} /></div>
+          <div>
+            <label className={lbl}>Przypisani</label>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
+              {(f.przypisani||[]).map(m => (
+                <span key={m} style={{background:"#eff6ff",color:"#1d4ed8",padding:"2px 10px",borderRadius:99,fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:4}}>
+                  {m} <button type="button" onClick={() => set("przypisani",(f.przypisani||[]).filter(x=>x!==m))} style={{background:"none",border:"none",cursor:"pointer",color:"#6b7280",fontSize:11}}>x</button>
+                </span>
+              ))}
+            </div>
+            <select value="" onChange={e => { if(e.target.value && !(f.przypisani||[]).includes(e.target.value)) set("przypisani",[...(f.przypisani||[]),e.target.value]); }} className={inp}>
+              <option value="">+ Dodaj osobę...</option>
+              {appUsers.map(u => <option key={u.uid} value={u.email}>{u.email}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{padding:"14px 24px",borderTop:"1px solid #f3f4f6",display:"flex",justifyContent:"flex-end",gap:8}}>
+          <button onClick={onClose} style={{padding:"9px 18px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer",color:"#6b7280"}}>Anuluj</button>
+          <button onClick={() => { if(!f.klient){alert("Podaj klienta");return;} onSave(f); }}
+            style={{padding:"9px 18px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Zapisz sprawę</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUser, appUsers, onUpdate, onDelete, onBack, showToast }) {
+  const [showAddZdarzenie, setShowAddZdarzenie] = useState(false);
+  const [zdType, setZdType] = useState("notatka");
+  const [zdTresc, setZdTresc] = useState("");
+  const [zdKtoDoKogo, setZdKtoDoKogo] = useState("");
+  const [zdMentions, setZdMentions] = useState([]);
+  const [mentionInput, setMentionInput] = useState("");
+  const [zdFile, setZdFile] = useState(null);
+  const [editZdarzenieId, setEditZdarzenieId] = useState(null);
+  const [editZdData, setEditZdData] = useState({});
+  const [przypomnienieZdId, setPrzypomnienieZdId] = useState(null);
+  const [przypomnienieData, setPrzypomnienieData] = useState("");
+  const [przypomnienieOpis, setPrzypomnienieOpis] = useState("");
+  const [editMode, setEditMode] = useState(false);
+  const [editData, setEditData] = useState({...sprawa});
+  // Serwis finalizacja
+  const [serwisKwota, setSerwisKwota] = useState("");
+  const [serwisWaluta, setSerwisWaluta] = useState(sprawa.waluta || "EUR");
+  const linkedCost = sprawa.linkedCostId && costs ? costs.find(c => c.id === sprawa.linkedCostId) : null;
+  const isSerwisOpen = sprawa.typ === "serwis" && sprawa.linkedCostId && linkedCost?.pendingSerwis && (sprawa.status === "otwarta" || sprawa.status === "w_toku");
+  // Synchronizuj editData gdy sprawa się zmieni (np. po onSnapshot)
+  useEffect(() => { if (!editMode) setEditData({...sprawa}); }, [sprawa, editMode]);
+
+  const typ = allTypy.find(t => t.id === sprawa.typ);
+  const status = SPRAWA_STATUSY.find(s => s.id === sprawa.status) || SPRAWA_STATUSY[0];
+  const vehicle = vehicles.find(v => v.id === sprawa.vehicleId);
+  const zdarzenia = [...(sprawa.zdarzenia || [])].sort((a,b) => b.data.localeCompare(a.data));
+
+  const addZdarzenie = () => {
+    if (!zdTresc.trim()) return;
+    const nowe = {
+      id: Math.random().toString(36).slice(2,10),
+      typ: zdType,
+      tresc: zdTresc,
+      ktoDoKogo: zdKtoDoKogo,
+      mentions: zdMentions,
+      zalacznik: zdFile || null,
+      data: new Date().toISOString(),
+      autor: currentUser.email,
+      seenBy: [currentUser.email],
+    };
+    onUpdate({ _addZdarzenie: nowe });
+    setZdTresc(""); setZdKtoDoKogo(""); setZdMentions([]); setMentionInput(""); setZdFile(null); setShowAddZdarzenie(false);
+    showToast("✅ Zdarzenie dodane");
+  };
+
+  const inp = "w-full px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none focus:border-gray-400";
+  const lbl = "block text-xs font-semibold text-gray-500 mb-1";
+
+  return (
+    <div>
+      {/* BACK + HEADER */}
+      <div className="flex items-center gap-3 mb-5">
+        <button onClick={onBack} className="px-3 py-1.5 rounded-lg text-sm text-gray-500 hover:bg-gray-100 transition-all">← Powrót</button>
+        <div className="flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-lg">{typ?.icon || "📌"}</span>
+            <h2 className="text-lg font-bold text-gray-900">{sprawa.numer || "Sprawa"} · {sprawa.klient}</h2>
+            {sprawa.podtyp && <span className="text-sm text-gray-500">({sprawa.podtyp})</span>}
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold" style={{background:status.bg,color:status.color}}>{status.label}</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <select value={sprawa.status} onChange={e => onUpdate({status: e.target.value})}
+            className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 outline-none bg-white font-semibold"
+            style={{color: status.color}}>
+            {SPRAWA_STATUSY.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+          </select>
+          <button onClick={() => setEditMode(!editMode)} className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 hover:bg-gray-50 whitespace-nowrap">✏️ Edytuj</button>
+          <button onClick={async () => { if(window.confirm("Usunąć sprawę?")) onDelete(); }}
+            className="w-8 h-8 flex items-center justify-center rounded-lg border border-red-200 text-red-500 hover:bg-red-50 flex-shrink-0"
+            title="Usuń sprawę">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* SERWIS — FINALIZACJA KOSZTU */}
+      {isSerwisOpen && (
+        <div className="mb-5 p-5 rounded-xl border-2 border-orange-300" style={{ background: '#fff7ed' }}>
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-lg">🔧</span>
+            <h3 className="font-bold text-orange-800">Serwis w toku — uzupełnij koszt</h3>
+          </div>
+          <div className="text-sm text-orange-700 mb-3">
+            {linkedCost?.note && <span>Notatka: <strong>{linkedCost.note}</strong></span>}
+            {vehicle && <span className="ml-2">· {vehicle.plate} — {vehicle.brand}</span>}
+          </div>
+          <div className="flex items-end gap-3 flex-wrap">
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">Kwota końcowa</label>
+              <input type="number" value={serwisKwota} onChange={e => setSerwisKwota(e.target.value)}
+                placeholder="0.00" className="px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none focus:border-orange-400 w-36" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">Waluta</label>
+              <select value={serwisWaluta} onChange={e => setSerwisWaluta(e.target.value)}
+                className="px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none bg-white">
+                <option value="EUR">EUR</option>
+                <option value="PLN">PLN</option>
+              </select>
+            </div>
+            <button onClick={() => {
+              if (!serwisKwota || parseFloat(serwisKwota) <= 0) { showToast("Podaj kwotę"); return; }
+              const amt = parseFloat(serwisKwota);
+              const updatedCost = { ...linkedCost, pendingSerwis: false };
+              if (serwisWaluta === "EUR") {
+                updatedCost.amountEUR = amt;
+                updatedCost.amountPLN = Math.round(amt * 4.27 * 100) / 100;
+                updatedCost.currency = "EUR";
+              } else {
+                updatedCost.amountPLN = amt;
+                updatedCost.amountEUR = Math.round(amt / 4.27 * 100) / 100;
+                updatedCost.currency = "PLN";
+              }
+              updateCost(updatedCost);
+              onUpdate({ status: "zamknieta", kwota: String(amt), waluta: serwisWaluta });
+              showToast("✅ Serwis zakończony — koszt zapisany, sprawa zamknięta");
+            }}
+              className="px-5 py-2 rounded-xl text-sm font-bold text-white hover:opacity-90 transition-all"
+              style={{ background: '#16a34a' }}>
+              Zakończ serwis
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* DANE SPRAWY */}
+      {!editMode ? (
+        <div className="bg-white rounded-xl border border-gray-100 p-5 mb-5 grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            ["Kwota", sprawa.kwota ? `${sprawa.kwota} ${sprawa.waluta||"EUR"}${sprawa.waluta==="PLN" && sprawa.kwota ? " (≈ "+(parseFloat(sprawa.kwota)/4.27).toFixed(0)+" €)" : ""}` : "—"],
+            ["Termin płatności", sprawa.terminPlatnosci || "—"],
+            ["Nr zlecenia", sprawa.nrZlecenia || "—"],
+            ["Nr noty", sprawa.nrNoty || "—"],
+            ["Nr nadania", sprawa.nrNadania || "—"],
+            ["Telefon", sprawa.telefon || "—"],
+            ["Pojazd", vehicle?.plate || "—"],
+            ["Przypomnienie", sprawa.przypomnienie || "—"],
+          ].map(([label,value]) => (
+            <div key={label}>
+              <div className="text-xs text-gray-400 mb-0.5">{label}</div>
+              <div className="text-sm font-semibold text-gray-800">{value}</div>
+            </div>
+          ))}
+          {sprawa.uwagi && (
+            <div className="col-span-2 md:col-span-4">
+              <div className="text-xs text-gray-400 mb-0.5">Uwagi</div>
+              <div className="text-sm text-gray-700">{sprawa.uwagi}</div>
+            </div>
+          )}
+          {sprawa.przypisani && sprawa.przypisani.length > 0 && (
+            <div className="col-span-2 md:col-span-4">
+              <div className="text-xs text-gray-400 mb-1">Przypisani</div>
+              <div className="flex gap-2 flex-wrap">
+                {sprawa.przypisani.map(p => (
+                  <span key={p} style={{background:"#eff6ff",color:"#1d4ed8",padding:"3px 10px",borderRadius:99,fontSize:12,fontWeight:600}}>&#128100; {p}</span>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="col-span-2 md:col-span-4">
+            <div className="text-xs text-gray-400 mb-2">Załączniki sprawy</div>
+            <AttachmentList files={sprawa.zalaczniki || []} onDelete={(i) => {
+              const nowe = [...(sprawa.zalaczniki||[])];
+              nowe.splice(i,1);
+              onUpdate({zalaczniki: nowe});
+            }} />
+            <div className="mt-2">
+              <SprawaFileUpload
+                sprawaId={sprawa.id}
+                subfolder="glowne"
+                label="📎 Dodaj załącznik (PDF/JPG/PNG)"
+                onUploaded={(f) => onUpdate({zalaczniki: [...(sprawa.zalaczniki||[]), f]})}
+              />
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-100 p-5 mb-5">
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div><label className={lbl}>Klient</label><input className={inp} value={editData.klient||""} onChange={e=>setEditData(p=>({...p,klient:e.target.value}))} /></div>
+            <div>
+              <label className={lbl}>Kwota</label>
+              <div style={{display:"flex",gap:4}}>
+                <input className={inp} type="number" value={editData.kwota||""} style={{flex:1}}
+                  onChange={e=>setEditData(p=>({...p,kwota:e.target.value}))} />
+                <div style={{display:"flex",borderRadius:8,border:"1.5px solid #e5e7eb",overflow:"hidden",flexShrink:0}}>
+                  {["EUR","PLN"].map(w => (
+                    <button key={w} type="button" onClick={() => setEditData(p=>({...p,waluta:w}))}
+                      style={{padding:"0 10px",fontSize:12,fontWeight:600,border:"none",cursor:"pointer",
+                        background:(editData.waluta||sprawa.waluta||"EUR")===w?"#111827":"#fff",
+                        color:(editData.waluta||sprawa.waluta||"EUR")===w?"#fff":"#6b7280"}}>
+                      {w}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {(editData.kwota||sprawa.kwota) && (
+                <div style={{fontSize:11,color:"#9ca3af",marginTop:3}}>
+                  {(editData.waluta||sprawa.waluta||"EUR")==="EUR"
+                    ? `≈ ${(parseFloat(editData.kwota||sprawa.kwota)*4.27).toFixed(2)} zł`
+                    : `≈ ${(parseFloat(editData.kwota||sprawa.kwota)/4.27).toFixed(2)} €`}
+                  <span style={{marginLeft:4,color:"#d1d5db"}}>· kurs ~4.27</span>
+                </div>
+              )}
+            </div>
+            <div><label className={lbl}>Termin płatności</label><input className={inp} type="date" value={editData.terminPlatnosci||""} onChange={e=>setEditData(p=>({...p,terminPlatnosci:e.target.value}))} /></div>
+            <div><label className={lbl}>Przypomnienie</label><input className={inp} type="date" value={editData.przypomnienie||""} onChange={e=>setEditData(p=>({...p,przypomnienie:e.target.value}))} /></div>
+            <div><label className={lbl}>Nr zlecenia</label><input className={inp} value={editData.nrZlecenia||""} onChange={e=>setEditData(p=>({...p,nrZlecenia:e.target.value}))} /></div>
+            <div><label className={lbl}>Nr noty</label><input className={inp} value={editData.nrNoty||""} onChange={e=>setEditData(p=>({...p,nrNoty:e.target.value}))} /></div>
+            <div><label className={lbl}>Nr nadania</label><input className={inp} value={editData.nrNadania||""} onChange={e=>setEditData(p=>({...p,nrNadania:e.target.value}))} /></div>
+            <div><label className={lbl}>Telefon</label><input className={inp} value={editData.telefon||""} onChange={e=>setEditData(p=>({...p,telefon:e.target.value}))} /></div>
+          </div>
+          <div className="mb-3"><label className={lbl}>Uwagi</label><textarea className={inp+" resize-none"} rows={2} value={editData.uwagi||""} onChange={e=>setEditData(p=>({...p,uwagi:e.target.value}))} /></div>
+          <div className="mb-3">
+            <label className={lbl}>Przypisani</label>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
+              {(editData.przypisani||sprawa.przypisani||[]).map(m => (
+                <span key={m} style={{background:"#eff6ff",color:"#1d4ed8",padding:"2px 10px",borderRadius:99,fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:4}}>
+                  {m} <button type="button" onClick={() => setEditData(p=>({...p,przypisani:(p.przypisani||sprawa.przypisani||[]).filter(x=>x!==m)}))} style={{background:"none",border:"none",cursor:"pointer",color:"#6b7280",fontSize:11}}>✕</button>
+                </span>
+              ))}
+            </div>
+            <select value="" onChange={e => { if(e.target.value) { const curr=editData.przypisani||sprawa.przypisani||[]; if(!curr.includes(e.target.value)) setEditData(p=>({...p,przypisani:[...(p.przypisani||sprawa.przypisani||[]),e.target.value]})); }}} className={inp}>
+              <option value="">+ Dodaj osobę...</option>
+              {appUsers.map(u => <option key={u.uid} value={u.email}>{u.email}</option>)}
+            </select>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => setEditMode(false)} style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer"}}>Anuluj</button>
+            <button onClick={() => { onUpdate(editData); setEditMode(false); showToast("✅ Zapisano"); }}
+              style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Zapisz</button>
+          </div>
+        </div>
+      )}
+
+      {/* TIMELINE */}
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-bold text-gray-800">Chronologia</h3>
+        <button onClick={() => setShowAddZdarzenie(!showAddZdarzenie)}
+          className="px-3 py-1.5 rounded-lg text-sm font-semibold text-white hover:opacity-90"
+          style={{background:"#111827"}}>
+          + Dodaj zdarzenie
+        </button>
+      </div>
+
+      {showAddZdarzenie && (
+        <div className="bg-white rounded-xl border border-gray-100 p-4 mb-4">
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <label className={lbl}>Typ zdarzenia</label>
+              <select className={inp} value={zdType} onChange={e=>setZdType(e.target.value)}>
+                {ZDARZENIE_TYPY.map(t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={lbl}>Kto / Do kogo</label>
+              <input className={inp} placeholder="np. Jan → klient" value={zdKtoDoKogo} onChange={e=>setZdKtoDoKogo(e.target.value)} />
+            </div>
+          </div>
+          <div className="mb-3">
+            <label className={lbl}>Treść / Notatka</label>
+            <textarea className={inp+" resize-none"} rows={3} placeholder="Opis zdarzenia, treść emaila, notatka..." value={zdTresc} onChange={e=>setZdTresc(e.target.value)} />
+          </div>
+          <div className="mb-3">
+            <label className={lbl}>@ Oznacz osobę (przypomnienie)</label>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:6}}>
+              {zdMentions.map(m => (
+                <span key={m} style={{background:"#eff6ff",color:"#1d4ed8",padding:"2px 10px",borderRadius:99,fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:4}}>
+                  @{m} <button onClick={() => setZdMentions(p=>p.filter(x=>x!==m))} style={{background:"none",border:"none",cursor:"pointer",color:"#6b7280",fontSize:11}}>✕</button>
+                </span>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:6}}>
+              <select value="" onChange={e => { if(e.target.value && !zdMentions.includes(e.target.value)) setZdMentions(p=>[...p,e.target.value]); }}
+                style={{flex:1,padding:"7px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",background:"#fff"}}>
+                <option value="">Wybierz z listy...</option>
+                {appUsers.map(u => <option key={u.uid} value={u.email}>{u.email}</option>)}
+              </select>
+              <input value={mentionInput} onChange={e=>setMentionInput(e.target.value)}
+                placeholder="lub wpisz email..."
+                style={{flex:1,padding:"7px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none"}}
+                onKeyDown={e => { if(e.key==="Enter" && mentionInput.trim()) { setZdMentions(p=>[...p,mentionInput.trim()]); setMentionInput(""); }}}
+              />
+              <button onClick={() => { if(mentionInput.trim() && !zdMentions.includes(mentionInput.trim())) { setZdMentions(p=>[...p,mentionInput.trim()]); setMentionInput(""); }}}
+                style={{padding:"7px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",cursor:"pointer",fontSize:13}}>+</button>
+            </div>
+          </div>
+          <div className="mb-3">
+            <label className={lbl}>Załącznik (opcjonalnie)</label>
+            {zdFile ? (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-xs">
+                <span>{zdFile.type === "application/pdf" ? "📄" : "🖼️"}</span>
+                <span className="text-gray-700 truncate max-w-48">{zdFile.name}</span>
+                <button onClick={() => setZdFile(null)} className="ml-auto text-gray-400 hover:text-red-400">✕</button>
+              </div>
+            ) : (
+              <SprawaFileUpload
+                sprawaId={sprawa.id}
+                subfolder="zdarzenia"
+                label="📎 Dodaj plik (PDF/JPG/PNG)"
+                onUploaded={(f) => setZdFile(f)}
+              />
+            )}
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => setShowAddZdarzenie(false)} style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer"}}>Anuluj</button>
+            <button onClick={addZdarzenie} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Dodaj</button>
+          </div>
+        </div>
+      )}
+
+      {zdarzenia.length === 0 && !showAddZdarzenie && (
+        <div className="text-center py-8 text-gray-400 text-sm">Brak zdarzeń — kliknij "+ Dodaj zdarzenie"</div>
+      )}
+
+      <div className="space-y-3">
+        {zdarzenia.map(z => {
+          const zt = ZDARZENIE_TYPY.find(t => t.id === z.typ) || ZDARZENIE_TYPY[2];
+          const dt = new Date(z.data);
+          return (
+            <div key={z.id} className="bg-white rounded-xl border border-gray-100 p-4">
+              {editZdarzenieId === z.id ? (
+                <div>
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <select value={editZdData.typ||z.typ} onChange={e=>setEditZdData(p=>({...p,typ:e.target.value}))}
+                      className="px-2 py-1.5 rounded-lg border border-gray-200 text-xs outline-none">
+                      {ZDARZENIE_TYPY.map(t=><option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
+                    </select>
+                    <input value={editZdData.ktoDoKogo ?? z.ktoDoKogo ?? ""} onChange={e=>setEditZdData(p=>({...p,ktoDoKogo:e.target.value}))}
+                      placeholder="Kto / Do kogo" className="px-2 py-1.5 rounded-lg border border-gray-200 text-xs outline-none" />
+                  </div>
+                  <textarea value={editZdData.tresc ?? z.tresc ?? ""} onChange={e=>setEditZdData(p=>({...p,tresc:e.target.value}))}
+                    rows={3} className="w-full px-2 py-1.5 rounded-lg border border-gray-200 text-sm outline-none resize-none mb-2" />
+                  <div className="mb-2">
+                    {(editZdData.zalacznik || z.zalacznik) ? (
+                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-200 bg-gray-50 text-xs">
+                        <span>{(editZdData.zalacznik||z.zalacznik).type === "application/pdf" ? "📄" : "🖼️"}</span>
+                        <a href={safeHref((editZdData.zalacznik||z.zalacznik).url)} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate max-w-48">{(editZdData.zalacznik||z.zalacznik).name}</a>
+                        <button onClick={() => setEditZdData(p=>({...p,zalacznik:null}))} className="ml-auto text-gray-400 hover:text-red-400">✕</button>
+                      </div>
+                    ) : (
+                      <SprawaFileUpload
+                        sprawaId={sprawa.id}
+                        subfolder="zdarzenia"
+                        label="📎 Dodaj załącznik"
+                        onUploaded={(f) => setEditZdData(p=>({...p,zalacznik:f}))}
+                      />
+                    )}
+                  </div>
+                  <div className="flex gap-2 justify-end">
+                    <button onClick={() => { setEditZdarzenieId(null); setEditZdData({}); }}
+                      className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 bg-white">Anuluj</button>
+                    <button onClick={() => {
+                      const updated = (sprawa.zdarzenia||[]).map(zd => zd.id === z.id ? {...zd, ...editZdData} : zd);
+                      onUpdate({zdarzenia: updated});
+                      setEditZdarzenieId(null); setEditZdData({});
+                    }} className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white" style={{background:"#111827"}}>Zapisz</button>
+                  </div>
+                </div>
+              ) : (
+              <div className="flex items-start gap-3">
+                <span className="text-xl mt-0.5 flex-shrink-0">{zt.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-semibold text-gray-700">{zt.label}</span>
+                      {z.ktoDoKogo && <span className="text-xs text-gray-400">· {z.ktoDoKogo}</span>}
+                    </div>
+                    <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                      <span className="text-xs text-gray-400">{dt.toLocaleDateString("pl-PL")} {dt.toLocaleTimeString("pl-PL",{hour:"2-digit",minute:"2-digit"})}</span>
+                      <div className="flex gap-1">
+                        <button onClick={() => { setEditZdarzenieId(z.id); setEditZdData({typ:z.typ,tresc:z.tresc,ktoDoKogo:z.ktoDoKogo}); }}
+                          className="px-2 py-0.5 rounded text-xs text-gray-400 hover:bg-gray-100">✏️</button>
+                        <button onClick={() => { setPrzypomnienieZdId(z.id); setPrzypomnienieData(z.przypomnienie||""); setPrzypomnienieOpis(z.przypomnienieOpis||""); }}
+                          className="px-2 py-0.5 rounded text-xs hover:bg-orange-50 transition-all"
+                          style={{color: z.przypomnienie ? "#f97316" : "#d1d5db"}} title="Ustaw przypomnienie">⏰</button>
+                        <button onClick={() => { if(window.confirm("Usunąć zdarzenie?")) onUpdate({zdarzenia:(sprawa.zdarzenia||[]).filter(zd=>zd.id!==z.id)}); }}
+                          className="px-2 py-0.5 rounded text-xs hover:bg-red-50 transition-all" style={{color:"#ef4444"}}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-sm text-gray-700 whitespace-pre-wrap">{z.tresc}</div>
+                  {z.zalacznik && (
+                    <div className="mt-2">
+                      <a href={safeHref(z.zalacznik.url)} target="_blank" rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-gray-50 text-xs text-blue-600 hover:bg-blue-50 transition-all">
+                        <span>{z.zalacznik.type === "application/pdf" ? "📄" : "🖼️"}</span>
+                        <span className="max-w-48 truncate">{z.zalacznik.name}</span>
+                      </a>
+                    </div>
+                  )}
+                  <div className="text-xs text-gray-400 mt-1.5 flex items-center gap-2 flex-wrap">
+                    <span>👤 {z.autor}</span>
+                    {z.mentions && z.mentions.length > 0 && z.mentions.map(m => (
+                      <span key={m} style={{background:"#eff6ff",color:"#1d4ed8",padding:"1px 8px",borderRadius:99,fontSize:11,fontWeight:600}}>@{m}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {przypomnienieZdId && (
+        <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.35)"}}>
+          <div style={{background:"#fff",borderRadius:16,padding:24,width:360,boxShadow:"0 8px 32px rgba(0,0,0,0.12)"}}>
+            <h3 style={{fontWeight:700,fontSize:15,marginBottom:16,color:"#111827"}}>Ustaw przypomnienie</h3>
+            <div style={{marginBottom:12}}>
+              <label style={{display:"block",fontSize:12,fontWeight:600,color:"#6b7280",marginBottom:4}}>Data i godzina</label>
+              <input type="datetime-local" value={przypomnienieData} onChange={e => setPrzypomnienieData(e.target.value)}
+                style={{width:"100%",padding:"8px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",boxSizing:"border-box"}} />
+            </div>
+            <div style={{marginBottom:16}}>
+              <label style={{display:"block",fontSize:12,fontWeight:600,color:"#6b7280",marginBottom:4}}>Krotki opis</label>
+              <input value={przypomnienieOpis} onChange={e => setPrzypomnienieOpis(e.target.value)}
+                placeholder="np. Zadzwon do klienta..."
+                style={{width:"100%",padding:"8px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",boxSizing:"border-box"}} />
+            </div>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              {przypomnienieData && (
+                <button onClick={() => {
+                  const updated = (sprawa.zdarzenia||[]).map(zd => zd.id === przypomnienieZdId ? {...zd, przypomnienie:null, przypomnienieOpis:null} : zd);
+                  onUpdate({zdarzenia: updated});
+                  setPrzypomnienieZdId(null);
+                }} style={{padding:"8px 14px",borderRadius:8,border:"1.5px solid #fecaca",background:"#fff",fontSize:12,cursor:"pointer",color:"#ef4444"}}>Usun</button>
+              )}
+              <button onClick={() => setPrzypomnienieZdId(null)}
+                style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer"}}>Anuluj</button>
+              <button onClick={() => {
+                const updated = (sprawa.zdarzenia||[]).map(zd => zd.id === przypomnienieZdId ? {...zd, przypomnienie: przypomnienieData, przypomnienieOpis: przypomnienieOpis} : zd);
+                onUpdate({zdarzenia: updated});
+                setPrzypomnienieZdId(null);
+                showToast("Przypomnienie ustawione");
+              }} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Zapisz</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SprawyTab({ sprawyList, vehicles, costs, updateCost, currentUser, appUsers, eurRate, eurRateDate, showToast, onAdd, onUpdate, onDelete }) {
+  const [view, setView] = useState("lista");
+  const [selectedId, setSelectedId] = useState(null);
+  const [showNewSprawa, setShowNewSprawa] = useState(false);
+  const [showNewTyp, setShowNewTyp] = useState(false);
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterTyp, setFilterTyp] = useState("all");
+  const [filterMoje, setFilterMoje] = useState(false);
+  const [customTypy, setCustomTypy] = useState([]);
+  const [newTypLabel, setNewTypLabel] = useState("");
+  const [showArchive, setShowArchive] = useState(false);
+
+  const allTypy = [...SPRAWA_TYPY, ...customTypy];
+  const selected = sprawyList.find(s => s.id === selectedId);
+
+  const today = new Date().toISOString().slice(0,10);
+  const dzisiaj = sprawyList.filter(s => s.status !== "zamknieta" && s.status !== "wygrana" && s.status !== "przegrana" && s.przypomnienie && s.przypomnienie <= today);
+
+  const CLOSED_STATUSES = ["zamknieta", "wygrana", "przegrana"];
+  const isAdminUser = appUsers.find(u => u.email === currentUser.email)?.role === "admin";
+
+  const allFiltered = sprawyList.filter(s => {
+    if (!isAdminUser && !(s.przypisani||[]).includes(currentUser.email)) return false;
+    if (filterStatus !== "all" && s.status !== filterStatus) return false;
+    if (filterTyp !== "all" && s.typ !== filterTyp) return false;
+    if (filterMoje && !(s.przypisani||[]).includes(currentUser.email)) return false;
+    return true;
+  }).sort((a,b) => {
+    const statusOrder = { otwarta: 0, w_toku: 1, wstrzymana: 2, zamknieta: 3, wygrana: 3, przegrana: 3 };
+    const oa = statusOrder[a.status] ?? 1;
+    const ob = statusOrder[b.status] ?? 1;
+    if (oa !== ob) return oa - ob;
+    return (b.dataUtworzenia||"").localeCompare(a.dataUtworzenia||"");
+  });
+
+  const activeFiltered  = allFiltered.filter(s => !CLOSED_STATUSES.includes(s.status));
+  const archivedFiltered = allFiltered.filter(s => CLOSED_STATUSES.includes(s.status));
+  // Gdy użytkownik filtruje po konkretnym zamkniętym statusie, pokaż wyniki
+  const isFilteringClosed = CLOSED_STATUSES.includes(filterStatus);
+  const filtered = showArchive || isFilteringClosed ? allFiltered : activeFiltered;
+
+  if (view === "szczegoly" && selected) {
+    return <SprawaDetail
+      sprawa={selected}
+      vehicles={vehicles}
+      costs={costs}
+      updateCost={updateCost}
+      allTypy={allTypy}
+      currentUser={currentUser}
+      appUsers={appUsers}
+      onUpdate={(data) => onUpdate(selected.id, data)}
+      onDelete={async () => { await onDelete(selected.id); setView("lista"); setSelectedId(null); }}
+      onBack={() => setView("lista")}
+      showToast={showToast}
+    />;
+  }
+
+  return (
+    <div>
+      {/* HEADER */}
+      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">Sprawy</h2>
+          <p className="text-sm text-gray-400 mt-0.5">
+            {sprawyList.filter(s => !CLOSED_STATUSES.includes(s.status)).length} aktywnych
+            {archivedFiltered.length > 0 && ` · ${archivedFiltered.length} w archiwum`}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="px-3 py-2 rounded-xl text-sm flex items-center gap-1.5"
+            style={{background:"#fffbeb",border:"1px solid #fde68a",color:"#92400e"}}>
+            <span>💱</span>
+            <span className="font-semibold text-xs">1 € = {eurRate ? eurRate.toFixed(4) : "4.27"} zł</span>
+            <span className="text-xs opacity-60">· NBP {eurRateDate || ""}</span>
+          </div>
+          <button onClick={() => setShowNewSprawa(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white hover:opacity-90 transition-all"
+            style={{background:"#111827"}}>
+            + Nowa sprawa
+          </button>
+        </div>
+      </div>
+
+      {/* PRZYPOMNIENIA DZISIAJ */}
+      {dzisiaj.length > 0 && (
+        <div className="mb-4 p-4 rounded-xl border" style={{background:"#fff7ed",borderColor:"#fed7aa"}}>
+          <div className="text-sm font-bold text-orange-700 mb-2">⏰ Przypomnienia na dziś ({dzisiaj.length})</div>
+          <div className="space-y-1.5">
+            {dzisiaj.map(s => {
+              const typ = allTypy.find(t => t.id === s.typ);
+              return (
+                <div key={s.id} onClick={() => { setSelectedId(s.id); setView("szczegoly"); }}
+                  className="flex items-center gap-3 cursor-pointer hover:bg-orange-100 px-3 py-2 rounded-lg transition-all">
+                  <span>{typ?.icon || "📌"}</span>
+                  <span className="text-sm font-medium text-orange-800">{s.numer} · {s.klient}</span>
+                  <span className="ml-auto text-xs text-orange-500">{s.kwota ? s.kwota+" €" : ""}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* FILTRY */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+          className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 outline-none bg-white text-gray-700">
+          <option value="all">Wszystkie statusy</option>
+          {SPRAWA_STATUSY.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+        </select>
+        <select value={filterTyp} onChange={e => setFilterTyp(e.target.value)}
+          className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 outline-none bg-white text-gray-700">
+          <option value="all">Wszystkie typy</option>
+          {allTypy.map(t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
+        </select>
+        <button onClick={() => setShowNewTyp(true)}
+          className="px-3 py-1.5 rounded-lg text-xs border border-dashed border-gray-300 text-gray-500 hover:bg-gray-50">
+          + Nowy typ
+        </button>
+        <button onClick={() => setFilterMoje(p => !p)}
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all"
+          style={{background: filterMoje ? "#111827" : "#fff", color: filterMoje ? "#fff" : "#6b7280", borderColor: filterMoje ? "#111827" : "#e5e7eb"}}>
+          Moje sprawy
+        </button>
+        {archivedFiltered.length > 0 && (
+          <button onClick={() => setShowArchive(p => !p)}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ml-auto"
+            style={{
+              background: showArchive ? "#6b7280" : "#fff",
+              color: showArchive ? "#fff" : "#6b7280",
+              borderColor: showArchive ? "#6b7280" : "#e5e7eb",
+            }}>
+            🗄️ Archiwum ({archivedFiltered.length})
+          </button>
+        )}
+      </div>
+
+      {/* LISTA SPRAW */}
+      <div className="space-y-2">
+        {filtered.length === 0 && (
+          <div className="text-center py-16 text-gray-400">
+            <div className="text-4xl mb-3">⚡</div>
+            <div className="font-medium">{showArchive ? "Brak spraw w archiwum" : "Brak aktywnych spraw"}</div>
+            <div className="text-sm mt-1">{showArchive ? "" : "Kliknij \"+ Nowa sprawa\" aby dodać"}</div>
+          </div>
+        )}
+        {filtered.map((s, idx) => {
+          // Separator między aktywnymi a archiwalnymi (gdy showArchive)
+          const prevS = idx > 0 ? filtered[idx-1] : null;
+          const isClosed = CLOSED_STATUSES.includes(s.status);
+          const prevClosed = prevS ? CLOSED_STATUSES.includes(prevS.status) : false;
+          const showSeparator = showArchive && isClosed && !prevClosed && idx > 0;
+          const typ = allTypy.find(t => t.id === s.typ);
+          const status = SPRAWA_STATUSY.find(st => st.id === s.status) || SPRAWA_STATUSY[0];
+          const isOverdue = s.terminPlatnosci && s.terminPlatnosci < today && s.status !== "zamknieta" && s.status !== "wygrana";
+          const daysLeft = s.terminPlatnosci ? Math.ceil((new Date(s.terminPlatnosci) - new Date()) / 86400000) : null;
+          return (
+            <div key={s.id}>
+            {showSeparator && (
+              <div className="flex items-center gap-3 py-3">
+                <div className="flex-1 h-px bg-gray-200"></div>
+                <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">🗄️ Archiwum</div>
+                <div className="flex-1 h-px bg-gray-200"></div>
+              </div>
+            )}
+            <div onClick={() => { setSelectedId(s.id); setView("szczegoly"); }}
+              className={"rounded-xl border p-4 cursor-pointer hover:shadow-sm transition-all" + (isClosed ? " opacity-60" : "")}
+              style={{borderColor: isOverdue ? "#fca5a5" : "#f3f4f6", background: isOverdue ? "#fff7f7" : "#fff"}}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                  <span className="text-xl flex-shrink-0">{typ?.icon || "📌"}</span>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-sm text-gray-900">{s.numer || "—"}</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{background: status.bg, color: status.color}}>{status.label}</span>
+                      {isOverdue && <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{background:"#fef2f2",color:"#dc2626"}}>⚠ Przeterminowane</span>}
+                    </div>
+                    <div className="text-sm text-gray-600 mt-0.5 truncate">{s.klient || "—"}{s.podtyp ? <span className="text-xs text-gray-400 ml-1">· {s.podtyp}</span> : null}</div>
+                    {s.uwagi && <div className="text-xs text-gray-400 mt-0.5 truncate">{s.uwagi}</div>}
+                  </div>
+                </div>
+                <div className="text-right flex-shrink-0">
+                  {s.kwota && <div className="font-bold text-sm text-gray-900">{s.kwota} {s.waluta||"EUR"}</div>}
+                  {daysLeft !== null && (
+                    <div className="text-xs mt-0.5" style={{color: daysLeft < 0 ? "#dc2626" : daysLeft <= 7 ? "#f97316" : "#6b7280"}}>
+                      {daysLeft < 0 ? `${Math.abs(daysLeft)}d po terminie` : daysLeft === 0 ? "Dziś!" : `${daysLeft}d do terminu`}
+                    </div>
+                  )}
+                  <div className="text-xs text-gray-400 mt-0.5">{s.zdarzenia?.length || 0} zdarzeń</div>
+                </div>
+              </div>
+            </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* MODAL NOWA SPRAWA */}
+      {showNewSprawa && (
+        <NowaSprawaModal
+          allTypy={allTypy}
+          vehicles={vehicles}
+          appUsers={appUsers}
+          onSave={(data) => {
+            onAdd({ ...data, status: "otwarta", zdarzenia: [], dataUtworzenia: new Date().toISOString() });
+            setShowNewSprawa(false);
+            showToast("✅ Sprawa dodana");
+          }}
+          onClose={() => setShowNewSprawa(false)}
+        />
+      )}
+
+      {/* MODAL NOWY TYP */}
+      {showNewTyp && (
+        <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.35)"}}>
+          <div style={{background:"#fff",borderRadius:16,padding:24,width:320,boxShadow:"0 8px 32px rgba(0,0,0,0.12)"}}>
+            <h3 style={{fontWeight:700,fontSize:15,marginBottom:16}}>Nowy typ sprawy</h3>
+            <input value={newTypLabel} onChange={e => setNewTypLabel(e.target.value)}
+              placeholder="Nazwa typu (np. Windykacja)"
+              style={{width:"100%",padding:"8px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",boxSizing:"border-box",marginBottom:12}} />
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button onClick={() => setShowNewTyp(false)} style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer"}}>Anuluj</button>
+              <button onClick={() => {
+                if (!newTypLabel.trim()) return;
+                const id = newTypLabel.toLowerCase().replace(/\s+/g,"_") + "_" + Math.random().toString(36).slice(2,5);
+                setCustomTypy(p => [...p, { id, label: newTypLabel.trim(), icon: "📌", color: "#6b7280" }]);
+                setNewTypLabel("");
+                setShowNewTyp(false);
+              }} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Dodaj</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EMAIL STATUS TAB — zarządzanie odbiorcami i konfiguracja wysyłki statusów
+// ═══════════════════════════════════════════════════════════════════════════════
+function EmailStatusTab({ showToast }) {
+  const [recipients, setRecipients] = useState([]);
+  const [newEmail, setNewEmail] = useState("");
+  const [newName, setNewName] = useState("");
+  const [sendgridKey, setSendgridKey] = useState("");
+  const [senderEmail, setSenderEmail] = useState("");
+  const [configLoaded, setConfigLoaded] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [logs, setLogs] = useState([]);
+
+  // Wczytaj odbiorców
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "emailRecipients"), (snap) => {
+      setRecipients(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return () => unsub();
+  }, []);
+
+  // Wczytaj konfigurację SendGrid
+  useEffect(() => {
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "config", "email"));
+        if (snap.exists()) {
+          const data = snap.data();
+          setSendgridKey(data.sendgridApiKey || "");
+          setSenderEmail(data.senderEmail || "");
+        }
+      } catch (e) { console.error("config load err", e); }
+      setConfigLoaded(true);
+    })();
+  }, []);
+
+  // Wczytaj logi wysyłek
+  useEffect(() => {
+    (async () => {
+      try {
+        const snap = await getDocs(collection(db, "emailLogs"));
+        const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setLogs(all.sort((a, b) => (b.sentAt || "").localeCompare(a.sentAt || "")).slice(0, 10));
+      } catch (e) { /* brak kolekcji */ }
+    })();
+  }, [sending]);
+
+  // Zapisz konfigurację SendGrid
+  const saveConfig = async () => {
+    try {
+      await setDoc(doc(db, "config", "email"), {
+        sendgridApiKey: sendgridKey.trim(),
+        senderEmail: senderEmail.trim(),
+        updatedAt: new Date().toISOString(),
+      });
+      logAction("update", "config", { section: "email" });
+      showToast("✅ Konfiguracja zapisana");
+    } catch (e) {
+      showToast("❌ Błąd zapisu konfiguracji");
+    }
+  };
+
+  // Dodaj odbiorcę
+  const addRecipient = async () => {
+    const email = newEmail.trim().toLowerCase();
+    if (!email || !email.includes("@")) { showToast("❌ Podaj prawidłowy email"); return; }
+    if (recipients.find(r => r.email === email)) { showToast("❌ Ten email już jest na liście"); return; }
+    try {
+      await addDoc(collection(db, "emailRecipients"), {
+        email,
+        name: newName.trim() || email.split("@")[0],
+        active: true,
+        addedAt: new Date().toISOString(),
+      });
+      logAction("add", "emailRecipients", { email });
+      setNewEmail("");
+      setNewName("");
+      showToast("✅ Odbiorca dodany");
+    } catch (e) {
+      showToast("❌ Błąd dodawania");
+    }
+  };
+
+  // Toggle aktywność
+  const toggleActive = async (id, current) => {
+    try {
+      await updateDoc(doc(db, "emailRecipients", id), { active: !current });
+      logAction("update", "emailRecipients", { id, active: !current });
+    } catch (e) { showToast("❌ Błąd"); }
+  };
+
+  // Usuń odbiorcę
+  const removeRecipient = async (id) => {
+    try {
+      await deleteDoc(doc(db, "emailRecipients", id));
+      logAction("delete", "emailRecipients", { id });
+      showToast("Odbiorca usunięty");
+    } catch (e) { showToast("❌ Błąd usuwania"); }
+  };
+
+  // Wyślij testowy email
+  const sendTestEmail = async () => {
+    if (!sendgridKey.trim()) { showToast("❌ Najpierw zapisz SendGrid API Key"); return; }
+    if (recipients.filter(r => r.active).length === 0) { showToast("❌ Dodaj co najmniej jednego aktywnego odbiorcę"); return; }
+    setSending(true);
+    try {
+      const fn = httpsCallable(functions, "sendFleetEmailNow");
+      const result = await fn();
+      if (result.data.success) {
+        showToast(`✅ Email wysłany do ${result.data.recipients} odbiorców`);
+      } else {
+        showToast(`❌ Błąd: ${result.data.error}`);
+      }
+    } catch (e) {
+      showToast("❌ Błąd wysyłki: " + (e.message || ""));
+    }
+    setSending(false);
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">Email — Statusy floty</h2>
+          <p className="text-sm text-gray-400 mt-0.5">Automatyczna wysyłka 3x dziennie (8:00, 14:00, 20:00)</p>
+        </div>
+        <button onClick={sendTestEmail} disabled={sending}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all"
+          style={{ background: sending ? "#9ca3af" : "#3b82f6" }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          {sending ? "Wysyłam..." : "Wyślij teraz"}
+        </button>
+      </div>
+
+      {/* KONFIGURACJA SENDGRID */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-5 mb-4">
+        <h3 className="text-sm font-semibold text-gray-800 mb-3">Konfiguracja SendGrid</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">SendGrid API Key</label>
+            <input type="password" value={sendgridKey} onChange={e => setSendgridKey(e.target.value)}
+              placeholder="SG.xxxx..." className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Email nadawcy</label>
+            <input type="email" value={senderEmail} onChange={e => setSenderEmail(e.target.value)}
+              placeholder="fleetstat@firma.pl" className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+          </div>
+        </div>
+        <button onClick={saveConfig}
+          className="mt-3 px-4 py-2 rounded-lg bg-gray-900 text-white text-xs font-semibold">
+          Zapisz konfigurację
+        </button>
+      </div>
+
+      {/* ODBIORCY */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-5 mb-4">
+        <h3 className="text-sm font-semibold text-gray-800 mb-3">
+          Odbiorcy ({recipients.filter(r => r.active).length} aktywnych)
+        </h3>
+
+        {/* Formularz dodawania */}
+        <div className="flex gap-2 mb-4">
+          <input value={newEmail} onChange={e => setNewEmail(e.target.value)}
+            placeholder="email@firma.pl" className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm"
+            onKeyDown={e => e.key === "Enter" && addRecipient()} />
+          <input value={newName} onChange={e => setNewName(e.target.value)}
+            placeholder="Nazwa (opcjonalnie)" className="w-40 px-3 py-2 rounded-lg border border-gray-200 text-sm"
+            onKeyDown={e => e.key === "Enter" && addRecipient()} />
+          <button onClick={addRecipient}
+            className="px-4 py-2 rounded-lg bg-blue-500 text-white text-sm font-semibold flex-shrink-0">
+            + Dodaj
+          </button>
+        </div>
+
+        {/* Lista odbiorców */}
+        <div className="space-y-2">
+          {recipients.length === 0 && (
+            <p className="text-sm text-gray-400 text-center py-4">Brak odbiorców — dodaj pierwszy email powyżej</p>
+          )}
+          {recipients.map(r => (
+            <div key={r.id} className="flex items-center justify-between px-3 py-2.5 rounded-xl border border-gray-100"
+              style={{ opacity: r.active ? 1 : 0.5 }}>
+              <div className="flex items-center gap-3">
+                <button onClick={() => toggleActive(r.id, r.active)}
+                  className="w-5 h-5 rounded flex items-center justify-center border-2 transition-all"
+                  style={{ borderColor: r.active ? "#22c55e" : "#d1d5db", background: r.active ? "#f0fdf4" : "#fff" }}>
+                  {r.active && <span className="text-green-600 text-xs">✓</span>}
+                </button>
+                <div>
+                  <span className="text-sm font-semibold text-gray-800">{r.name || r.email.split("@")[0]}</span>
+                  <span className="text-xs text-gray-400 ml-2">{r.email}</span>
+                </div>
+              </div>
+              <button onClick={() => removeRecipient(r.id)}
+                className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50">
+                Usuń
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* LOGI WYSYŁEK */}
+      {logs.length > 0 && (
+        <div className="bg-white rounded-2xl border border-gray-100 p-5">
+          <h3 className="text-sm font-semibold text-gray-800 mb-3">Ostatnie wysyłki</h3>
+          <div className="space-y-1.5">
+            {logs.map(l => (
+              <div key={l.id} className="flex items-center justify-between text-xs px-3 py-2 rounded-lg bg-gray-50">
+                <span className="text-gray-500">
+                  {new Date(l.sentAt).toLocaleString("pl-PL", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })}
+                </span>
+                <span className={l.status === "sent" ? "text-green-600 font-semibold" : "text-red-500 font-semibold"}>
+                  {l.status === "sent" ? `✅ Wysłano do ${l.recipients?.length || 0}` : `❌ ${l.error || "Błąd"}`}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// USERS TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+// Definicja wszystkich zakładek które admin może przyznawać userom
+// Kolejność odpowiada sidebar nav. "users" i "email" są ukryte — zawsze admin-only.
+const ASSIGNABLE_TABS = [
+  { id: "dashboard", label: "Przegląd",      icon: "📊" },
+  { id: "frachty",   label: "Frachty",       icon: "🚛" },
+  { id: "fv",        label: "Faktury sprzedaży", icon: "💰" },
+  { id: "costs",     label: "Koszty",        icon: "💳" },
+  { id: "vehicles",  label: "Pojazdy",       icon: "🚚" },
+  { id: "serwis",    label: "Serwis",        icon: "🔧" },
+  { id: "rent",      label: "Rentowność",    icon: "📈" },
+  { id: "docs",      label: "Dokumenty",     icon: "📄" },
+  { id: "imi",       label: "IMI / SIPSI",   icon: "🌍" },
+  { id: "payments",  label: "Płatności",     icon: "🗓️" },
+  { id: "logi",      label: "Logi aktywności", icon: "📝" },
+  { id: "sprawy",    label: "Sprawy",        icon: "📋" },
+  { id: "chat",      label: "Czat",          icon: "💬" },
+];
+
+// ═══════════════════════════════════════════════════════════════════
+//  AUDIT LOG TAB — logi aktywności użytkowników (admin-only)
+// ═══════════════════════════════════════════════════════════════════
+function AuditLogTab() {
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filterModule, setFilterModule] = useState("all");
+  const [filterAction, setFilterAction] = useState("all");
+  const [filterUser, setFilterUser] = useState("all");
+  const [searchQ, setSearchQ] = useState("");
+  const [limit, setLimit] = useState(200);
+
+  useEffect(() => {
+    setLoading(true);
+    const q = query(collection(db, "auditLog"), orderBy("ts", "desc"), firestoreLimit(limit));
+    const unsub = onSnapshot(q, (snap) => {
+      setLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLoading(false);
+    }, (err) => { console.error("auditLog onSnapshot", err); setLoading(false); });
+    return () => unsub();
+  }, [limit]);
+
+  const ACTION_LABELS = {
+    add: { label: "Dodanie", color: "#16a34a", bg: "#f0fdf4" },
+    update: { label: "Edycja", color: "#2563eb", bg: "#eff6ff" },
+    delete: { label: "Usunięcie", color: "#dc2626", bg: "#fef2f2" },
+    toggleStatus: { label: "Zmiana statusu", color: "#9333ea", bg: "#faf5ff" },
+    bulkAdd: { label: "Import zbiorczy", color: "#0891b2", bg: "#ecfeff" },
+    login: { label: "Logowanie", color: "#059669", bg: "#ecfdf5" },
+    logout: { label: "Wylogowanie", color: "#6b7280", bg: "#f9fafb" },
+  };
+
+  const MODULE_LABELS = {
+    payments: "Płatności",
+    frachty: "Frachty",
+    vehicles: "Pojazdy",
+    costs: "Koszty",
+    sprawy: "Sprawy",
+    pauzy: "Pauzy",
+    chat: "Czat",
+    users: "Użytkownicy",
+    config: "Konfiguracja",
+    emailRecipients: "Odbiorcy email",
+    operacyjne: "Operacyjne",
+    auth: "Autoryzacja",
+  };
+
+  // Unikalne wartości do filtrów
+  const uniqueModules = [...new Set(logs.map(l => l.module))].sort();
+  const uniqueActions = [...new Set(logs.map(l => l.action))].sort();
+  const uniqueUsers   = [...new Set(logs.map(l => l.email).filter(Boolean))].sort();
+
+  const q = searchQ.trim().toLowerCase();
+  const filtered = logs.filter(l => {
+    if (filterModule !== "all" && l.module !== filterModule) return false;
+    if (filterAction !== "all" && l.action !== filterAction) return false;
+    if (filterUser !== "all" && l.email !== filterUser) return false;
+    if (q) {
+      const hay = (
+        (l.email || "") + " " +
+        (l.module || "") + " " +
+        (l.action || "") + " " +
+        JSON.stringify(l.details || {})
+      ).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const fmtTs = (ts) => {
+    if (!ts) return "—";
+    try {
+      const d = new Date(ts);
+      return d.toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    } catch { return ts; }
+  };
+
+  const detailStr = (details) => {
+    if (!details || typeof details !== "object") return "";
+    const parts = Object.entries(details).filter(([,v]) => v !== undefined && v !== null && v !== "").map(([k,v]) => {
+      if (typeof v === "object") return `${k}: ${JSON.stringify(v)}`;
+      return `${k}: ${v}`;
+    });
+    return parts.join(" · ");
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-xl font-bold text-gray-900">Logi aktywności</h2>
+        <div className="text-sm text-gray-500">{filtered.length} z {logs.length} wpisów</div>
+      </div>
+
+      {/* FILTRY */}
+      <div className="flex items-center gap-2 flex-wrap mb-4">
+        <select value={filterModule} onChange={e => setFilterModule(e.target.value)}
+          className="px-3 py-2 rounded-lg text-sm border border-gray-200 bg-white">
+          <option value="all">Wszystkie moduły</option>
+          {uniqueModules.map(m => <option key={m} value={m}>{MODULE_LABELS[m] || m}</option>)}
+        </select>
+        <select value={filterAction} onChange={e => setFilterAction(e.target.value)}
+          className="px-3 py-2 rounded-lg text-sm border border-gray-200 bg-white">
+          <option value="all">Wszystkie akcje</option>
+          {uniqueActions.map(a => <option key={a} value={a}>{ACTION_LABELS[a]?.label || a}</option>)}
+        </select>
+        <select value={filterUser} onChange={e => setFilterUser(e.target.value)}
+          className="px-3 py-2 rounded-lg text-sm border border-gray-200 bg-white">
+          <option value="all">Wszyscy użytkownicy</option>
+          {uniqueUsers.map(u => <option key={u} value={u}>{u}</option>)}
+        </select>
+        <div className="relative">
+          <input type="text" value={searchQ} onChange={e => setSearchQ(e.target.value)}
+            placeholder="Szukaj w logach…"
+            className="pl-8 pr-3 py-2 rounded-lg text-sm border border-gray-200 bg-white w-56" />
+          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>
+        </div>
+        {(filterModule !== "all" || filterAction !== "all" || filterUser !== "all" || searchQ) && (
+          <button onClick={() => { setFilterModule("all"); setFilterAction("all"); setFilterUser("all"); setSearchQ(""); }}
+            className="px-3 py-2 rounded-lg text-sm border border-gray-200 bg-white hover:bg-gray-50 text-gray-600">
+            ✕ Wyczyść
+          </button>
+        )}
+      </div>
+
+      {/* TABELA */}
+      {loading ? (
+        <div className="p-8 text-center text-gray-400 text-sm">Ładowanie logów…</div>
+      ) : filtered.length === 0 ? (
+        <div className="p-8 text-center text-gray-400 text-sm">Brak wpisów pasujących do filtrów</div>
+      ) : (
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-600">
+                <th className="text-left px-3 py-2 font-semibold w-40">Data / czas</th>
+                <th className="text-left px-3 py-2 font-semibold">Użytkownik</th>
+                <th className="text-left px-3 py-2 font-semibold">Akcja</th>
+                <th className="text-left px-3 py-2 font-semibold">Moduł</th>
+                <th className="text-left px-3 py-2 font-semibold">Szczegóły</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((l) => {
+                const am = ACTION_LABELS[l.action] || { label: l.action, color: "#6b7280", bg: "#f9fafb" };
+                return (
+                  <tr key={l.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                    <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{fmtTs(l.ts)}</td>
+                    <td className="px-3 py-2 text-xs font-medium text-gray-700">{l.email || l.uid || "—"}</td>
+                    <td className="px-3 py-2">
+                      <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold"
+                        style={{ color: am.color, background: am.bg }}>
+                        {am.label}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-xs text-gray-600">{MODULE_LABELS[l.module] || l.module}</td>
+                    <td className="px-3 py-2 text-xs text-gray-500 max-w-xs truncate" title={detailStr(l.details)}>
+                      {detailStr(l.details)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* WIĘCEJ */}
+      {logs.length >= limit && (
+        <div className="text-center mt-4">
+          <button onClick={() => setLimit(l => l + 200)}
+            className="px-4 py-2 rounded-lg text-sm border border-gray-200 bg-white hover:bg-gray-50 text-gray-600">
+            Załaduj więcej (aktualnie {limit})
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
+  const [users, setUsers]     = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedUid, setExpandedUid] = useState(null);
+  const [subTab, setSubTab]   = useState("biuro"); // "biuro" | "kierowcy"
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const snap = await getDocs(collection(db, "users"));
+        const list = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+        setUsers(list.sort((a,b) => (a.email||"").localeCompare(b.email||"")));
+      } catch(e) {
+        console.error("Błąd ładowania użytkowników:", e);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  // Defaulty per rola (muszą być zgodne z DEFAULT_TABS_BY_ROLE w App)
+  const DEFAULTS = {
+    admin:      ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","sprawy","chat"],
+    dyspozytor: ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","sprawy","chat"],
+    kierowca:   ["driver"],
+    podglad:    ["dashboard","frachty","vehicles","serwis","docs","imi","chat"],
+  };
+
+  async function saveAllowedTabs(uid, newTabs, userRole) {
+    try {
+      await setDoc(doc(db, "users", uid), { allowedTabs: newTabs }, { merge: true });
+      logAction("update", "users", { targetUid: uid, allowedTabs: newTabs });
+      setUsers(p => p.map(u => u.uid === uid ? { ...u, allowedTabs: newTabs } : u));
+      showToast("✅ Zapisano uprawnienia zakładek");
+    } catch(e) {
+      console.error("Błąd zapisu allowedTabs:", e);
+      showToast("❌ Błąd zapisu uprawnień");
+    }
+  }
+
+  function toggleTab(u, tabId) {
+    const current = Array.isArray(u.allowedTabs) && u.allowedTabs.length > 0
+      ? u.allowedTabs
+      : (DEFAULTS[u.role] || DEFAULTS.podglad);
+    const next = current.includes(tabId)
+      ? current.filter(t => t !== tabId)
+      : [...current, tabId];
+    saveAllowedTabs(u.uid, next, u.role);
+  }
+
+  async function changeRole(uid, newRole) {
+    try {
+      const setUserRole = httpsCallable(functions, "setUserRole");
+      await setUserRole({ uid, role: newRole });
+      logAction("update", "users", { targetUid: uid, newRole, method: "cloudFunction" });
+      setUsers(p => p.map(u => u.uid === uid ? { ...u, role: newRole } : u));
+      showToast("✅ Rola zaktualizowana (Custom Claims)");
+    } catch(e) {
+      console.warn("Cloud Function niedostępna, fallback na Firestore:", e);
+      try {
+        await setDoc(doc(db, "users", uid), { role: newRole }, { merge: true });
+        logAction("update", "users", { targetUid: uid, newRole, method: "firestoreFallback" });
+        setUsers(p => p.map(u => u.uid === uid ? { ...u, role: newRole } : u));
+        showToast("✅ Rola zaktualizowana");
+      } catch(e2) {
+        showToast("❌ Błąd zapisu roli");
+      }
+    }
+  }
+
+  // ── Przypisanie / odpisanie kierowcy do pojazdu ──
+  function assignDriverToVehicle(driverEmail, driverName, vehicleId) {
+    if (!vehicleId || !driverEmail) return;
+    const today = new Date().toISOString().split("T")[0];
+    setVehicles(prev => prev.map(v => {
+      if (v.id === vehicleId) {
+        const hist = v.driverHistory || [];
+        // Sprawdź czy ten kierowca już jest aktywny na tym pojeździe
+        const alreadyActive = hist.some(d => !d.to && d.email === driverEmail);
+        if (alreadyActive) return { ...v, assignedDriver: driverEmail };
+        // Zamknij tylko aktywnego kierowcę z emailem INNYM niż nowy (nie ruszaj imion)
+        const updated = hist.map(d => !d.to && d.email !== driverEmail ? { ...d, to: today } : d);
+        const newEntry = { id: Date.now().toString(36), name: driverName || driverEmail, email: driverEmail, phone: "", from: today, to: "" };
+        return { ...v, driverHistory: [...updated, newEntry], assignedDriver: driverEmail };
+      }
+      // Odpisz tego kierowcę z innego auta (tylko jego wpis, nie ruszaj innych)
+      if (v.assignedDriver === driverEmail) {
+        const hist = (v.driverHistory || []).map(d => !d.to && d.email === driverEmail ? { ...d, to: today } : d);
+        return { ...v, driverHistory: hist, assignedDriver: "" };
+      }
+      return v;
+    }));
+    logAction("update", "vehicles", { vehicleId, assignedDriver: driverEmail, action: "assignDriver" });
+    showToast("✅ Kierowca przypisany do pojazdu");
+  }
+
+  function unassignDriver(driverEmail) {
+    if (!driverEmail) return;
+    const today = new Date().toISOString().split("T")[0];
+    setVehicles(prev => prev.map(v => {
+      if (v.assignedDriver === driverEmail) {
+        const hist = (v.driverHistory || []).map(d => !d.to && d.email === driverEmail ? { ...d, to: today } : d);
+        return { ...v, driverHistory: hist, assignedDriver: "" };
+      }
+      return v;
+    }));
+    logAction("update", "vehicles", { driverEmail, action: "unassignDriver" });
+    showToast("✅ Kierowca odpisany od pojazdu");
+  }
+
+  const ROLES_BIURO = [
+    { id: "admin",      label: "Admin",      icon: "👑", desc: "Pełny dostęp",                      color: "#92400e", bg: "#fef3c7" },
+    { id: "dyspozytor", label: "Dyspozytor", icon: "🚚", desc: "Edycja frachtów i kosztów",          color: "#1d4ed8", bg: "#eff6ff" },
+    { id: "podglad",    label: "Podgląd",    icon: "👁",  desc: "Tylko odczyt, bez finansów",        color: "#6b7280", bg: "#f3f4f6" },
+  ];
+
+  const ALL_ROLES = [
+    ...ROLES_BIURO,
+    { id: "kierowca",   label: "Kierowca",   icon: "🧑‍✈️", desc: "Panel kierowcy — zlecenia, CMR, czas pracy", color: "#059669", bg: "#ecfdf5" },
+  ];
+
+  const biuroUsers   = users.filter(u => u.role !== "kierowca");
+  const driverUsers  = users.filter(u => u.role === "kierowca");
+  const activeVehicles = (vehicles || []).filter(v => !v.archived);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">Użytkownicy</h2>
+          <p className="text-sm text-gray-400 mt-0.5">Zarządzanie dostępem do FleetStat</p>
+        </div>
+      </div>
+
+      {/* SUB-TABS: Biuro / Kierowcy */}
+      <div className="flex gap-2 mb-6">
+        {[
+          { id: "biuro", label: "Biuro", icon: "🏢", count: biuroUsers.length },
+          { id: "kierowcy", label: "Kierowcy", icon: "🧑‍✈️", count: driverUsers.length },
+        ].map(t => (
+          <button key={t.id} onClick={() => setSubTab(t.id)}
+            className="px-4 py-2.5 rounded-xl text-sm font-semibold transition-all border"
+            style={{
+              background: subTab === t.id ? "#111827" : "#fff",
+              color: subTab === t.id ? "#fff" : "#6b7280",
+              borderColor: subTab === t.id ? "#111827" : "#e5e7eb",
+            }}>
+            {t.icon} {t.label} <span className="ml-1 opacity-60">({t.count})</span>
+          </button>
+        ))}
+      </div>
+
+      {/* ═══════ TAB: BIURO ═══════ */}
+      {subTab === "biuro" && (
+        <div>
+          {/* ROLE LEGEND */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+            {ROLES_BIURO.map(r => (
+              <div key={r.id} className="rounded-xl p-4 border border-gray-100 bg-white">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-lg">{r.icon}</span>
+                  <span className="font-semibold text-gray-800 text-sm">{r.label}</span>
+                  <span className="ml-auto px-2 py-0.5 rounded-full text-xs font-semibold"
+                    style={{ background: r.bg, color: r.color }}>{r.id}</span>
+                </div>
+                <p className="text-xs text-gray-400">{r.desc}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* BIURO USERS LIST */}
+          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+            <div className="hidden md:grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-medium text-gray-400 uppercase tracking-wider">
+              <span className="col-span-5">Email</span>
+              <span className="col-span-3">Aktualna rola</span>
+              <span className="col-span-4">Zmień rolę</span>
+            </div>
+
+            {loading && (
+              <div className="px-5 py-10 text-center text-gray-400 text-sm">Ładowanie użytkowników…</div>
+            )}
+            {!loading && biuroUsers.length === 0 && (
+              <div className="px-5 py-10 text-center text-gray-400 text-sm">Brak użytkowników biurowych</div>
+            )}
+
+            {!loading && biuroUsers.map((u, i) => {
+              const roleInfo = ALL_ROLES.find(r => r.id === u.role) || ALL_ROLES[2];
+              const isMe = u.uid === currentUid;
+              const isAdminUser = u.role === "admin";
+              const effectiveAllowed = Array.isArray(u.allowedTabs) && u.allowedTabs.length > 0
+                ? u.allowedTabs
+                : (DEFAULTS[u.role] || DEFAULTS.podglad);
+              const isExpanded = expandedUid === u.uid;
+              const hasCustom = Array.isArray(u.allowedTabs);
+              return (
+                <div key={u.uid} style={{ borderBottom: i === biuroUsers.length - 1 ? "none" : "1px solid #f9fafb" }}>
+                  <div className="md:grid md:grid-cols-12 flex flex-wrap gap-y-2 px-5 py-4 items-center hover:bg-gray-50 transition-colors">
+                    <div className="col-span-5 flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+                        style={{ background: "#f3f4f6", color: "#374151" }}>
+                        {(u.email||"?")[0].toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium text-gray-800 truncate max-w-48">{u.email || "—"}</div>
+                        {isMe && <div className="text-xs text-amber-500 font-medium">to Ty</div>}
+                      </div>
+                    </div>
+                    <div className="col-span-3">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold"
+                        style={{ background: roleInfo.bg, color: roleInfo.color }}>
+                        {roleInfo.icon} {roleInfo.label}
+                      </span>
+                    </div>
+                    <div className="col-span-4 flex gap-1.5 flex-wrap items-center">
+                      {ALL_ROLES.filter(r => r.id !== u.role).map(r => (
+                        <button key={r.id}
+                          onClick={() => {
+                            if (isMe && r.id !== "admin") {
+                              if (!window.confirm("Zmieniasz własną rolę — stracisz dostęp admina. Kontynuować?")) return;
+                            }
+                            changeRole(u.uid, r.id);
+                          }}
+                          className="px-3 py-1 rounded-lg text-xs font-medium border transition-all hover:opacity-80"
+                          style={{ borderColor: r.bg, background: r.bg, color: r.color }}>
+                          {r.icon} {r.label}
+                        </button>
+                      ))}
+                      {!isAdminUser && (
+                        <button onClick={() => setExpandedUid(isExpanded ? null : u.uid)}
+                          className="px-2.5 py-1 rounded-lg text-xs font-medium border transition-all hover:bg-gray-100"
+                          style={{ borderColor:"#e5e7eb", color:"#374151", background:"#fff" }}
+                          title="Zakładki dostępne dla tego użytkownika">
+                          {isExpanded ? "▲" : "▼"} Zakładki ({effectiveAllowed.length})
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {isExpanded && !isAdminUser && (
+                    <div className="px-5 pb-5 pt-1 bg-gray-50">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          Dostęp do zakładek
+                          {hasCustom ? (
+                            <span className="ml-2 text-xs font-normal text-blue-600">· własne ustawienia</span>
+                          ) : (
+                            <span className="ml-2 text-xs font-normal text-gray-400">· domyślne dla roli "{u.role}"</span>
+                          )}
+                        </div>
+                        {hasCustom && (
+                          <button onClick={() => saveAllowedTabs(u.uid, [], u.role)}
+                            className="text-xs text-gray-500 hover:text-gray-800 underline">
+                            Przywróć domyślne dla roli
+                          </button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        {ASSIGNABLE_TABS.map(t => {
+                          const checked = effectiveAllowed.includes(t.id);
+                          return (
+                            <label key={t.id}
+                              className="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-all border text-sm"
+                              style={{
+                                background: checked ? "#eff6ff" : "#fff",
+                                borderColor: checked ? "#bfdbfe" : "#e5e7eb",
+                                color: checked ? "#1d4ed8" : "#6b7280",
+                                fontWeight: checked ? 600 : 400,
+                              }}>
+                              <input type="checkbox" checked={checked} onChange={() => toggleTab(u, t.id)}
+                                className="w-4 h-4" style={{ accentColor: "#3b82f6" }} />
+                              <span>{t.icon}</span>
+                              <span className="text-xs">{t.label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <div className="mt-3 text-xs text-gray-400">
+                        💡 Zakładki <strong>Użytkownicy</strong> i <strong>Email statusy</strong> są zawsze admin-only i nie można ich przyznać tutaj.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-4 px-1 text-xs text-gray-400">
+            💡 Nowy użytkownik pojawi się na liście po pierwszym zalogowaniu. Domyślnie otrzymuje rolę <strong>Podgląd</strong>.
+          </div>
+        </div>
+      )}
+
+      {/* ═══════ TAB: KIEROWCY ═══════ */}
+      {subTab === "kierowcy" && (
+        <div>
+          {/* Info banner */}
+          <div className="rounded-xl p-4 border border-emerald-100 bg-emerald-50/50 mb-6">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-lg">🧑‍✈️</span>
+              <span className="font-semibold text-emerald-800 text-sm">Kierowcy</span>
+            </div>
+            <p className="text-xs text-emerald-600">
+              Kierowca widzi osobny panel mobile-first: zlecenia (bez cen), pojazd, serwis, spalanie i czas pracy.
+              Przypisz kierowcę do pojazdu żeby widział swoje dane.
+            </p>
+          </div>
+
+          {/* DODAJ KIEROWCĘ */}
+          <div className="bg-white rounded-2xl border border-gray-100 p-4 mb-4">
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Dodaj kierowcę</div>
+            <div className="flex gap-2 flex-wrap">
+              <input id="newDriverEmail" placeholder="email kierowcy" className="flex-1 min-w-48 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+              <input id="newDriverName" placeholder="Imię i nazwisko" className="flex-1 min-w-40 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+              <button onClick={async () => {
+                const emailEl = document.getElementById("newDriverEmail");
+                const nameEl = document.getElementById("newDriverName");
+                const email = emailEl?.value?.trim().toLowerCase();
+                const name = nameEl?.value?.trim();
+                if (!email || !email.includes("@")) { showToast("❌ Podaj prawidłowy email"); return; }
+                if (users.find(u => u.email === email && u.role === "kierowca")) { showToast("❌ Ten kierowca już jest w systemie"); return; }
+                try {
+                  const addDriver = httpsCallable(functions, "addDriverByEmail");
+                  const result = await addDriver({ email, displayName: name });
+                  if (result.data.success) {
+                    setUsers(p => {
+                      const exists = p.find(u => u.uid === result.data.uid);
+                      if (exists) return p.map(u => u.uid === result.data.uid ? { ...u, role: "kierowca", displayName: result.data.displayName } : u);
+                      return [...p, { uid: result.data.uid, email, role: "kierowca", displayName: result.data.displayName }];
+                    });
+                    logAction("add", "users", { email, role: "kierowca" });
+                    showToast("✅ Kierowca dodany");
+                    emailEl.value = "";
+                    nameEl.value = "";
+                  }
+                } catch (e) {
+                  console.error(e);
+                  const msg = e.message || "";
+                  if (msg.includes("nie istnieje") || msg.includes("not-found")) {
+                    showToast("❌ Konto nie istnieje w Firebase Auth — najpierw załóż konto w konsoli");
+                  } else {
+                    showToast("❌ Błąd dodawania kierowcy");
+                  }
+                }
+              }}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white" style={{background:"#059669"}}>
+                + Dodaj kierowcę
+              </button>
+            </div>
+            <div className="text-xs text-gray-400 mt-2">
+              Kierowca musi mieć konto w Firebase Auth (założone w konsoli lub przez rejestrację). Po dodaniu tutaj i pierwszym zalogowaniu — zobaczy panel kierowcy.
+            </div>
+          </div>
+
+          {/* DRIVERS LIST */}
+          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+            <div className="hidden md:grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-medium text-gray-400 uppercase tracking-wider">
+              <span className="col-span-4">Kierowca</span>
+              <span className="col-span-4">Przypisany pojazd</span>
+              <span className="col-span-4">Akcje</span>
+            </div>
+
+            {loading && (
+              <div className="px-5 py-10 text-center text-gray-400 text-sm">Ładowanie…</div>
+            )}
+
+            {!loading && driverUsers.length === 0 && (
+              <div className="px-5 py-10 text-center text-gray-400 text-sm">
+                Brak kierowców. Zmień rolę użytkownika na <strong>Kierowca</strong> w zakładce Biuro, aby dodać go tutaj.
+              </div>
+            )}
+
+            {!loading && driverUsers.map((u, i) => {
+              const assignedVehicle = activeVehicles.find(v => v.assignedDriver === u.email);
+              const availableVehicles = activeVehicles; // pokaż wszystkie — admin może nadpisać przypisanie
+              return (
+                <div key={u.uid} className="md:grid md:grid-cols-12 flex flex-wrap gap-y-3 px-5 py-4 items-center hover:bg-gray-50 transition-colors"
+                  style={{ borderBottom: i === driverUsers.length - 1 ? "none" : "1px solid #f9fafb" }}>
+
+                  {/* Kierowca info */}
+                  <div className="col-span-4 flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full flex items-center justify-center text-base font-bold flex-shrink-0"
+                      style={{ background: "#ecfdf5", color: "#059669" }}>
+                      {(u.email||"?")[0].toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-gray-800">{u.displayName || u.email?.split("@")[0] || "—"}</div>
+                      <div className="text-xs text-gray-400 truncate max-w-48">{u.email}</div>
+                    </div>
+                  </div>
+
+                  {/* Pojazd */}
+                  <div className="col-span-4">
+                    {assignedVehicle ? (
+                      <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-100">
+                        <span className="text-sm">🚛</span>
+                        <span className="text-sm font-semibold text-emerald-800">{assignedVehicle.plate}</span>
+                        {assignedVehicle.brand && <span className="text-xs text-emerald-600">{assignedVehicle.brand}</span>}
+                      </div>
+                    ) : (
+                      <span className="text-sm text-gray-400 italic">Brak pojazdu</span>
+                    )}
+                  </div>
+
+                  {/* Akcje */}
+                  <div className="col-span-4 flex gap-2 flex-wrap items-center">
+                    {assignedVehicle ? (
+                      <button onClick={() => unassignDriver(u.email)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium border border-red-100 bg-red-50 text-red-600 hover:bg-red-100 transition-colors">
+                        Odpisz od auta
+                      </button>
+                    ) : (
+                      <select
+                        onChange={(e) => {
+                          if (e.target.value) assignDriverToVehicle(u.email, u.displayName || u.email?.split("@")[0], e.target.value);
+                          e.target.value = "";
+                        }}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium border border-emerald-200 bg-emerald-50 text-emerald-700 cursor-pointer"
+                        defaultValue="">
+                        <option value="" disabled>Przypisz do pojazdu…</option>
+                        {availableVehicles.map(v => (
+                          <option key={v.id} value={v.id}>{v.plate} {v.brand ? `(${v.brand})` : ""}{v.assignedDriver && v.assignedDriver !== u.email ? ` ← ${(v.driverHistory||[]).find(d=>!d.to)?.name || v.assignedDriver}` : ""}</option>
+                        ))}
+                      </select>
+                    )}
+                    <button onClick={() => changeRole(u.uid, "podglad")}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-200 bg-white text-gray-500 hover:bg-gray-100 transition-colors">
+                      Zmień na Podgląd
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Driver history summary */}
+          {!loading && driverUsers.length > 0 && (
+            <div className="mt-6 bg-white rounded-2xl border border-gray-100 p-5">
+              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Historia przypisań</div>
+              <div className="space-y-2">
+                {activeVehicles.filter(v => (v.driverHistory || []).length > 0).map(v => (
+                  <div key={v.id} className="flex items-start gap-3 py-2 border-b border-gray-50 last:border-0">
+                    <div className="text-sm font-semibold text-gray-700 min-w-24">{v.plate}</div>
+                    <div className="flex flex-wrap gap-1">
+                      {(v.driverHistory || []).slice(-5).reverse().map((d, idx) => (
+                        <span key={d.id || idx}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs"
+                          style={{
+                            background: !d.to ? "#ecfdf5" : "#f3f4f6",
+                            color: !d.to ? "#059669" : "#9ca3af",
+                            fontWeight: !d.to ? 600 : 400,
+                          }}>
+                          {d.name || d.email} · {d.from}{d.to ? ` → ${d.to}` : " → teraz"}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PAYMENTS TAB — moduł płatności (oddzielny od Rejestru kosztów)
+// ═══════════════════════════════════════════════════════════════════════════════
+const PAY_CATEGORIES = [
+  { id: "leasing",      label: "Leasing",       color: "#6366f1" },
+  { id: "ubezpieczenie",label: "Ubezpieczenie", color: "#0ea5e9" },
+  { id: "paliwo",       label: "Paliwo",        color: "#f59e0b" },
+  { id: "czesci",       label: "Części",        color: "#10b981" },
+  { id: "uslugi",       label: "Usługi",        color: "#ec4899" },
+  { id: "inne",         label: "Inne",          color: "#64748b" },
+];
+const PAY_CURRENCIES = ["PLN", "EUR", "USD"];
+const PAY_FREQUENCIES = [
+  { id: "monthly", label: "Co miesiąc" },
+  { id: "yearly",  label: "Co rok" },
+];
+const fmtMoney = (n, cur) => `${(Number(n)||0).toLocaleString("pl-PL",{minimumFractionDigits:2,maximumFractionDigits:2})} ${cur||""}`.trim();
+const todayISO = () => new Date().toISOString().slice(0,10);
+const addMonthsISO = (iso, n) => { const d = new Date(iso); d.setMonth(d.getMonth()+n); return d.toISOString().slice(0,10); };
+const addYearsISO  = (iso, n) => { const d = new Date(iso); d.setFullYear(d.getFullYear()+n); return d.toISOString().slice(0,10); };
+const monthKey = (iso) => iso.slice(0,7);     // "YYYY-MM"
+const yearKey  = (iso) => iso.slice(0,4);     // "YYYY"
+
+// Z jednego dokumentu (ad-hoc albo szablon cykliczny) buduje listę "instancji widocznych"
+// — pojedynczy wpis zwraca 1 instancję, szablon cykliczny zwraca N wg częstotliwości.
+function expandPayment(p, windowStartISO, windowEndISO) {
+  if (!p?.recurring?.enabled) {
+    // Ad-hoc: jedna instancja
+    return [{
+      ...p,
+      instanceKey: "one",
+      dueDate: p.dueDate || p.issueDate,
+      isInstance: false,
+    }];
+  }
+  const { startDate, endDate, frequency } = p.recurring;
+  if (!startDate) return [];
+  const step = frequency === "yearly" ? addYearsISO : addMonthsISO;
+  const out = [];
+  let cursor = startDate;
+  const hardEnd = endDate || addYearsISO(startDate, 5); // bezpiecznik
+  let guard = 0;
+  while (cursor <= hardEnd && guard < 240) {
+    // obcinamy do okna widoczności
+    if (cursor >= windowStartISO && cursor <= windowEndISO) {
+      const key = frequency === "yearly" ? yearKey(cursor) : monthKey(cursor);
+      const overrides = (p.instanceOverrides || {})[key] || {};
+      // Nie kopiuj załącznika szablonu na instancje — plik jest per-instancja (z overrides)
+      const { fileUrl: _fu, filePath: _fp, fileName: _fn, fileType: _ft, fileSize: _fs, ...templateWithoutFile } = p;
+      out.push({
+        ...templateWithoutFile,
+        ...overrides,         // nadpisz nr FV, kwoty, plik itp. per instancja
+        instanceKey: key,
+        dueDate: cursor,
+        isInstance: true,
+        _hasOverrides: Object.keys(overrides).length > 0,
+        // status instancji czyta z p.paidInstances
+        instanceStatus: (p.paidInstances || []).includes(key) ? "paid" : "topay",
+      });
+    }
+    cursor = step(cursor, 1);
+    guard++;
+  }
+  return out;
+}
+
+function statusOf(inst) {
+  const base = inst.isInstance ? inst.instanceStatus : (inst.status || "topay");
+  if (base === "paid") return "paid";
+  if (inst.dueDate && inst.dueDate < todayISO()) return "overdue";
+  return "topay";
+}
+const STATUS_META = {
+  topay:   { label: "Do zapłaty",     bg: "#eff6ff", border: "#bfdbfe", color: "#1d4ed8" },
+  paid:    { label: "Zapłacone",      bg: "#f0fdf4", border: "#bbf7d0", color: "#15803d" },
+  overdue: { label: "Przeterminowane",bg: "#fef2f2", border: "#fecaca", color: "#b91c1c" },
+};
+
+// ═══════════════════════════════════════════════════════════════════
+//  PANEL KIEROWCY — mobile-first, osobny layout
+// ═══════════════════════════════════════════════════════════════════
+function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEvents = [], fuelEntries = [], driverDocs = [], showToast }) {
+  const [selectedFracht, setSelectedFracht] = useState(null);
+  const [driverTab, setDriverTab] = useState("home"); // "home" | "zlecenia" | "pojazd" | "serwis" | "spalanie" | "czas" | "dokumenty" | "mapa"
+  const [fuelView, setFuelView] = useState("list"); // "list" | "form" | "stats"
+  const [fuelForm, setFuelForm] = useState({ date: new Date().toISOString().slice(0,10), liters: "", mileage: "", station: "", cardNr: "", pricePerL: "", country: "PL", currency: "PLN", fullTank: true, isAdblue: false, adblueL: "" });
+  const [docView, setDocView] = useState("list"); // "list" | "form"
+  const [docForm, setDocForm] = useState({ description: "", type: "paragon", photoFile: null, photoPreview: null });
+  const [docUploading, setDocUploading] = useState(false);
+  const [driverZoom, setDriverZoom] = useState(() => {
+    try { return localStorage.getItem("fleetstat_driver_zoom") || "normal"; } catch { return "normal"; }
+  }); // "normal" | "large"
+  const zoomScale = driverZoom === "large" ? 1.25 : 1;
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const today = new Date();
+
+  // Podział na aktywne / przyszłe / historia
+  const active = frachty.filter(f => {
+    if (f.statusRozladunku === "rozladowano") return false;
+    if (!f.dataZaladunku) return false;
+    return f.dataZaladunku <= todayStr && (!f.dataRozladunku || f.dataRozladunku >= todayStr);
+  });
+  const upcoming = frachty.filter(f => {
+    if (f.statusRozladunku === "rozladowano") return false;
+    return f.dataZaladunku && f.dataZaladunku > todayStr;
+  });
+  const history = frachty.filter(f =>
+    f.statusRozladunku === "rozladowano" || (f.dataRozladunku && f.dataRozladunku < todayStr)
+  );
+
+  const formatKody = (f) => {
+    const zal = [f.zaladunekKod, f.zaladunekKod2, f.zaladunekKod3].filter(s => s && s.trim()).join(" / ");
+    const roz = [f.dokod, f.dokod2, f.dokod3].filter(s => s && s.trim()).join(" / ");
+    return { zal: zal || "—", roz: roz || "—" };
+  };
+
+  const fmtDate = (d) => {
+    if (!d) return "—";
+    try { return new Date(d + "T12:00:00").toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit" }); }
+    catch { return d; }
+  };
+
+  const fmtDateFull = (d) => {
+    if (!d) return "—";
+    try { return new Date(d + "T12:00:00").toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric" }); }
+    catch { return d; }
+  };
+
+  const daysUntil = (d) => d ? Math.ceil((new Date(d) - today) / 86400000) : null;
+
+  // Cofnięcie statusu (załadunek / rozładunek)
+  const undoFrachtStatus = async (fracht, field) => {
+    if (!window.confirm(field === "zaladowano" ? "Cofnąć potwierdzenie załadunku?" : "Cofnąć potwierdzenie rozładunku?")) return;
+    try {
+      await addDoc(collection(db, "driverEvents"), {
+        type: `cofnij_${field}`,
+        frachtId: fracht.id,
+        vehicleId: vehicle?.id,
+        driverEmail: user.email,
+        driverName: user.displayName || user.email,
+        ts: new Date().toISOString(),
+      });
+      logAction(`cofnij_${field}`, "driverEvents", { frachtId: fracht.id });
+      showToast("↩️ Cofnięto potwierdzenie");
+    } catch (e) {
+      console.error("undo error", e);
+      showToast("❌ Błąd cofania");
+    }
+  };
+
+  // Aktualizacja statusu frachtu
+  const updateFrachtStatus = async (fracht, field, value) => {
+    try {
+      await addDoc(collection(db, "driverEvents"), {
+        type: field,
+        frachtId: fracht.id,
+        vehicleId: vehicle?.id,
+        value,
+        driverEmail: user.email,
+        driverName: user.displayName || user.email,
+        ts: new Date().toISOString(),
+      });
+      logAction(field, "driverEvents", { frachtId: fracht.id, vehicleId: vehicle?.id });
+      showToast(field === "zaladowano" ? "✅ Załadunek potwierdzony" : "✅ Rozładunek potwierdzony");
+    } catch (e) {
+      console.error("driverEvent error", e);
+      showToast("❌ Błąd zapisu");
+    }
+  };
+
+  // ── Upload zdjęcia (towar / CMR) ──
+  const uploadDriverPhoto = async (type, file) => {
+    if (!file || !selectedFracht) return;
+    try {
+      const path = `driverPhotos/${selectedFracht.id}/${type}_${Date.now()}_${file.name}`;
+      const sRef = storageRef(storage, path);
+      await uploadBytes(sRef, file);
+      const url = await getDownloadURL(sRef);
+      const eventType = type === "towar" ? "towar_photo"
+        : type === "cmr_zaladunek" ? "cmr_zaladunek_photo"
+        : type === "cmr_rozladunek" ? "cmr_rozladunek_photo"
+        : type === "cmr" ? "cmr_photo"
+        : `${type}_photo`;
+      await addDoc(collection(db, "driverEvents"), {
+        type: eventType,
+        frachtId: selectedFracht.id,
+        vehicleId: vehicle?.id,
+        photoUrl: url,
+        driverEmail: user.email,
+        driverName: user.displayName || user.email,
+        ts: new Date().toISOString(),
+      });
+      showToast(type.includes("cmr") ? "✅ Zdjęcie CMR dodane" : "✅ Zdjęcie towaru dodane");
+      return url;
+    } catch (e) {
+      console.error("Photo upload error:", e);
+      showToast("❌ Błąd wysyłania zdjęcia");
+      return null;
+    }
+  };
+
+  // ── Helper: oblicz opóźnienie (planowane vs faktyczne) ──
+  const calcDelay = (plannedDate, plannedTime, actualTs) => {
+    if (!plannedDate || !actualTs) return null;
+    const planned = new Date(`${plannedDate}T${plannedTime || "23:59"}:00`);
+    const actual = new Date(actualTs);
+    const diffMin = Math.round((actual - planned) / 60000);
+    if (diffMin <= 0) return { onTime: true, text: "Na czas", diffMin };
+    const h = Math.floor(diffMin / 60);
+    const m = diffMin % 60;
+    return { onTime: false, text: h > 0 ? `Opóźnienie ${h}h ${m}min` : `Opóźnienie ${m}min`, diffMin };
+  };
+
+  // ── Helper: badge opóźnienia ──
+  const renderDelayBadge = (delay) => {
+    if (!delay) return null;
+    return (
+      <span style={{
+        display: "inline-flex", alignItems: "center", gap: 4,
+        padding: "3px 8px", borderRadius: 8, fontSize: 11, fontWeight: 600,
+        background: delay.onTime ? "#f0fdf4" : delay.diffMin > 120 ? "#fef2f2" : "#fffbeb",
+        color: delay.onTime ? "#15803d" : delay.diffMin > 120 ? "#dc2626" : "#d97706",
+      }}>
+        {delay.onTime ? "✅" : "⏰"} {delay.text}
+      </span>
+    );
+  };
+
+  // ── Helper: usuń zdjęcie kierowcy ──
+  const deleteDriverPhoto = async (eventId) => {
+    if (!window.confirm("Usunąć to zdjęcie?")) return;
+    try {
+      await deleteDoc(doc(db, "driverEvents", eventId));
+      showToast("🗑️ Zdjęcie usunięte");
+    } catch (e) {
+      console.error("Delete photo error:", e);
+      showToast("❌ Błąd usuwania");
+    }
+  };
+
+  // ── Helper: zapisz uwagi kierowcy ──
+  const saveDriverNote = async (fracht, type, text) => {
+    if (!fracht || !text?.trim()) return;
+    try {
+      // Znajdź istniejący event uwagi i zaktualizuj lub utwórz nowy
+      const existing = driverEvents.find(e => e.frachtId === fracht.id && e.type === type);
+      if (existing?.id) {
+        await updateDoc(doc(db, "driverEvents", existing.id), { note: text.trim(), ts: new Date().toISOString() });
+      } else {
+        await addDoc(collection(db, "driverEvents"), {
+          type,
+          frachtId: fracht.id,
+          vehicleId: vehicle?.id,
+          note: text.trim(),
+          driverEmail: user.email,
+          driverName: user.displayName || user.email,
+          ts: new Date().toISOString(),
+        });
+      }
+      showToast("✅ Uwagi zapisane");
+    } catch (e) {
+      console.error("Save note error:", e);
+      showToast("❌ Błąd zapisu uwag");
+    }
+  };
+
+  // ── Helper: status step (potwierdź/cofnij z datą) ──
+  const renderStatusStep = (isDone, label, event, enabled, onConfirm, onUndo) => (
+    <div style={{padding: 12, borderRadius: 12, marginBottom: 8, opacity: enabled ? 1 : 0.4,
+      background: isDone ? "#f0fdf4" : "#f8fafc", border: `1px solid ${isDone ? "#bbf7d0" : "#e5e7eb"}`}}>
+      <div className="flex items-center justify-between">
+        <div>
+          <div style={{fontSize: 13, fontWeight: 600, color: isDone ? "#15803d" : "#374151"}}>
+            {isDone ? "✅" : "⏳"} {label}
+          </div>
+          {event && <div style={{fontSize: 12, color: "#6b7280", marginTop: 2}}>
+            {new Date(event.value || event.ts).toLocaleString("pl-PL", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
+          </div>}
+        </div>
+        {enabled && !isDone && (
+          <button onClick={onConfirm}
+            style={{padding: "8px 16px", borderRadius: 10, border: "none", background: "#3b82f6", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer"}}>
+            Potwierdź
+          </button>
+        )}
+        {isDone && onUndo && (
+          <button onClick={onUndo}
+            style={{padding: "6px 10px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", color: "#9ca3af", fontSize: 11, fontWeight: 500, cursor: "pointer"}}>
+            ↩ Cofnij
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  // ── Helper: photo step (dodaj zdjęcie z datą + usuwanie) ──
+  const renderPhotoStep = (isDone, label, photoEvent, enabled, photoType) => (
+    <div style={{padding: 12, borderRadius: 12, marginBottom: 8, opacity: enabled ? 1 : 0.4,
+      background: isDone ? "#f0fdf4" : "#f8fafc", border: `1px solid ${isDone ? "#bbf7d0" : "#e5e7eb"}`}}>
+      <div className="flex items-center justify-between">
+        <div style={{flex: 1, minWidth: 0}}>
+          <div style={{fontSize: 13, fontWeight: 600, color: isDone ? "#15803d" : "#374151"}}>
+            {isDone ? "✅" : "📄"} {label}
+          </div>
+          {photoEvent && <div style={{fontSize: 12, color: "#6b7280", marginTop: 2}}>
+            {photoEvent.ts ? new Date(photoEvent.ts).toLocaleString("pl-PL", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "Dodane"}
+            {photoEvent.photoUrl && <span> · <a href={photoEvent.photoUrl} target="_blank" rel="noopener noreferrer" style={{color: "#6366f1", textDecoration: "none"}}>Zobacz</a></span>}
+          </div>}
+        </div>
+        <div className="flex items-center gap-2">
+          {isDone && photoEvent?.id && (
+            <button onClick={() => deleteDriverPhoto(photoEvent.id)}
+              style={{background: "none", border: "none", color: "#d1d5db", fontSize: 14, cursor: "pointer", padding: "4px"}}>✕</button>
+          )}
+          {enabled && !isDone && (
+            <label style={{padding: "8px 16px", borderRadius: 10, border: "none", background: "#6366f1", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4}}>
+              📷 Dodaj
+              <input type="file" accept="image/*" capture="environment" className="hidden"
+                onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto(photoType, file); e.target.value=""; }} />
+            </label>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Detail view (zlecenie) — wg mockupu ──
+  if (selectedFracht) {
+    const f = selectedFracht;
+    const kody = formatKody(f);
+    // Sprawdź driverEvents dla tego frachtu (uwzględnij cofnięcia)
+    const myEvents = driverEvents.filter(ev => ev.frachtId === f.id).sort((a,b) => (a.ts||"").localeCompare(b.ts||""));
+    const zalEvent = myEvents.filter(e => e.type === "zaladowano").pop();
+    const zalUndo = myEvents.filter(e => e.type === "cofnij_zaladowano").pop();
+    const rozEvent = myEvents.filter(e => e.type === "rozladowano").pop();
+    const rozUndo = myEvents.filter(e => e.type === "cofnij_rozladowano").pop();
+    const towarPhotos = myEvents.filter(e => e.type === "towar_photo");
+    const towarDmgPhotos = myEvents.filter(e => e.type === "towar_damage_photo");
+    const cmrZalPhoto = myEvents.find(e => e.type === "cmr_zaladunek_photo");
+    const cmrRozPhoto = myEvents.find(e => e.type === "cmr_rozladunek_photo");
+    const cmrPhotoLegacy = myEvents.find(e => e.type === "cmr_photo");
+    // Nowe statusy
+    const dotarcieZalEvent = myEvents.filter(e => e.type === "dotarcie_zaladunek").pop();
+    const dotarcieZalUndo = myEvents.filter(e => e.type === "cofnij_dotarcie_zaladunek").pop();
+    const startRozEvent = myEvents.filter(e => e.type === "start_rozladunek").pop();
+    const startRozUndo = myEvents.filter(e => e.type === "cofnij_start_rozladunek").pop();
+    const dotarcieRozEvent = myEvents.filter(e => e.type === "dotarcie_rozladunek").pop();
+    const dotarcieRozUndo = myEvents.filter(e => e.type === "cofnij_dotarcie_rozladunek").pop();
+    // Cofnięcie anuluje jeśli nowsze
+    const hasZal = (!!zalEvent && (!zalUndo || zalEvent.ts > zalUndo.ts)) || !!f._driverZaladowano;
+    const hasRoz = (!!rozEvent && (!rozUndo || rozEvent.ts > rozUndo.ts)) || f.statusRozladunku === "rozladowano";
+    const hasDotarcieZal = !!dotarcieZalEvent && (!dotarcieZalUndo || dotarcieZalEvent.ts > dotarcieZalUndo.ts);
+    const hasStartRoz = !!startRozEvent && (!startRozUndo || startRozEvent.ts > startRozUndo.ts);
+    const hasDotarcieRoz = !!dotarcieRozEvent && (!dotarcieRozUndo || dotarcieRozEvent.ts > dotarcieRozUndo.ts);
+    // Uwagi kierowcy
+    const uwagiZalEvent = myEvents.filter(e => e.type === "uwagi_zaladunek").pop();
+    const uwagiRozEvent = myEvents.filter(e => e.type === "uwagi_rozladunek").pop();
+    const hasCmrZal = !!cmrZalPhoto;
+    const hasCmrRoz = !!cmrRozPhoto || !!cmrPhotoLegacy;
+
+    return (
+      <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", paddingTop: "env(safe-area-inset-top, 0px)", paddingBottom: 40, zoom: driverZoom === "large" ? 1.2 : 1 }}>
+        <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet"/>
+        <div className="max-w-lg mx-auto p-4">
+          <button onClick={() => setSelectedFracht(null)}
+            className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-3 py-2"
+            style={{ minHeight: 44 }}>
+            ← Powrót
+          </button>
+
+          {/* ═══ HEADER ═══ */}
+          <div style={{background: "linear-gradient(135deg, #1e293b, #334155)", borderRadius: 16, padding: 20, marginBottom: 16}}>
+            <div className="flex items-center justify-between" style={{marginBottom: 4}}>
+              {f.nrRef && <span style={{color: "#94a3b8", fontSize: 12, fontWeight: 600}}>REF: {f.nrRef}</span>}
+              <span style={{fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 20,
+                background: hasRoz ? "rgba(34,197,94,0.2)" : hasZal ? "rgba(59,130,246,0.2)" : "rgba(251,191,36,0.2)",
+                color: hasRoz ? "#4ade80" : hasZal ? "#60a5fa" : "#fbbf24"}}>
+                {hasRoz ? "Rozładowano" : hasZal ? "W trasie" : "Oczekuje"}
+              </span>
+            </div>
+            <div style={{color: "#fff", fontSize: 13, marginTop: 4}}>{f.klient || "—"}</div>
+          </div>
+
+          {/* ═══ TRASA ═══ */}
+          <div style={{background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", overflow: "hidden", marginBottom: 16}}>
+            {/* Załadunek */}
+            <div style={{padding: "16px 16px 12px", borderBottom: "1px solid #f3f4f6"}}>
+              <div className="flex items-center gap-2" style={{marginBottom: 8}}>
+                <div style={{width: 10, height: 10, borderRadius: "50%", background: "#3b82f6", border: "2px solid #bfdbfe"}}></div>
+                <span style={{fontSize: 11, fontWeight: 700, color: "#3b82f6", textTransform: "uppercase", letterSpacing: 0.5}}>Załadunek</span>
+              </div>
+              <div style={{paddingLeft: 18}}>
+                <div style={{fontSize: 16, fontWeight: 700, color: "#111827", marginBottom: 2}}>{kody.zal}</div>
+                {f.zaladunekAdres && <div style={{fontSize: 13, color: "#6b7280", marginBottom: 2}}>{f.zaladunekAdres}</div>}
+                <div style={{fontSize: 13, color: "#374151", fontWeight: 600}}>
+                  {fmtDate(f.dataZaladunku)}{f.godzZaladunku ? ` · ${f.godzZaladunku}` : ""}
+                </div>
+                {f.zaladunekTelefon && (
+                  <a href={`tel:${f.zaladunekTelefon}`} style={{fontSize: 13, color: "#3b82f6", textDecoration: "none", display: "block", marginTop: 4}}>
+                    📞 {f.zaladunekTelefon}
+                  </a>
+                )}
+                {f.zaladunekGeo && (() => {
+                  const [lat,lng] = f.zaladunekGeo.split(",").map(Number);
+                  return (
+                    <div style={{marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "#eff6ff", border: "1px solid #bfdbfe"}}>
+                      <div style={{fontSize: 11, color: "#6b7280", marginBottom: 4}}>📍 Współrzędne GPS</div>
+                      <div style={{fontSize: 18, fontWeight: 700, color: "#1e293b", letterSpacing: 0.5, fontFamily: "monospace"}}>
+                        {lat?.toFixed(5)}, {lng?.toFixed(5)}
+                      </div>
+                      <a href={`https://www.google.com/maps/dir/?api=1&destination=${f.zaladunekGeo}&travelmode=driving`}
+                        target="_blank" rel="noopener noreferrer"
+                        style={{display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8,
+                          padding: "10px 16px", borderRadius: 10, background: "#3b82f6", color: "#fff",
+                          fontSize: 14, fontWeight: 600, textDecoration: "none"}}>
+                        🧭 Nawiguj do załadunku
+                      </a>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+            {/* Rozładunek */}
+            <div style={{padding: "12px 16px 16px"}}>
+              <div className="flex items-center gap-2" style={{marginBottom: 8}}>
+                <div style={{width: 10, height: 10, borderRadius: "50%", background: "#10b981", border: "2px solid #a7f3d0"}}></div>
+                <span style={{fontSize: 11, fontWeight: 700, color: "#10b981", textTransform: "uppercase", letterSpacing: 0.5}}>Rozładunek</span>
+              </div>
+              <div style={{paddingLeft: 18}}>
+                <div style={{fontSize: 16, fontWeight: 700, color: "#111827", marginBottom: 2}}>{kody.roz}</div>
+                {f.rozladunekAdres && <div style={{fontSize: 13, color: "#6b7280", marginBottom: 2}}>{f.rozladunekAdres}</div>}
+                <div style={{fontSize: 13, color: "#374151", fontWeight: 600}}>
+                  {fmtDate(f.dataRozladunku)}{f.godzRozladunku ? ` · ${f.godzRozladunku}` : ""}
+                </div>
+                {f.rozladunekTelefon && (
+                  <a href={`tel:${f.rozladunekTelefon}`} style={{fontSize: 13, color: "#3b82f6", textDecoration: "none", display: "block", marginTop: 4}}>
+                    📞 {f.rozladunekTelefon}
+                  </a>
+                )}
+                {f.rozladunekGeo && (() => {
+                  const [lat,lng] = f.rozladunekGeo.split(",").map(Number);
+                  return (
+                    <div style={{marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "#ecfdf5", border: "1px solid #a7f3d0"}}>
+                      <div style={{fontSize: 11, color: "#6b7280", marginBottom: 4}}>📍 Współrzędne GPS</div>
+                      <div style={{fontSize: 18, fontWeight: 700, color: "#1e293b", letterSpacing: 0.5, fontFamily: "monospace"}}>
+                        {lat?.toFixed(5)}, {lng?.toFixed(5)}
+                      </div>
+                      <a href={`https://www.google.com/maps/dir/?api=1&destination=${f.rozladunekGeo}&travelmode=driving`}
+                        target="_blank" rel="noopener noreferrer"
+                        style={{display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8,
+                          padding: "10px 16px", borderRadius: 10, background: "#10b981", color: "#fff",
+                          fontSize: 14, fontWeight: 600, textDecoration: "none"}}>
+                        🧭 Nawiguj do rozładunku
+                      </a>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
+
+          {/* ═══ TOWAR ═══ */}
+          {(f.wagaLadunku || f.towarIloscPalet || f.towarPalety || f.towarOpis) && (
+            <div style={{background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", padding: 16, marginBottom: 16}}>
+              <div style={{fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 12}}>Towar</div>
+              <div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: (f.towarPalety || f.towarOpis) ? 12 : 0}}>
+                {f.towarIloscPalet && (
+                  <div style={{padding: 12, borderRadius: 12, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
+                    <div style={{fontSize: 11, color: "#9ca3af"}}>Ilość palet</div>
+                    <div style={{fontSize: 18, fontWeight: 700, color: "#111827"}}>{f.towarIloscPalet}</div>
+                  </div>
+                )}
+                {f.wagaLadunku && (
+                  <div style={{padding: 12, borderRadius: 12, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
+                    <div style={{fontSize: 11, color: "#9ca3af"}}>Waga łączna</div>
+                    <div style={{fontSize: 18, fontWeight: 700, color: "#111827"}}>{f.wagaLadunku} kg</div>
+                  </div>
+                )}
+              </div>
+              {f.towarPalety && (
+                <div>
+                  <div style={{fontSize: 11, color: "#9ca3af", marginBottom: 6}}>Wymiary</div>
+                  {f.towarPalety.split("\n").filter(Boolean).map((line, i) => (
+                    <div key={i} style={{padding: "8px 12px", borderRadius: 8, background: "#f8fafc", border: "1px solid #f1f5f9", marginBottom: 4, fontSize: 13, color: "#374151", fontWeight: 500}}>
+                      {line}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {f.towarOpis && !f.towarPalety && (
+                <div style={{fontSize: 13, color: "#374151"}}>{f.towarOpis}</div>
+              )}
+              {f.zaladunekTyp && (
+                <div style={{marginTop: 12, padding: "8px 12px", borderRadius: 8, background: "#fffbeb", border: "1px solid #fde68a", fontSize: 13, color: "#92400e", fontWeight: 500}}>
+                  Załadunek: {f.zaladunekTyp}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ═══ UWAGI ═══ */}
+          {f.uwagi && (
+            <div style={{background: "#fffbeb", borderRadius: 12, border: "1px solid #fde68a", padding: "12px 16px", marginBottom: 16}}>
+              <div style={{fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 4}}>Uwagi</div>
+              <div style={{fontSize: 13, color: "#78350f"}}>{f.uwagi}</div>
+            </div>
+          )}
+
+          {/* ═══ KAFELEK 1: ZAŁADUNEK ═══ */}
+          {(() => { const zalDelay = calcDelay(f.dataZaladunku, f.godzZaladunku, dotarcieZalEvent?.value || dotarcieZalEvent?.ts); return (
+          <div style={{background: "#fff", borderRadius: 16, border: "2px solid #bfdbfe", padding: 16, marginBottom: 12}}>
+            <div className="flex items-center justify-between" style={{marginBottom: 8}}>
+              <div style={{fontSize: 13, fontWeight: 700, color: "#1d4ed8"}}>📦 ZAŁADUNEK</div>
+              <span style={{fontSize: 11, color: "#9ca3af"}}>{fmtDate(f.dataZaladunku)}{f.godzZaladunku ? ` · ${f.godzZaladunku}` : ""}</span>
+            </div>
+            {hasDotarcieZal && zalDelay && (
+              <div style={{marginBottom: 10}}>{renderDelayBadge(zalDelay)}</div>
+            )}
+
+            {/* 1. Dotarcie na załadunek */}
+            {renderStatusStep(hasDotarcieZal, "Dotarcie na załadunek", dotarcieZalEvent, !false, () => updateFrachtStatus(f, "dotarcie_zaladunek", new Date().toISOString()), () => undoFrachtStatus(f, "dotarcie_zaladunek"))}
+
+            {/* 2. Zdjęcia towaru */}
+            {hasDotarcieZal && (
+              <div style={{padding: 12, borderRadius: 12, marginBottom: 8, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
+                <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 8}}>📸 Zdjęcia towaru</div>
+                {towarPhotos.length > 0 && (
+                  <div style={{display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8}}>
+                    {towarPhotos.map((p, i) => (
+                      <div key={p.id || i} style={{display: "flex", alignItems: "center", gap: 2}}>
+                        <a href={p.photoUrl} target="_blank" rel="noopener noreferrer"
+                          style={{display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8,
+                            background: "#f0fdf4", border: "1px solid #bbf7d0", fontSize: 12, color: "#15803d",
+                            fontWeight: 500, textDecoration: "none"}}>
+                          📸 {i + 1} · {p.ts ? new Date(p.ts).toLocaleString("pl-PL", {hour:"2-digit",minute:"2-digit"}) : ""}
+                        </a>
+                        {p.id && <button onClick={() => deleteDriverPhoto(p.id)}
+                          style={{background: "none", border: "none", color: "#d1d5db", fontSize: 14, cursor: "pointer", padding: "4px"}}>✕</button>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <label style={{display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  padding: "10px", borderRadius: 10, border: "1px dashed #d1d5db", background: "#fff",
+                  color: "#6b7280", fontSize: 13, fontWeight: 500, cursor: "pointer"}}>
+                  📷 {towarPhotos.length > 0 ? "Dodaj kolejne zdjęcie" : "Dodaj zdjęcie towaru"}
+                  <input type="file" accept="image/*" capture="environment" className="hidden"
+                    onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto("towar", file); e.target.value=""; }} />
+                </label>
+              </div>
+            )}
+
+            {/* 3. CMR załadunek */}
+            {hasDotarcieZal && renderPhotoStep(hasCmrZal, "CMR załadunek", cmrZalPhoto, hasDotarcieZal, "cmr_zaladunek")}
+
+            {/* 4. Uwagi kierowcy — załadunek */}
+            {hasDotarcieZal && (
+              <div style={{padding: 12, borderRadius: 12, marginBottom: 8, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
+                <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6}}>📝 Uwagi — załadunek</div>
+                <textarea
+                  defaultValue={uwagiZalEvent?.note || ""}
+                  placeholder="Wpisz uwagi z załadunku..."
+                  onBlur={(e) => { if (e.target.value !== (uwagiZalEvent?.note || "")) saveDriverNote(f, "uwagi_zaladunek", e.target.value); }}
+                  style={{width: "100%", fontSize: 14, padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e7eb",
+                    background: "#fff", resize: "vertical", minHeight: 60, fontFamily: "inherit"}} />
+                {uwagiZalEvent?.ts && <div style={{fontSize: 11, color: "#9ca3af", marginTop: 4}}>
+                  Zapisane: {new Date(uwagiZalEvent.ts).toLocaleString("pl-PL", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
+                </div>}
+              </div>
+            )}
+
+            {/* 5. Start do rozładunku */}
+            {hasDotarcieZal && renderStatusStep(hasStartRoz, "Start do rozładunku", startRozEvent, hasCmrZal, () => updateFrachtStatus(f, "start_rozladunek", new Date().toISOString()), () => undoFrachtStatus(f, "start_rozladunek"))}
+          </div>); })()}
+
+          {/* ═══ KAFELEK 2: ROZŁADUNEK ═══ */}
+          {(() => { const rozDelay = calcDelay(f.dataRozladunku, f.godzRozladunku, dotarcieRozEvent?.value || dotarcieRozEvent?.ts); return (
+          <div style={{background: "#fff", borderRadius: 16, border: `2px solid ${hasStartRoz ? "#a7f3d0" : "#e5e7eb"}`, padding: 16, opacity: hasStartRoz ? 1 : 0.4}}>
+            <div className="flex items-center justify-between" style={{marginBottom: 8}}>
+              <div style={{fontSize: 13, fontWeight: 700, color: "#059669"}}>📦 ROZŁADUNEK</div>
+              <span style={{fontSize: 11, color: "#9ca3af"}}>{fmtDate(f.dataRozladunku)}{f.godzRozladunku ? ` · ${f.godzRozladunku}` : ""}</span>
+            </div>
+            {hasDotarcieRoz && rozDelay && (
+              <div style={{marginBottom: 10}}>{renderDelayBadge(rozDelay)}</div>
+            )}
+
+            {/* 1. Dotarcie na rozładunek */}
+            {renderStatusStep(hasDotarcieRoz, "Dotarcie na rozładunek", dotarcieRozEvent, hasStartRoz, () => updateFrachtStatus(f, "dotarcie_rozladunek", new Date().toISOString()), () => undoFrachtStatus(f, "dotarcie_rozladunek"))}
+
+            {/* 2. CMR rozładunek */}
+            {hasDotarcieRoz && renderPhotoStep(hasCmrRoz, "CMR rozładunek", cmrRozPhoto || cmrPhotoLegacy, hasDotarcieRoz, "cmr_rozladunek")}
+
+            {/* 3. Uwagi kierowcy — rozładunek */}
+            {hasDotarcieRoz && (
+              <div style={{padding: 12, borderRadius: 12, marginBottom: 8, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
+                <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6}}>📝 Uwagi — rozładunek</div>
+                <textarea
+                  defaultValue={uwagiRozEvent?.note || ""}
+                  placeholder="Wpisz uwagi z rozładunku..."
+                  onBlur={(e) => { if (e.target.value !== (uwagiRozEvent?.note || "")) saveDriverNote(f, "uwagi_rozladunek", e.target.value); }}
+                  style={{width: "100%", fontSize: 14, padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e7eb",
+                    background: "#fff", resize: "vertical", minHeight: 60, fontFamily: "inherit"}} />
+                {uwagiRozEvent?.ts && <div style={{fontSize: 11, color: "#9ca3af", marginTop: 4}}>
+                  Zapisane: {new Date(uwagiRozEvent.ts).toLocaleString("pl-PL", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
+                </div>}
+              </div>
+            )}
+
+            {/* 4. Zdjęcie uszkodzonego towaru (opcjonalne) */}
+            {hasDotarcieRoz && (
+              <div style={{padding: 12, borderRadius: 12, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
+                <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 4}}>📸 Zdjęcie uszkodzeń <span style={{fontSize: 11, color: "#9ca3af", fontWeight: 400}}>(opcjonalne)</span></div>
+                {towarDmgPhotos.length > 0 && (
+                  <div style={{display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8}}>
+                    {towarDmgPhotos.map((p, i) => (
+                      <div key={p.id || i} style={{display: "flex", alignItems: "center", gap: 2}}>
+                        <a href={p.photoUrl} target="_blank" rel="noopener noreferrer"
+                          style={{display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8,
+                            background: "#fef2f2", border: "1px solid #fecaca", fontSize: 12, color: "#dc2626",
+                            fontWeight: 500, textDecoration: "none"}}>
+                          ⚠️ Uszkodzenie {i + 1}
+                        </a>
+                        {p.id && <button onClick={() => deleteDriverPhoto(p.id)}
+                          style={{background: "none", border: "none", color: "#d1d5db", fontSize: 14, cursor: "pointer", padding: "4px"}}>✕</button>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <label style={{display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  padding: "10px", borderRadius: 10, border: "1px dashed #fecaca", background: "#fff",
+                  color: "#9ca3af", fontSize: 13, fontWeight: 500, cursor: "pointer"}}>
+                  📷 Dodaj zdjęcie uszkodzenia
+                  <input type="file" accept="image/*" capture="environment" className="hidden"
+                    onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto("towar_damage", file); e.target.value=""; }} />
+                </label>
+              </div>
+            )}
+          </div>); })()}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Main view — Dashboard z kafelkami ──
+  const driverName = (vehicle?.driverHistory || []).find(d => !d.to)?.name || user.displayName || user.email;
+
+  // Najbliższy urgent serwis
+  const serwisAlert = (() => {
+    if (!vehicle) return null;
+    const checks = [
+      ["OC", vehicle.ocExpiry], ["AC", vehicle.acExpiry],
+      ["Przegląd", vehicle.inspectionExpiry], ["UDT", vehicle.udtExpiry],
+    ].filter(([,d]) => d).map(([l,d]) => ({ label: l, days: daysUntil(d) })).filter(a => a.days !== null && a.days <= 60);
+    checks.sort((a,b) => a.days - b.days);
+    return checks[0] || null;
+  })();
+
+  // Średnie spalanie (z fuelEntries FULL lub fallback na operacyjne)
+  const avgSpalanie = (() => {
+    const fulls = [...fuelEntries].filter(e => e.fullTank && e.mileage > 0).sort((a,b) => a.mileage - b.mileage);
+    if (fulls.length >= 2) {
+      const tL = fulls.slice(1).reduce((s,e) => s + (e.liters||0), 0);
+      const tK = fulls[fulls.length-1].mileage - fulls[0].mileage;
+      if (tK > 0) return ((tL / tK) * 100).toFixed(1);
+    }
+    const w = operacyjne.filter(o => o.spalanie > 0);
+    return w.length > 0 ? (w.reduce((s,o) => s + o.spalanie, 0) / w.length).toFixed(1) : null;
+  })();
+
+  const renderFrachtCard = (f) => {
+    const kody = formatKody(f);
+    const isDone = f.statusRozladunku === "rozladowano" || (f.dataRozladunku && f.dataRozladunku < todayStr);
+    const myEvts = driverEvents.filter(ev => ev.frachtId === f.id);
+    const hasZal = myEvts.some(e => e.type === "zaladowano") || f._driverZaladowano;
+    const hasRoz = myEvts.some(e => e.type === "rozladowano") || isDone;
+    return (
+      <div key={f.id} onClick={() => setSelectedFracht(f)}
+        style={{ background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", overflow: "hidden", cursor: "pointer", marginBottom: 8 }}>
+        <div style={{ background: isDone ? "#f0fdf4" : hasZal ? "#eff6ff" : "#fffbeb", padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: isDone ? "#15803d" : hasZal ? "#2563eb" : "#92400e" }}>
+            {isDone ? "✅ Zakończone" : hasZal ? "🚛 W trasie" : "📋 Oczekuje"}
+          </span>
+          {f.nrRef && <span style={{ fontSize: 11, color: "#9ca3af" }}>{f.nrRef}</span>}
+        </div>
+        <div style={{ padding: "12px 16px" }}>
+          <div className="flex items-center gap-2" style={{ marginBottom: 4 }}>
+            <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#3b82f6", flexShrink: 0 }}></div>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{kody.zal.split(" / ")[0]}</span>
+            <span style={{ fontSize: 12, color: "#9ca3af", marginLeft: "auto" }}>{fmtDate(f.dataZaladunku)}{f.godzZaladunku ? ` · ${f.godzZaladunku}` : ""}</span>
+          </div>
+          <div style={{ width: 1, height: 10, background: "#e5e7eb", marginLeft: 3 }}></div>
+          <div className="flex items-center gap-2">
+            <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#10b981", flexShrink: 0 }}></div>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{kody.roz.split(" / ")[0]}</span>
+            <span style={{ fontSize: 12, color: "#9ca3af", marginLeft: "auto" }}>{fmtDate(f.dataRozladunku)}{f.godzRozladunku ? ` · ${f.godzRozladunku}` : ""}</span>
+          </div>
+        </div>
+        {(f.towarIloscPalet || f.wagaLadunku || f.zaladunekTyp) && (
+          <div style={{ padding: "0 16px 12px", display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {f.towarIloscPalet && <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: "#f3f4f6", color: "#6b7280" }}>{f.towarIloscPalet} palet</span>}
+            {f.wagaLadunku && <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: "#f3f4f6", color: "#6b7280" }}>{f.wagaLadunku} kg</span>}
+            {f.zaladunekTyp && <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: "#f3f4f6", color: "#6b7280" }}>{f.zaladunekTyp}</span>}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ── Ekran sub-view (nie home) ──
+  if (driverTab !== "home") {
+    const subTitles = { zlecenia: "Zlecenia", pojazd: "Pojazd", serwis: "Serwis", spalanie: "Tankowania", czas: "Czas pracy", dokumenty: "Dokumenty", mapa: "Mapa" };
+    return (
+      <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", paddingTop: "env(safe-area-inset-top, 0px)", zoom: driverZoom === "large" ? 1.2 : 1 }}>
+        <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet"/>
+        <div className="max-w-lg mx-auto p-4">
+          <button onClick={() => setDriverTab("home")} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-3 py-2" style={{ minHeight: 44 }}>← Powrót</button>
+          <div className="text-lg font-bold text-gray-900 mb-4">{subTitles[driverTab] || driverTab}</div>
+
+          {/* ZLECENIA */}
+          {driverTab === "zlecenia" && (
+            <div>
+              {active.length > 0 && (<><div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Aktywne ({active.length})</div>{active.map(f => renderFrachtCard(f))}</>)}
+              {upcoming.length > 0 && (<><div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-4 mb-2">Nadchodzące ({upcoming.length})</div>{upcoming.map(f => renderFrachtCard(f))}</>)}
+              {history.length > 0 && (<><div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-4 mb-2">Historia ({history.length})</div>{history.slice(0, 10).map(f => renderFrachtCard(f))}{history.length > 10 && <div className="text-xs text-gray-400 text-center mt-2">…i {history.length - 10} więcej</div>}</>)}
+              {active.length === 0 && upcoming.length === 0 && history.length === 0 && (
+                <div className="text-center py-12 text-gray-400"><div className="text-4xl mb-3">🛣️</div><div className="font-medium">Brak zleceń</div></div>
+              )}
+            </div>
+          )}
+
+          {/* POJAZD */}
+          {driverTab === "pojazd" && vehicle && (
+            <div className="space-y-4">
+              <div className="bg-white rounded-2xl border border-gray-100 p-5">
+                <div className="flex items-center gap-3 mb-4"><div className="text-3xl">🚛</div><div><div className="text-lg font-bold text-gray-900">{vehicle.plate}</div>{vehicle.plate2 && <div className="text-sm text-gray-500">Przyczepa: {vehicle.plate2}</div>}</div></div>
+                <div className="grid grid-cols-2 gap-3">
+                  {[["Marka",vehicle.brand],["Typ",vehicle.type],["Rok",vehicle.year],["Wymiary",vehicle.dimensions],["Ładowność",vehicle.maxWeight?`${vehicle.maxWeight} kg`:null],["VIN",vehicle.vin],["Przebieg",vehicle.currentKm?`${Number(vehicle.currentKm).toLocaleString("pl-PL")} km`:null]].filter(([,v])=>v).map(([l,v])=>(
+                    <div key={l} className="p-3 rounded-lg bg-gray-50 border border-gray-100"><div className="text-xs text-gray-400">{l}</div><div className="text-sm font-semibold text-gray-800">{v}</div></div>
+                  ))}
+                </div>
+              </div>
+              {((vehicle.equipment||[]).length>0||(vehicle.customEquipment||[]).length>0) && (
+                <div className="bg-white rounded-2xl border border-gray-100 p-5">
+                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Wyposażenie</div>
+                  <div className="flex flex-wrap gap-2">{[...(vehicle.equipment||[]),...(vehicle.customEquipment||[])].map(eq=>(<span key={eq} className="px-3 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100">{eq}</span>))}</div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* SERWIS */}
+          {driverTab === "serwis" && vehicle && (
+            <div className="space-y-4">
+              <div className="bg-white rounded-2xl border border-gray-100 p-5">
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Terminy i przeglądy</div>
+                <div className="space-y-2">
+                  {[["OC",vehicle.ocExpiry],["AC",vehicle.acExpiry],["Przegląd techniczny",vehicle.inspectionExpiry],["UDT ważność",vehicle.udtExpiry],["UDT przegląd",vehicle.udtNextDate],["GAP",vehicle.gapExpiry]].filter(([,d])=>d).map(([label,date])=>{
+                    const days=daysUntil(date);const urgent=days!==null&&days<=30;const warn=days!==null&&days<=60;
+                    return(<div key={label} className="flex items-center justify-between py-2 px-3 rounded-lg" style={{background:urgent?"#fef2f2":warn?"#fffbeb":"#f9fafb"}}><span className="text-sm text-gray-700">{label}</span><div className="text-right"><span className="text-sm font-semibold" style={{color:urgent?"#dc2626":warn?"#d97706":"#374151"}}>{fmtDateFull(date)}</span>{days!==null&&<span className="ml-2 text-xs" style={{color:urgent?"#dc2626":warn?"#d97706":"#9ca3af"}}>({days>0?`za ${days} dni`:days===0?"dziś!":`${Math.abs(days)} dni temu`})</span>}</div></div>);
+                  })}
+                </div>
+              </div>
+              {(vehicle.lastOilServiceKm||vehicle.oilServiceEveryKm)&&(
+                <div className="bg-white rounded-2xl border border-gray-100 p-5">
+                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Serwis olejowy</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {vehicle.lastOilServiceKm&&<div className="p-3 rounded-lg bg-gray-50 border border-gray-100"><div className="text-xs text-gray-400">Ostatni serwis</div><div className="text-sm font-semibold text-gray-800">{Number(vehicle.lastOilServiceKm).toLocaleString("pl-PL")} km</div></div>}
+                    {vehicle.oilServiceEveryKm&&<div className="p-3 rounded-lg bg-gray-50 border border-gray-100"><div className="text-xs text-gray-400">Następny co</div><div className="text-sm font-semibold text-gray-800">{Number(vehicle.oilServiceEveryKm).toLocaleString("pl-PL")} km</div></div>}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* SPALANIE / TANKOWANIA */}
+          {driverTab === "spalanie" && vehicle && (() => {
+            const FUEL_COUNTRIES = ["PL","DE","NL","BE","FR","CZ","AT","IT","ES","LU","DK","SE","HU","SK","LT","LV","RO","BG","HR","SI"];
+            const countryFlag = (c) => ({PL:"\u{1F1F5}\u{1F1F1}",DE:"\u{1F1E9}\u{1F1EA}",NL:"\u{1F1F3}\u{1F1F1}",BE:"\u{1F1E7}\u{1F1EA}",FR:"\u{1F1EB}\u{1F1F7}",CZ:"\u{1F1E8}\u{1F1FF}",AT:"\u{1F1E6}\u{1F1F9}",IT:"\u{1F1EE}\u{1F1F9}",ES:"\u{1F1EA}\u{1F1F8}",LU:"\u{1F1F1}\u{1F1FA}",DK:"\u{1F1E9}\u{1F1F0}",SE:"\u{1F1F8}\u{1F1EA}",HU:"\u{1F1ED}\u{1F1FA}",SK:"\u{1F1F8}\u{1F1F0}",LT:"\u{1F1F1}\u{1F1F9}",LV:"\u{1F1F1}\u{1F1FB}",RO:"\u{1F1F7}\u{1F1F4}",BG:"\u{1F1E7}\u{1F1EC}",HR:"\u{1F1ED}\u{1F1F7}",SI:"\u{1F1F8}\u{1F1EE}"})[c]||c;
+            const sorted = [...fuelEntries].sort((a,b) => (b.date||"").localeCompare(a.date||"") || (b.mileage||0)-(a.mileage||0));
+            const totalL = fuelEntries.reduce((s,e) => s + (e.liters||0), 0);
+            const byMileage = [...fuelEntries].filter(e => e.mileage > 0).sort((a,b) => b.mileage - a.mileage);
+            const totalKm = byMileage.length >= 2 ? byMileage[0].mileage - byMileage[byMileage.length-1].mileage : 0;
+            // Spalanie z tankowań FULL
+            const fulls = [...fuelEntries].filter(e => e.fullTank && e.mileage > 0).sort((a,b) => a.mileage - b.mileage);
+            const avgFuel = (() => {
+              if (fulls.length < 2) return null;
+              const tL = fulls.slice(1).reduce((s,e) => s + (e.liters||0), 0);
+              const tK = fulls[fulls.length-1].mileage - fulls[0].mileage;
+              return tK > 0 ? ((tL / tK) * 100).toFixed(1) : null;
+            })();
+            // Submit fuel entry
+            const submitFuel = async () => {
+              if (!fuelForm.liters || !fuelForm.mileage) { showToast("Podaj litry i przebieg"); return; }
+              try {
+                const now = new Date();
+                const ts = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")} ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+                await addDoc(collection(db, "fuelEntries"), {
+                  vehicleId: vehicle.id,
+                  driverEmail: user.email,
+                  date: fuelForm.date,
+                  liters: parseFloat(fuelForm.liters),
+                  mileage: parseInt(fuelForm.mileage),
+                  station: fuelForm.station || "",
+                  cardNr: fuelForm.cardNr || "",
+                  pricePerL: fuelForm.pricePerL ? parseFloat(fuelForm.pricePerL) : null,
+                  country: fuelForm.country || "PL",
+                  currency: fuelForm.currency || "EUR",
+                  fullTank: !!fuelForm.fullTank,
+                  isAdblue: !!fuelForm.isAdblue,
+                  adblueL: fuelForm.adblueL ? parseFloat(fuelForm.adblueL) : 0,
+                  createdAt: ts,
+                });
+                showToast("Tankowanie zapisane");
+                setFuelForm(f => ({ ...f, liters: "", mileage: "", station: "", pricePerL: "", adblueL: "", isAdblue: false, currency: f.country === "PL" ? "PLN" : "EUR" }));
+                setFuelView("list");
+              } catch (err) {
+                console.error("fuelEntry save error", err);
+                showToast("Błąd zapisu: " + err.message);
+              }
+            };
+            // Delete fuel entry
+            const deleteFuel = async (id) => {
+              if (!window.confirm("Usunąć to tankowanie?")) return;
+              try {
+                await deleteDoc(doc(db, "fuelEntries", id));
+                showToast("Usunięto");
+              } catch (err) { showToast("Błąd: " + err.message); }
+            };
+            // Format date DD.MM.YYYY
+            const fmtD = (d) => { if (!d) return "—"; const [y,m,day] = d.split("-"); return `${day}.${m}.${y}`; };
+
+            return (
+              <div>
+                {/* SUMMARY CARDS */}
+                {(() => {
+                  const totalAdblue = fuelEntries.reduce((s,e) => s + (e.adblueL||0), 0);
+                  return (
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
+                      <div style={{ background: "#fff", borderRadius: 12, padding: "10px 8px", textAlign: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", borderTop: "3px solid #059669" }}>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: "#059669" }}>{totalL > 0 ? totalL.toLocaleString("pl-PL") : "—"}</div>
+                        <div style={{ fontSize: 10, color: "#64748b" }}>Diesel L</div>
+                      </div>
+                      <div style={{ background: "#fff", borderRadius: 12, padding: "10px 8px", textAlign: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", borderTop: "3px solid #2563eb" }}>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: "#2563eb" }}>{totalAdblue > 0 ? totalAdblue.toLocaleString("pl-PL") : "—"}</div>
+                        <div style={{ fontSize: 10, color: "#64748b" }}>AdBlue L</div>
+                      </div>
+                      <div style={{ background: "#fff", borderRadius: 12, padding: "10px 8px", textAlign: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", borderTop: "3px solid #7c3aed" }}>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: "#7c3aed" }}>{totalKm > 0 ? totalKm.toLocaleString("pl-PL") : "—"}</div>
+                        <div style={{ fontSize: 10, color: "#64748b" }}>km</div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* TAB BAR: Lista / Statystyki */}
+                <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+                  {[["list","Lista"],["stats","Statystyki"]].map(([k,l]) => (
+                    <button key={k} onClick={() => setFuelView(k)} style={{
+                      flex: 1, padding: "8px 0", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer", border: "none",
+                      background: fuelView === k ? "#2563eb" : "#f1f5f9", color: fuelView === k ? "#fff" : "#64748b",
+                    }}>{l}</button>
+                  ))}
+                </div>
+
+                {/* ── LIST VIEW ── */}
+                {fuelView === "list" && (
+                  <div>
+                    {sorted.length === 0 && (
+                      <div style={{ textAlign: "center", padding: "32px 0", color: "#9ca3af" }}>
+                        <div style={{ fontSize: 32, marginBottom: 8 }}>⛽</div>
+                        <div style={{ fontSize: 14 }}>Brak tankowań</div>
+                        <div style={{ fontSize: 12, marginTop: 4 }}>Dodaj pierwsze tankowanie</div>
+                      </div>
+                    )}
+                    {sorted.map(e => (
+                      <div key={e.id} style={{
+                        background: "#fff", borderRadius: 12, padding: "12px 14px", marginBottom: 8,
+                        boxShadow: "0 1px 3px rgba(0,0,0,0.08)", display: "flex", alignItems: "center", gap: 10,
+                      }}>
+                        <div style={{ textAlign: "center", minWidth: 42 }}>
+                          <div style={{ fontSize: 20 }}>{countryFlag(e.country)}</div>
+                          <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>{fmtD(e.date)}</div>
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600, fontSize: 14, color: "#1e293b" }}>
+                            {(e.liters||0).toLocaleString("pl-PL")} L
+                            {e.fullTank && <span style={{ fontSize: 9, background: "#dbeafe", color: "#1d4ed8", padding: "1px 5px", borderRadius: 6, marginLeft: 5, verticalAlign: "middle" }}>FULL</span>}
+                            {e.isAdblue && <span style={{ fontSize: 9, background: "#e0f2fe", color: "#0369a1", padding: "1px 5px", borderRadius: 6, marginLeft: 5, verticalAlign: "middle" }}>AdBlue</span>}
+                          </div>
+                          <div style={{ fontSize: 11, color: "#64748b" }}>
+                            {e.station || "—"}
+                            {e.adblueL > 0 && !e.isAdblue && <span style={{ color: "#0284c7", marginLeft: 6 }}>+{e.adblueL}L AdBlue</span>}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#334155" }}>{e.mileage ? e.mileage.toLocaleString("pl-PL")+" km" : ""}</div>
+                          {e.pricePerL > 0 && <div style={{ fontSize: 10, color: "#94a3b8" }}>{e.pricePerL.toFixed(e.currency === "EUR" ? 3 : 2)} {e.currency || (e.country === "PL" ? "PLN" : "EUR")}/L</div>}
+                        </div>
+                        <button onClick={() => deleteFuel(e.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: "#d1d5db", padding: 4 }} title="Usuń">✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* ── STATS VIEW ── */}
+                {fuelView === "stats" && (() => {
+                  // Grupuj fuelEntries wg miesiąca YYYY-MM
+                  const byMonth = {};
+                  fuelEntries.forEach(e => {
+                    const ym = (e.date || "").slice(0, 7);
+                    if (!ym) return;
+                    if (!byMonth[ym]) byMonth[ym] = { diesel: 0, adblue: 0, minKm: Infinity, maxKm: 0, count: 0 };
+                    const m = byMonth[ym];
+                    if (!e.isAdblue) m.diesel += (e.liters || 0);
+                    if (e.isAdblue) m.adblue += (e.liters || 0);
+                    m.adblue += (e.adblueL || 0); // adblue dolane przy dieslu
+                    if (e.mileage > 0) { m.minKm = Math.min(m.minKm, e.mileage); m.maxKm = Math.max(m.maxKm, e.mileage); }
+                    m.count++;
+                  });
+                  const months = Object.entries(byMonth).sort((a,b) => b[0].localeCompare(a[0]));
+
+                  return (
+                    <div>
+                      {months.length === 0 && (
+                        <div style={{ textAlign: "center", padding: "32px 0", color: "#9ca3af" }}>
+                          <div style={{ fontSize: 32, marginBottom: 8 }}>📊</div>
+                          <div style={{ fontSize: 13 }}>Dodaj tankowania aby zobaczyć statystyki</div>
+                        </div>
+                      )}
+                      {months.map(([ym, m]) => {
+                        const [y, mo] = ym.split("-");
+                        const label = new Date(+y, +mo - 1).toLocaleDateString("pl-PL", { month: "long", year: "numeric" });
+                        const km = m.maxKm > m.minKm ? m.maxKm - m.minKm : 0;
+                        return (
+                          <div key={ym} style={{ background: "#fff", borderRadius: 14, padding: 14, boxShadow: "0 1px 3px rgba(0,0,0,0.08)", marginBottom: 10 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#1e293b", marginBottom: 10, textTransform: "capitalize" }}>{label}</div>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                              <div style={{ padding: "10px 6px", borderRadius: 10, background: "#f0fdf4", textAlign: "center" }}>
+                                <div style={{ fontSize: 16, fontWeight: 800, color: "#059669" }}>{m.diesel > 0 ? m.diesel.toLocaleString("pl-PL") : "—"}</div>
+                                <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>Diesel L</div>
+                              </div>
+                              <div style={{ padding: "10px 6px", borderRadius: 10, background: "#e0f2fe", textAlign: "center" }}>
+                                <div style={{ fontSize: 16, fontWeight: 800, color: "#0284c7" }}>{m.adblue > 0 ? m.adblue.toLocaleString("pl-PL") : "—"}</div>
+                                <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>AdBlue L</div>
+                              </div>
+                              <div style={{ padding: "10px 6px", borderRadius: 10, background: "#f5f3ff", textAlign: "center" }}>
+                                <div style={{ fontSize: 16, fontWeight: 800, color: "#7c3aed" }}>{km > 0 ? km.toLocaleString("pl-PL") : "—"}</div>
+                                <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>km</div>
+                              </div>
+                            </div>
+                            <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 6, textAlign: "right" }}>{m.count} tankowań{km > 0 ? ` · ${m.minKm.toLocaleString("pl-PL")} → ${m.maxKm.toLocaleString("pl-PL")} km` : ""}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+
+                {/* ── FORM VIEW ── */}
+                {fuelView === "form" && (
+                  <div style={{ background: "#fff", borderRadius: 14, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: "#1e293b", marginBottom: 12 }}>Nowe tankowanie</div>
+                    {/* Date */}
+                    <div style={{ marginBottom: 10 }}>
+                      <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 3 }}>Data tankowania *</label>
+                      <input type="date" value={fuelForm.date} onChange={e => setFuelForm(f => ({...f, date: e.target.value}))}
+                        style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 15, color: "#1e293b", background: "#f8fafc", boxSizing: "border-box" }}/>
+                    </div>
+                    {/* Liters + Mileage */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                      <div>
+                        <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 3 }}>Litry *</label>
+                        <input type="number" placeholder="np. 400" value={fuelForm.liters} onChange={e => setFuelForm(f => ({...f, liters: e.target.value}))}
+                          style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 15, color: "#1e293b", background: "#f8fafc", boxSizing: "border-box" }}/>
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 3 }}>Przebieg km *</label>
+                        <input type="number" placeholder="np. 845230" value={fuelForm.mileage} onChange={e => setFuelForm(f => ({...f, mileage: e.target.value}))}
+                          style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 15, color: "#1e293b", background: "#f8fafc", boxSizing: "border-box" }}/>
+                      </div>
+                    </div>
+                    {/* Station */}
+                    <div style={{ marginBottom: 10 }}>
+                      <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 3 }}>Stacja paliw</label>
+                      <input type="text" placeholder="np. Shell Wrocław A4" value={fuelForm.station} onChange={e => setFuelForm(f => ({...f, station: e.target.value}))}
+                        style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 15, color: "#1e293b", background: "#f8fafc", boxSizing: "border-box" }}/>
+                    </div>
+                    {/* Card + Price */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                      <div>
+                        <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 3 }}>Nr karty</label>
+                        <input type="text" placeholder="EW-4821" value={fuelForm.cardNr} onChange={e => setFuelForm(f => ({...f, cardNr: e.target.value}))}
+                          style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 15, color: "#1e293b", background: "#f8fafc", boxSizing: "border-box" }}/>
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 3 }}>Cena/L</label>
+                        <input type="number" step="0.01" placeholder="np. 5.89" value={fuelForm.pricePerL} onChange={e => setFuelForm(f => ({...f, pricePerL: e.target.value}))}
+                          style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 15, color: "#1e293b", background: "#f8fafc", boxSizing: "border-box" }}/>
+                      </div>
+                    </div>
+                    {/* Country + Currency */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                      <div>
+                        <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 3 }}>Kraj</label>
+                        <select value={fuelForm.country} onChange={e => { const c = e.target.value; setFuelForm(f => ({...f, country: c, currency: c === "PL" ? "PLN" : "EUR"})); }}
+                          style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 15, color: "#1e293b", background: "#f8fafc", boxSizing: "border-box" }}>
+                          {FUEL_COUNTRIES.map(c => <option key={c} value={c}>{countryFlag(c)} {c}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 3 }}>Waluta</label>
+                        <select value={fuelForm.currency} onChange={e => setFuelForm(f => ({...f, currency: e.target.value}))}
+                          style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 15, color: "#1e293b", background: "#f8fafc", boxSizing: "border-box" }}>
+                          {["EUR","PLN","CZK","HUF","SEK","DKK","RON","BGN","HRK","GBP"].map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    {/* AdBlue toggle + liters */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", marginBottom: 6 }}>
+                      <div onClick={() => setFuelForm(f => ({...f, isAdblue: !f.isAdblue}))}
+                        style={{ width: 48, height: 26, borderRadius: 13, cursor: "pointer", background: fuelForm.isAdblue ? "#0284c7" : "#cbd5e1", position: "relative", transition: "background 0.2s" }}>
+                        <div style={{ width: 22, height: 22, borderRadius: 11, background: "#fff", position: "absolute", top: 2, left: fuelForm.isAdblue ? 24 : 2, transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }}/>
+                      </div>
+                      <span style={{ fontSize: 13, color: "#334155", fontWeight: 500 }}>To jest AdBlue (nie diesel)</span>
+                    </div>
+                    {!fuelForm.isAdblue && (
+                      <div style={{ marginBottom: 10 }}>
+                        <label style={{ fontSize: 11, fontWeight: 600, color: "#0284c7", display: "block", marginBottom: 3 }}>AdBlue litry (opcjonalnie)</label>
+                        <input type="number" placeholder="np. 50" value={fuelForm.adblueL} onChange={e => setFuelForm(f => ({...f, adblueL: e.target.value}))}
+                          style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #bae6fd", borderRadius: 10, fontSize: 15, color: "#1e293b", background: "#f0f9ff", boxSizing: "border-box" }}/>
+                      </div>
+                    )}
+                    {/* Full tank toggle */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", marginBottom: 10 }}>
+                      <div onClick={() => setFuelForm(f => ({...f, fullTank: !f.fullTank}))}
+                        style={{ width: 48, height: 26, borderRadius: 13, cursor: "pointer", background: fuelForm.fullTank ? "#2563eb" : "#cbd5e1", position: "relative", transition: "background 0.2s" }}>
+                        <div style={{ width: 22, height: 22, borderRadius: 11, background: "#fff", position: "absolute", top: 2, left: fuelForm.fullTank ? 24 : 2, transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }}/>
+                      </div>
+                      <span style={{ fontSize: 13, color: "#334155", fontWeight: 500 }}>Do pełna (FULL)</span>
+                    </div>
+                    {/* Submit */}
+                    <button onClick={submitFuel} style={{
+                      width: "100%", padding: "13px", background: "linear-gradient(135deg, #1e40af, #3b82f6)",
+                      color: "#fff", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: "pointer"
+                    }}>Zapisz tankowanie</button>
+                    <button onClick={() => setFuelView("list")} style={{
+                      width: "100%", padding: "10px", marginTop: 8, background: "transparent",
+                      color: "#64748b", border: "1px solid #e2e8f0", borderRadius: 12, fontSize: 13, fontWeight: 600, cursor: "pointer"
+                    }}>Anuluj</button>
+                  </div>
+                )}
+
+                {/* FAB — Dodaj tankowanie (tylko na liście) */}
+                {fuelView === "list" && (
+                  <div style={{ textAlign: "center", marginTop: 16 }}>
+                    <button onClick={() => setFuelView("form")} style={{
+                      background: "linear-gradient(135deg, #1e40af, #3b82f6)", color: "#fff", border: "none", borderRadius: 14,
+                      padding: "12px 28px", fontSize: 14, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 12px rgba(37,99,235,0.3)"
+                    }}>+ Dodaj tankowanie</button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* CZAS PRACY */}
+          {driverTab === "czas" && (() => {
+            const STATUSY = [
+              { id: "jazda",    label: "Jazda",       color: "#15803d", bg: "#f0fdf4" },
+              { id: "pauza9",   label: "Pauza 9h",    color: "#b45309", bg: "#fffbeb" },
+              { id: "pauza11",  label: "Pauza 11h",   color: "#c2410c", bg: "#fff7ed" },
+              { id: "pauza24",  label: "Pauza 24h",   color: "#dc2626", bg: "#fef2f2" },
+              { id: "pauza45",  label: "Pauza 45h",   color: "#9333ea", bg: "#faf5ff" },
+              { id: "pauzaInne",label: "Pauza inne",  color: "#0369a1", bg: "#f0f9ff" },
+              { id: "baza",     label: "Baza",        color: "#6b7280", bg: "#f3f4f6" },
+            ];
+            const stInfo = (id) => STATUSY.find(s => s.id === id) || { label: id, color: "#6b7280", bg: "#f3f4f6" };
+
+            // Bieżący miesiąc
+            const now = new Date();
+            const curY = now.getFullYear();
+            const curM = now.getMonth(); // 0-based
+            const fmtYM = (y,m) => `${y}-${String(m+1).padStart(2,"0")}`;
+            const curYM = fmtYM(curY, curM);
+            const monthLabel = new Date(curY, curM).toLocaleDateString("pl-PL", { month: "long", year: "numeric" });
+
+            // Rozwiń wpisy na poszczególne dni
+            const dayMap = {}; // "YYYY-MM-DD" → entry
+            pauzy.forEach(e => {
+              if (!e.start || !e.end) return;
+              const s = new Date(e.start + "T00:00:00");
+              const en = new Date(e.end + "T00:00:00");
+              for (let d = new Date(s); d <= en; d.setDate(d.getDate() + 1)) {
+                const ds = d.toISOString().slice(0,10);
+                dayMap[ds] = e;
+              }
+            });
+
+            // Auto-fill: dni od tachoStart do dziś bez wpisu w pauzy → Jazda
+            const todayISO = now.toISOString().slice(0,10);
+            if (vehicle && vehicle.tachoStart) {
+              const tStart = new Date(vehicle.tachoStart + "T00:00:00");
+              const tEnd = new Date(todayISO + "T00:00:00");
+              for (let d = new Date(tStart); d <= tEnd; d.setDate(d.getDate() + 1)) {
+                const ds = d.toISOString().slice(0,10);
+                if (!dayMap[ds]) {
+                  dayMap[ds] = { status: "jazda", start: ds, end: ds, _auto: true };
+                }
+              }
+            }
+
+            // Policz dni w bieżącym miesiącu wg statusu
+            const daysInMonth = new Date(curY, curM + 1, 0).getDate();
+            const statusCounts = {};
+            let totalDays = 0;
+            for (let d = 1; d <= daysInMonth; d++) {
+              const ds = fmtYM(curY, curM) + "-" + String(d).padStart(2,"0");
+              const entry = dayMap[ds];
+              if (entry) {
+                const st = entry.status || "jazda";
+                statusCounts[st] = (statusCounts[st] || 0) + 1;
+                totalDays++;
+              }
+            }
+
+            // Znajdź aktualny status (dziś)
+            const todayEntry = dayMap[todayISO];
+            const todaySt = todayEntry ? stInfo(todayEntry.status) : null;
+
+            // Lista wpisów w tym miesiącu (oryginalne wpisy, nie rozwinięte)
+            const monthEntries = pauzy
+              .filter(p => p.start && p.start.startsWith(curYM) || p.end && p.end.startsWith(curYM))
+              .sort((a,b) => (b.start||"").localeCompare(a.start||""));
+
+            // Mini kalendarz
+            const firstDow = (new Date(curY, curM, 1).getDay() + 6) % 7;
+
+            // Tacho — 28-dniowy cykl
+            const tachoData = (() => {
+              if (!vehicle || !vehicle.tachoStart) return null;
+              const [ty,tm,td] = vehicle.tachoStart.split("-").map(Number);
+              const tachoStart = new Date(ty, tm-1, td);
+              const todayD = new Date(); todayD.setHours(0,0,0,0);
+              const daysSince = Math.round((todayD - tachoStart) / 86400000);
+              const daysLeft = 28 - daysSince;
+              const stopDate = new Date(tachoStart); stopDate.setDate(stopDate.getDate() + 28);
+              const stopStr = stopDate.toLocaleDateString("pl-PL", {day:"2-digit", month:"2-digit"});
+              const isRed = daysLeft < 5;
+              const isYellow = daysLeft >= 5 && daysLeft < 10;
+              return { daysSince, daysLeft, stopStr, isRed, isYellow,
+                bg: isRed ? "#fef2f2" : isYellow ? "#fffbeb" : "#f0fdf4",
+                color: isRed ? "#b91c1c" : isYellow ? "#92400e" : "#15803d",
+                icon: isRed ? "🔴" : isYellow ? "🟡" : "🟢",
+              };
+            })();
+
+            return (
+              <div>
+                {/* Tacho */}
+                {tachoData && (
+                  <div style={{
+                    background: tachoData.bg, borderRadius: 14, padding: "14px 16px", marginBottom: 12,
+                    border: `1.5px solid ${tachoData.color}22`,
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 18 }}>{tachoData.icon}</span>
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: tachoData.color }}>
+                            {tachoData.daysLeft > 0 ? `Tacho: ${tachoData.daysLeft} dni` : tachoData.daysLeft === 0 ? "Tacho: dziś powrót!" : `Tacho: przekroczone o ${Math.abs(tachoData.daysLeft)} dni!`}
+                          </div>
+                          <div style={{ fontSize: 11, color: tachoData.color, opacity: 0.7 }}>do {tachoData.stopStr}</div>
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: tachoData.color }}>{tachoData.daysSince}/28</div>
+                    </div>
+                    {/* Progress bar */}
+                    <div style={{ marginTop: 8, background: "#fff", borderRadius: 6, height: 8, overflow: "hidden" }}>
+                      <div style={{ width: `${Math.min((tachoData.daysSince / 28) * 100, 100)}%`, height: "100%", borderRadius: 6, background: tachoData.color, transition: "width 0.3s" }}/>
+                    </div>
+                  </div>
+                )}
+
+                {/* Aktualny status */}
+                <div style={{
+                  background: todaySt ? todaySt.bg : "#f9fafb",
+                  borderRadius: 14, padding: "14px 16px", marginBottom: 12,
+                  border: `2px solid ${todaySt ? todaySt.color : "#e5e7eb"}`,
+                }}>
+                  <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600, marginBottom: 4 }}>Dzisiaj</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: todaySt ? todaySt.color : "#9ca3af" }}>
+                    {todaySt ? todaySt.label : "Brak statusu"}
+                  </div>
+                  {todayEntry && todayEntry.note && (
+                    <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>{todayEntry.note}</div>
+                  )}
+                  {todayEntry && todayEntry.startTime && (
+                    <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>Start: {todayEntry.startTime}{todayEntry.hours > 0 ? ` · ${todayEntry.hours}h` : ""}</div>
+                  )}
+                </div>
+
+                {/* Statystyki miesiąca */}
+                <div style={{ background: "#fff", borderRadius: 14, padding: 14, boxShadow: "0 1px 3px rgba(0,0,0,0.06)", marginBottom: 12 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 10, textTransform: "capitalize" }}>{monthLabel}</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    {Object.entries(statusCounts).sort((a,b) => b[1] - a[1]).map(([st, cnt]) => {
+                      const info = stInfo(st);
+                      return (
+                        <div key={st} style={{
+                          padding: "8px 10px", borderRadius: 10, background: info.bg,
+                          display: "flex", alignItems: "center", justifyContent: "space-between",
+                        }}>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: info.color }}>{info.label}</span>
+                          <span style={{ fontSize: 16, fontWeight: 800, color: info.color }}>{cnt}d</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {totalDays > 0 && (
+                    <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 8, textAlign: "right" }}>
+                      Razem: {totalDays} dni z {daysInMonth}
+                    </div>
+                  )}
+                  {totalDays === 0 && (
+                    <div style={{ textAlign: "center", padding: "12px 0", color: "#9ca3af", fontSize: 12 }}>Brak wpisów w tym miesiącu</div>
+                  )}
+                </div>
+
+                {/* Mini kalendarz */}
+                <div style={{ background: "#fff", borderRadius: 14, padding: 14, boxShadow: "0 1px 3px rgba(0,0,0,0.06)", marginBottom: 12 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2, textAlign: "center" }}>
+                    {["Pn","Wt","Śr","Cz","Pt","Sb","Nd"].map(d => (
+                      <div key={d} style={{ fontSize: 9, color: "#94a3b8", fontWeight: 600, paddingBottom: 4 }}>{d}</div>
+                    ))}
+                    {Array.from({length: firstDow}).map((_,i) => <div key={`e${i}`}/>)}
+                    {Array.from({length: daysInMonth}).map((_,i) => {
+                      const d = i + 1;
+                      const ds = fmtYM(curY, curM) + "-" + String(d).padStart(2,"0");
+                      const entry = dayMap[ds];
+                      const info = entry ? stInfo(entry.status) : null;
+                      const isToday = ds === todayISO;
+                      return (
+                        <div key={d} style={{
+                          width: "100%", aspectRatio: "1", borderRadius: 8, display: "flex",
+                          alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: isToday ? 800 : 500,
+                          background: info ? info.bg : "transparent",
+                          color: info ? info.color : "#cbd5e1",
+                          border: isToday ? "2px solid #1e293b" : "none",
+                        }}>{d}</div>
+                      );
+                    })}
+                  </div>
+                  {/* Legenda */}
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                    {STATUSY.filter(s => statusCounts[s.id]).map(s => (
+                      <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: 2, background: s.color }}/>
+                        <span style={{ fontSize: 9, color: "#64748b" }}>{s.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Lista wpisów */}
+                {monthEntries.length > 0 && (
+                  <div style={{ background: "#fff", borderRadius: 14, padding: 14, boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", marginBottom: 8 }}>Wpisy</div>
+                    {monthEntries.map((p,i) => {
+                      const info = stInfo(p.status);
+                      const fmtD = (d) => { if (!d) return ""; const [y,m,day] = d.split("-"); return `${day}.${m}`; };
+                      const range = p.start === p.end ? fmtD(p.start) : `${fmtD(p.start)} – ${fmtD(p.end)}`;
+                      return (
+                        <div key={p.id||i} style={{
+                          display: "flex", alignItems: "center", gap: 10, padding: "8px 0",
+                          borderBottom: i < monthEntries.length - 1 ? "1px solid #f1f5f9" : "none",
+                        }}>
+                          <div style={{ width: 8, height: 8, borderRadius: 2, background: info.color, flexShrink: 0 }}/>
+                          <div style={{ flex: 1 }}>
+                            <span style={{ fontSize: 13, fontWeight: 600, color: info.color }}>{info.label}</span>
+                            {p.note && <span style={{ fontSize: 11, color: "#94a3b8", marginLeft: 6 }}>{p.note}</span>}
+                          </div>
+                          <div style={{ textAlign: "right" }}>
+                            <div style={{ fontSize: 12, color: "#475569", fontWeight: 500 }}>{range}</div>
+                            {p.startTime && <div style={{ fontSize: 10, color: "#94a3b8" }}>{p.startTime}{p.hours > 0 ? ` · ${p.hours}h` : ""}</div>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* DOKUMENTY */}
+          {driverTab === "dokumenty" && (() => {
+            const DOC_TYPES = [
+              { id: "paragon", label: "Paragon", icon: "🧾" },
+              { id: "faktura", label: "Faktura", icon: "📄" },
+              { id: "mandat", label: "Mandat", icon: "⚠️" },
+              { id: "serwis", label: "Serwis / Naprawa", icon: "🔧" },
+              { id: "opony", label: "Opony", icon: "🔄" },
+              { id: "mycie", label: "Mycie", icon: "🚿" },
+              { id: "parking", label: "Parking", icon: "🅿️" },
+              { id: "autostrada", label: "Autostrada / Myto", icon: "🛣️" },
+              { id: "hotel", label: "Hotel / Nocleg", icon: "🏨" },
+              { id: "inne", label: "Inne", icon: "📋" },
+            ];
+            const typeInfo = (id) => DOC_TYPES.find(t => t.id === id) || { label: id, icon: "📋" };
+            const sorted = [...driverDocs].sort((a,b) => (b.createdAt||"").localeCompare(a.createdAt||""));
+            const fmtD = (d) => { if (!d) return "—"; const parts = d.split(/[-T ]/); return parts.length >= 3 ? `${parts[2]}.${parts[1]}.${parts[0]}` : d; };
+
+            const submitDoc = async () => {
+              if (!docForm.description.trim()) { showToast("Podaj opis dokumentu"); return; }
+              setDocUploading(true);
+              try {
+                let photoUrl = null;
+                if (docForm.photoFile) {
+                  const path = `driverDocs/${user.email}/${docForm.type}_${Date.now()}_${docForm.photoFile.name}`;
+                  const sRef = storageRef(storage, path);
+                  await uploadBytes(sRef, docForm.photoFile);
+                  photoUrl = await getDownloadURL(sRef);
+                }
+                const now = new Date();
+                const ts = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")} ${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+                await addDoc(collection(db, "driverDocs"), {
+                  driverEmail: user.email,
+                  driverName: user.displayName || user.email,
+                  vehicleId: vehicle?.id || null,
+                  type: docForm.type,
+                  description: docForm.description.trim(),
+                  photoUrl: photoUrl,
+                  createdAt: ts,
+                });
+                showToast("Dokument zapisany");
+                setDocForm({ description: "", type: "paragon", photoFile: null, photoPreview: null });
+                setDocView("list");
+              } catch (err) {
+                console.error("driverDoc save error", err);
+                showToast("Błąd: " + err.message);
+              } finally { setDocUploading(false); }
+            };
+
+            const deleteDocEntry = async (d) => {
+              if (!window.confirm("Usunąć ten dokument?")) return;
+              try {
+                await deleteDoc(doc(db, "driverDocs", d.id));
+                showToast("Usunięto");
+              } catch (err) { showToast("Błąd: " + err.message); }
+            };
+
+            return (
+              <div>
+                {/* LIST VIEW */}
+                {docView === "list" && (
+                  <div>
+                    {sorted.length === 0 && (
+                      <div style={{ textAlign: "center", padding: "32px 0", color: "#9ca3af" }}>
+                        <div style={{ fontSize: 32, marginBottom: 8 }}>📄</div>
+                        <div style={{ fontSize: 14 }}>Brak dokumentów</div>
+                        <div style={{ fontSize: 12, marginTop: 4 }}>Dodaj paragon, fakturę lub inny dokument</div>
+                      </div>
+                    )}
+                    {sorted.map(d => {
+                      const ti = typeInfo(d.type);
+                      return (
+                        <div key={d.id} style={{ background: "#fff", borderRadius: 12, padding: "12px 14px", marginBottom: 8, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <div style={{ fontSize: 24, minWidth: 32, textAlign: "center" }}>{ti.icon}</div>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontWeight: 600, fontSize: 14, color: "#1e293b" }}>{d.description}</div>
+                              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
+                                <span style={{ background: "#f1f5f9", padding: "1px 6px", borderRadius: 6, fontSize: 10, fontWeight: 600, color: "#475569" }}>{ti.label}</span>
+                                <span style={{ marginLeft: 8 }}>{fmtD(d.createdAt)}</span>
+                              </div>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              {d.photoUrl && (
+                                <a href={d.photoUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 18, textDecoration: "none" }} title="Zobacz zdjęcie">📷</a>
+                              )}
+                              <button onClick={() => deleteDocEntry(d)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: "#d1d5db", padding: 4 }} title="Usuń">✕</button>
+                            </div>
+                          </div>
+                          {d.photoUrl && (
+                            <div style={{ marginTop: 8 }}>
+                              <img src={d.photoUrl} alt="Zdjęcie dokumentu" style={{ width: "100%", maxHeight: 200, objectFit: "cover", borderRadius: 8, border: "1px solid #e2e8f0" }}/>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {/* Dodaj dokument button */}
+                    <div style={{ textAlign: "center", marginTop: 16 }}>
+                      <button onClick={() => setDocView("form")} style={{
+                        background: "linear-gradient(135deg, #7c3aed, #8b5cf6)", color: "#fff", border: "none", borderRadius: 14,
+                        padding: "12px 28px", fontSize: 14, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 12px rgba(124,58,237,0.3)"
+                      }}>+ Dodaj dokument</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* FORM VIEW */}
+                {docView === "form" && (
+                  <div style={{ background: "#fff", borderRadius: 14, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: "#1e293b", marginBottom: 14 }}>Nowy dokument</div>
+
+                    {/* Type selector — chip grid */}
+                    <div style={{ marginBottom: 12 }}>
+                      <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 6 }}>Typ dokumentu</label>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {DOC_TYPES.map(t => (
+                          <button key={t.id} onClick={() => setDocForm(f => ({...f, type: t.id}))}
+                            style={{
+                              padding: "6px 12px", borderRadius: 10, fontSize: 12, fontWeight: 600, cursor: "pointer",
+                              border: docForm.type === t.id ? "2px solid #7c3aed" : "1.5px solid #e2e8f0",
+                              background: docForm.type === t.id ? "#f5f3ff" : "#fff",
+                              color: docForm.type === t.id ? "#7c3aed" : "#475569",
+                            }}>
+                            {t.icon} {t.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Description */}
+                    <div style={{ marginBottom: 12 }}>
+                      <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 3 }}>Opis *</label>
+                      <input type="text" placeholder="np. Faktura za wymianę opon, Mandat DE..." value={docForm.description}
+                        onChange={e => setDocForm(f => ({...f, description: e.target.value}))}
+                        style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e2e8f0", borderRadius: 10, fontSize: 15, color: "#1e293b", background: "#f8fafc", boxSizing: "border-box" }}/>
+                    </div>
+
+                    {/* Photo */}
+                    <div style={{ marginBottom: 14 }}>
+                      <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 6 }}>Zdjęcie (opcjonalnie)</label>
+                      {docForm.photoPreview ? (
+                        <div style={{ position: "relative" }}>
+                          <img src={docForm.photoPreview} alt="Podgląd" style={{ width: "100%", maxHeight: 200, objectFit: "cover", borderRadius: 10, border: "1px solid #e2e8f0" }}/>
+                          <button onClick={() => setDocForm(f => ({...f, photoFile: null, photoPreview: null}))}
+                            style={{ position: "absolute", top: 6, right: 6, background: "rgba(0,0,0,0.6)", color: "#fff", border: "none", borderRadius: 8, width: 28, height: 28, fontSize: 14, cursor: "pointer" }}>✕</button>
+                        </div>
+                      ) : (
+                        <label style={{
+                          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                          padding: "20px", border: "2px dashed #d1d5db", borderRadius: 12, cursor: "pointer",
+                          background: "#fafafa", color: "#64748b", fontSize: 13, fontWeight: 500,
+                        }}>
+                          <span style={{ fontSize: 24 }}>📷</span> Zrób zdjęcie lub wybierz z galerii
+                          <input type="file" accept="image/*" capture="environment" style={{ display: "none" }}
+                            onChange={e => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                setDocForm(f => ({...f, photoFile: file, photoPreview: URL.createObjectURL(file)}));
+                              }
+                              e.target.value = "";
+                            }}/>
+                        </label>
+                      )}
+                    </div>
+
+                    {/* Submit */}
+                    <button onClick={submitDoc} disabled={docUploading} style={{
+                      width: "100%", padding: "13px",
+                      background: docUploading ? "#94a3b8" : "linear-gradient(135deg, #7c3aed, #8b5cf6)",
+                      color: "#fff", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: docUploading ? "wait" : "pointer",
+                    }}>{docUploading ? "Wysyłanie..." : "Zapisz dokument"}</button>
+                    <button onClick={() => { setDocView("list"); setDocForm({ description: "", type: "paragon", photoFile: null, photoPreview: null }); }} style={{
+                      width: "100%", padding: "10px", marginTop: 8, background: "transparent",
+                      color: "#64748b", border: "1px solid #e2e8f0", borderRadius: 12, fontSize: 13, fontWeight: 600, cursor: "pointer",
+                    }}>Anuluj</button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* MAPA — placeholder */}
+          {driverTab === "mapa" && (
+            <div className="text-center py-16 text-gray-400">
+              <div className="text-4xl mb-3">🗺️</div>
+              <div className="font-medium">Wkrótce — integracja GPS</div>
+            </div>
+          )}
+
+          {!vehicle && driverTab !== "zlecenia" && (
+            <div className="text-center py-12 text-gray-400"><div className="text-4xl mb-3">🚛</div><div className="font-medium">Brak przypisanego pojazdu</div></div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── HOME — Dashboard z kafelkami ──
+  const firstActive = active[0] || upcoming[0];
+  const firstKody = firstActive ? formatKody(firstActive) : null;
+
+  return (
+    <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", zoom: driverZoom === "large" ? 1.2 : 1 }}>
+      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet"/>
+
+      {/* HEADER */}
+      <div style={{background: "linear-gradient(135deg, #1e293b, #334155)", paddingTop: "max(env(safe-area-inset-top, 0px), 12px)"}} className="px-4 pb-5 pt-3">
+        <div className="max-w-lg mx-auto">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-white text-lg font-bold">FleetStat</div>
+              <div className="text-gray-300 text-sm">{driverName}</div>
+            </div>
+            <div className="text-right">
+              {vehicle ? (
+                <div className="text-white text-sm font-medium">{vehicle.plate}{vehicle.plate2 ? ` + ${vehicle.plate2}` : ""}</div>
+              ) : (
+                <div className="text-yellow-300 text-sm">Brak pojazdu</div>
+              )}
+              <div className="flex items-center gap-2 mt-1">
+                <button onClick={() => {
+                  const next = driverZoom === "normal" ? "large" : "normal";
+                  setDriverZoom(next);
+                  try { localStorage.setItem("fleetstat_driver_zoom", next); } catch {}
+                }}
+                  className="text-xs text-gray-400 hover:text-gray-200"
+                  style={{padding: "2px 6px", borderRadius: 6, background: driverZoom === "large" ? "rgba(255,255,255,0.15)" : "transparent"}}>
+                  {driverZoom === "large" ? "🔍 Aa−" : "🔍 Aa+"}
+                </button>
+                <button onClick={() => { logAction("logout", "auth", { reason: "manual" }); signOut(auth); }}
+                  className="text-xs text-gray-400 hover:text-gray-200">Wyloguj</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-lg mx-auto p-4">
+        {!vehicle && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-4 text-center">
+            <div className="text-2xl mb-2">🚛</div>
+            <div className="text-sm font-semibold text-yellow-800">Brak przypisanego pojazdu</div>
+            <div className="text-xs text-yellow-600 mt-1">Skontaktuj się z dyspozytorem</div>
+          </div>
+        )}
+
+        {/* ═══ KAFELEK: ZLECENIA (full width, duży) ═══ */}
+        <div onClick={() => setDriverTab("zlecenia")}
+          style={{ background: "#fff", borderRadius: 20, border: "1px solid #e5e7eb", overflow: "hidden", cursor: "pointer", marginBottom: 12 }}>
+          <div style={{ padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div className="flex items-center gap-3">
+              <div style={{ width: 48, height: 48, borderRadius: 14, background: "linear-gradient(135deg, #3b82f6, #2563eb)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>📋</div>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: "#111827" }}>Zlecenia</div>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>
+                  {active.length > 0 ? `${active.length} aktywne` : ""}
+                  {active.length > 0 && upcoming.length > 0 ? " · " : ""}
+                  {upcoming.length > 0 ? `${upcoming.length} nadchodzące` : ""}
+                  {active.length === 0 && upcoming.length === 0 ? "Brak zleceń" : ""}
+                </div>
+              </div>
+            </div>
+            <div style={{ fontSize: 20, color: "#d1d5db" }}>›</div>
+          </div>
+          {/* Mini preview aktywnego zlecenia */}
+          {firstActive && firstKody && (
+            <div style={{ padding: "0 20px 16px" }}>
+              <div style={{ padding: "10px 14px", borderRadius: 12,
+                background: active.length > 0 ? "#f0fdf4" : "#eff6ff",
+                border: `1px solid ${active.length > 0 ? "#bbf7d0" : "#bfdbfe"}` }}>
+                <div className="flex items-center justify-between" style={{ marginBottom: 4 }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: active.length > 0 ? "#15803d" : "#2563eb" }}>
+                    {active.length > 0 ? "🚛 W trasie" : "📋 Nadchodzące"}
+                  </span>
+                  {firstActive.nrRef && <span style={{ fontSize: 11, color: "#9ca3af" }}>{firstActive.nrRef}</span>}
+                </div>
+                <div className="flex items-center gap-2">
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#3b82f6" }}></div>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{firstKody.zal.split(" / ")[0]}</span>
+                  <span style={{ color: "#d1d5db", fontSize: 12 }}>→</span>
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981" }}></div>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{firstKody.roz.split(" / ")[0]}</span>
+                  <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: "auto" }}>{fmtDate(firstActive.dataRozladunku)}</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ═══ SIATKA KAFELKÓW (2 kolumny) ═══ */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          {[
+            { id: "serwis", icon: "🔧", label: "Serwis", gradient: "linear-gradient(135deg, #f59e0b, #d97706)",
+              sub: serwisAlert ? `${serwisAlert.label} za ${serwisAlert.days}d` : "Terminy OK",
+              subStyle: serwisAlert && serwisAlert.days <= 30 ? { background: "#fef2f2", color: "#dc2626" } : null },
+            { id: "dokumenty", icon: "📄", label: "Dokumenty", gradient: "linear-gradient(135deg, #8b5cf6, #7c3aed)", sub: driverDocs.length > 0 ? `${driverDocs.length} dokumentów` : "Paragony, faktury" },
+            { id: "spalanie", icon: "⛽", label: "Tankowania", gradient: "linear-gradient(135deg, #06b6d4, #0891b2)",
+              sub: fuelEntries.length > 0 ? `${fuelEntries.length} tankowań` : "Dodaj tankowanie" },
+            { id: "czas", icon: "⏱", label: "Czas pracy", gradient: "linear-gradient(135deg, #10b981, #059669)",
+              sub: (() => {
+                const todayISO = new Date().toISOString().slice(0,10);
+                const todayP = pauzy.find(p => p.start && p.end && p.start <= todayISO && p.end >= todayISO);
+                if (todayP) { const labels = {jazda:"Jazda",pauza9:"Pauza 9h",pauza11:"Pauza 11h",pauza24:"Pauza 24h",pauza45:"Pauza 45h",baza:"Baza"}; return labels[todayP.status] || todayP.status; }
+                if (active.length > 0) return "Jazda";
+                return "Pauzy, jazda";
+              })() },
+            { id: "mapa", icon: "🗺️", label: "Mapa", gradient: "linear-gradient(135deg, #ec4899, #db2777)", sub: "Wkrótce" },
+            { id: "pojazd", icon: "🚛", label: "Pojazd", gradient: "linear-gradient(135deg, #64748b, #475569)", sub: vehicle ? vehicle.brand || vehicle.type : "—" },
+          ].map(t => (
+            <div key={t.id} onClick={() => setDriverTab(t.id)}
+              style={{ background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", padding: "20px 16px", cursor: "pointer",
+                display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 12, background: t.gradient,
+                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>{t.icon}</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>{t.label}</div>
+              <div style={{ fontSize: 11, fontWeight: t.subStyle ? 600 : 400, padding: "2px 8px", borderRadius: 8,
+                background: t.subStyle?.background || "transparent", color: t.subStyle?.color || "#9ca3af" }}>{t.sub}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PaymentsTab({ payments, showToast, isAdmin }) {
+  const [view, setView] = useState("calendar"); // "calendar" | "list"
+  const [cursorYM, setCursorYM] = useState(() => new Date().toISOString().slice(0,7));
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterCurrency, setFilterCurrency] = useState("all");
+  const [filterCategory, setFilterCategory] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [editRec, setEditRec] = useState(null);
+  const [detail, setDetail] = useState(null); // klik w chip/wiersz
+  const [dayModal, setDayModal] = useState(null); // klik w dzień kalendarza (ISO date)
+  // AI multi-upload queue
+  const [draftInit, setDraftInit]   = useState(null); // prefilled z AI (nowa faktura, bez id)
+  const [formKey, setFormKey]       = useState(0);    // do wymuszenia remountu formularza
+  const [aiQueue, setAiQueue]       = useState([]);   // pozostałe sparsowane faktury czekające
+  const [aiQueueTotal, setAiQueueTotal] = useState(0);
+  const [aiQueueDone, setAiQueueDone]   = useState(0);
+
+  // ── Okno: 6 miesięcy wstecz, 18 w przód (dla generatora cyklicznych) ──
+  // Używamy "T12:00:00" (południe lokalne) żeby uniknąć problemów ze strefą czasową
+  // Gdy użytkownik wprowadzi dateFrom/dateTo poza domyślnym oknem — rozszerzamy je
+  const hasSearchFilters = !!(searchQuery.trim() || dateFrom || dateTo);
+  const windowStart = useMemo(() => {
+    const d = new Date(cursorYM + "-01T12:00:00");
+    d.setMonth(d.getMonth() - 6);
+    let iso = d.toISOString().slice(0,10);
+    if (dateFrom && dateFrom < iso) iso = dateFrom;
+    return iso;
+  }, [cursorYM, dateFrom]);
+  const windowEnd = useMemo(() => {
+    const d = new Date(cursorYM + "-01T12:00:00");
+    d.setMonth(d.getMonth() + 18);
+    let iso = d.toISOString().slice(0,10);
+    if (dateTo && dateTo > iso) iso = dateTo;
+    return iso;
+  }, [cursorYM, dateTo]);
+
+  // ── Ekspansja wszystkich rekordów do instancji ──
+  const allInstances = useMemo(() => {
+    return payments.flatMap(p => expandPayment(p, windowStart, windowEnd));
+  }, [payments, windowStart, windowEnd]);
+
+  // ── Instancje widoczne w bieżącym miesiącu (dla sum + kalendarza) ──
+  const monthInstances = useMemo(() => {
+    return allInstances.filter(i => i.dueDate && i.dueDate.slice(0,7) === cursorYM);
+  }, [allInstances, cursorYM]);
+
+  // ── Sumy per waluta (liczymy udział firmy po splicie) ──
+  const sums = useMemo(() => {
+    const acc = {}; // { currency: { topay, paid, overdue } }
+    monthInstances.forEach(i => {
+      const cur = i.currency || "PLN";
+      if (!acc[cur]) acc[cur] = { topay: 0, paid: 0, overdue: 0 };
+      const total = Number(i.brutto) || 0;
+      const companyPct = i.split?.enabled ? (Number(i.split.companyPct)||100) : 100;
+      const share = total * companyPct / 100;
+      acc[cur][statusOf(i)] += share;
+    });
+    return acc;
+  }, [monthInstances]);
+
+  // ── Podział: stałe (cykliczne) vs jednorazowe ──
+  const costBreakdown = useMemo(() => {
+    const recurring = {};  // { currency: { total, paid, topay } }
+    const oneoff    = {};
+    monthInstances.forEach(i => {
+      const cur = i.currency || "PLN";
+      const target = i.isInstance ? recurring : oneoff;
+      if (!target[cur]) target[cur] = { total: 0, paid: 0, topay: 0 };
+      const total = Number(i.brutto) || 0;
+      const companyPct = i.split?.enabled ? (Number(i.split.companyPct)||100) : 100;
+      const share = total * companyPct / 100;
+      target[cur].total += share;
+      target[cur][statusOf(i) === "paid" ? "paid" : "topay"] += share;
+    });
+    return { recurring, oneoff };
+  }, [monthInstances]);
+
+  const [filterType, setFilterType] = useState("all"); // "all" | "recurring" | "oneoff"
+
+  // ── Filtrowanie dla listy i kalendarza ──
+  // Gdy są aktywne filtry wyszukiwania (nr FV / klient / zakres dat) — lista pokazuje wyniki
+  // z całego okna (cross-month), a kalendarz dalej bazuje na bieżącym miesiącu.
+  const filtered = useMemo(() => {
+    const source = hasSearchFilters ? allInstances : monthInstances;
+    const q = searchQuery.trim().toLowerCase();
+    return source.filter(i => {
+      if (filterStatus !== "all" && statusOf(i) !== filterStatus) return false;
+      if (filterCurrency !== "all" && (i.currency||"PLN") !== filterCurrency) return false;
+      if (filterCategory !== "all" && i.category !== filterCategory) return false;
+      if (filterType === "recurring" && !i.isInstance) return false;
+      if (filterType === "oneoff" && i.isInstance) return false;
+      if (dateFrom && (!i.dueDate || i.dueDate < dateFrom)) return false;
+      if (dateTo   && (!i.dueDate || i.dueDate > dateTo))   return false;
+      if (q) {
+        const hay = (
+          (i.contractor || "") + " " +
+          (i.invoiceNumber || "") + " " +
+          (i.sellerNip || "") + " " +
+          (i.bankAccount || "") + " " +
+          (i.bankAccount2 || "")
+        ).toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    }).sort((a,b) => (a.dueDate||"").localeCompare(b.dueDate||""));
+  }, [monthInstances, allInstances, hasSearchFilters, filterStatus, filterCurrency, filterCategory, filterType, searchQuery, dateFrom, dateTo]);
+
+  // ── Mark as paid / unpaid ──
+  async function togglePaid(inst) {
+    try {
+      if (inst.isInstance) {
+        // Cykliczna: dopisz/usuń klucz instancji z paidInstances szablonu
+        const current = payments.find(p => p.id === inst.id);
+        const set = new Set(current?.paidInstances || []);
+        if (set.has(inst.instanceKey)) set.delete(inst.instanceKey);
+        else set.add(inst.instanceKey);
+        await updateDoc(doc(db, "payments", inst.id), { paidInstances: Array.from(set) });
+        logAction("toggleStatus", "payments", { id: inst.id, contractor: inst.contractor, instanceKey: inst.instanceKey });
+      } else {
+        // Ad-hoc: zmień status na doc
+        const newStatus = statusOf(inst) === "paid" ? "topay" : "paid";
+        await updateDoc(doc(db, "payments", inst.id), { status: newStatus });
+        logAction("toggleStatus", "payments", { id: inst.id, contractor: inst.contractor, newStatus });
+      }
+      showToast("✅ Zaktualizowano");
+    } catch(e) {
+      console.error("togglePaid", e);
+      showToast("❌ Błąd aktualizacji");
+    }
+  }
+
+  // ── Zapis nadpisań (overrides) dla instancji cyklicznej ──
+  async function saveInstanceOverride(inst, overrideData) {
+    try {
+      const template = payments.find(p => p.id === inst.id);
+      if (!template) throw new Error("Szablon nie znaleziony");
+      const existing = template.instanceOverrides || {};
+      const merged = { ...existing, [inst.instanceKey]: { ...(existing[inst.instanceKey] || {}), ...overrideData } };
+      await updateDoc(doc(db, "payments", inst.id), { instanceOverrides: merged });
+      logAction("update", "payments", { id: inst.id, instanceKey: inst.instanceKey, action: "instanceOverride", ...overrideData });
+      showToast("✅ Dane instancji zaktualizowane");
+      // Odśwież detail z nowymi danymi
+      setDetail(d => d ? { ...d, ...overrideData, _hasOverrides: true } : d);
+    } catch(e) {
+      console.error("saveInstanceOverride", e);
+      showToast("❌ Błąd zapisu");
+    }
+  }
+
+  async function saveForm(data) {
+    try {
+      if (editRec) {
+        await updateDoc(doc(db, "payments", editRec.id), data);
+        logAction("update", "payments", { id: editRec.id, contractor: data.contractor, invoiceNumber: data.invoiceNumber });
+        showToast("✅ Zapisano zmiany");
+      } else {
+        const ref = await addDoc(collection(db, "payments"), { ...data, createdAt: new Date().toISOString() });
+        logAction("add", "payments", { id: ref.id, contractor: data.contractor, invoiceNumber: data.invoiceNumber, brutto: data.brutto, currency: data.currency });
+        showToast("✅ Dodano fakturę");
+      }
+      setEditRec(null);
+      // Jeśli w kolejce AI są następne faktury — otwórz kolejną bez zamykania okna
+      if (aiQueue.length > 0) {
+        const [next, ...rest] = aiQueue;
+        setDraftInit(next);
+        setAiQueue(rest);
+        setAiQueueDone(d => d + 1);
+        setFormKey(k => k + 1); // wymuś remount → świeży stan
+      } else {
+        setShowForm(false);
+        setDraftInit(null);
+        setAiQueueTotal(0);
+        setAiQueueDone(0);
+      }
+    } catch(e) {
+      console.error("savePayment", e);
+      showToast("❌ Błąd zapisu");
+    }
+  }
+
+  // Pomiń aktualną (bez zapisu) → następna w kolejce
+  function skipToNext() {
+    if (aiQueue.length > 0) {
+      const [next, ...rest] = aiQueue;
+      setDraftInit(next);
+      setAiQueue(rest);
+      setAiQueueDone(d => d + 1);
+      setFormKey(k => k + 1);
+    } else {
+      setShowForm(false);
+      setDraftInit(null);
+      setAiQueueTotal(0);
+      setAiQueueDone(0);
+    }
+  }
+
+  // Anuluj / zamknij wszystko
+  function closeFormAll() {
+    setShowForm(false);
+    setEditRec(null);
+    setDraftInit(null);
+    setAiQueue([]);
+    setAiQueueTotal(0);
+    setAiQueueDone(0);
+  }
+
+  // Dodaj sparsowane faktury z AI do kolejki (wołane z PaymentForm po multi-upload)
+  function appendToQueue(parsedList) {
+    if (!parsedList || parsedList.length === 0) return;
+    setAiQueue(q => [...q, ...parsedList]);
+    setAiQueueTotal(t => t + parsedList.length);
+  }
+
+  async function deleteRec(id) {
+    if (!confirm("Usunąć tę fakturę?\n(Dla faktury cyklicznej usunie cały szablon — wszystkie instancje znikną)")) return;
+    try {
+      const rec = payments.find(p => p.id === id);
+      await deleteDoc(doc(db, "payments", id));
+      logAction("delete", "payments", { id, contractor: rec?.contractor, invoiceNumber: rec?.invoiceNumber });
+      showToast("✅ Usunięto");
+      setDetail(null);
+    } catch(e) {
+      console.error("deletePayment", e);
+      showToast("❌ Błąd usuwania");
+    }
+  }
+
+  // ── Nawigacja miesięcy ──
+  const [curYear, curMon] = cursorYM.split("-").map(Number);
+  const monthLabel = new Date(curYear, curMon-1, 1).toLocaleDateString("pl-PL", { year: "numeric", month: "long" });
+  // UWAGA: nie używamy Date.toISOString() (strefa czasowa przesuwa miesiąc!) — składamy YM ręcznie
+  const prevMonth = () => {
+    let y = curYear, m = curMon - 1;
+    if (m < 1) { m = 12; y -= 1; }
+    setCursorYM(`${y}-${String(m).padStart(2,"0")}`);
+  };
+  const nextMonth = () => {
+    let y = curYear, m = curMon + 1;
+    if (m > 12) { m = 1; y += 1; }
+    setCursorYM(`${y}-${String(m).padStart(2,"0")}`);
+  };
+
+  // ── Kalendarz: siatka dni ──
+  const daysInMonth = new Date(curYear, curMon, 0).getDate();
+  const firstDow = new Date(curYear, curMon-1, 1).getDay(); // 0=nd
+  const offset = (firstDow + 6) % 7; // tak żeby pon=0
+
+  return (
+    <div>
+      {/* ── HEADER ── */}
+      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+        <div>
+          <PageTitle>Płatności</PageTitle>
+          <div className="text-xs text-gray-500 mt-1">Kalendarz faktur do zapłaty · moduł niezależny od Rejestru kosztów</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+            <button onClick={() => setView("calendar")} className="px-3 py-2 text-sm font-semibold"
+              style={{background: view==="calendar"?"#111827":"#fff", color: view==="calendar"?"#fff":"#6b7280"}}>🗓️ Kalendarz</button>
+            <button onClick={() => setView("list")} className="px-3 py-2 text-sm font-semibold"
+              style={{background: view==="list"?"#111827":"#fff", color: view==="list"?"#fff":"#6b7280"}}>📋 Lista</button>
+          </div>
+          <button onClick={() => { setEditRec(null); setShowForm(true); }}
+            className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+            style={{ background: "#111827" }}>+ Dodaj fakturę</button>
+        </div>
+      </div>
+
+      {/* ── NAWIGACJA MIESIĄCA + SUMY ── */}
+      <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-3">
+            <button onClick={prevMonth} className="w-9 h-9 rounded-lg border border-gray-200 hover:bg-gray-50 text-lg">←</button>
+            <div className="text-lg font-bold text-gray-900 capitalize min-w-[180px] text-center">{monthLabel}</div>
+            <button onClick={nextMonth} className="w-9 h-9 rounded-lg border border-gray-200 hover:bg-gray-50 text-lg">→</button>
+            <button onClick={() => setCursorYM(new Date().toISOString().slice(0,7))}
+              className="ml-2 px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-200 hover:bg-gray-50">Dziś</button>
+          </div>
+          <div className="text-xs text-gray-500">{monthInstances.length} pozycji</div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {["topay","overdue","paid"].map(st => (
+            <div key={st} className="rounded-lg p-3 border"
+              style={{ background: STATUS_META[st].bg, borderColor: STATUS_META[st].border }}>
+              <div className="text-xs font-semibold uppercase tracking-wide mb-2" style={{color: STATUS_META[st].color}}>
+                {STATUS_META[st].label}
+              </div>
+              <div className="space-y-1">
+                {PAY_CURRENCIES.map(cur => {
+                  const v = sums[cur]?.[st] || 0;
+                  if (!v) return null;
+                  return (
+                    <div key={cur} className="text-sm font-semibold" style={{color: STATUS_META[st].color}}>
+                      {fmtMoney(v, cur)}
+                    </div>
+                  );
+                })}
+                {!PAY_CURRENCIES.some(cur => sums[cur]?.[st]) && (
+                  <div className="text-sm text-gray-400">—</div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── PODZIAŁ: STAŁE vs JEDNORAZOWE ── */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+        {/* Stałe koszty (cykliczne) */}
+        <button
+          onClick={() => setFilterType(f => f === "recurring" ? "all" : "recurring")}
+          className="rounded-xl p-4 border-2 text-left transition-all hover:shadow-sm"
+          style={{
+            borderColor: filterType === "recurring" ? "#6366f1" : "#e5e7eb",
+            background: filterType === "recurring" ? "#eef2ff" : "#fff",
+          }}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-xs font-semibold uppercase tracking-wide" style={{color: "#6366f1"}}>
+              🔄 Stałe koszty (cykliczne)
+            </div>
+            <div className="text-xs text-gray-400">
+              {monthInstances.filter(i => i.isInstance).length} pozycji
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {PAY_CURRENCIES.map(cur => {
+              const v = costBreakdown.recurring[cur];
+              if (!v?.total) return null;
+              return (
+                <div key={cur} className="text-sm">
+                  <span className="font-bold text-gray-900">{fmtMoney(v.total, cur)}</span>
+                  {v.paid > 0 && <span className="ml-1.5 text-xs text-green-600">({fmtMoney(v.paid, cur)} zapł.)</span>}
+                </div>
+              );
+            })}
+            {!PAY_CURRENCIES.some(cur => costBreakdown.recurring[cur]?.total) && (
+              <div className="text-sm text-gray-400">—</div>
+            )}
+          </div>
+        </button>
+
+        {/* Jednorazowe */}
+        <button
+          onClick={() => setFilterType(f => f === "oneoff" ? "all" : "oneoff")}
+          className="rounded-xl p-4 border-2 text-left transition-all hover:shadow-sm"
+          style={{
+            borderColor: filterType === "oneoff" ? "#f59e0b" : "#e5e7eb",
+            background: filterType === "oneoff" ? "#fffbeb" : "#fff",
+          }}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-xs font-semibold uppercase tracking-wide" style={{color: "#d97706"}}>
+              📄 Jednorazowe faktury
+            </div>
+            <div className="text-xs text-gray-400">
+              {monthInstances.filter(i => !i.isInstance).length} pozycji
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {PAY_CURRENCIES.map(cur => {
+              const v = costBreakdown.oneoff[cur];
+              if (!v?.total) return null;
+              return (
+                <div key={cur} className="text-sm">
+                  <span className="font-bold text-gray-900">{fmtMoney(v.total, cur)}</span>
+                  {v.paid > 0 && <span className="ml-1.5 text-xs text-green-600">({fmtMoney(v.paid, cur)} zapł.)</span>}
+                </div>
+              );
+            })}
+            {!PAY_CURRENCIES.some(cur => costBreakdown.oneoff[cur]?.total) && (
+              <div className="text-sm text-gray-400">—</div>
+            )}
+          </div>
+        </button>
+      </div>
+
+      {/* ── FILTRY ── */}
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}
+          className="px-3 py-2 rounded-lg text-sm border border-gray-200 bg-white">
+          <option value="all">Wszystkie statusy</option>
+          <option value="topay">Do zapłaty</option>
+          <option value="overdue">Przeterminowane</option>
+          <option value="paid">Zapłacone</option>
+        </select>
+        <select value={filterCurrency} onChange={e=>setFilterCurrency(e.target.value)}
+          className="px-3 py-2 rounded-lg text-sm border border-gray-200 bg-white">
+          <option value="all">Wszystkie waluty</option>
+          {PAY_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select value={filterCategory} onChange={e=>setFilterCategory(e.target.value)}
+          className="px-3 py-2 rounded-lg text-sm border border-gray-200 bg-white">
+          <option value="all">Wszystkie kategorie</option>
+          {PAY_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+        </select>
+
+        {/* Wyszukiwarka: nr FV / kontrahent / NIP */}
+        <div className="relative">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Szukaj: nr FV, klient, NIP…"
+            className="pl-8 pr-3 py-2 rounded-lg text-sm border border-gray-200 bg-white w-64"
+          />
+          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>
+        </div>
+
+        {/* Zakres dat */}
+        <div className="flex items-center gap-1 text-xs text-gray-600">
+          <span>Od</span>
+          <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)}
+            className="px-2 py-2 rounded-lg text-sm border border-gray-200 bg-white" />
+          <span>Do</span>
+          <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)}
+            className="px-2 py-2 rounded-lg text-sm border border-gray-200 bg-white" />
+        </div>
+
+        {hasSearchFilters && (
+          <button
+            onClick={() => { setSearchQuery(""); setDateFrom(""); setDateTo(""); }}
+            className="px-3 py-2 rounded-lg text-sm border border-gray-200 bg-white hover:bg-gray-50 text-gray-600"
+            title="Wyczyść wyszukiwanie">
+            ✕ Wyczyść
+          </button>
+        )}
+
+        {hasSearchFilters && (
+          <div className="text-xs text-gray-500 ml-auto">
+            Wyniki z całego okna ({filtered.length})
+          </div>
+        )}
+      </div>
+
+      {/* ── KALENDARZ ── */}
+      {view === "calendar" && !hasSearchFilters && (
+        <div className="bg-white border border-gray-200 rounded-xl p-4">
+          <div className="grid grid-cols-7 gap-1 mb-2">
+            {["Pn","Wt","Śr","Cz","Pt","Sb","Nd"].map(d => (
+              <div key={d} className="text-xs font-bold text-gray-500 text-center py-2">{d}</div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 gap-1">
+            {Array.from({length: offset}).map((_,i) => (
+              <div key={"e"+i} className="min-h-[90px] rounded-lg bg-gray-50/50"></div>
+            ))}
+            {Array.from({length: daysInMonth}).map((_,i) => {
+              const day = i+1;
+              const iso = `${curYear}-${String(curMon).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+              const dayItems = filtered.filter(x => x.dueDate === iso);
+              const isToday = iso === todayISO();
+              const hasItems = dayItems.length > 0;
+              // Podsumowanie statusu dla "obwódki" dnia
+              const nOverdue = dayItems.filter(x => statusOf(x)==="overdue").length;
+              const nTopay   = dayItems.filter(x => statusOf(x)==="topay").length;
+              const nPaid    = dayItems.filter(x => statusOf(x)==="paid").length;
+              const dayBorder = nOverdue>0 ? "#ef4444" : nTopay>0 ? "#f59e0b" : nPaid>0 ? "#10b981" : "#f3f4f6";
+              return (
+                <div key={day}
+                  onClick={() => hasItems && setDayModal(iso)}
+                  className={"min-h-[90px] rounded-lg p-1.5 flex flex-col gap-1 "+(hasItems?"cursor-pointer hover:shadow-md transition-shadow":"")}
+                  style={{ background: isToday ? "#fef9c3" : "#fff", border: `2px solid ${dayBorder}` }}>
+                  <div className="flex items-center justify-between">
+                    <div className={"text-xs font-bold "+(isToday?"text-gray-900":"text-gray-500")}>{day}</div>
+                    {hasItems && (
+                      <div className="text-[10px] font-bold px-1.5 rounded-full"
+                        style={{background:"#111827", color:"#fff", minWidth:"18px", textAlign:"center"}}>
+                        {dayItems.length}
+                      </div>
+                    )}
+                  </div>
+                  {dayItems.slice(0,2).map((x, idx) => {
+                    const st = statusOf(x);
+                    const companyPct = x.split?.enabled ? (Number(x.split.companyPct)||100) : 100;
+                    const share = (Number(x.brutto)||0) * companyPct / 100;
+                    return (
+                      <button key={idx}
+                        onClick={(e) => { e.stopPropagation(); setDetail(x); }}
+                        className="text-left px-1.5 py-1 rounded text-[10px] truncate border hover:opacity-80"
+                        style={{
+                          background: STATUS_META[st].bg,
+                          borderColor: STATUS_META[st].border,
+                          color: STATUS_META[st].color,
+                        }}
+                        title={`${x.contractor} · ${fmtMoney(x.brutto,x.currency)}${x.split?.enabled?` (firma ${companyPct}%)`:""}`}>
+                        <div className="font-semibold truncate">{x.contractor || "—"}</div>
+                        <div className="opacity-80 truncate">{fmtMoney(share, x.currency)}</div>
+                      </button>
+                    );
+                  })}
+                  {dayItems.length > 2 && (
+                    <button onClick={(e) => { e.stopPropagation(); setDayModal(iso); }}
+                      className="text-[10px] text-blue-600 font-semibold hover:underline text-left pl-1">
+                      +{dayItems.length-2} więcej →
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── LISTA ── */}
+      {view === "list" && (
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          {filtered.length === 0 ? (
+            <div className="p-8 text-center text-gray-400 text-sm">
+              {hasSearchFilters ? "Brak wyników wyszukiwania" : "Brak faktur w tym miesiącu przy wybranych filtrach"}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+            <table className="w-full text-sm" style={{ minWidth: 1050 }}>
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200 text-xs text-gray-600">
+                  <th className="text-left px-3 py-2.5 font-semibold" style={{minWidth:100}}>Termin</th>
+                  <th className="text-left px-3 py-2.5 font-semibold" style={{minWidth:180}}>Kontrahent</th>
+                  <th className="text-left px-3 py-2.5 font-semibold" style={{minWidth:130}}>Nr FV</th>
+                  <th className="text-left px-3 py-2.5 font-semibold" style={{minWidth:80}}>Kategoria</th>
+                  <th className="text-right px-3 py-2.5 font-semibold" style={{minWidth:100}}>Netto</th>
+                  <th className="text-right px-3 py-2.5 font-semibold" style={{minWidth:100}}>Brutto</th>
+                  <th className="text-right px-3 py-2.5 font-semibold" style={{minWidth:110}}>Udział firmy</th>
+                  <th className="text-center px-3 py-2.5 font-semibold" style={{minWidth:95}}>Status</th>
+                  <th className="text-center px-3 py-2.5 font-semibold" style={{minWidth:130}}>Akcje</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((x, i) => {
+                  const st = statusOf(x);
+                  const companyPct = x.split?.enabled ? (Number(x.split.companyPct)||100) : 100;
+                  const share = (Number(x.brutto)||0) * companyPct / 100;
+                  const cat = PAY_CATEGORIES.find(c => c.id === x.category);
+                  return (
+                    <tr key={x.id+"-"+x.instanceKey} className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
+                      onClick={() => setDetail(x)}>
+                      <td className="px-3 py-2.5 whitespace-nowrap">{x.dueDate}</td>
+                      <td className="px-3 py-2.5 font-medium">
+                        {x.contractor || "—"}
+                        {x.isInstance && (
+                          x._hasOverrides
+                            ? <span className="ml-1.5 text-xs text-green-600 font-semibold">✓</span>
+                            : <span className="ml-1.5 text-xs text-gray-400">(cykliczna)</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-1.5">
+                          {x.isInstance && !x._hasOverrides ? (
+                            <span className="text-sm text-orange-500 italic font-medium">do uzupełnienia</span>
+                          ) : (
+                            <span className="text-gray-700">{x.invoiceNumber || "—"}</span>
+                          )}
+                          {x.fileUrl && (
+                            <a href={x.fileUrl} target="_blank" rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-blue-600 hover:text-blue-800"
+                              title="Pobierz oryginał faktury">📎</a>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        {cat && <span className="px-2.5 py-1 rounded text-xs font-semibold" style={{background: cat.color+"22", color: cat.color}}>{cat.label}</span>}
+                      </td>
+                      <td className={"px-3 py-2.5 text-right tabular-nums whitespace-nowrap" + (x.isInstance && !x._hasOverrides ? " text-gray-400" : "")}>{fmtMoney(x.netto, x.currency)}</td>
+                      <td className={"px-3 py-2.5 text-right tabular-nums whitespace-nowrap font-semibold" + (x.isInstance && !x._hasOverrides ? " text-gray-400 font-normal" : "")}>{fmtMoney(x.brutto, x.currency)}</td>
+                      <td className={"px-3 py-2.5 text-right tabular-nums whitespace-nowrap" + (x.isInstance && !x._hasOverrides ? " text-gray-400" : "")}>
+                        {x.split?.enabled ? (
+                          <div>
+                            <div className={x.isInstance && !x._hasOverrides ? "" : "font-semibold"}>{fmtMoney(share, x.currency)}</div>
+                            <div className="text-xs text-gray-500">{companyPct}% · {x.split.partnerName||"partner"} {100-companyPct}%</div>
+                          </div>
+                        ) : fmtMoney(x.brutto, x.currency)}
+                      </td>
+                      <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                        <span className="px-2.5 py-1 rounded text-xs font-semibold border"
+                          style={{background: STATUS_META[st].bg, borderColor: STATUS_META[st].border, color: STATUS_META[st].color}}>
+                          {STATUS_META[st].label}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button onClick={(e) => { e.stopPropagation(); togglePaid(x); }}
+                            className="px-2.5 py-1 rounded text-xs font-semibold border hover:bg-gray-50"
+                            style={{borderColor: "#d1d5db"}}>
+                            {st === "paid" ? "↩ Cofnij" : "✓ Zapłacone"}
+                          </button>
+                          {isAdmin && (
+                            <button onClick={(e) => { e.stopPropagation(); deleteRec(x.id); }}
+                              className="px-2 py-1 rounded text-xs font-semibold border border-red-200 text-red-600 hover:bg-red-50"
+                              title="Usuń fakturę (admin)">
+                              🗑
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── MODAL DNIA (wszystkie faktury na dany dzień) ── */}
+      {dayModal && (() => {
+        const items = filtered.filter(x => x.dueDate === dayModal);
+        const dayLabel = new Date(dayModal).toLocaleDateString("pl-PL", { weekday:"long", day:"numeric", month:"long", year:"numeric" });
+        // Sumy dnia per waluta per status
+        const daySums = {};
+        items.forEach(x => {
+          const cur = x.currency || "PLN";
+          if (!daySums[cur]) daySums[cur] = { topay: 0, paid: 0, overdue: 0 };
+          const companyPct = x.split?.enabled ? (Number(x.split.companyPct)||100) : 100;
+          daySums[cur][statusOf(x)] += (Number(x.brutto)||0) * companyPct / 100;
+        });
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setDayModal(null)}>
+            <div className="absolute inset-0 bg-black/40"></div>
+            <div className="relative bg-white rounded-xl max-w-3xl w-full max-h-[85vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+              <div className="p-5 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white z-10">
+                <div>
+                  <div className="font-bold text-lg capitalize">{dayLabel}</div>
+                  <div className="text-xs text-gray-500 mt-0.5">{items.length} {items.length===1?"faktura":"faktur"} do obsłużenia</div>
+                </div>
+                <button onClick={() => setDayModal(null)} className="w-8 h-8 rounded-lg hover:bg-gray-100 text-gray-500">✕</button>
+              </div>
+
+              {/* sumy dnia */}
+              <div className="px-5 py-3 bg-gray-50 border-b border-gray-200 flex flex-wrap gap-4 text-xs">
+                {Object.entries(daySums).map(([cur, s]) => (
+                  <div key={cur} className="flex gap-2 items-center">
+                    <div className="font-bold text-gray-700">{cur}:</div>
+                    {s.overdue > 0 && <span style={{color: STATUS_META.overdue.color}} className="font-semibold">przeterm. {fmtMoney(s.overdue,cur)}</span>}
+                    {s.topay   > 0 && <span style={{color: STATUS_META.topay.color}}   className="font-semibold">do zapł. {fmtMoney(s.topay,cur)}</span>}
+                    {s.paid    > 0 && <span style={{color: STATUS_META.paid.color}}    className="font-semibold">zapł. {fmtMoney(s.paid,cur)}</span>}
+                  </div>
+                ))}
+              </div>
+
+              <div className="p-4 space-y-2">
+                {items.map((x, idx) => {
+                  const st = statusOf(x);
+                  const companyPct = x.split?.enabled ? (Number(x.split.companyPct)||100) : 100;
+                  const share = (Number(x.brutto)||0) * companyPct / 100;
+                  const cat = PAY_CATEGORIES.find(c => c.id === x.category);
+                  return (
+                    <div key={idx} className="flex items-center gap-3 p-3 rounded-lg border hover:bg-gray-50"
+                      style={{ borderColor: STATUS_META[st].border, background: st==="paid" ? "#f9fafb" : "#fff" }}>
+                      <input type="checkbox" checked={st==="paid"} onChange={() => togglePaid(x)}
+                        className="w-5 h-5 cursor-pointer flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <div className={"font-semibold text-sm truncate "+(st==="paid"?"line-through text-gray-400":"")}>
+                            {x.contractor || "—"}
+                          </div>
+                          {cat && <span className="px-2 py-0.5 rounded text-[10px] font-semibold" style={{background: cat.color+"22", color: cat.color}}>{cat.label}</span>}
+                          {x.isInstance && (
+                            x._hasOverrides
+                              ? <span className="text-[10px] text-green-600">✓</span>
+                              : <span className="text-[10px] text-gray-400">(cykliczna)</span>
+                          )}
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold border"
+                            style={{background: STATUS_META[st].bg, borderColor: STATUS_META[st].border, color: STATUS_META[st].color}}>
+                            {STATUS_META[st].label}
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-500 truncate">
+                          {x.invoiceNumber ? `${x.invoiceNumber} · ` : ""}{x.description || ""}
+                        </div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <div className="font-bold text-sm tabular-nums">{fmtMoney(x.brutto, x.currency)}</div>
+                        {x.split?.enabled && <div className="text-[10px] text-gray-500">firma: {fmtMoney(share, x.currency)}</div>}
+                      </div>
+                      {x.fileUrl && (
+                        <a href={x.fileUrl} target="_blank" rel="noreferrer"
+                          className="px-2 py-1 rounded text-[11px] font-semibold border border-blue-200 text-blue-600 hover:bg-blue-50 flex-shrink-0"
+                          title="Pobierz oryginał faktury">📥</a>
+                      )}
+                      <button onClick={() => { setDetail(x); setDayModal(null); }}
+                        className="px-2 py-1 rounded text-[11px] font-semibold border border-gray-200 hover:bg-white flex-shrink-0">
+                        Szczegóły
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── PANEL BOCZNY: DETAIL ── */}
+      {detail && (
+        <div className="fixed inset-0 z-50 flex justify-end" onClick={() => setDetail(null)}>
+          <div className="absolute inset-0 bg-black/30"></div>
+          <div className="relative w-full max-w-md bg-white h-full overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white z-10">
+              <div className="font-bold text-lg">Szczegóły faktury</div>
+              <button onClick={() => setDetail(null)} className="w-8 h-8 rounded-lg hover:bg-gray-100 text-gray-500">✕</button>
+            </div>
+            <div className="p-5 space-y-3 text-sm">
+              <Row label="Kontrahent"   value={detail.contractor} />
+              <Row label="NIP"          value={detail.sellerNip} />
+              <Row label="Numer FV"     value={detail.invoiceNumber} />
+              <Row label="Opis"         value={detail.description} />
+              <Row label="Kategoria"    value={PAY_CATEGORIES.find(c=>c.id===detail.category)?.label} />
+              <Row label="Data wyst."   value={detail.issueDate} />
+              <Row label="Termin"       value={detail.dueDate} />
+              <Row label="Netto"        value={fmtMoney(detail.netto, detail.currency)} />
+              <Row label="Brutto"       value={fmtMoney(detail.brutto, detail.currency)} />
+              {detail.bankAccount && (
+                <div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wide">
+                    Konto {detail.bankAccountLabel ? `(${detail.bankAccountLabel})` : "1"}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="font-mono text-sm text-gray-900 flex-1 break-all">{detail.bankAccount}</div>
+                    <button type="button"
+                      onClick={() => { navigator.clipboard?.writeText(detail.bankAccount); showToast("📋 Skopiowano"); }}
+                      className="px-2 py-1 rounded text-xs font-semibold border border-gray-200 hover:bg-gray-50 flex-shrink-0"
+                      title="Kopiuj">📋</button>
+                  </div>
+                </div>
+              )}
+              {detail.bankAccount2 && (
+                <div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wide">
+                    Konto {detail.bankAccount2Label ? `(${detail.bankAccount2Label})` : "2"}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="font-mono text-sm text-gray-900 flex-1 break-all">{detail.bankAccount2}</div>
+                    <button type="button"
+                      onClick={() => { navigator.clipboard?.writeText(detail.bankAccount2); showToast("📋 Skopiowano"); }}
+                      className="px-2 py-1 rounded text-xs font-semibold border border-gray-200 hover:bg-gray-50 flex-shrink-0"
+                      title="Kopiuj">📋</button>
+                  </div>
+                </div>
+              )}
+              {detail.fileUrl && (
+                <div>
+                  <div className="text-xs text-gray-500 uppercase tracking-wide">Załącznik</div>
+                  <a href={detail.fileUrl} target="_blank" rel="noreferrer"
+                    className="mt-1 flex items-center gap-2 p-2 rounded-lg border border-blue-200 bg-blue-50 hover:bg-blue-100 transition-colors">
+                    <div className="text-xl">📄</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-blue-900 truncate">{detail.fileName || "faktura"}</div>
+                      <div className="text-[10px] text-blue-700">{detail.fileSize ? `${(detail.fileSize/1024).toFixed(0)} KB` : ""} · kliknij aby pobrać</div>
+                    </div>
+                    <div className="text-blue-600 text-sm font-semibold">📥</div>
+                  </a>
+                </div>
+              )}
+              {detail.split?.enabled && (
+                <>
+                  <Row label="Udział firmy" value={`${detail.split.companyPct}% = ${fmtMoney((Number(detail.brutto)||0)*(Number(detail.split.companyPct)||100)/100, detail.currency)}`} />
+                  <Row label="Partner" value={`${detail.split.partnerName||"—"} (${100-(Number(detail.split.companyPct)||100)}%)`} />
+                </>
+              )}
+              {detail.recurring?.enabled && (
+                <Row label="Cykl" value={`${PAY_FREQUENCIES.find(f=>f.id===detail.recurring.frequency)?.label || "cykl"} · ${detail.recurring.startDate} → ${detail.recurring.endDate || "∞"}`} />
+              )}
+              {detail.note && <Row label="Notatka" value={detail.note} />}
+
+              {/* ── Mini-formularz nadpisań dla instancji cyklicznej ── */}
+              {detail.isInstance && (
+                <InstanceOverrideForm
+                  inst={detail}
+                  onSave={(data) => saveInstanceOverride(detail, data)}
+                />
+              )}
+
+              <div className="pt-3 flex gap-2">
+                <button onClick={() => togglePaid(detail)}
+                  className="flex-1 px-3 py-2 rounded-lg text-sm font-semibold text-white"
+                  style={{background: statusOf(detail)==="paid" ? "#64748b" : "#10b981"}}>
+                  {statusOf(detail)==="paid" ? "↩ Cofnij zapłacone" : "✓ Oznacz zapłacone"}
+                </button>
+                <button onClick={() => { setEditRec(payments.find(p=>p.id===detail.id)); setShowForm(true); setDetail(null); }}
+                  className="px-3 py-2 rounded-lg text-sm font-semibold border border-gray-200 hover:bg-gray-50">Edytuj szablon</button>
+                <button onClick={() => deleteRec(detail.id)}
+                  className="px-3 py-2 rounded-lg text-sm font-semibold border border-red-200 text-red-600 hover:bg-red-50">Usuń</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── FORMULARZ ── */}
+      {showForm && (
+        <PaymentForm
+          key={editRec?.id || `draft-${formKey}`}
+          initial={editRec || draftInit}
+          isEdit={!!editRec}
+          onSave={saveForm}
+          onClose={closeFormAll}
+          onSkipNext={aiQueue.length > 0 ? skipToNext : null}
+          onQueueAppend={appendToQueue}
+          queueInfo={aiQueueTotal > 0 ? {
+            done: aiQueueDone,
+            total: aiQueueTotal + 1, // +1 bo aktualna nie jest w aiQueue, tylko w draftInit
+            remaining: aiQueue.length,
+          } : null}
+        />
+      )}
+    </div>
+  );
+}
+
+// Mały helper-wiersz w panelu detalu
+function Row({ label, value }) {
+  if (!value) return null;
+  return (
+    <div>
+      <div className="text-xs text-gray-500 uppercase tracking-wide">{label}</div>
+      <div className="font-medium text-gray-900">{value}</div>
+    </div>
+  );
+}
+
+// ── Mini-formularz nadpisań per instancja cykliczna ──
+function InstanceOverrideForm({ inst, onSave, onSaveFile }) {
+  const [open, setOpen] = useState(false);
+  const [step, setStep] = useState("upload"); // "upload" | "review"
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [parsed, setParsed] = useState(null);
+  const [fileMeta, setFileMeta] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  // Pola formularza (wypełniane po AI parse lub ręcznie)
+  const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [netto, setNetto]   = useState("");
+  const [brutto, setBrutto] = useState("");
+  const [note, setNote]     = useState("");
+
+  // Jeśli inst ma overrides, pre-fill do edycji
+  useEffect(() => {
+    if (inst._hasOverrides) {
+      setInvoiceNumber(inst.invoiceNumber || "");
+      setNetto(inst.netto || "");
+      setBrutto(inst.brutto || "");
+      setNote(inst.note || "");
+      setStep("review");
+    } else {
+      setStep("upload");
+      setInvoiceNumber("");
+      setNetto("");
+      setBrutto("");
+      setNote("");
+    }
+    setParsed(null);
+    setFileMeta(null);
+    setAiError("");
+  }, [inst.instanceKey]);
+
+  const handleFile = async (file) => {
+    setAiLoading(true);
+    setAiError("");
+    try {
+      // Parsuj AI + upload pliku równolegle
+      const [aiResult, uploadResult] = await Promise.all([
+        parseOneInvoice(file),
+        uploadPaymentFile(file).catch(e => { console.error("upload fail", e); return null; }),
+      ]);
+      setParsed(aiResult);
+      setFileMeta(uploadResult);
+      setInvoiceNumber(aiResult.invoiceNumber || "");
+      setNetto(aiResult.netto || "");
+      setBrutto(aiResult.brutto || "");
+      setNote(aiResult.note || "");
+      setStep("review");
+    } catch(e) {
+      setAiError(e.message || "Błąd parsowania");
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    const data = {
+      invoiceNumber: invoiceNumber || "",
+      netto: Number(netto) || 0,
+      brutto: Number(brutto) || 0,
+    };
+    if (note) data.note = note;
+    // Jeśli mamy nowy plik — zapisz metadane
+    if (fileMeta) {
+      data.fileUrl  = fileMeta.fileUrl;
+      data.filePath = fileMeta.filePath;
+      data.fileName = fileMeta.fileName;
+      data.fileType = fileMeta.fileType;
+      data.fileSize = fileMeta.fileSize;
+    }
+    await onSave(data);
+    setSaving(false);
+    setOpen(false);
+  };
+
+  if (!open) {
+    return (
+      <div className="pt-2 pb-1">
+        <button onClick={() => setOpen(true)}
+          className="w-full px-3 py-2 rounded-lg text-sm font-semibold border-2 border-dashed transition-all"
+          style={{
+            borderColor: inst._hasOverrides ? "#10b981" : "#3b82f6",
+            color: inst._hasOverrides ? "#059669" : "#2563eb",
+            background: inst._hasOverrides ? "#f0fdf4" : "#eff6ff",
+          }}>
+          {inst._hasOverrides ? "✓ Dane z FV uzupełnione — edytuj" : "📄 Wgraj fakturę i uzupełnij dane"}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="pt-2 pb-1 space-y-2 p-3 rounded-lg border border-blue-200 bg-blue-50/50">
+      <div className="text-xs font-semibold text-blue-800 mb-1">
+        Dane z faktury · {inst.instanceKey}
+      </div>
+
+      {/* KROK 1: Upload */}
+      {step === "upload" && (
+        <div>
+          <label className="flex flex-col items-center justify-center gap-2 p-4 rounded-lg border-2 border-dashed border-blue-300 bg-blue-50 cursor-pointer hover:bg-blue-100 transition-colors">
+            {aiLoading ? (
+              <div className="text-sm text-blue-700 font-medium animate-pulse">⏳ AI czyta fakturę…</div>
+            ) : (
+              <>
+                <div className="text-2xl">📄</div>
+                <div className="text-sm text-blue-700 font-medium">Wgraj fakturę (PDF lub zdjęcie)</div>
+                <div className="text-xs text-blue-500">AI odczyta nr FV, kwoty i inne dane</div>
+              </>
+            )}
+            <input type="file" accept=".pdf,image/png,image/jpeg,image/webp" className="hidden"
+              disabled={aiLoading}
+              onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
+          </label>
+          {aiError && <div className="mt-2 text-xs text-red-600 font-medium">{aiError}</div>}
+          <div className="flex gap-2 mt-2">
+            <button onClick={() => { setStep("review"); }}
+              className="flex-1 px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-200 hover:bg-gray-50 text-gray-600">
+              Uzupełnij ręcznie (bez pliku)
+            </button>
+            <button onClick={() => setOpen(false)}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-200 hover:bg-gray-50 text-gray-500">
+              Anuluj
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* KROK 2: Przegląd / edycja */}
+      {step === "review" && (
+        <>
+          {parsed && <div className="text-xs text-green-700 font-medium mb-1">✓ AI odczytał dane z faktury — sprawdź i zapisz</div>}
+          <div>
+            <label className="text-xs text-gray-600">Nr faktury</label>
+            <input type="text" value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)}
+              className="w-full px-3 py-1.5 rounded-lg text-sm border border-gray-200" placeholder="np. 0912/05/2026" />
+          </div>
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <label className="text-xs text-gray-600">Netto</label>
+              <input type="number" step="0.01" value={netto} onChange={e => setNetto(e.target.value)}
+                className="w-full px-3 py-1.5 rounded-lg text-sm border border-gray-200" />
+            </div>
+            <div className="flex-1">
+              <label className="text-xs text-gray-600">Brutto</label>
+              <input type="number" step="0.01" value={brutto} onChange={e => setBrutto(e.target.value)}
+                className="w-full px-3 py-1.5 rounded-lg text-sm border border-gray-200" />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-gray-600">Notatka</label>
+            <input type="text" value={note} onChange={e => setNote(e.target.value)}
+              className="w-full px-3 py-1.5 rounded-lg text-sm border border-gray-200" placeholder="opcjonalnie" />
+          </div>
+          {fileMeta && (
+            <div className="text-xs text-green-700">📎 {fileMeta.fileName} ({(fileMeta.fileSize/1024).toFixed(0)} KB)</div>
+          )}
+          {!fileMeta && !inst._hasOverrides && (
+            <button onClick={() => setStep("upload")}
+              className="text-xs text-blue-600 hover:underline">
+              ← Wróć do uploadu pliku
+            </button>
+          )}
+          <div className="flex gap-2 pt-1">
+            <button onClick={handleSave} disabled={saving}
+              className="flex-1 px-3 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50">
+              {saving ? "Zapisuję…" : "Zapisz"}
+            </button>
+            <button onClick={() => setOpen(false)}
+              className="px-3 py-2 rounded-lg text-sm font-semibold border border-gray-200 hover:bg-gray-50">
+              Anuluj
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Formularz dodawania / edycji faktury
+// ── AI: wyciąganie danych z faktury (PDF / zdjęcie) ──
+const PAYMENT_AI_PROMPT = `Jesteś asystentem księgowym. Przeczytaj załączoną fakturę i zwróć WYŁĄCZNIE obiekt JSON (bez żadnego komentarza, bez markdown) w poniższym formacie:
+
+{
+  "contractor": "nazwa kontrahenta / sprzedawcy (string)",
+  "sellerNip": "NIP / VAT-ID sprzedawcy (string, same cyfry lub z myślnikami jak na fakturze)",
+  "invoiceNumber": "numer faktury (string, np. FV/2026/04/123)",
+  "description": "krótki opis czego dotyczy faktura (string, max 80 znaków)",
+  "category": "jedna z: leasing | ubezpieczenie | paliwo | czesci | uslugi | inne",
+  "currency": "jedna z: PLN | EUR | USD",
+  "netto":  liczba (bez walut i separatorów tysięcy, kropka jako separator dziesiętny),
+  "brutto": liczba (bez walut i separatorów tysięcy, kropka jako separator dziesiętny),
+  "issueDate": "data wystawienia w formacie YYYY-MM-DD",
+  "dueDate":   "termin płatności w formacie YYYY-MM-DD",
+  "bankAccount": "numer konta bankowego do zapłaty w walucie faktury — PLN (IBAN lub 26-cyfrowy NRB, string)",
+  "bankAccount2": "drugi numer konta jeśli jest na fakturze (np. konto walutowe EUR/USD, string; jeśli nie ma — pusty string)",
+  "bankAccountLabel": "opis pierwszego konta, np. 'PLN' lub 'konto główne' (string, krótki)",
+  "bankAccount2Label": "opis drugiego konta, np. 'EUR' lub 'konto walutowe' (string; jeśli brak — pusty string)",
+  "note": "opcjonalna notatka (string) lub pusty string"
+}
+
+Reguły:
+- Jeśli jakieś pole nie jest widoczne na fakturze, wstaw pusty string "" lub 0 dla liczb.
+- Jeśli waluta to PLN, użyj "PLN" nawet jeśli na fakturze jest "zł" lub "PLN".
+- Kategorię zgadnij na podstawie opisu/pozycji (np. "olej napędowy" → paliwo, "polisa OC" → ubezpieczenie, "rata leasingowa" → leasing, "klocki hamulcowe" → czesci, "naprawa" lub "usługa" → uslugi).
+- bankAccount i bankAccount2 zwracaj bez spacji (np. "PL12345678901234567890123456" lub "12345678901234567890123456").
+- Jeśli na fakturze jest tylko jedno konto, wstaw je w bankAccount, a bankAccount2 zostaw pustym.
+- Jeśli są dwa konta (np. PLN i EUR), wstaw konto w walucie faktury jako bankAccount, drugie jako bankAccount2.
+- Zwracaj POPRAWNY JSON bez dodatkowego tekstu.`;
+
+// Parsuj jedną fakturę przez AI (PDF / obraz → JSON)
+// Wydzielone na poziom modułu żeby mogło być reużywane w InstanceOverrideForm i PaymentForm.
+async function parseOneInvoice(file) {
+  if (file.size > 10 * 1024 * 1024) throw new Error(`${file.name}: plik za duży (max 10 MB)`);
+  const isPdf = file.type === "application/pdf";
+  const isImg = /^image\/(png|jpe?g|webp)$/.test(file.type);
+  if (!isPdf && !isImg) throw new Error(`${file.name}: nieobsługiwany format`);
+  const base64 = await new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(",")[1]);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+  const msgContent = isPdf
+    ? [{ type:"document", source:{ type:"base64", media_type:"application/pdf", data: base64 } }, { type:"text", text: PAYMENT_AI_PROMPT }]
+    : [{ type:"image",    source:{ type:"base64", media_type: file.type,         data: base64 } }, { type:"text", text: PAYMENT_AI_PROMPT }];
+  const res = await fetch("/api/claude", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 1500,
+      messages: [{ role: "user", content: msgContent }],
+    }),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`API ${res.status}: ${errText.slice(0,150)}`);
+  }
+  const resp = await res.json();
+  if (resp.error) throw new Error(resp.error.message || "Błąd API");
+  const txt = resp.content?.map(c => c.text || "").join("").trim().replace(/```json|```/g,"").trim();
+  if (!txt) throw new Error("Pusta odpowiedź AI");
+  try { return JSON.parse(txt); }
+  catch(e) { throw new Error(`${file.name}: niepoprawny JSON z AI`); }
+}
+
+function PaymentForm({ initial, isEdit, onSave, onClose, onSkipNext, onQueueAppend, queueInfo }) {
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [aiFilled, setAiFilled] = useState(!!initial && !isEdit); // draft z AI → od razu "wypełnione"
+  const [aiProgress, setAiProgress] = useState({ done: 0, total: 0 }); // progres parsowania wielu plików
+  const [isDragging, setIsDragging] = useState(false); // highlight podczas drag-and-drop
+
+  const [f, setF] = useState(() => ({
+    contractor:    initial?.contractor    || "",
+    sellerNip:     initial?.sellerNip     || "",
+    invoiceNumber: initial?.invoiceNumber || "",
+    description:   initial?.description   || "",
+    category:      initial?.category      || "inne",
+    currency:      initial?.currency      || "PLN",
+    netto:         initial?.netto         || "",
+    brutto:        initial?.brutto        || "",
+    issueDate:     initial?.issueDate     || todayISO(),
+    dueDate:       initial?.dueDate       || todayISO(),
+    bankAccount:      initial?.bankAccount      || "",
+    bankAccountLabel: initial?.bankAccountLabel || "",
+    bankAccount2:     initial?.bankAccount2     || "",
+    bankAccount2Label:initial?.bankAccount2Label|| "",
+    status:        initial?.status        || "topay",
+    note:          initial?.note          || "",
+    // załącznik (oryginał faktury w Storage)
+    fileUrl:       initial?.fileUrl       || "",
+    filePath:      initial?.filePath      || "",
+    fileName:      initial?.fileName      || "",
+    fileType:      initial?.fileType      || "",
+    fileSize:      initial?.fileSize      || 0,
+    recurring: {
+      enabled:    !!initial?.recurring?.enabled,
+      startDate:  initial?.recurring?.startDate || todayISO(),
+      endDate:    initial?.recurring?.endDate   || "",
+      frequency:  initial?.recurring?.frequency || "monthly",
+    },
+    split: {
+      enabled:      !!initial?.split?.enabled,
+      companyPct:   initial?.split?.companyPct ?? 100,
+      partnerName:  initial?.split?.partnerName || "",
+    },
+    paidInstances: initial?.paidInstances || [],
+  }));
+  const upd = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const updSub = (sub, k, v) => setF(p => ({ ...p, [sub]: { ...p[sub], [k]: v } }));
+
+  // Wspólna logika: przyjmuje File[] (z inputa lub dropa) i parsuje równolegle
+  async function processFiles(files) {
+    if (!files || files.length === 0) return;
+    setAiError("");
+    setAiFilled(false);
+    setAiLoading(true);
+    setAiProgress({ done: 0, total: files.length });
+    try {
+      // Parsuj + upload równolegle — każdy plik osobno leci przez AI i do Storage
+      let done = 0;
+      const results = await Promise.allSettled(
+        files.map(async (f) => {
+          const [parsed, fileMeta] = await Promise.all([
+            parseOneInvoice(f),
+            uploadPaymentFile(f).catch(e => { console.error("upload fail", f.name, e); return null; }),
+          ]);
+          done++;
+          setAiProgress({ done, total: files.length });
+          return { ...parsed, _file: fileMeta };
+        })
+      );
+      const success = [];
+      const failures = [];
+      results.forEach((r, i) => {
+        if (r.status === "fulfilled") success.push(r.value);
+        else failures.push(files[i].name);
+      });
+      if (success.length === 0) throw new Error("Żadna faktura nie została sparsowana");
+
+      // Pierwsza → wypełnia aktualny formularz
+      const first = success[0];
+      setF(prev => ({
+        ...prev,
+        contractor:    first.contractor    || prev.contractor,
+        sellerNip:     first.sellerNip     || prev.sellerNip,
+        invoiceNumber: first.invoiceNumber || prev.invoiceNumber,
+        description:   first.description   || prev.description,
+        category:      first.category && PAY_CATEGORIES.some(c=>c.id===first.category) ? first.category : prev.category,
+        currency:      first.currency && PAY_CURRENCIES.includes(first.currency) ? first.currency : prev.currency,
+        netto:         first.netto  || prev.netto,
+        brutto:        first.brutto || prev.brutto,
+        issueDate:     first.issueDate || prev.issueDate,
+        dueDate:       first.dueDate   || prev.dueDate,
+        bankAccount:      (first.bankAccount || "").replace(/\s+/g,"") || prev.bankAccount,
+        bankAccountLabel: first.bankAccountLabel || prev.bankAccountLabel,
+        bankAccount2:     (first.bankAccount2 || "").replace(/\s+/g,"") || prev.bankAccount2,
+        bankAccount2Label:first.bankAccount2Label || prev.bankAccount2Label,
+        note:          first.note  || prev.note,
+        // metadata pliku z Firebase Storage
+        fileUrl:  first._file?.fileUrl  || prev.fileUrl,
+        filePath: first._file?.filePath || prev.filePath,
+        fileName: first._file?.fileName || prev.fileName,
+        fileType: first._file?.fileType || prev.fileType,
+        fileSize: first._file?.fileSize || prev.fileSize,
+      }));
+      setAiFilled(true);
+
+      // Reszta → do kolejki w rodzicu (otworzą się kolejno po zapisie)
+      // WAŻNE: spłaszczamy _file do pól top-level, bo PaymentForm czyta initial.fileUrl itd.
+      if (success.length > 1 && onQueueAppend) {
+        onQueueAppend(success.slice(1).map(r => ({
+          ...r,
+          fileUrl:  r._file?.fileUrl  || "",
+          filePath: r._file?.filePath || "",
+          fileName: r._file?.fileName || "",
+          fileType: r._file?.fileType || "",
+          fileSize: r._file?.fileSize || 0,
+        })));
+      }
+
+      if (failures.length > 0) {
+        setAiError(`${failures.length} z ${files.length} plików nie sparsowało: ${failures.join(", ").slice(0,120)}`);
+      }
+    } catch(e) {
+      console.error("AI parse error", e);
+      setAiError(e.message || "Błąd analizy");
+    } finally {
+      setAiLoading(false);
+      setAiProgress({ done: 0, total: 0 });
+    }
+  }
+
+  // Handler dla <input type="file">
+  async function handleAiUpload(ev) {
+    const files = Array.from(ev.target.files || []);
+    await processFiles(files);
+    if (ev.target) ev.target.value = "";
+  }
+
+  // Handlery drag-and-drop (upuść plik z folderu bezpośrednio na pole)
+  function handleDragOver(ev) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (!aiLoading) setIsDragging(true);
+  }
+  function handleDragLeave(ev) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    setIsDragging(false);
+  }
+  async function handleDrop(ev) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    setIsDragging(false);
+    if (aiLoading) return;
+    const files = Array.from(ev.dataTransfer?.files || []).filter(f => {
+      return f.type === "application/pdf" || /^image\/(png|jpe?g|webp)$/.test(f.type);
+    });
+    if (files.length === 0) {
+      setAiError("Upuść plik PDF / PNG / JPG / WEBP");
+      return;
+    }
+    await processFiles(files);
+  }
+
+  function submit() {
+    if (!f.contractor.trim()) { alert("Uzupełnij kontrahenta"); return; }
+    if (!f.brutto) { alert("Uzupełnij kwotę brutto"); return; }
+    if (f.split.enabled) {
+      const pct = Number(f.split.companyPct);
+      if (isNaN(pct) || pct < 0 || pct > 100) { alert("Udział firmy musi być między 0 a 100"); return; }
+    }
+    const data = {
+      contractor:    f.contractor.trim(),
+      sellerNip:     (f.sellerNip || "").trim(),
+      invoiceNumber: f.invoiceNumber.trim(),
+      description:   f.description.trim(),
+      category:      f.category,
+      currency:      f.currency,
+      netto:         Number(f.netto) || 0,
+      brutto:        Number(f.brutto) || 0,
+      issueDate:     f.issueDate,
+      dueDate:       f.dueDate,
+      bankAccount:   (f.bankAccount || "").replace(/\s+/g,""),
+      status:        f.status,
+      note:          f.note.trim(),
+      fileUrl:       f.fileUrl  || "",
+      filePath:      f.filePath || "",
+      fileName:      f.fileName || "",
+      fileType:      f.fileType || "",
+      fileSize:      f.fileSize || 0,
+      recurring:     f.recurring.enabled ? {
+        enabled: true,
+        startDate: f.recurring.startDate,
+        endDate:   f.recurring.endDate || null,
+        frequency: f.recurring.frequency,
+      } : { enabled: false },
+      split: f.split.enabled ? {
+        enabled: true,
+        companyPct: Number(f.split.companyPct) || 100,
+        partnerName: f.split.partnerName.trim(),
+        partnerPct: 100 - (Number(f.split.companyPct) || 100),
+      } : { enabled: false },
+      paidInstances: f.paidInstances,
+    };
+    onSave(data);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40"></div>
+      <div className="relative bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="p-5 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white z-10">
+          <div>
+            <div className="font-bold text-lg">{isEdit ? "Edycja faktury" : "Nowa faktura"}</div>
+            {queueInfo && (
+              <div className="text-xs text-blue-700 font-semibold mt-0.5">
+                🤖 Paczka AI: faktura {queueInfo.done + 1} / {queueInfo.total}
+                {queueInfo.remaining > 0 && <span className="text-blue-500 font-normal"> · po zapisie: następna</span>}
+              </div>
+            )}
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-gray-100 text-gray-500">✕</button>
+        </div>
+        <div className="p-5 space-y-4">
+          {/* ── AI UPLOAD (z drag & drop) ── */}
+          <div className="rounded-lg border-2 border-dashed p-4 transition-all"
+            onDragOver={handleDragOver}
+            onDragEnter={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            style={{
+              borderColor: isDragging ? "#3b82f6" : aiFilled ? "#86efac" : aiError ? "#fca5a5" : "#e5e7eb",
+              background:  isDragging ? "#dbeafe" : aiFilled ? "#f0fdf4" : aiError ? "#fef2f2" : "#fafafa",
+              transform:   isDragging ? "scale(1.01)" : "scale(1)",
+            }}>
+            <div className="flex items-center gap-3">
+              <div className="text-2xl">{isDragging ? "📥" : aiLoading ? "⏳" : aiFilled ? "✅" : aiError ? "⚠️" : "🤖"}</div>
+              <div className="flex-1">
+                <div className="font-semibold text-sm text-gray-900">
+                  {isDragging ? "Upuść pliki tutaj..." :
+                   aiLoading ? `AI czyta faktury... ${aiProgress.done}/${aiProgress.total}` :
+                   aiFilled  ? "Pola wypełnione — sprawdź i popraw w razie potrzeby" :
+                   aiError   ? "Błąd analizy — uzupełnij ręcznie" :
+                                "Wgraj lub przeciągnij faktury — AI wypełni pola za Ciebie"}
+                </div>
+                <div className="text-xs text-gray-500 mt-0.5">
+                  {aiError
+                    ? aiError
+                    : "PDF / PNG / JPG (max 10 MB każda). Możesz przeciągnąć pliki z folderu lub wybrać wiele naraz. Po zapisie otworzy się kolejna. Split i cykliczność ustawisz ręcznie."}
+                </div>
+                {aiLoading && aiProgress.total > 0 && (
+                  <div className="mt-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                    <div className="h-full bg-blue-500 transition-all" style={{width: `${(aiProgress.done/aiProgress.total)*100}%`}}></div>
+                  </div>
+                )}
+              </div>
+              <label className={"px-3 py-2 rounded-lg text-sm font-semibold cursor-pointer whitespace-nowrap "+(aiLoading?"opacity-50 pointer-events-none":"")}
+                style={{background: "#111827", color: "#fff"}}>
+                📎 Wgraj
+                <input type="file" multiple accept=".pdf,image/png,image/jpeg,image/webp"
+                  onChange={handleAiUpload} className="hidden" disabled={aiLoading} />
+              </label>
+            </div>
+          </div>
+
+          {/* ── ZAŁĄCZNIK (oryginał faktury) ── */}
+          {f.fileUrl ? (
+            <div className="rounded-lg border border-gray-200 p-3 bg-blue-50 flex items-center gap-3">
+              <div className="text-2xl">📄</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs text-gray-500 uppercase tracking-wide">Załączony plik</div>
+                <div className="font-semibold text-sm text-gray-900 truncate">{f.fileName || "faktura"}</div>
+                <div className="text-xs text-gray-500">
+                  {f.fileType || ""}{f.fileSize ? ` · ${(f.fileSize/1024).toFixed(0)} KB` : ""}
+                </div>
+              </div>
+              <a href={f.fileUrl} target="_blank" rel="noreferrer"
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-200 bg-white hover:bg-gray-50">
+                📥 Pobierz
+              </a>
+              <button type="button"
+                onClick={() => setF(p => ({ ...p, fileUrl:"", filePath:"", fileName:"", fileType:"", fileSize:0 }))}
+                className="px-2 py-1.5 rounded-lg text-xs font-semibold text-red-600 border border-red-200 hover:bg-red-50"
+                title="Usuń załącznik z rekordu (plik zostanie w Storage)">
+                ✕
+              </button>
+            </div>
+          ) : (
+            <ManualFileAttach onAttached={(meta) => setF(p => ({ ...p, ...meta }))} />
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Kontrahent *">
+              <input value={f.contractor} onChange={e=>upd("contractor", e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200" placeholder="np. Leasing Mercedes" />
+            </Field>
+            <Field label="NIP kontrahenta">
+              <input value={f.sellerNip} onChange={e=>upd("sellerNip", e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200" placeholder="np. 1234567890" />
+            </Field>
+          </div>
+          <Field label="Numer FV">
+            <input value={f.invoiceNumber} onChange={e=>upd("invoiceNumber", e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-gray-200" />
+          </Field>
+          <Field label="Opis">
+            <input value={f.description} onChange={e=>upd("description", e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-gray-200" placeholder="np. Felgi do Forda / Rata leasingu ST12345" />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Kategoria">
+              <select value={f.category} onChange={e=>upd("category", e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200">
+                {PAY_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </select>
+            </Field>
+            <Field label="Waluta">
+              <select value={f.currency} onChange={e=>upd("currency", e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200">
+                {PAY_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Netto">
+              <input type="number" step="0.01" value={f.netto} onChange={e=>upd("netto", e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200" />
+            </Field>
+            <Field label="Brutto *">
+              <input type="number" step="0.01" value={f.brutto} onChange={e=>upd("brutto", e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200" />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Data wystawienia">
+              <input type="date" value={f.issueDate} onChange={e=>upd("issueDate", e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200" />
+            </Field>
+            <Field label="Termin płatności">
+              <input type="date" value={f.dueDate} onChange={e=>upd("dueDate", e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-gray-200" />
+            </Field>
+          </div>
+          <Field label={`Konto bankowe 1${f.bankAccountLabel ? ` (${f.bankAccountLabel})` : ""}`}>
+            <div className="flex gap-2">
+              <input value={f.bankAccount}
+                onChange={e=>upd("bankAccount", e.target.value.replace(/\s+/g,""))}
+                className="flex-1 px-3 py-2 rounded-lg border border-gray-200 font-mono text-sm"
+                placeholder="IBAN / NRB" />
+              {f.bankAccount && (
+                <button type="button"
+                  onClick={() => { navigator.clipboard?.writeText(f.bankAccount); }}
+                  className="px-3 py-2 rounded-lg text-xs font-semibold border border-gray-200 hover:bg-gray-50"
+                  title="Kopiuj numer konta">📋</button>
+              )}
+            </div>
+          </Field>
+          <Field label={`Konto bankowe 2${f.bankAccount2Label ? ` (${f.bankAccount2Label})` : ""}`}>
+            <div className="flex gap-2">
+              <input value={f.bankAccount2}
+                onChange={e=>upd("bankAccount2", e.target.value.replace(/\s+/g,""))}
+                className="flex-1 px-3 py-2 rounded-lg border border-gray-200 font-mono text-sm"
+                placeholder="drugie konto (opcjonalne)" />
+              {f.bankAccount2 && (
+                <button type="button"
+                  onClick={() => { navigator.clipboard?.writeText(f.bankAccount2); }}
+                  className="px-3 py-2 rounded-lg text-xs font-semibold border border-gray-200 hover:bg-gray-50"
+                  title="Kopiuj numer konta">📋</button>
+              )}
+            </div>
+          </Field>
+
+          {/* ── CYKLICZNA ── */}
+          <div className="rounded-lg border border-gray-200 p-3 bg-gray-50">
+            <label className="flex items-center gap-2 mb-2 cursor-pointer">
+              <input type="checkbox" checked={f.recurring.enabled}
+                onChange={e => updSub("recurring","enabled", e.target.checked)} />
+              <span className="font-semibold text-sm">Faktura cykliczna (leasing, ubezpieczenie...)</span>
+            </label>
+            {f.recurring.enabled && (
+              <div className="grid grid-cols-3 gap-3 mt-2">
+                <Field label="Częstotliwość">
+                  <select value={f.recurring.frequency} onChange={e=>updSub("recurring","frequency", e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white">
+                    {PAY_FREQUENCIES.map(fr => <option key={fr.id} value={fr.id}>{fr.label}</option>)}
+                  </select>
+                </Field>
+                <Field label="Start">
+                  <input type="date" value={f.recurring.startDate} onChange={e=>updSub("recurring","startDate", e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200" />
+                </Field>
+                <Field label="Koniec (opcjonalnie)">
+                  <input type="date" value={f.recurring.endDate} onChange={e=>updSub("recurring","endDate", e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200" />
+                </Field>
+              </div>
+            )}
+          </div>
+
+          {/* ── SPLIT ── */}
+          <div className="rounded-lg border border-gray-200 p-3 bg-gray-50">
+            <label className="flex items-center gap-2 mb-2 cursor-pointer">
+              <input type="checkbox" checked={f.split.enabled}
+                onChange={e => updSub("split","enabled", e.target.checked)} />
+              <span className="font-semibold text-sm">Udział w koszcie (split)</span>
+            </label>
+            {f.split.enabled && (
+              <div className="grid grid-cols-2 gap-3 mt-2">
+                <Field label="Udział firmy (%)">
+                  <input type="number" min="0" max="100" value={f.split.companyPct}
+                    onChange={e=>updSub("split","companyPct", e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200" />
+                </Field>
+                <Field label="Nazwa partnera">
+                  <input value={f.split.partnerName} onChange={e=>updSub("split","partnerName", e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200" placeholder="np. Jan Kowalski" />
+                </Field>
+                <div className="col-span-2 text-xs text-gray-500">
+                  Partner pokrywa {100 - (Number(f.split.companyPct)||0)}%. Sumy miesięczne liczone tylko z udziału firmy.
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── STATUS PŁATNOŚCI ── */}
+          <PaymentStatusBlock f={f} setF={setF} />
+
+          <Field label="Notatka">
+            <textarea value={f.note} onChange={e=>upd("note", e.target.value)} rows={2}
+              className="w-full px-3 py-2 rounded-lg border border-gray-200" />
+          </Field>
+        </div>
+        <div className="p-4 border-t border-gray-200 flex justify-end gap-2 sticky bottom-0 bg-white">
+          <button onClick={onClose}
+            className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 hover:bg-gray-50">
+            {queueInfo ? "Anuluj całą paczkę" : "Anuluj"}
+          </button>
+          {onSkipNext && (
+            <button onClick={onSkipNext}
+              className="px-4 py-2 rounded-lg text-sm font-semibold border border-amber-200 text-amber-700 hover:bg-amber-50"
+              title="Pomiń tę fakturę (nie zapisuj) i przejdź do następnej">
+              Pomiń →
+            </button>
+          )}
+          <button onClick={submit}
+            className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+            style={{background: "#111827"}}>
+            {queueInfo && queueInfo.remaining > 0 ? "Zapisz i dalej →" : "Zapisz"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Blok statusu płatności w formularzu ──
+// Ad-hoc: prosty toggle Zapłacone/Do zapłaty (f.status)
+// Cykliczna: lista instancji z checkboxami (f.paidInstances)
+function PaymentStatusBlock({ f, setF }) {
+  const instances = useMemo(() => {
+    if (!f.recurring.enabled || !f.recurring.startDate) return [];
+    const out = [];
+    const start = new Date(f.recurring.startDate + "T00:00:00");
+    const end = f.recurring.endDate ? new Date(f.recurring.endDate + "T00:00:00") : null;
+    const now = new Date();
+    // Okno: od startu do max(endDate, +24m od dziś)
+    const hardEnd = end || new Date(now.getFullYear(), now.getMonth()+24, 1);
+    if (f.recurring.frequency === "monthly") {
+      let d = new Date(start.getFullYear(), start.getMonth(), 1);
+      let guard = 0;
+      while (d <= hardEnd && guard++ < 120) {
+        const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+        out.push({ key, label: d.toLocaleDateString("pl-PL", {month:"long", year:"numeric"}) });
+        d = new Date(d.getFullYear(), d.getMonth()+1, 1);
+      }
+    } else if (f.recurring.frequency === "yearly") {
+      let d = new Date(start.getFullYear(), start.getMonth(), 1);
+      let guard = 0;
+      while (d <= hardEnd && guard++ < 30) {
+        const key = `${d.getFullYear()}`;
+        out.push({ key, label: String(d.getFullYear()) });
+        d = new Date(d.getFullYear()+1, d.getMonth(), 1);
+      }
+    }
+    return out;
+  }, [f.recurring.enabled, f.recurring.startDate, f.recurring.endDate, f.recurring.frequency]);
+
+  if (!f.recurring.enabled) {
+    // AD-HOC: prosty toggle
+    const isPaid = f.status === "paid";
+    return (
+      <div className="rounded-lg border border-gray-200 p-3 bg-gray-50">
+        <div className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">Status płatności</div>
+        <div className="flex gap-2">
+          <button type="button"
+            onClick={() => setF(p => ({ ...p, status: "topay" }))}
+            className="flex-1 px-3 py-2 rounded-lg text-sm font-semibold border-2 transition-all"
+            style={{
+              background: !isPaid ? "#fef3c7" : "#fff",
+              borderColor: !isPaid ? "#f59e0b" : "#e5e7eb",
+              color: !isPaid ? "#92400e" : "#6b7280",
+            }}>
+            ⏰ Do zapłaty
+          </button>
+          <button type="button"
+            onClick={() => setF(p => ({ ...p, status: "paid" }))}
+            className="flex-1 px-3 py-2 rounded-lg text-sm font-semibold border-2 transition-all"
+            style={{
+              background: isPaid ? "#dcfce7" : "#fff",
+              borderColor: isPaid ? "#10b981" : "#e5e7eb",
+              color: isPaid ? "#065f46" : "#6b7280",
+            }}>
+            ✅ Zapłacone
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // CYKLICZNA: lista instancji
+  const paidSet = new Set(f.paidInstances || []);
+  const toggleInst = (key) => {
+    setF(p => {
+      const set = new Set(p.paidInstances || []);
+      if (set.has(key)) set.delete(key);
+      else set.add(key);
+      return { ...p, paidInstances: Array.from(set) };
+    });
+  };
+  const markAll = () => setF(p => ({ ...p, paidInstances: instances.map(i => i.key) }));
+  const clearAll = () => setF(p => ({ ...p, paidInstances: [] }));
+
+  return (
+    <div className="rounded-lg border border-gray-200 p-3 bg-gray-50">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+          Status per instancja ({paidSet.size}/{instances.length} zapłacone)
+        </div>
+        <div className="flex gap-1">
+          <button type="button" onClick={markAll}
+            className="text-[10px] px-2 py-0.5 rounded border border-gray-300 hover:bg-white">wszystkie ✓</button>
+          <button type="button" onClick={clearAll}
+            className="text-[10px] px-2 py-0.5 rounded border border-gray-300 hover:bg-white">wyczyść</button>
+        </div>
+      </div>
+      {instances.length === 0 ? (
+        <div className="text-xs text-gray-400 py-2">Ustaw datę startu, aby zobaczyć instancje</div>
+      ) : (
+        <div className="max-h-48 overflow-y-auto border border-gray-200 rounded bg-white">
+          {instances.map(inst => {
+            const paid = paidSet.has(inst.key);
+            return (
+              <label key={inst.key}
+                className="flex items-center gap-2 px-3 py-1.5 border-b border-gray-100 last:border-b-0 hover:bg-gray-50 cursor-pointer text-sm">
+                <input type="checkbox" checked={paid} onChange={() => toggleInst(inst.key)}
+                  className="w-4 h-4 cursor-pointer" />
+                <span className={"capitalize "+(paid?"line-through text-gray-400":"text-gray-700")}>{inst.label}</span>
+                <span className="ml-auto text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                  style={{
+                    background: paid ? "#dcfce7" : "#fef3c7",
+                    color: paid ? "#065f46" : "#92400e",
+                  }}>
+                  {paid ? "zapłacone" : "do zapłaty"}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <div>
+      <div className="text-xs font-semibold text-gray-600 mb-1">{label}</div>
+      {children}
+    </div>
+  );
+}
+
+// Ręczne dodanie załącznika (bez AI) — upload tylko do Storage, bez parsowania
+function ManualFileAttach({ onAttached }) {
+  const [uploading, setUploading] = useState(false);
+  const [err, setErr] = useState("");
+  async function handle(ev) {
+    const file = ev.target.files?.[0];
+    if (!file) return;
+    setErr("");
+    setUploading(true);
+    try {
+      if (file.size > 10 * 1024 * 1024) throw new Error("Plik za duży (max 10 MB)");
+      const meta = await uploadPaymentFile(file);
+      onAttached(meta);
+    } catch(e) {
+      console.error("manual attach error", e);
+      setErr(e.message || "Błąd uploadu");
+    } finally {
+      setUploading(false);
+      if (ev.target) ev.target.value = "";
+    }
+  }
+  return (
+    <div className="rounded-lg border border-dashed border-gray-200 p-3 bg-gray-50 flex items-center gap-3">
+      <div className="text-xl">📎</div>
+      <div className="flex-1">
+        <div className="text-sm font-semibold text-gray-700">Brak załącznika</div>
+        <div className="text-xs text-gray-500">{err || "Możesz dołączyć oryginał faktury ręcznie (PDF / PNG / JPG)"}</div>
+      </div>
+      <label className={"px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer border border-gray-200 bg-white hover:bg-gray-100 "+(uploading?"opacity-50 pointer-events-none":"")}>
+        {uploading ? "⏳ Wgrywam..." : "Dołącz plik"}
+        <input type="file" accept=".pdf,image/png,image/jpeg,image/webp" onChange={handle} className="hidden" disabled={uploading} />
+      </label>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// IMI / SIPSI TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+const EU_COUNTRIES = [
+  "Austria","Belgia","Bułgaria","Chorwacja","Cypr","Czechy","Dania","Estonia",
+  "Finlandia","Francja","Grecja","Hiszpania","Holandia","Irlandia","Litwa",
+  "Luksemburg","Łotwa","Malta","Niemcy","Polska","Portugalia","Rumunia",
+  "Słowacja","Słowenia","Szwecja","Węgry","Włochy","Norwegia","Szwajcaria","UK",
+];
+
+function ImiTab({ imiRecords, vehicles, onAdd, onDelete }) {
+  const [showUpload, setShowUpload] = useState(false);
+  const [preview, setPreview]       = useState(null); // record to show full card
+  const [filterCountry, setFilterCountry] = useState("all");
+  const [filterDriver, setFilterDriver]   = useState("");
+
+  const filtered = imiRecords.filter(r => {
+    if (filterCountry !== "all" && r.country !== filterCountry) return false;
+    if (filterDriver && !(r.driverName||"").toLowerCase().includes(filterDriver.toLowerCase())) return false;
+    return true;
+  }).sort((a,b) => (b.createdAt||"").localeCompare(a.createdAt||""));
+
+  const countries = [...new Set(imiRecords.map(r => r.country).filter(Boolean))];
+
+  return (
+    <div>
+      {/* HEADER */}
+      <div className="flex items-start justify-between mb-5 gap-3 flex-wrap">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">IMI / SIPSI</h2>
+          <p className="text-sm text-gray-400 mt-0.5">Delegowanie kierowców do krajów UE · {imiRecords.length} wpisów</p>
+        </div>
+        <button onClick={() => setShowUpload(true)}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white hover:opacity-90 transition-all"
+          style={{ background:"#111827" }}>
+          🤖 Wgraj dokument IMI
+        </button>
+      </div>
+
+      {/* FILTERS */}
+      {imiRecords.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-5">
+          <select value={filterCountry} onChange={e => setFilterCountry(e.target.value)}
+            className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 outline-none bg-white text-gray-700">
+            <option value="all">Wszystkie kraje</option>
+            {countries.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <select value={filterDriver} onChange={e => setFilterDriver(e.target.value)} className="text-sm px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-700"><option value="">Wszyscy kierowcy</option>{[...new Set(imiRecords.map(r => r.driverName).filter(Boolean))].sort().map(d => <option key={d} value={d}>{d}</option>)}</select>
+        </div>
+      )}
+
+      {/* RECORDS LIST */}
+      <div className="space-y-3">
+        {filtered.map(r => (
+          <ImiCard key={r.id} record={r} vehicles={vehicles}
+            onPreview={() => setPreview(r)}
+            onDelete={() => onDelete(r.id)} />
+        ))}
+      </div>
+
+      {imiRecords.length === 0 && (
+        <div className="text-center py-20 text-gray-400">
+          <div className="text-5xl mb-4">🌍</div>
+          <div className="font-semibold text-gray-500 mb-1">Brak wpisów IMI/SIPSI</div>
+          <div className="text-sm">Wgraj dokument — AI odczyta wszystkie dane automatycznie</div>
+        </div>
+      )}
+
+      {showUpload && (
+        <ImiUploadModal
+          vehicles={vehicles}
+          existingRecords={imiRecords}
+          onSave={(r) => { onAdd(r); }}
+          onClose={() => setShowUpload(false)}
+        />
+      )}
+
+      {preview && (
+        <ImiPreviewModal record={preview} vehicles={vehicles} onClose={() => setPreview(null)} />
+      )}
+    </div>
+  );
+}
+
+function ImiCard({ record: r, vehicles, onPreview, onDelete }) {
+  const vehicle = vehicles.find(v => v.id === r.vehicleId);
+  const isActive = r.dateTo && new Date(r.dateTo) >= new Date();
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden hover:shadow-md transition-all">
+      <div className="flex items-center gap-3 px-5 py-3 border-b border-gray-50"
+        style={{ background: isActive ? "#f0fdf4" : "#f9fafb" }}>
+        <span className="text-2xl">🌍</span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-bold text-gray-900">{r.driverName || "—"}</span>
+            {r.country && (
+              <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
+                style={{ background:"#eff6ff", color:"#1a3c8f" }}>🏳️ {r.country}</span>
+            )}
+            {isActive
+              ? <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background:"#f0fdf4", color:"#16a34a" }}>● Aktywne</span>
+              : r.dateTo && <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background:"#f3f4f6", color:"#9ca3af" }}>Zakończone</span>
+            }
+          </div>
+          <div className="text-xs text-gray-400 mt-0.5">
+            {r.dateFrom && r.dateTo ? `${fmtDate(r.dateFrom)} — ${fmtDate(r.dateTo)}` : r.dateFrom ? `od ${fmtDate(r.dateFrom)}` : ""}
+          </div>
+        </div>
+        <div className="flex gap-1">
+          <button onClick={onPreview}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all hover:bg-gray-100"
+            style={{ borderColor:"#e5e7eb", color:"#374151" }}>👁 Podgląd / Drukuj</button>
+          <button onClick={onDelete}
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-all text-xs">✕</button>
+        </div>
+      </div>
+      {/* info row — tylko kierowca, kraj, daty */}
+      <div className="grid grid-cols-3 divide-x divide-gray-50 text-xs">
+        <div className="px-4 py-2.5">
+          <div className="text-gray-400 mb-0.5">Kierowca</div>
+          <div className="font-medium text-gray-700">{r.driverName||"—"}</div>
+        </div>
+        <div className="px-4 py-2.5">
+          <div className="text-gray-400 mb-0.5">Kraj delegowania</div>
+          <div className="font-medium text-gray-700">{r.country||"—"}</div>
+        </div>
+        <div className="px-4 py-2.5">
+          <div className="text-gray-400 mb-0.5">Okres</div>
+          <div className="font-medium text-gray-700">
+            {r.dateFrom && r.dateTo ? `${fmtDate(r.dateFrom)} — ${fmtDate(r.dateTo)}` : "—"}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function buildImiHtml(r) {
+  const fmtD = (d) => {
+    if (!d) return "";
+    const [y,m,day] = d.split("-");
+    return `${day}/${m}/${y}`;
+  };
+  const period = (r.dateFrom && r.dateTo) ? `${fmtD(r.dateFrom)} - ${fmtD(r.dateTo)}` : (r.dateFrom ? fmtD(r.dateFrom) : "");
+  const ops = [r.operationType, r.carriageType].filter(Boolean).join("<br>");
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Road Transport - Posting Declaration</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: Arial, sans-serif; font-size: 11px; color: #000; background:#fff; padding:24px; max-width:780px; margin:0 auto; }
+  h1 { color:#1a3c8f; font-size:20px; font-weight:bold; text-align:center; margin-bottom:18px; line-height:1.3; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:0 24px; }
+  .section { margin-bottom:10px; }
+  .section-title { font-weight:bold; font-size:12px; text-align:center; border-bottom:2px solid #1a3c8f; padding-bottom:4px; margin-bottom:8px; }
+  .row { display:flex; align-items:flex-start; margin-bottom:5px; gap:4px; }
+  .lbl { color:#555; min-width:140px; flex-shrink:0; font-size:10.5px; }
+  .val { color:#1a3c8f; font-size:10.5px; font-weight:500; }
+  .plates-section { margin-top:14px; border-top:2px solid #1a3c8f; padding-top:8px; }
+  .plates-title { font-weight:bold; font-size:12px; margin-bottom:5px; }
+  .plates-val { color:#1a3c8f; font-size:10.5px; }
+  .footer { margin-top:18px; font-size:9px; color:#666; border-top:1px solid #ddd; padding-top:6px; }
+  @media print { body { padding:12px; } }
+</style>
+</head>
+<body>
+<h1>Road Transport - Posting<br>Declaration</h1>
+
+<div class="grid2">
+  <!-- LEFT: Posting information -->
+  <div class="section">
+    <div class="section-title">Posting information</div>
+    <div class="row"><span class="lbl">a.1 Country of posting</span><span class="val">${r.country||""}</span></div>
+    <div class="row"><span class="lbl">a.2 Period of posting</span><span class="val">${period}</span></div>
+    <div class="row"><span class="lbl">a.3 Type of operation(s)</span><span class="val">${(r.operationType||"").replace(/\n/g,"<br>")}</span></div>
+    <div class="row"><span class="lbl">a.4 Type of carriage(s)</span><span class="val">${r.carriageType||""}</span></div>
+  </div>
+
+  <!-- RIGHT: Company information -->
+  <div class="section">
+    <div class="section-title">Company information</div>
+    <div class="row"><span class="lbl">e.1 Name</span><span class="val">${r.employer||""}</span></div>
+    <div class="row"><span class="lbl">e.2 Email Address</span><span class="val">${r.employerEmail||""}</span></div>
+    <div class="row"><span class="lbl">e.4 National company register number</span><span class="val">${r.employerVat||""}</span></div>
+    <div class="row"><span class="lbl">e.6 Country of registration</span><span class="val">${r.employerCountry||""}</span></div>
+    <div class="row"><span class="lbl">e.7 Address</span><span class="val">${(r.employerAddress||"").replace(/\n/g,"<br>")}</span></div>
+  </div>
+</div>
+
+<!-- Declaration Details full width -->
+<div class="section">
+  <div class="section-title">Declaration Details</div>
+  <div class="grid2">
+    <div>
+      <div class="row"><span class="lbl">b.1 Number of the declaration</span><span class="val">${r.delegationNumber||""}</span></div>
+      <div class="row"><span class="lbl">b.2 Last update</span><span class="val">${r.lastUpdate||""}</span></div>
+      <div class="row"><span class="lbl">b.3 Submission date</span><span class="val">${r.submissionDate||""}</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="grid2">
+  <!-- Driver Information -->
+  <div class="section">
+    <div class="section-title">Driver Information</div>
+    <div class="row"><span class="lbl">c.1 Name</span><span class="val">${r.driverName||""}</span></div>
+    <div class="row"><span class="lbl">c.3 Driving licence</span><span class="val">${r.driverLicence||""}</span></div>
+    <div class="row"><span class="lbl">c.5 Address of residence</span><span class="val">${(r.driverAddress||"").replace(/\n/g,"<br>")}</span></div>
+    <div class="row"><span class="lbl">c.6 Start date of employment contract</span><span class="val">${r.driverBirth||""}</span></div>
+    <div class="row"><span class="lbl">c.7 Applicable law employment contract</span><span class="val">${r.driverNationality||""}</span></div>
+  </div>
+
+  <!-- Transport Manager Information -->
+  <div class="section">
+    <div class="section-title">Transport Manager Information</div>
+    <div class="row"><span class="lbl">f.1 Name</span><span class="val">${r.managerName||""}</span></div>
+    <div class="row"><span class="lbl">f.2 Email Address</span><span class="val">${r.managerEmail||""}</span></div>
+    <div class="row"><span class="lbl">f.3 Phone number</span><span class="val">${r.managerPhone||""}</span></div>
+    <div class="row"><span class="lbl">f.4 Professional Address</span><span class="val">${(r.managerAddress||"").replace(/\n/g,"<br>")}</span></div>
+  </div>
+</div>
+
+<div class="grid2">
+  <!-- Driver Identification Document -->
+  <div class="section">
+    <div class="section-title">Driver Identification Document</div>
+    <div class="row"><span class="lbl">d.1 Document type</span><span class="val">${r.driverDocType||""}</span></div>
+    <div class="row"><span class="lbl">d.2 Number</span><span class="val">${r.driverDocNumber||""}</span></div>
+    <div class="row"><span class="lbl">d.5 Issuing country</span><span class="val">${r.driverDocCountry||""}</span></div>
+  </div>
+
+  <!-- Contact Person -->
+  <div class="section">
+    <div class="section-title">Contact Person</div>
+    <div class="row"><span class="lbl">g.1 Name</span><span class="val">${r.contactName||""}</span></div>
+    <div class="row"><span class="lbl">g.2 Email Address</span><span class="val">${r.contactEmail||""}</span></div>
+    <div class="row"><span class="lbl">g.3 Phone number</span><span class="val">${r.contactPhone||""}</span></div>
+    <div class="row"><span class="lbl">g.4 Address</span><span class="val">${r.contactAddress||""}</span></div>
+  </div>
+</div>
+
+<!-- Number plates -->
+<div class="plates-section">
+  <div class="plates-title">Number plate(s) of the motor vehicle(s)</div>
+  <div class="plates-val">${r.vehiclePlate||""}</div>
+</div>
+
+<div class="footer">Information about the data can be found here: https://postingdeclaration.eu/help</div>
+</body>
+</html>`;
+}
+
+function ImiPreviewModal({ record: r, vehicles, onClose }) {
+  const html = buildImiHtml(r);
+  const [opened, setOpened] = useState(false);
+
+  const [showPrintView, setShowPrintView] = useState(false);
+
+  const openInNewTab = () => setShowPrintView(true);
+
+  // FULLSCREEN PRINT VIEW
+  if (showPrintView) return (
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background:"#fff" }}>
+      <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 flex-shrink-0 no-print"
+        style={{ background:"#111827" }}>
+        <span className="text-sm font-semibold text-white">🖨 Gotowy do druku — użyj Ctrl+P lub ⌘P</span>
+        <div className="flex gap-2">
+          <button
+            onClick={() => { window.print(); }}
+            className="px-4 py-1.5 rounded-lg text-xs font-bold text-gray-900 bg-amber-400 hover:bg-amber-300 transition-all">
+            🖨 Drukuj / Zapisz PDF
+          </button>
+          <button onClick={() => setShowPrintView(false)}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-300 hover:text-white border border-gray-600">
+            ← Wróć
+          </button>
+        </div>
+      </div>
+      <div className="flex-1 overflow-auto">
+        <iframe
+          srcDoc={html}
+          className="w-full h-full"
+          style={{ border:"none", minHeight:"calc(100vh - 52px)" }}
+          title="IMI Print"
+        />
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background:"rgba(0,0,0,0.6)", backdropFilter:"blur(6px)" }}>
+      <div className="w-full max-w-3xl bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden" style={{ maxHeight:"92vh" }}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
+          <div>
+            <div className="text-sm font-bold text-gray-900">Road Transport - Posting Declaration</div>
+            <div className="text-xs text-gray-400">{r.driverName} · {r.country} · {r.dateFrom && r.dateTo ? `${fmtDate(r.dateFrom)} — ${fmtDate(r.dateTo)}` : ""}</div>
+          </div>
+          <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs ml-3 flex-shrink-0">✕</button>
+        </div>
+
+        <div className="flex-1 overflow-hidden p-4">
+          <iframe
+            srcDoc={html}
+            className="w-full h-full rounded-xl border border-gray-100"
+            style={{ minHeight:480 }}
+            title="IMI Preview"
+          />
+        </div>
+
+        <div className="px-5 py-4 border-t border-gray-100 flex-shrink-0">
+          <button onClick={openInNewTab}
+            className="w-full py-3 rounded-xl text-sm font-bold text-white hover:opacity-90 transition-all active:scale-95 flex items-center justify-center gap-2"
+            style={{ background:"#111827" }}>
+            🖨 Otwórz widok drukowania → Ctrl+P / PDF
+          </button>
+          {opened && (
+            <p className="text-xs text-center text-gray-400 mt-2">
+              Użyj <strong>Ctrl+P</strong> (lub ⌘P) i wybierz <strong>„Zapisz jako PDF"</strong>
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function ImiUploadModal({ vehicles, existingRecords, onSave, onClose }) {
+  const [queue, setQueue] = useState([]);
+  const [started, setStarted] = useState(false);
+  const fileRef = useRef();
+
+  const AI_PROMPT = `Extract all fields from this Road Transport - Posting Declaration and return JSON:
+{
+  "country": "a.1 Country of posting",
+  "dateFrom": "a.2 start date YYYY-MM-DD",
+  "dateTo": "a.2 end date YYYY-MM-DD",
+  "operationType": "a.3 Type of operation(s)",
+  "carriageType": "a.4 Type of carriage(s)",
+  "delegationNumber": "b.1 Number of the declaration",
+  "lastUpdate": "b.2 Last update",
+  "submissionDate": "b.3 Submission date",
+  "employer": "e.1 Name",
+  "employerEmail": "e.2 Email Address",
+  "employerVat": "e.4 National company register number",
+  "employerCountry": "e.6 Country of registration",
+  "employerAddress": "e.7 Address",
+  "driverName": "c.1 Name",
+  "driverLicence": "c.3 Driving licence",
+  "driverAddress": "c.5 Address of residence",
+  "driverBirth": "c.6 Start date of employment contract",
+  "driverNationality": "c.7 Applicable law employment contract",
+  "managerName": "f.1 Name",
+  "managerEmail": "f.2 Email Address",
+  "managerPhone": "f.3 Phone number",
+  "managerAddress": "f.4 Professional Address",
+  "driverDocType": "d.1 Document type",
+  "driverDocNumber": "d.2 Number",
+  "driverDocCountry": "d.5 Issuing country",
+  "contactName": "g.1 Name",
+  "contactEmail": "g.2 Email Address",
+  "contactPhone": "g.3 Phone number",
+  "contactAddress": "g.4 Address",
+  "vehiclePlate": "all number plates comma separated"
+}
+Use null for missing fields.`;
+
+  const AI_SYSTEM = `You are an expert at reading Road Transport Posting Declaration documents (IMI/SIPSI).
+Extract ALL fields exactly as they appear. Return ONLY clean JSON, no text before or after.`;
+
+  const isDuplicate = (parsed) => {
+    return existingRecords.some(r => {
+      if (parsed.delegationNumber && r.delegationNumber &&
+          parsed.delegationNumber.trim() === r.delegationNumber.trim()) return true;
+      if (parsed.driverName && r.driverName && parsed.country && r.country &&
+          parsed.driverName.trim().toLowerCase() === r.driverName.trim().toLowerCase() &&
+          parsed.country.trim().toLowerCase() === r.country.trim().toLowerCase() &&
+          parsed.dateFrom === r.dateFrom && parsed.dateTo === r.dateTo) return true;
+      return false;
+    });
+  };
+
+  const analyzeFile = async (item) => {
+    const { fileData, fileType, id } = item;
+    const base64 = fileData.split(",")[1];
+    const isPdf  = fileType === "application/pdf";
+
+    const msgContent = isPdf
+      ? [{ type:"document", source:{ type:"base64", media_type:"application/pdf", data:base64 } }, { type:"text", text:AI_PROMPT }]
+      : [{ type:"image",    source:{ type:"base64", media_type:fileType, data:base64 } },            { type:"text", text:AI_PROMPT }];
+
+    const res  = await fetch("/api/claude", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:2000, system:AI_SYSTEM, messages:[{ role:"user", content:msgContent }] }),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`API error ${res.status}: ${errText.slice(0,200)}`);
+    }
+    const resp = await res.json();
+    if (resp.error) throw new Error(resp.error.message || "API error");
+    const txt  = resp.content?.map(c=>c.text||"").join("").trim().replace(/```json|```/g,"").trim();
+    if (!txt) throw new Error("Pusta odpowiedź AI");
+    let parsed;
+    try { parsed = JSON.parse(txt); }
+    catch(e) { throw new Error("Błąd parsowania JSON: " + txt.slice(0,100)); }
+    return parsed;
+  };
+
+  const readFile = (file) => new Promise((res) => {
+    const reader = new FileReader();
+    reader.onload = (e) => res(e.target.result);
+    reader.readAsDataURL(file);
+  });
+
+  const addFiles = async (files) => {
+    const allowed = ["application/pdf","image/jpeg","image/png","image/jpg","image/webp"];
+    const items = [];
+    for (const file of [...files]) {
+      if (!allowed.includes(file.type) || file.size > 15*1024*1024) continue;
+      const fileData = await readFile(file);
+      items.push({ id: uid(), fileName: file.name, fileType: file.type, fileData, status:"pending" });
+    }
+    if (!items.length) return;
+    setQueue(q => [...q, ...items]);
+    setStarted(true);
+    // process sequentially to avoid rate limits
+    for (const item of items) {
+      setQueue(q => q.map(x => x.id===item.id ? {...x, status:"analyzing"} : x));
+      try {
+        const parsed = await analyzeFile(item);
+        if (isDuplicate(parsed)) {
+          setQueue(q => q.map(x => x.id===item.id
+            ? {...x, status:"duplicate", result: parsed}
+            : x));
+        } else {
+          const record = {
+            ...parsed,
+            id: item.id,
+            vehicleId: vehicles[0]?.id || "",
+            createdAt: new Date().toISOString(),
+            fileName: item.fileName,
+          };
+          onSave(record);
+          setQueue(q => q.map(x => x.id===item.id ? {...x, status:"saved", result:parsed} : x));
+        }
+      } catch(e) {
+        setQueue(q => q.map(x => x.id===item.id ? {...x, status:"error", error:String(e)} : x));
+      }
+    }
+  };
+
+  const handleDrop = (e) => { e.preventDefault(); addFiles(e.dataTransfer.files); };
+  const allDone = queue.length > 0 && queue.every(x => ["saved","duplicate","error"].includes(x.status));
+  const savedCount = queue.filter(x => x.status==="saved").length;
+  const dupCount   = queue.filter(x => x.status==="duplicate").length;
+  const errCount   = queue.filter(x => x.status==="error").length;
+
+  const StatusIcon = ({ status }) => {
+    if (status==="pending")   return <span className="text-gray-400 text-lg">⏸</span>;
+    if (status==="analyzing") return <span className="text-lg animate-spin inline-block">⏳</span>;
+    if (status==="saved")     return <span className="text-lg">✅</span>;
+    if (status==="duplicate") return <span className="text-lg">♻️</span>;
+    if (status==="error")     return <span className="text-lg">❌</span>;
+    return null;
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center p-0 sm:p-4"
+      style={{ background:"rgba(0,0,0,0.4)", backdropFilter:"blur(4px)" }}>
+      <div className="w-full sm:max-w-lg bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col"
+        style={{ fontFamily:"'DM Sans',sans-serif", maxHeight:"90vh" }}>
+
+        {/* HEADER */}
+        <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100">
+          <div>
+            <h3 className="text-base font-bold text-gray-900">🌍 Import IMI/SIPSI</h3>
+            <p className="text-xs text-gray-400 mt-0.5">Wiele plików naraz · AI odczytuje i zapisuje automatycznie</p>
+          </div>
+          <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs">✕</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+          {/* DROP ZONE */}
+          <div
+            onDrop={handleDrop} onDragOver={e=>e.preventDefault()}
+            onClick={() => fileRef.current?.click()}
+            className="w-full py-8 rounded-2xl border-2 border-dashed flex flex-col items-center gap-2 cursor-pointer hover:bg-gray-50 transition-all"
+            style={{ borderColor:"#d1d5db" }}>
+            <input ref={fileRef} type="file" accept=".pdf,image/*" multiple
+              onChange={e=>addFiles(e.target.files)} className="hidden" />
+            <span className="text-3xl">📂</span>
+            <span className="text-sm font-semibold text-gray-600">Przeciągnij pliki lub kliknij</span>
+            <span className="text-xs text-gray-400">PDF, JPG, PNG · wiele plików naraz · maks. 15 MB/plik</span>
+            <span className="text-xs text-gray-300">RAR/ZIP: wypakuj najpierw i wrzuć pliki PDF</span>
+          </div>
+
+          {/* QUEUE */}
+          {queue.length > 0 && (
+            <div className="space-y-2">
+              {queue.map(item => (
+                <div key={item.id} className="flex items-center gap-3 p-3 rounded-xl border"
+                  style={{
+                    background: item.status==="saved"?"#f0fdf4": item.status==="duplicate"?"#fffbeb": item.status==="error"?"#fef2f2":"#f9fafb",
+                    borderColor: item.status==="saved"?"#bbf7d0": item.status==="duplicate"?"#fde68a": item.status==="error"?"#fecaca":"#e5e7eb"
+                  }}>
+                  <StatusIcon status={item.status} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-semibold text-gray-800 truncate">{item.fileName}</div>
+                    <div className="text-xs mt-0.5" style={{
+                      color: item.status==="saved"?"#16a34a": item.status==="duplicate"?"#d97706": item.status==="error"?"#dc2626":"#9ca3af"
+                    }}>
+                      {item.status==="pending"   && "Oczekuje…"}
+                      {item.status==="analyzing" && "🤖 AI analizuje…"}
+                      {item.status==="saved"     && `Zapisano · ${item.result?.driverName||""} · ${item.result?.country||""}`}
+                      {item.status==="duplicate" && `Duplikat — pominięto · ${item.result?.driverName||""} (${item.result?.country||""} ${item.result?.dateFrom||""})`}
+                      {item.status==="error"     && `❌ ${item.error || "Błąd odczytu"}`}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* SUMMARY */}
+          {allDone && (
+            <div className="rounded-xl p-4 space-y-1" style={{ background:"#f0fdf4", border:"1.5px solid #bbf7d0" }}>
+              <div className="text-sm font-bold text-green-800">✅ Przetwarzanie zakończone</div>
+              {savedCount>0 && <div className="text-xs text-green-700">• {savedCount} {savedCount===1?"dokument zapisany":"dokumenty zapisane"}</div>}
+              {dupCount>0   && <div className="text-xs text-amber-600">• {dupCount} duplikat{dupCount===1?"":"y"} pominięt{dupCount===1?"y":"e"}</div>}
+              {errCount>0   && <div className="text-xs text-red-500">• {errCount} błąd{errCount===1?"":"y"} — wgraj ręcznie</div>}
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-100">
+          <button onClick={onClose}
+            className="w-full py-3 rounded-xl text-sm font-bold transition-all hover:opacity-90"
+            style={{ background: allDone?"#111827":"#f3f4f6", color: allDone?"#fff":"#374151" }}>
+            {allDone ? "Gotowe — zamknij" : "Anuluj"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DOCS TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+function daysUntil(dateStr) {
+  if (!dateStr) return null;
+  return Math.ceil((new Date(dateStr) - new Date()) / 86400000);
+}
+
+function DocStatusBadge({ expiryDate }) {
+  const d = daysUntil(expiryDate);
+  if (d === null) return null;
+  if (d < 0)   return <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background:"#fef2f2",color:"#dc2626" }}>⚠ Wygasło</span>;
+  if (d <= 30) return <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background:"#fef2f2",color:"#dc2626" }}>🔴 {d} dni</span>;
+  if (d <= 60) return <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background:"#fffbeb",color:"#d97706" }}>🟡 {d} dni</span>;
+  return <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ background:"#f0fdf4",color:"#16a34a" }}>🟢 {d} dni</span>;
+}
+
+function FilePreviewModal({ file, onClose }) {
+  if (!file) return null;
+  const isPdf = file.fileType === "application/pdf";
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background:"rgba(0,0,0,0.7)", backdropFilter:"blur(6px)" }}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-screen flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+          <span className="text-sm font-bold text-gray-900 truncate">{file.fileName}</span>
+          <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs ml-3 flex-shrink-0">✕</button>
+        </div>
+        <div className="flex-1 overflow-auto p-4 flex items-center justify-center" style={{ minHeight:400 }}>
+          {isPdf
+            ? <iframe src={file.fileData} className="w-full rounded-lg" style={{ height:520, border:"none" }} title={file.fileName} />
+            : <img src={file.fileData} alt={file.fileName} className="max-w-full max-h-96 rounded-xl object-contain shadow" />
+          }
+        </div>
+        <div className="px-5 py-3 border-t border-gray-100 flex justify-end">
+          <a href={file.fileData} download={file.fileName}
+            className="px-4 py-2 rounded-xl text-xs font-semibold text-white"
+            style={{ background:"#111827" }}>
+            ⬇ Pobierz
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
+  const [showAdd, setShowAdd]       = useState(false);
+  const [editDoc, setEditDoc]           = useState(null);
+  const [preview, setPreview]           = useState(null);
+  const [filterV, setFilterV]           = useState("all");
+  const [filterG, setFilterG]           = useState("all");
+  const [showReminders, setShowReminders] = useState(false);
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
+
+  const filtered = docs.filter(d => {
+    if (filterV !== "all" && d.vehicleId !== filterV) return false;
+    const dt = DOC_TYPES.find(t => t.id === d.type);
+    if (filterG !== "all" && dt?.group !== filterG) return false;
+    return true;
+  }).sort((a,b) => {
+    const da = daysUntil(a.expiryDate) ?? 9999;
+    const db = daysUntil(b.expiryDate) ?? 9999;
+    return da - db;
+  });
+
+  const expiredCount = docs.filter(d => (daysUntil(d.expiryDate) ?? 1) < 0).length;
+  const soon30       = docs.filter(d => { const x=daysUntil(d.expiryDate); return x!==null&&x>=0&&x<=30; }).length;
+  const soon60       = docs.filter(d => { const x=daysUntil(d.expiryDate); return x!==null&&x>30&&x<=60; }).length;
+  const groups       = [...new Set(DOC_TYPES.map(t => t.group))];
+
+  // reminders: all docs with expiryDate, sorted
+  const reminders = docs
+    .filter(d => d.expiryDate)
+    .map(d => ({
+      ...d,
+      days: daysUntil(d.expiryDate),
+      vehicle: vehicles.find(v => v.id === d.vehicleId),
+      dt: DOC_TYPES.find(t => t.id === d.type) || DOC_TYPES.at(-1),
+    }))
+    .sort((a,b) => a.days - b.days);
+
+  const DocRow = ({ doc }) => {
+    const dt = DOC_TYPES.find(t => t.id === doc.type) || DOC_TYPES.at(-1);
+    const d  = daysUntil(doc.expiryDate);
+    const isExpired = d !== null && d < 0;
+    const isUrgent  = d !== null && d >= 0 && d <= 30;
+    const hasFile   = !!doc.fileData;
+    return (
+      <div className="bg-white rounded-xl border flex gap-3 px-4 py-3 transition-all hover:shadow-sm"
+        style={{ borderColor: isExpired?"#fecaca": isUrgent?"#fde68a":"#e5e7eb" }}>
+        {/* icon */}
+        <div className="w-9 h-9 rounded-xl flex items-center justify-center text-base flex-shrink-0 mt-0.5"
+          style={{ background: dt.color+"18" }}>{dt.icon}</div>
+        {/* content */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold text-gray-900">{dt.label}</span>
+            {doc.label && <span className="text-xs text-gray-400">· {doc.label}</span>}
+            <DocStatusBadge expiryDate={doc.expiryDate} />
+            {hasFile && (
+              <button onClick={() => setPreview(doc)}
+                className="px-2 py-0.5 rounded-full text-xs font-medium flex items-center gap-1 hover:opacity-80 transition-all"
+                style={{ background:"#eff6ff", color:"#3b82f6" }}>
+                {doc.fileType==="application/pdf" ? "📄" : "🖼️"} {doc.fileName || "Plik"}
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
+            {doc.issueDate   && <span className="text-xs text-gray-400">Wystawiony: {fmtDate(doc.issueDate)}</span>}
+            {doc.expiryDate  && <span className="text-xs font-medium text-gray-600">Ważny do: {fmtDate(doc.expiryDate)}</span>}
+            {doc.insurer     && <span className="text-xs text-gray-400">🏢 {doc.insurer}</span>}
+            {doc.policyNumber&& <span className="text-xs text-gray-400" style={{fontFamily:"'DM Mono',monospace"}}>#{doc.policyNumber}</span>}
+            {doc.cost        && <span className="text-xs text-gray-400">💰 {Number(doc.cost).toLocaleString("pl-PL")} zł</span>}
+          </div>
+          {doc.notes && <div className="text-xs text-gray-400 mt-0.5 truncate italic">{doc.notes}</div>}
+          {/* reminders */}
+          {doc.reminders?.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {doc.reminders.map((r,i) => (
+                <span key={i} className="px-2 py-0.5 rounded-full text-xs font-medium flex items-center gap-1"
+                  style={{ background:"#f5f3ff", color:"#7c3aed" }}>
+                  🔔 {r.daysBefore} dni przed
+                  {r.note && <span className="text-purple-300 font-normal">· {r.note}</span>}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+        {/* actions */}
+        <div className="flex flex-col gap-1 flex-shrink-0">
+          <button onClick={() => setEditDoc(doc)}
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-all text-xs">✏️</button>
+          <button onClick={() => onDelete(doc.id)}
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-all text-xs">✕</button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      {/* HEADER */}
+      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">Dokumenty & Ubezpieczenia</h2>
+          <p className="text-sm text-gray-400 mt-0.5">{docs.length} dokumentów · {docs.filter(d=>d.fileData).length} z plikiem</p>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          <button onClick={() => setShowBulkUpload(true)}
+            className="px-3 py-2 rounded-xl text-sm font-semibold border transition-all hover:bg-gray-50 flex items-center gap-1.5"
+            style={{ borderColor:"#e5e7eb", color:"#374151" }}>
+            🤖 Wgraj z AI
+          </button>
+          <button onClick={() => setShowReminders(true)}
+            className="relative px-3 py-2 rounded-xl text-sm font-semibold border transition-all hover:bg-gray-50"
+            style={{ borderColor:"#e5e7eb", color:"#374151" }}>
+            🔔 Przypomnienia
+            {(expiredCount+soon30) > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full text-white text-xs flex items-center justify-center font-bold"
+                style={{ background:"#dc2626", fontSize:10 }}>{expiredCount+soon30}</span>
+            )}
+          </button>
+          <button onClick={() => setShowAdd(true)}
+            className="px-4 py-2 rounded-xl text-sm font-bold text-white hover:opacity-90 transition-all"
+            style={{ background:"#111827" }}>
+            + Dodaj dokument
+          </button>
+        </div>
+      </div>
+
+      {/* ALERT STRIP */}
+      {(expiredCount>0||soon30>0||soon60>0) && (
+        <div className="flex flex-wrap gap-2 mb-5">
+          {expiredCount>0 && <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium" style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626"}}>⚠️ <strong>{expiredCount}</strong> {expiredCount===1?"dokument wygasł":"dokumenty wygasły"}</div>}
+          {soon30>0      && <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium" style={{background:"#fef9c3",border:"1px solid #fde047",color:"#854d0e"}}>🔴 <strong>{soon30}</strong> wygasa w ciągu 30 dni</div>}
+          {soon60>0      && <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium" style={{background:"#fffbeb",border:"1px solid #fde68a",color:"#92400e"}}>🟡 <strong>{soon60}</strong> wygasa w ciągu 60 dni</div>}
+        </div>
+      )}
+
+      {/* FILTERS */}
+      <div className="flex flex-wrap gap-2 mb-5">
+        <select value={filterV} onChange={e=>setFilterV(e.target.value)}
+          className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 outline-none bg-white text-gray-700">
+          <option value="all">Wszystkie pojazdy</option>
+          {vehicles.map(v=><option key={v.id} value={v.id}>{v.plate}{v.plate2?` / ${v.plate2}`:""}</option>)}
+        </select>
+        <select value={filterG} onChange={e=>setFilterG(e.target.value)}
+          className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 outline-none bg-white text-gray-700">
+          <option value="all">Wszystkie typy</option>
+          {groups.map(g=><option key={g} value={g}>{g}</option>)}
+        </select>
+      </div>
+
+      {/* DOC LIST grouped by vehicle */}
+      {vehicles.map(v => {
+        const vDocs = filtered.filter(d => d.vehicleId === v.id);
+        if (!vDocs.length) return null;
+        return (
+          <div key={v.id} className="mb-6">
+            <div className="flex items-center gap-2 mb-2.5">
+              <span className="text-xs font-bold text-gray-500 uppercase tracking-wider" style={{fontFamily:"'DM Mono',monospace"}}>
+                {v.plate}{v.plate2?` / ${v.plate2}`:""}
+              </span>
+              <span className="text-xs text-gray-400">· {v.brand} {v.year}</span>
+              <span className="text-xs text-gray-300">({vDocs.length})</span>
+            </div>
+            <div className="space-y-2">
+              {vDocs.map(doc => <DocRow key={doc.id} doc={doc} />)}
+            </div>
+          </div>
+        );
+      })}
+
+      {/* docs without vehicle */}
+      {(() => {
+        const orphans = filtered.filter(d => !vehicles.find(v => v.id === d.vehicleId));
+        if (!orphans.length) return null;
+        return (
+          <div className="mb-6">
+            <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2.5">Inne / bez pojazdu</div>
+            <div className="space-y-2">{orphans.map(doc => <DocRow key={doc.id} doc={doc} />)}</div>
+          </div>
+        );
+      })()}
+
+      {docs.length === 0 && (
+        <div className="text-center py-20 text-gray-400">
+          <div className="text-5xl mb-4">🛡️</div>
+          <div className="font-semibold text-gray-500 mb-1">Brak dokumentów</div>
+          <div className="text-sm">Kliknij „Dodaj dokument" — możesz też wgrać plik PDF lub zdjęcie</div>
+        </div>
+      )}
+
+      {/* REMINDERS PANEL */}
+      {showReminders && (
+        <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center p-0 sm:p-4"
+          style={{ background:"rgba(0,0,0,0.35)", backdropFilter:"blur(4px)" }}>
+          <div className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-screen overflow-y-auto"
+            style={{ fontFamily:"'DM Sans',sans-serif" }}>
+            <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100 sticky top-0 bg-white">
+              <h3 className="text-base font-bold text-gray-900">🔔 Przypomnienia</h3>
+              <button onClick={() => setShowReminders(false)} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs">✕</button>
+            </div>
+            <div className="px-6 py-4 space-y-3">
+              {reminders.length === 0 && <p className="text-sm text-gray-400 text-center py-8">Brak dokumentów z datą ważności</p>}
+              {reminders.map(r => (
+                <div key={r.id} className="flex items-center gap-3 p-3 rounded-xl"
+                  style={{ background: r.days<0?"#fef2f2": r.days<=30?"#fef9c3": r.days<=60?"#fffbeb":"#f9fafb",
+                           border: `1px solid ${r.days<0?"#fecaca":r.days<=30?"#fde047":r.days<=60?"#fde68a":"#e5e7eb"}` }}>
+                  <span className="text-xl">{r.dt.icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold text-gray-900 truncate">{r.dt.label}{r.label?` · ${r.label}`:""}</div>
+                    <div className="text-xs text-gray-500">{r.vehicle?.plate||"—"} · ważny do {fmtDate(r.expiryDate)}</div>
+                    {r.reminders?.map((rem,i) => (
+                      <div key={i} className="text-xs mt-0.5" style={{color:"#7c3aed"}}>🔔 {rem.daysBefore} dni przed{rem.note?` · ${rem.note}`:""}</div>
+                    ))}
+                  </div>
+                  <DocStatusBadge expiryDate={r.expiryDate} />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BULK UPLOAD */}
+      {showBulkUpload && (
+        <BulkUploadModal
+          vehicles={vehicles}
+          onSave={(docs) => { docs.forEach(d => onAdd(d)); setShowBulkUpload(false); }}
+          onClose={() => setShowBulkUpload(false)}
+        />
+      )}
+
+      {/* ADD / EDIT MODAL */}
+      {(showAdd || editDoc) && (
+        <AddDocModal
+          vehicles={vehicles} doc={editDoc}
+          onSave={(data) => {
+            if (editDoc) { onEdit(editDoc.id, data); setEditDoc(null); }
+            else { onAdd(data); setShowAdd(false); }
+          }}
+          onClose={() => { setShowAdd(false); setEditDoc(null); }}
+        />
+      )}
+
+      {/* FILE PREVIEW */}
+      {preview && <FilePreviewModal file={preview} onClose={() => setPreview(null)} />}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BULK UPLOAD MODAL — multi-file + AI extraction
+// ═══════════════════════════════════════════════════════════════════════════════
+function BulkUploadModal({ vehicles, onSave, onClose }) {
+  const [queue, setQueue]   = useState([]); // [{id, fileName, fileType, fileData, status, extracted, edited}]
+  const [saving, setSaving] = useState(false);
+  const dropRef  = useRef();
+  const fileRef  = useRef();
+
+  const readFile = (file) => new Promise((res) => {
+    const reader = new FileReader();
+    reader.onload = (e) => res(e.target.result);
+    reader.readAsDataURL(file);
+  });
+
+  const addFiles = async (files) => {
+    const allowed = ["application/pdf","image/jpeg","image/png","image/jpg","image/webp"];
+    const items = [];
+    for (const file of files) {
+      if (!allowed.includes(file.type)) continue;
+      if (file.size > 8 * 1024 * 1024) continue;
+      const fileData = await readFile(file);
+      items.push({ id: uid(), fileName: file.name, fileType: file.type, fileData, status: "pending", extracted: null, edited: null });
+    }
+    setQueue(q => [...q, ...items]);
+    // kick off AI extraction for each
+    items.forEach(item => extractWithAI(item));
+  };
+
+  const extractWithAI = async (item) => {
+    setQueue(q => q.map(x => x.id===item.id ? {...x, status:"analyzing"} : x));
+    try {
+      const isPdf = item.fileType === "application/pdf";
+      const mediaType = item.fileType;
+      const base64 = item.fileData.split(",")[1];
+
+      const systemPrompt = `Jesteś asystentem do rozpoznawania dokumentów transportowych i ubezpieczeniowych.
+Analizujesz obrazy/PDF i zwracasz JSON z polami dokumentu.
+Zawsze odpowiadaj TYLKO czystym JSON bez żadnego tekstu przed ani po.
+Typy dokumentów (pole "type"): oc, ac, gap, nnw, assistance, cargo, licencja, zezwolenie, przeglad, tachlegalizacja, prawo_jazdy, karta_kierowcy, inne
+Format daty: YYYY-MM-DD`;
+
+      const userPrompt = `Przeanalizuj ten dokument i zwróć JSON z następującymi polami (jeśli nieznane, użyj null):
+{
+  "type": "typ dokumentu z listy",
+  "label": "krótki opis np. OC Warta 2025",
+  "issueDate": "data wystawienia YYYY-MM-DD lub null",
+  "expiryDate": "data ważności YYYY-MM-DD lub null",
+  "insurer": "nazwa ubezpieczyciela / organu lub null",
+  "policyNumber": "numer polisy/dokumentu lub null",
+  "cost": "kwota w PLN jako liczba lub null",
+  "notes": "krótka notatka lub null",
+  "confidence": "high/medium/low"
+}`;
+
+      const contentParts = isPdf
+        ? [
+            { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } },
+            { type: "text", text: userPrompt }
+          ]
+        : [
+            { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
+            { type: "text", text: userPrompt }
+          ];
+
+      const res = await fetch("/api/claude", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1000,
+          system: systemPrompt,
+          messages: [{ role: "user", content: contentParts }],
+        }),
+      });
+      if (!res.ok) { const e = await res.text(); throw new Error(`API ${res.status}: ${e.slice(0,200)}`); }
+      const data = await res.json();
+      if (data.error) throw new Error(data.error.message || "API error");
+      const text = data.content?.map(c => c.text||"").join("").trim();
+      if (!text) throw new Error("Pusta odpowiedź AI");
+      const clean = text.replace(/```json|```/g,"").trim();
+      let parsed;
+      try { parsed = JSON.parse(clean); } catch(e) { throw new Error("JSON parse error: " + clean.slice(0,100)); }
+
+      const extracted = {
+        vehicleId:    vehicles[0]?.id || "",
+        type:         parsed.type         || "inne",
+        label:        parsed.label        || "",
+        issueDate:    parsed.issueDate     || "",
+        expiryDate:   parsed.expiryDate    || "",
+        insurer:      parsed.insurer       || "",
+        policyNumber: parsed.policyNumber  || "",
+        cost:         parsed.cost ? String(parsed.cost) : "",
+        notes:        parsed.notes         || "",
+        confidence:   parsed.confidence    || "low",
+        reminders:    [],
+        fileData:     item.fileData,
+        fileName:     item.fileName,
+        fileType:     item.fileType,
+      };
+      setQueue(q => q.map(x => x.id===item.id ? {...x, status:"done", extracted, edited:{...extracted}} : x));
+    } catch(e) {
+      setQueue(q => q.map(x => x.id===item.id ? {...x, status:"error"} : x));
+    }
+  };
+
+  const updateEdited = (id, field, val) => {
+    setQueue(q => q.map(x => x.id===id ? {...x, edited:{...x.edited,[field]:val}} : x));
+  };
+
+  const removeItem = (id) => setQueue(q => q.filter(x => x.id!==id));
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    addFiles(e.dataTransfer.files);
+  };
+
+  const readyItems = queue.filter(x => x.status==="done" && x.edited);
+  const allDone    = queue.length > 0 && queue.every(x => x.status==="done" || x.status==="error");
+
+  const handleSaveAll = () => {
+    setSaving(true);
+    onSave(readyItems.map(x => ({ ...x.edited, id: x.id })));
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center p-0 sm:p-4"
+      style={{ background:"rgba(0,0,0,0.45)", backdropFilter:"blur(5px)" }}>
+      <div className="w-full sm:max-w-2xl bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col"
+        style={{ fontFamily:"'DM Sans',sans-serif", maxHeight:"92vh" }}>
+
+        {/* HEADER */}
+        <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100">
+          <div>
+            <h3 className="text-base font-bold text-gray-900">🤖 Wgraj dokumenty z AI</h3>
+            <p className="text-xs text-gray-400 mt-0.5">AI automatycznie odczyta dane — Ty potwierdzasz przed zapisem</p>
+          </div>
+          <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs">✕</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+          {/* DROP ZONE */}
+          <div ref={dropRef}
+            onDrop={handleDrop}
+            onDragOver={e => e.preventDefault()}
+            onClick={() => fileRef.current?.click()}
+            className="w-full py-10 rounded-2xl border-2 border-dashed flex flex-col items-center gap-2 cursor-pointer transition-all hover:bg-gray-50"
+            style={{ borderColor:"#d1d5db" }}>
+            <input ref={fileRef} type="file" accept=".pdf,image/*" multiple onChange={e => addFiles(e.target.files)} className="hidden" />
+            <span className="text-4xl">📂</span>
+            <span className="text-sm font-semibold text-gray-600">Przeciągnij pliki tutaj lub kliknij</span>
+            <span className="text-xs text-gray-400">PDF, JPG, PNG · maks. 8 MB / plik · wiele plików naraz</span>
+          </div>
+
+          {/* QUEUE */}
+          {queue.map(item => {
+            const dt = DOC_TYPES.find(t => t.id === item.edited?.type) || DOC_TYPES.at(-1);
+            return (
+              <div key={item.id} className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
+                {/* file header */}
+                <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-50"
+                  style={{ background: item.status==="error" ? "#fef2f2" : item.status==="analyzing" ? "#f5f3ff" : "#f9fafb" }}>
+                  <span className="text-xl">{item.fileType==="application/pdf" ? "📄" : "🖼️"}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold text-gray-800 truncate">{item.fileName}</div>
+                    <div className="text-xs mt-0.5">
+                      {item.status==="pending"   && <span className="text-gray-400">Oczekuje…</span>}
+                      {item.status==="analyzing" && <span style={{color:"#7c3aed"}}>🤖 AI analizuje…</span>}
+                      {item.status==="done"      && <span style={{color:"#16a34a"}}>✓ Odczytano · pewność: <strong>{item.extracted?.confidence}</strong></span>}
+                      {item.status==="error"     && <span style={{color:"#dc2626"}}>⚠ Błąd — wypełnij ręcznie</span>}
+                    </div>
+                  </div>
+                  <button onClick={() => removeItem(item.id)} className="w-6 h-6 rounded-lg flex items-center justify-center text-gray-300 hover:text-red-400 text-xs">✕</button>
+                </div>
+
+                {/* editable fields */}
+                {(item.status==="done" || item.status==="error") && item.edited && (
+                  <div className="px-4 py-4 grid grid-cols-2 gap-3">
+                    {/* pojazd */}
+                    <div className="col-span-2">
+                      <MF label="Pojazd">
+                        <MSelect value={item.edited.vehicleId} onChange={v => updateEdited(item.id,"vehicleId",v)}>
+                          <option value="">— bez pojazdu —</option>
+                          {vehicles.map(v => <option key={v.id} value={v.id}>{v.plate}{v.plate2?` / ${v.plate2}`:""} · {v.brand}</option>)}
+                        </MSelect>
+                      </MF>
+                    </div>
+                    {/* typ */}
+                    <div className="col-span-2">
+                      <MF label="Typ dokumentu">
+                        <div className="flex flex-wrap gap-1.5">
+                          {DOC_TYPES.map(t => (
+                            <button key={t.id} onClick={() => updateEdited(item.id,"type",t.id)}
+                              className="px-2.5 py-1 rounded-lg text-xs font-medium transition-all"
+                              style={{
+                                background: item.edited.type===t.id ? t.color+"20" : "#f3f4f6",
+                                border: `1.5px solid ${item.edited.type===t.id ? t.color : "#e5e7eb"}`,
+                                color: item.edited.type===t.id ? t.color : "#6b7280",
+                              }}>{t.icon} {t.label}</button>
+                          ))}
+                        </div>
+                      </MF>
+                    </div>
+                    <MF label="Opis"><MInput value={item.edited.label} onChange={v=>updateEdited(item.id,"label",v)} placeholder="np. OC Warta 2025" /></MF>
+                    <MF label="Ubezpieczyciel"><MInput value={item.edited.insurer} onChange={v=>updateEdited(item.id,"insurer",v)} placeholder="np. PZU" /></MF>
+                    <MF label="Wystawiony"><MInput type="date" value={item.edited.issueDate} onChange={v=>updateEdited(item.id,"issueDate",v)} /></MF>
+                    <MF label="Ważny do"><MInput type="date" value={item.edited.expiryDate} onChange={v=>updateEdited(item.id,"expiryDate",v)} /></MF>
+                    <MF label="Nr polisy"><MInput value={item.edited.policyNumber} onChange={v=>updateEdited(item.id,"policyNumber",v)} placeholder="POL/..." /></MF>
+                    <MF label="Koszt (zł)"><MInput type="number" value={item.edited.cost} onChange={v=>updateEdited(item.id,"cost",v)} /></MF>
+                  </div>
+                )}
+
+                {/* analyzing spinner */}
+                {item.status==="analyzing" && (
+                  <div className="px-4 py-6 flex items-center justify-center gap-3 text-sm text-purple-600">
+                    <span className="animate-spin text-xl">⏳</span> Odczytuję dokument…
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* FOOTER */}
+        {queue.length > 0 && (
+          <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between gap-3">
+            <span className="text-xs text-gray-400">
+              {readyItems.length} z {queue.length} gotowych do zapisu
+            </span>
+            <button
+              onClick={handleSaveAll}
+              disabled={readyItems.length===0 || saving || !allDone}
+              className="px-6 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-95 disabled:opacity-30"
+              style={{ background:"#111827" }}>
+              {saving ? "Zapisywanie…" : `Zapisz ${readyItems.length} dokumentów`}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MODAL: ADD / EDIT DOCUMENT
+// ═══════════════════════════════════════════════════════════════════════════════
+function AddDocModal({ vehicles, doc, onSave, onClose }) {
+  const today = new Date().toISOString().split("T")[0];
+  const [form, setForm] = useState({
+    vehicleId:    doc?.vehicleId    || vehicles[0]?.id || "",
+    type:         doc?.type         || "oc",
+    label:        doc?.label        || "",
+    issueDate:    doc?.issueDate    || today,
+    expiryDate:   doc?.expiryDate   || "",
+    insurer:      doc?.insurer      || "",
+    policyNumber: doc?.policyNumber || "",
+    cost:         doc?.cost         || "",
+    notes:        doc?.notes        || "",
+    fileData:     doc?.fileData     || null,
+    fileName:     doc?.fileName     || "",
+    fileType:     doc?.fileType     || "",
+    reminders:    doc?.reminders    || [],
+  });
+  const [uploading, setUploading]   = useState(false);
+  const [newRemDays, setNewRemDays] = useState("30");
+  const [newRemNote, setNewRemNote] = useState("");
+  const fileRef = useRef();
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const groups = [...new Set(DOC_TYPES.map(t => t.group))];
+
+  const handleFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const allowed = ["application/pdf","image/jpeg","image/png","image/jpg","image/webp"];
+    if (!allowed.includes(file.type)) { alert("Dozwolone formaty: PDF, JPG, PNG"); return; }
+    if (file.size > 5 * 1024 * 1024) { alert("Maks. rozmiar pliku: 5 MB"); return; }
+    setUploading(true);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      set("fileData", ev.target.result);
+      set("fileName", file.name);
+      set("fileType", file.type);
+      setUploading(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const addReminder = () => {
+    const days = parseInt(newRemDays);
+    if (!days || days < 1) return;
+    set("reminders", [...form.reminders, { daysBefore: days, note: newRemNote.trim() }]);
+    setNewRemDays("30");
+    setNewRemNote("");
+  };
+
+  const removeReminder = (i) => set("reminders", form.reminders.filter((_,idx) => idx !== i));
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center p-0 sm:p-4"
+      style={{ background:"rgba(0,0,0,0.35)", backdropFilter:"blur(4px)" }}>
+      <div className="w-full sm:max-w-lg bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-y-auto"
+        style={{ fontFamily:"'DM Sans',sans-serif", maxHeight:"95vh" }}>
+        <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100 sticky top-0 bg-white z-10">
+          <h3 className="text-base font-bold text-gray-900">{doc ? "Edytuj dokument" : "Nowy dokument"}</h3>
+          <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs">✕</button>
+        </div>
+
+        <div className="px-6 py-5 space-y-5">
+          {/* Pojazd */}
+          <MF label="Pojazd">
+            <MSelect value={form.vehicleId} onChange={v => set("vehicleId", v)}>
+              <option value="">— bez pojazdu —</option>
+              {vehicles.map(v => <option key={v.id} value={v.id}>{v.plate}{v.plate2?` / ${v.plate2}`:""} · {v.brand}</option>)}
+            </MSelect>
+          </MF>
+
+          {/* Typ */}
+          <div>
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Typ dokumentu</div>
+            {groups.map(group => (
+              <div key={group} className="mb-3">
+                <div className="text-xs text-gray-400 mb-1.5">{group}</div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {DOC_TYPES.filter(t => t.group === group).map(dt => (
+                    <button key={dt.id} onClick={() => set("type", dt.id)}
+                      className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-left transition-all"
+                      style={{
+                        background: form.type===dt.id ? dt.color+"18" : "#f9fafb",
+                        border: `1.5px solid ${form.type===dt.id ? dt.color : "#e5e7eb"}`,
+                        color: form.type===dt.id ? dt.color : "#6b7280",
+                      }}>
+                      <span>{dt.icon}</span>{dt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Opis + daty */}
+          <MF label="Własny opis (opcjonalnie)">
+            <MInput placeholder="np. OC Warta 2025/2026" value={form.label} onChange={v => set("label", v)} />
+          </MF>
+          <div className="grid grid-cols-2 gap-3">
+            <MF label="Data wystawienia"><MInput type="date" value={form.issueDate} onChange={v => set("issueDate", v)} /></MF>
+            <MF label="Ważny do ⚠️"><MInput type="date" value={form.expiryDate} onChange={v => set("expiryDate", v)} /></MF>
+          </div>
+
+          {/* Ubezpieczyciel / nr polisy / koszt */}
+          <div className="grid grid-cols-2 gap-3">
+            <MF label="Ubezpieczyciel / organ"><MInput placeholder="np. Warta, PZU, WORD" value={form.insurer} onChange={v => set("insurer", v)} /></MF>
+            <MF label="Nr polisy / dokumentu"><MInput placeholder="np. POL/123456" value={form.policyNumber} onChange={v => set("policyNumber", v)} /></MF>
+          </div>
+          <MF label="Koszt (zł)"><MInput type="number" placeholder="np. 1200" value={form.cost} onChange={v => set("cost", v)} /></MF>
+          <MF label="Notatki"><MInput placeholder="dodatkowe informacje..." value={form.notes} onChange={v => set("notes", v)} /></MF>
+
+          {/* PLIK */}
+          <div className="border-t border-gray-100 pt-4">
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">📎 Załącznik</div>
+            {form.fileData ? (
+              <div className="flex items-center gap-3 p-3 rounded-xl border border-gray-200 bg-gray-50">
+                <span className="text-2xl">{form.fileType==="application/pdf" ? "📄" : "🖼️"}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-gray-800 truncate">{form.fileName}</div>
+                  <div className="text-xs text-gray-400">{form.fileType}</div>
+                </div>
+                <button onClick={() => { set("fileData",null); set("fileName",""); set("fileType",""); }}
+                  className="text-xs text-red-400 hover:text-red-600 font-medium">Usuń</button>
+              </div>
+            ) : (
+              <div>
+                <input ref={fileRef} type="file" accept=".pdf,image/*" onChange={handleFile} className="hidden" />
+                <button onClick={() => fileRef.current?.click()}
+                  className="w-full py-8 rounded-xl border-2 border-dashed flex flex-col items-center gap-2 transition-all hover:bg-gray-50"
+                  style={{ borderColor:"#d1d5db", color:"#9ca3af" }}>
+                  {uploading
+                    ? <><span className="text-2xl">⏳</span><span className="text-sm">Ładowanie…</span></>
+                    : <><span className="text-2xl">📂</span><span className="text-sm font-medium text-gray-500">Kliknij aby wybrać plik</span><span className="text-xs">PDF, JPG, PNG · maks. 5 MB</span></>
+                  }
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* PRZYPOMNIENIA */}
+          <div className="border-t border-gray-100 pt-4">
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">🔔 Przypomnienia</div>
+            {form.reminders.length > 0 && (
+              <div className="space-y-2 mb-3">
+                {form.reminders.map((r,i) => (
+                  <div key={i} className="flex items-center gap-2 p-2.5 rounded-xl border"
+                    style={{ background:"#f5f3ff", borderColor:"#ddd6fe" }}>
+                    <span className="text-sm">🔔</span>
+                    <span className="text-xs font-semibold text-purple-700">{r.daysBefore} dni przed wygaśnięciem</span>
+                    {r.note && <span className="text-xs text-purple-400 flex-1 truncate">· {r.note}</span>}
+                    <button onClick={() => removeReminder(i)} className="text-xs text-purple-300 hover:text-red-400 ml-auto">✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2 items-end">
+              <MF label="Dni przed">
+                <MSelect value={newRemDays} onChange={v => setNewRemDays(v)}>
+                  {["7","14","30","60","90"].map(d => <option key={d} value={d}>{d} dni</option>)}
+                </MSelect>
+              </MF>
+              <div className="flex-1">
+                <MF label="Notatka (opcjonalnie)">
+                  <MInput placeholder="np. odnowić OC" value={newRemNote} onChange={v => setNewRemNote(v)} />
+                </MF>
+              </div>
+              <button onClick={addReminder}
+                className="px-3 py-2 rounded-xl text-xs font-bold text-white flex-shrink-0 mb-0.5"
+                style={{ background:"#7c3aed" }}>
+                + Dodaj
+              </button>
+            </div>
+            <p className="text-xs text-gray-400 mt-1">Przypomnienia widoczne w panelu 🔔 gdy zbliża się termin.</p>
+          </div>
+        </div>
+
+        <div className="px-6 pb-6 sticky bottom-0 bg-white pt-2 border-t border-gray-50">
+          <button onClick={() => onSave(form)} disabled={!form.type}
+            className="w-full py-3 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-95 disabled:opacity-30"
+            style={{ background:"#111827" }}>
+            {doc ? "Zapisz zmiany" : "Dodaj dokument"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MODAL: ADD COST
+// ═══════════════════════════════════════════════════════════════════════════════
+function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, toPLN, toEUR, onSave, onClose, onAddCategory, editRecord }) {
+  const today = new Date().toISOString().split("T")[0];
+  const [form, setForm] = useState(editRecord ? {
+    vehicleId: editRecord.vehicleId || vehicles[0]?.id || "",
+    category:  editRecord.category || categories[0]?.id || "",
+    currency:  editRecord.currency || "EUR",
+    amountPLN: editRecord.amountPLN || "",
+    amountEUR: editRecord.amountEUR || "",
+    date:      editRecord.date || today,
+    note:      editRecord.note || "",
+    liters:    editRecord.liters || "",
+  } : {
+    vehicleId: vehicles[0]?.id || "",
+    category:  categories[0]?.id || "",
+    currency:  "EUR",
+    amountPLN: "",
+    amountEUR: "",
+    date:      today,
+    note:      "",
+    liters:    "",
+  });
+  const [showNewCat, setShowNewCat] = useState(false);
+  const [newCat, setNewCat]         = useState({ label: "", icon: "📋", color: PALETTE[0] });
+
+  const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  const handleAmountChange = (field, val) => {
+    if (field === "amountPLN") {
+      set("amountPLN", val);
+      if (eurRate && val !== "") set("amountEUR", (parseFloat(val || 0) / eurRate).toFixed(2));
+      else set("amountEUR", "");
+    } else {
+      set("amountEUR", val);
+      if (eurRate && val !== "") set("amountPLN", (parseFloat(val || 0) * eurRate).toFixed(2));
+      else set("amountPLN", "");
+    }
+  };
+
+  const handleSaveNewCat = () => {
+    if (!newCat.label.trim()) return;
+    const id = newCat.label.toLowerCase().replace(/\s+/g, "_") + "_" + Math.random().toString(36).slice(2, 5);
+    onAddCategory({ id, label: newCat.label.trim(), icon: newCat.icon || "📋", color: newCat.color });
+    set("category", id);
+    setShowNewCat(false);
+    setNewCat({ label: "", icon: "📋", color: PALETTE[0] });
+  };
+
+  const isSerwis = form.category === "serwis" || form.category === "naprawa";
+  const hasAmount = form.amountPLN || form.amountEUR;
+
+  const handleSave = () => {
+    if (!form.vehicleId) return;
+    // Serwis pozwala na zapis bez kwoty (kwota = 0, pendingSerwis = true)
+    if (!isSerwis && !hasAmount) return;
+    const entry = {
+      vehicleId: form.vehicleId,
+      category:  form.category,
+      currency:  form.currency,
+      amountPLN: form.amountPLN ? parseFloat(form.amountPLN) : (hasAmount ? (toPLN(parseFloat(form.amountEUR)) || 0) : 0),
+      amountEUR: form.amountEUR ? parseFloat(form.amountEUR) : (hasAmount ? (toEUR(parseFloat(form.amountPLN)) || null) : 0),
+      date:      form.date,
+      note:      form.note,
+      liters:    form.liters ? parseFloat(form.liters) : undefined,
+    };
+    if (isSerwis && !hasAmount) entry.pendingSerwis = true;
+    onSave(entry);
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center p-0 sm:p-4"
+      style={{ background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)" }}>
+      <div className="w-full sm:max-w-lg bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-y-auto"
+        style={{ fontFamily: "'DM Sans', sans-serif", maxHeight: "95vh" }}>
+
+        <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100 sticky top-0 bg-white z-10">
+          <h3 className="text-base font-bold text-gray-900">{editRecord ? "Edytuj koszt" : "Nowy koszt"}</h3>
+          <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 transition-all text-xs">✕</button>
+        </div>
+
+        <div className="px-6 py-5 space-y-4">
+
+          {/* POJAZD */}
+          <MF label="Pojazd">
+            <MSelect value={form.vehicleId} onChange={(v) => set("vehicleId", v)}>
+              {vehicles.map((v) => <option key={v.id} value={v.id}>{v.plate} – {v.brand}</option>)}
+            </MSelect>
+          </MF>
+
+          {/* KATEGORIA */}
+          <MF label="Kategoria">
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <MSelect value={form.category} onChange={(v) => set("category", v)}>
+                  {categories.map((c) => <option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
+                </MSelect>
+              </div>
+              <button onClick={() => setShowNewCat((p) => !p)}
+                className="px-3 py-2.5 rounded-lg border text-xs font-semibold transition-all whitespace-nowrap"
+                style={{
+                  border:     `1px solid ${showNewCat ? "#111827" : "#e5e7eb"}`,
+                  color:      showNewCat ? "#fff" : "#6b7280",
+                  background: showNewCat ? "#111827" : "#fff",
+                }}>
+                {showNewCat ? "Anuluj" : "+ Nowa"}
+              </button>
+            </div>
+          </MF>
+
+          {/* INLINE NEW CATEGORY */}
+          {showNewCat && (
+            <div className="rounded-xl p-4 space-y-3" style={{ background: "#f9fafb", border: "1px solid #e5e7eb" }}>
+              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Dodaj nową kategorię</div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2">
+                  <MF label="Nazwa kategorii">
+                    <MInput placeholder="np. Myjnia" value={newCat.label} onChange={(v) => setNewCat((p) => ({ ...p, label: v }))} />
+                  </MF>
+                </div>
+                <MF label="Ikona (emoji)">
+                  <MInput placeholder="🚿" value={newCat.icon} onChange={(v) => setNewCat((p) => ({ ...p, icon: v }))} />
+                </MF>
+              </div>
+              <MF label="Kolor">
+                <div className="flex gap-2 flex-wrap mt-1">
+                  {PALETTE.map((col) => (
+                    <button key={col} onClick={() => setNewCat((p) => ({ ...p, color: col }))}
+                      className="w-6 h-6 rounded-full transition-all"
+                      style={{ background: col, outline: newCat.color === col ? `2px solid ${col}` : "none", outlineOffset: "2px", opacity: newCat.color === col ? 1 : 0.5 }} />
+                  ))}
+                </div>
+              </MF>
+              <button onClick={handleSaveNewCat} disabled={!newCat.label.trim()}
+                className="w-full py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-30 transition-all"
+                style={{ background: "#111827" }}>
+                Dodaj kategorię
+              </button>
+            </div>
+          )}
+
+          {/* DATA */}
+          <MF label="Data operacji">
+            <MInput type="date" value={form.date} onChange={(v) => set("date", v)} />
+          </MF>
+
+          {/* WALUTA TOGGLE */}
+          <MF label="Waluta wprowadzania">
+            <div className="flex gap-2">
+              {["PLN", "EUR"].map((cur) => (
+                <button key={cur} onClick={() => { set("currency", cur); set("amountPLN",""); set("amountEUR",""); }}
+                  className="flex-1 py-2.5 rounded-lg text-sm font-semibold border transition-all"
+                  style={{
+                    background: form.currency === cur ? "#111827" : "#fff",
+                    color:      form.currency === cur ? "#fff" : "#6b7280",
+                    border:     `1px solid ${form.currency === cur ? "#111827" : "#e5e7eb"}`,
+                  }}>
+                  {cur === "PLN" ? "🇵🇱 PLN (zł)" : "🇪🇺 EUR (€)"}
+                </button>
+              ))}
+            </div>
+          </MF>
+
+          {/* KWOTY */}
+          <div className="grid grid-cols-2 gap-3">
+            <MF label={`Kwota EUR${!eurLoading && eurRate ? ` (kurs: ${eurRate.toFixed(4)})` : ""}`}>
+              <MInput type="number" placeholder="0.00" value={form.amountEUR}
+                onChange={(v) => handleAmountChange("amountEUR", v)}
+                highlight={form.currency === "EUR"} />
+            </MF>
+            <MF label="Kwota PLN (opcjonalnie)">
+              <MInput type="number" placeholder="0.00" value={form.amountPLN}
+                onChange={(v) => handleAmountChange("amountPLN", v)}
+                highlight={form.currency === "PLN"} />
+            </MF>
+          </div>
+          {!eurLoading && (
+            <p className="text-xs text-gray-400 -mt-2">
+              💱 Kurs NBP z dnia {eurRateDate} · przeliczanie obustronnie automatyczne
+            </p>
+          )}
+
+          {/* LITRY — tylko dla Paliwo */}
+          {form.category === "paliwo" && (
+            <MF label="Litry (opcjonalnie)">
+              <MInput type="number" placeholder="np. 450" value={form.liters} onChange={(v) => set("liters", v)} />
+            </MF>
+          )}
+
+          {/* OPIS */}
+          <MF label={isSerwis ? "Opis serwisu (co naprawiasz?)" : "Opis / notatka"}>
+            <MInput placeholder={isSerwis ? "np. wymiana klocków, olej, filtry" : "np. tankowanie DE–PL"} value={form.note} onChange={(v) => set("note", v)} />
+          </MF>
+
+          {/* Informacja o serwisie bez kwoty */}
+          {isSerwis && !hasAmount && (
+            <div className="p-3 rounded-xl text-xs" style={{ background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412' }}>
+              <strong>Nie znasz jeszcze kwoty?</strong> Możesz zapisać serwis bez kwoty — trafi do Spraw jako otwarta sprawa. Po odebraniu auta uzupełnisz kwotę i zamkniesz sprawę.
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 pb-6 sticky bottom-0 bg-white pt-2 border-t border-gray-50">
+          <button onClick={handleSave}
+            disabled={!form.vehicleId || (!isSerwis && !hasAmount)}
+            className="w-full py-3 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-95 disabled:opacity-30"
+            style={{ background: isSerwis && !hasAmount ? "#ea580c" : "#111827" }}>
+            {editRecord ? "Zapisz zmiany" : isSerwis && !hasAmount ? "🔧 Zapisz serwis (uzupełnisz kwotę później)" : "Zapisz koszt"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DRIVER COPY ROW
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+// SERWIS TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+// RENTOWNOŚĆ TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const RENT_COSTS = [
+  { id: "paliwo",     label: "Paliwo",              icon: "⛽" },
+  { id: "leasing",    label: "Leasing",              icon: "🏦" },
+  { id: "wyplata",    label: "Wynagrodzenie",     icon: "👤" },
+  { id: "zus",        label: "ZUS + podatki",        icon: "📋" },
+  { id: "serwis",     label: "Serwis",               icon: "🔧" },
+  { id: "polisa",     label: "Polisa / OC / AC",     icon: "🛡️" },
+  { id: "etoll",      label: "E-toll / Autostrady",  icon: "🛣️" },
+  { id: "nego",       label: "Nego",                 icon: "🤝" },
+  { id: "hotele",     label: "Hotele",               icon: "🏨" },
+  { id: "mandaty",    label: "Mandaty",              icon: "⚠️" },
+  { id: "imi",        label: "IMI / SIPSI",          icon: "🌍" },
+  { id: "telefon",    label: "Telefon",              icon: "📱" },
+  { id: "slickshift", label: "SlickShift",           icon: "📡" },
+  { id: "uruchomienie", label: "Koszt uruchomienia", icon: "🔑" },
+  { id: "ocpd",       label: "OCPD (2x OC)",         icon: "🛡️" },
+  { id: "telepass",   label: "Telepass / Myto",      icon: "🛣️" },
+  { id: "inne",       label: "Inne",                 icon: "📦" },
+];
+
+const MONTHS_PL = ["Styczeń","Luty","Marzec","Kwiecień","Maj","Czerwiec","Lipiec","Sierpień","Wrzesień","Październik","Listopad","Grudzień"];
+
+function rentKey(vehicleId, year, month) { return `${vehicleId}_${year}_${month}`; }
+
+function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRate, operacyjne = [], onSaveOperacyjne, onAdd, onUpdate, onDelete }) {
+  const [view, setView]           = useState("flota");
+  const [selVehicle, setSelVehicle] = useState(null);
+  const [selYear, setSelYear]     = useState(new Date().getFullYear());
+  const [editOp, setEditOp] = useState(null);
+  const [showForm, setShowForm]   = useState(false);
+  const [editRecord, setEditRecord] = useState(null);
+  const [formVehicle, setFormVehicle] = useState("");
+  const [formYear, setFormYear]   = useState(new Date().getFullYear());
+  const [formMonth, setFormMonth] = useState(new Date().getMonth());
+
+  const years = [2024, 2025, 2026];
+
+  // Mapowanie kategorii kosztów → RENT_COSTS
+  const CAT_TO_RENT = {
+    paliwo: "paliwo", leasing: "leasing",
+    wyplata: "wyplata", zus: "zus",
+    naprawa: "serwis", serwis: "serwis",
+    ubezpieczenie: "polisa", polisa: "polisa",
+    oplaty: "etoll", etoll: "etoll", myto: "etoll", nego: "etoll", telepass: "telepass",
+    hotele: "hotele", mandaty: "mandaty",
+    slickshift: "slickshift", telefon: "telefon",
+    uruchomienie: "uruchomienie", imi: "imi", ocpd: "ocpd",
+    przyczepa: "inne",
+    inne: "inne",
+  };
+
+  // ── Dynamic data index: compute frachty & costs from raw data ──
+  // This ensures the fleet view always reflects current costs/frachty,
+  // even when rentRecords haven't been manually regenerated.
+  const dynData = useMemo(() => {
+    const map = {};
+    // Track which vehicle+year combos have frachty entries in frachtyList
+    // to avoid mixing frachtyList and records (which causes double-counting)
+    const hasFrachtyForYear = new Set();
+    // Index frachty by vehicle+month
+    frachtyList.forEach(f => {
+      const date = f.dataZaladunku || f.dataZlecenia || "";
+      const ym = date.slice(0, 7); // "YYYY-MM"
+      if (!ym) return;
+      const key = `${f.vehicleId}_${ym}`;
+      if (!map[key]) map[key] = { frachty: 0, costs: {} };
+      map[key].frachty += parseFloat(f.cenaEur) || 0;
+      hasFrachtyForYear.add(`${f.vehicleId}_${ym.slice(0,4)}`);
+    });
+    // Index costs by vehicle+month
+    costs.forEach(c => {
+      const date = c.date || "";
+      const ym = date.slice(0, 7);
+      if (!ym) return;
+      const key = `${c.vehicleId}_${ym}`;
+      if (!map[key]) map[key] = { frachty: 0, costs: {} };
+      const rentCat = CAT_TO_RENT[c.category] || "inne";
+      const eur = c.amountEUR ? parseFloat(c.amountEUR) : (c.amountPLN && eurRate ? c.amountPLN / eurRate : 0);
+      map[key].costs[rentCat] = (map[key].costs[rentCat] || 0) + eur;
+    });
+    map._hasFrachtyForYear = hasFrachtyForYear;
+    return map;
+  }, [frachtyList, costs, eurRate]);
+
+  // Generuj wpisy z frachtów i kosztów dla wybranego miesiąca
+  const generateFromData = (year, month) => {
+    const monthStr = `${year}-${String(month+1).padStart(2,"0")}`;
+    vehicles.filter(v => !v.archived).forEach(v => {
+      // Przychody z frachtów
+      const frachtySum = frachtyList
+        .filter(f => f.vehicleId === v.id && (f.dataZaladunku||f.dataZlecenia||"").startsWith(monthStr))
+        .reduce((s,f) => s + (parseFloat(f.cenaEur)||0), 0);
+
+      // Koszty per kategoria
+      const costsObj = {};
+      costs
+        .filter(c => c.vehicleId === v.id && (c.date||"").startsWith(monthStr))
+        .forEach(c => {
+          const rentCat = CAT_TO_RENT[c.category] || "inne";
+          const eur = c.amountEUR ? parseFloat(c.amountEUR) : (c.amountPLN && eurRate ? c.amountPLN / eurRate : 0);
+          costsObj[rentCat] = (costsObj[rentCat]||0) + eur;
+        });
+
+      if (frachtySum === 0 && Object.keys(costsObj).length === 0) return;
+
+      const existing = records.find(r => r.vehicleId === v.id && r.year === year && r.month === month);
+      const entry = { vehicleId: v.id, year, month, frachty: Math.round(frachtySum), costs: Object.fromEntries(Object.entries(costsObj).map(([k,v]) => [k, Math.round(v)])) };
+      if (existing) onUpdate(existing.id, entry);
+      else onAdd(entry);
+    });
+  };
+
+  // ── Record lookup: single source of truth ──
+  // Wszystkie dane (frachty + koszty) zaciągane z dynData (frachtyList + costs z Firestore).
+  // Edycja w jednym miejscu (Rejestr kosztów / Frachty) aktualizuje automatycznie
+  // wszystkie widoki: Flota, Pojazd, Trendy, YoY, Rentowność.
+  const getRecord = (vid, y, m) => {
+    const existing = records.find(r => r.vehicleId === vid && r.year === y && r.month === m);
+    const monthStr = `${y}-${String(m+1).padStart(2,"0")}`;
+    const dyn = dynData[`${vid}_${monthStr}`];
+
+    if (!existing && !dyn) return null;
+
+    // ── Frachty ── (dynData gdy frachtyList ma dane dla tego roku, inaczej z rent records)
+    const usesDynFrachty = dynData._hasFrachtyForYear?.has(`${vid}_${y}`);
+    const frachty = usesDynFrachty
+      ? (dyn?.frachty > 0 ? Math.round(dyn.frachty) : 0)
+      : (existing?.frachty || 0);
+
+    // ── Koszty ── (dynData gdy są wpisy kosztów, inaczej z rent records)
+    const hasDynCosts = dyn?.costs && Object.keys(dyn.costs).length > 0;
+    const costsObj = hasDynCosts
+      ? Object.fromEntries(Object.entries(dyn.costs).map(([k,v]) => [k, Math.round(v)]))
+      : (existing?.costs || {});
+
+    return {
+      id: existing?.id,
+      vehicleId: vid, year: y, month: m,
+      frachty,
+      costs: costsObj,
+    };
+  };
+
+  const totalFrachty = (vid, y) => MONTHS_PL.reduce((s,_,m) => { const r = getRecord(vid,y,m); return s + (r?.frachty||0); }, 0);
+  const totalKoszt   = (vid, y) => MONTHS_PL.reduce((s,_,m) => { const r = getRecord(vid,y,m); return s + Object.values(r?.costs||{}).reduce((a,v)=>a+(v||0),0); }, 0);
+  const totalZysk    = (vid, y) => totalFrachty(vid,y) - totalKoszt(vid,y);
+
+  const fleetFrachty = (y) => vehicles.reduce((s,v) => s + totalFrachty(v.id,y), 0);
+  const fleetKoszt   = (y) => vehicles.reduce((s,v) => s + totalKoszt(v.id,y), 0);
+  const fleetZysk    = (y) => fleetFrachty(y) - fleetKoszt(y);
+
+  const openAdd = (vid, y, m) => {
+    const existing = getRecord(vid, y, m);
+    setEditRecord(existing || null);
+    setFormVehicle(vid || (vehicles[0]?.id || ""));
+    setFormYear(y || selYear);
+    setFormMonth(m !== undefined ? m : new Date().getMonth());
+    setShowForm(true);
+  };
+
+  const zyskColor = (z) => z > 0 ? "#16a34a" : z < 0 ? "#dc2626" : "#9ca3af";
+  const zyskBg   = (z) => z > 0 ? "#f0fdf4" : z < 0 ? "#fef2f2" : "#f9fafb";
+  const fmt      = (n) => (n||0).toLocaleString("pl-PL", { minimumFractionDigits:0, maximumFractionDigits:0 }) + " €";
+  const fmtS     = (n) => (n > 0 ? "+" : "") + fmt(n);
+
+  return (
+    <div>
+      {/* HEADER */}
+      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">📊 Rentowność floty</h2>
+          <p className="text-sm text-gray-400 mt-0.5">Przychody · Koszty · Zysk per pojazd</p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Year selector */}
+          <div className="flex rounded-xl overflow-hidden border border-gray-200">
+            {years.map(y => (
+              <button key={y} onClick={() => setSelYear(y)}
+                className="px-3 py-1.5 text-xs font-semibold transition-all"
+                style={{ background: selYear===y ? "#111827" : "#fff", color: selYear===y ? "#fff" : "#6b7280" }}>
+                {y}
+              </button>
+            ))}
+          </div>
+          <button onClick={() => openAdd("", selYear, new Date().getMonth())}
+            className="px-4 py-2 rounded-xl text-sm font-bold text-white hover:opacity-90 transition-all"
+            style={{ background: "#111827" }}>
+            + Dodaj wpis
+          </button>
+          <button onClick={() => {
+            const m = window.prompt(`Generuj dane za miesiąc (1-12) roku ${selYear}:`, String(new Date().getMonth()));
+            if (!m) return;
+            const mi = parseInt(m) - 1;
+            if (mi < 0 || mi > 11) return;
+            generateFromData(selYear, mi);
+          }}
+            className="px-4 py-2 rounded-xl text-sm font-bold hover:opacity-90 transition-all border border-gray-200"
+            style={{ background: "#f0fdf4", color: "#16a34a" }}>
+            ⚡ Generuj z danych
+          </button>
+        </div>
+      </div>
+
+      {/* SUB-NAV */}
+      <div className="flex gap-1 mb-5 p-1 rounded-xl" style={{ background:"#f3f4f6" }}>
+        {[["flota","Flota — przegląd"],["pojazd","Pojazd — dane operacyjne"],["trendy","Trendy"]].map(([id,label]) => (
+          <button key={id} onClick={() => setView(id)}
+            className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all"
+            style={{ background: view===id ? "#fff" : "transparent", color: view===id ? "#111827" : "#9ca3af",
+                     boxShadow: view===id ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── VIEW 1: FLOTA ── */}
+      {view === "flota" && (
+        <div className="space-y-3">
+          {/* Fleet summary row */}
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            {[["Przychody floty", fleetFrachty(selYear), "#3b82f6"],
+              ["Koszty floty",   fleetKoszt(selYear),   "#ef4444"],
+              ["Zysk floty",     fleetZysk(selYear),    zyskColor(fleetZysk(selYear))]
+            ].map(([lbl, val, color]) => (
+              <div key={lbl} className="bg-white rounded-2xl px-4 py-3 border border-gray-100">
+                <div className="text-xs text-gray-400 mb-1">{lbl} {selYear}</div>
+                <div className="text-lg font-bold" style={{ color }}>{fmt(val)}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Month grid for current year */}
+          <div className="mt-6">
+            <div className="text-sm font-semibold text-gray-700 mb-3">Zysk miesięczny per pojazd — {selYear}</div>
+            <div className="bg-white rounded-2xl border border-gray-100 overflow-x-auto">
+              <table className="w-full text-xs" style={{ minWidth: 700 }}>
+                <thead>
+                  <tr className="border-b border-gray-50">
+                    <th className="text-left px-4 py-2.5 font-semibold text-gray-400 w-28">Pojazd</th>
+                    {MONTHS_PL.map(m => <th key={m} className="text-center py-2.5 font-semibold text-gray-400 px-1" style={{ minWidth:60 }}>{m.slice(0,3)}</th>)}
+                    <th className="text-right px-4 py-2.5 font-semibold text-gray-400">Rok</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {vehicles.map(v => (
+                    <tr key={v.id} className="border-b border-gray-50 hover:bg-gray-50">
+                      <td className="px-4 py-2 font-semibold text-gray-800" style={{ fontFamily:"'DM Mono',monospace", fontSize:11 }}>{v.plate}</td>
+                      {MONTHS_PL.map((_,mi) => {
+                        const r = getRecord(v.id, selYear, mi);
+                        if (!r) return (
+                          <td key={mi} className="text-center py-2 px-1">
+                            <button onClick={() => openAdd(v.id, selYear, mi)}
+                              className="w-full h-7 rounded-lg border-2 border-dashed border-gray-200 hover:border-amber-300 hover:bg-amber-50 transition-all text-gray-300 hover:text-amber-400 text-xs">+</button>
+                          </td>
+                        );
+                        const f = r.frachty || 0;
+                        const k = Object.values(r?.costs||{}).reduce((s,v)=>s+(v||0),0);
+                        const z = f - k;
+                        return (
+                          <td key={mi} className="text-center py-2 px-1">
+                            <button onClick={() => openAdd(v.id, selYear, mi)}
+                              className="w-full h-7 rounded-lg text-xs font-bold transition-all hover:opacity-80"
+                              style={{ background: zyskBg(z), color: zyskColor(z) }}>
+                              {z >= 0 ? "+" : ""}{Math.round(z).toLocaleString("pl-PL")}
+                            </button>
+                          </td>
+                        );
+                      })}
+                      <td className="text-right px-4 py-2 font-bold text-sm" style={{ color: zyskColor(totalZysk(v.id,selYear)) }}>
+                        {MONTHS_PL.some((_,mi) => getRecord(v.id,selYear,mi)) ? fmtS(totalZysk(v.id,selYear)) : <span className="text-gray-300">—</span>}
+                      </td>
+                    </tr>
+                  ))}
+                  {/* Total row */}
+                  <tr style={{ background:"#f9fafb" }}>
+                    <td className="px-4 py-2.5 font-bold text-gray-700 text-xs">SUMA</td>
+                    {MONTHS_PL.map((_,mi) => {
+                      const z = vehicles.reduce((s,v) => { const r=getRecord(v.id,selYear,mi); if(!r) return s; const f=r.frachty||0; const k=Object.values(r?.costs||{}).reduce((s,v)=>s+(v||0),0); return s+f-k; }, 0);
+                      const hasAny = vehicles.some(v => getRecord(v.id,selYear,mi));
+                      return <td key={mi} className="text-center py-2.5 px-1 font-bold text-xs" style={{ color: hasAny ? zyskColor(z) : "#d1d5db" }}>{hasAny ? (z>=0?"+":"")+Math.round(z).toLocaleString("pl-PL") : "—"}</td>;
+                    })}
+                    <td className="text-right px-4 py-2.5 font-bold text-sm" style={{ color: zyskColor(fleetZysk(selYear)) }}>{fmtS(fleetZysk(selYear))}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Per-vehicle table */}
+          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+            <div className="grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+              <span className="col-span-3">Pojazd</span>
+              <span className="col-span-2 text-right">Frachty</span>
+              <span className="col-span-2 text-right">Koszty</span>
+              <span className="col-span-2 text-right">Zysk</span>
+              <span className="col-span-2 text-right">Marża</span>
+              <span className="col-span-1"></span>
+            </div>
+            {vehicles.map(v => {
+              const f = totalFrachty(v.id, selYear);
+              const k = totalKoszt(v.id, selYear);
+              const z = f - k;
+              const marza = f > 0 ? (z / f * 100) : 0;
+              const hasData = MONTHS_PL.some((_,mi) => getRecord(v.id,selYear,mi));
+              return (
+                <div key={v.id} className="grid grid-cols-12 px-5 py-3.5 border-b border-gray-50 items-center hover:bg-gray-50 transition-colors">
+                  <div className="col-span-3">
+                    <div className="font-semibold text-sm text-gray-900" style={{ fontFamily:"'DM Mono',monospace" }}>{v.plate}</div>
+                    <div className="text-xs text-gray-400">{v.brand}</div>
+                  </div>
+                  <div className="col-span-2 text-right text-sm font-medium text-gray-700">{f > 0 ? fmt(f) : <span className="text-gray-300">—</span>}</div>
+                  <div className="col-span-2 text-right text-sm font-medium text-gray-700">{k > 0 ? fmt(k) : <span className="text-gray-300">—</span>}</div>
+                  <div className="col-span-2 text-right text-sm font-bold" style={{ color: zyskColor(z) }}>{hasData ? fmtS(z) : <span className="text-gray-300">—</span>}</div>
+                  <div className="col-span-2 text-right">
+                    {f > 0 ? (
+                      <span className="px-2 py-0.5 rounded-full text-xs font-bold"
+                        style={{ background: zyskBg(z), color: zyskColor(z) }}>
+                        {marza.toFixed(1)}%
+                      </span>
+                    ) : <span className="text-gray-300 text-xs">—</span>}
+                  </div>
+                  <div className="col-span-1 flex justify-end gap-1">
+                    <button onClick={() => { setSelVehicle(v.id); setView("pojazd"); }}
+                      className="w-6 h-6 rounded flex items-center justify-center text-gray-300 hover:text-blue-500 hover:bg-blue-50 transition-all text-xs" title="Szczegół">▶</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+        </div>
+      )}
+
+      {/* ── VIEW 2: POJAZD SZCZEGÓŁ ── */}
+      {view === "pojazd" && (
+        <div>
+          {/* Vehicle selector */}
+          <div className="flex gap-2 mb-5 flex-wrap">
+            {vehicles.map(v => (
+              <button key={v.id} onClick={() => setSelVehicle(v.id)}
+                className="px-4 py-2 rounded-xl text-sm font-semibold transition-all border"
+                style={{ background: selVehicle===v.id ? "#111827" : "#fff",
+                         color: selVehicle===v.id ? "#fff" : "#374151",
+                         borderColor: selVehicle===v.id ? "#111827" : "#e5e7eb" }}>
+                {v.plate}
+              </button>
+            ))}
+          </div>
+
+          {selVehicle && (() => {
+            const v = vehicles.find(vv => vv.id === selVehicle);
+            const yearData = MONTHS_PL.map((lbl, mi) => {
+              const r = getRecord(selVehicle, selYear, mi);
+              const f = r?.frachty || 0;
+              const k = r ? Object.values(r?.costs||{}).reduce((s,v)=>s+(v||0),0) : 0;
+              return { lbl: lbl.slice(0,3), frachty: f, koszty: k, zysk: f-k, hasData: !!r };
+            });
+            const annualF = yearData.reduce((s,d)=>s+d.frachty,0);
+            const annualK = yearData.reduce((s,d)=>s+d.koszty,0);
+            const annualZ = annualF - annualK;
+
+            // Cost breakdown summed for year
+            const costBreakdown = RENT_COSTS.map(c => ({
+              ...c,
+              total: MONTHS_PL.reduce((_,__,mi) => { const r=getRecord(selVehicle,selYear,mi); return _ + (r?.costs?.[c.id]||0); }, 0)
+            })).filter(c => c.total > 0).sort((a,b) => b.total - a.total);
+
+            const maxBar = Math.max(...yearData.map(d => Math.max(d.frachty, d.koszty)), 1);
+
+            return (
+              <div className="space-y-4">
+                {/* KPI cards */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-white rounded-2xl px-4 py-3 border border-gray-100">
+                    <div className="text-xs text-gray-400 mb-1">Frachty {selYear}</div>
+                    <div className="text-lg font-bold text-blue-600">{fmt(annualF)}</div>
+                  </div>
+                  <div className="bg-white rounded-2xl px-4 py-3 border border-gray-100">
+                    <div className="text-xs text-gray-400 mb-1">Koszty {selYear}</div>
+                    <div className="text-lg font-bold text-red-500">{fmt(annualK)}</div>
+                  </div>
+                  <div className="bg-white rounded-2xl px-4 py-3 border border-gray-100">
+                    <div className="text-xs text-gray-400 mb-1">Zysk {selYear}</div>
+                    <div className="text-lg font-bold" style={{ color: zyskColor(annualZ) }}>{fmtS(annualZ)}</div>
+                  </div>
+                </div>
+
+                {/* Monthly bar chart */}
+                <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
+                  <div className="text-sm font-semibold text-gray-700 mb-4">Przychód vs Koszty — miesięcznie</div>
+                  <div className="flex items-end gap-1.5" style={{ height: 140 }}>
+                    {yearData.map((d, i) => (
+                      <div key={i} className="flex-1 flex flex-col items-center gap-0.5 group cursor-pointer" onClick={() => openAdd(selVehicle, selYear, i)}>
+                        <div className="w-full flex flex-col justify-end gap-px relative" style={{ height: 110 }}>
+                          {d.hasData ? (
+                            <>
+                              <div className="w-full rounded-t transition-all" style={{ height: Math.max(2, d.frachty/maxBar*100)+'%', background:"#3b82f6", opacity:0.85 }} title={`Frachty: ${fmt(d.frachty)}`} />
+                              <div className="w-full rounded-t transition-all" style={{ height: Math.max(2, d.koszty/maxBar*100)+'%', background:"#ef444460" }} title={`Koszty: ${fmt(d.koszty)}`} />
+                            </>
+                          ) : (
+                            <div className="w-full rounded-t border-2 border-dashed border-gray-200 group-hover:border-amber-300 transition-all" style={{ height:"100%" }} />
+                          )}
+                        </div>
+                        <div className="text-xs text-gray-400" style={{ fontSize:9 }}>{d.lbl}</div>
+                        {d.hasData && (
+                          <div className="text-xs font-bold" style={{ color: zyskColor(d.zysk), fontSize:9 }}>
+                            {d.zysk >= 0 ? "+" : ""}{Math.round(d.zysk).toLocaleString("pl-PL")}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-4 mt-2 text-xs text-gray-400">
+                    <span><span className="inline-block w-3 h-2 rounded mr-1" style={{ background:"#3b82f6" }}></span>Frachty</span>
+                    <span><span className="inline-block w-3 h-2 rounded mr-1" style={{ background:"#ef444460" }}></span>Koszty</span>
+                    <span className="text-gray-300 text-xs ml-2">Kliknij miesiąc aby dodać/edytować</span>
+                  </div>
+                </div>
+
+                {/* Cost breakdown */}
+                {costBreakdown.length > 0 && (
+                  <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
+                    <div className="text-sm font-semibold text-gray-700 mb-3">Struktura kosztów {selYear}</div>
+                    <div className="space-y-2">
+                      {costBreakdown.map(c => (
+                        <div key={c.id} className="flex items-center gap-3">
+                          <span className="w-5 text-base">{c.icon}</span>
+                          <span className="text-xs text-gray-600 w-36 flex-shrink-0">{c.label}</span>
+                          <div className="flex-1 h-2 rounded-full" style={{ background:"#f3f4f6" }}>
+                            <div className="h-2 rounded-full transition-all" style={{ width: Math.max(2, c.total/annualK*100)+'%', background:"#6366f1" }} />
+                          </div>
+                          <span className="text-xs font-semibold text-gray-700 w-20 text-right">{fmt(c.total)}</span>
+                          <span className="text-xs text-gray-400 w-10 text-right">{annualK>0?(c.total/annualK*100).toFixed(0):"0"}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Monthly detail table */}
+                <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+                  <div className="px-5 py-3 border-b border-gray-50 text-sm font-semibold text-gray-700">Szczegół miesięczny</div>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-gray-50">
+                        <th className="text-left px-5 py-2 font-semibold text-gray-400">Miesiąc</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-400">Frachty</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-400">Koszty</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-400">Zysk</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-400">KM licznik</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-400">Dni</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-400">Paliwo L</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-400">Spalanie</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-400">€/L</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-400">€/km</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-400">Śr. waga</th>
+                        <th className="px-3 py-2 w-8"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {MONTHS_PL.map((lbl, mi) => {
+                        const r = getRecord(selVehicle, selYear, mi);
+                        const f = r?.frachty || 0;
+                        const k = r ? RENT_COSTS.reduce((s,c)=>s+(r.costs?.[c.id]||0),0) : 0;
+                        const z = f - k;
+                        return (
+                          <tr key={mi} className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer" onClick={() => openAdd(selVehicle, selYear, mi)}>
+                            <td className="px-5 py-2.5 font-medium text-gray-700">{lbl}</td>
+                            <td className="text-right px-3 py-2.5 text-blue-600 font-medium">{f > 0 ? fmt(f) : <span className="text-gray-200">—</span>}</td>
+                            <td className="text-right px-3 py-2.5 text-gray-600">{k > 0 ? fmt(k) : <span className="text-gray-200">—</span>}</td>
+                            <td className="text-right px-3 py-2.5 font-bold" style={{ color: r ? zyskColor(z) : "#d1d5db" }}>{r ? fmtS(z) : "—"}</td>
+                            {(() => {
+                              const op = operacyjne.find(o => o.vehicleId === selVehicle && o.year === selYear && o.month === mi+1);
+                              const koszt_km = op?.kmLicznik && r?.costs ? (Object.values(r.costs||{}).reduce((s,v)=>s+v,0) / op.kmLicznik).toFixed(2) : null;
+                              const _wagi = frachtyList.filter(f => f.vehicleId === selVehicle && (f.dataZaladunku||f.dataZlecenia||'').startsWith(`${selYear}-${String(mi+1).padStart(2,'0')}`) && parseFloat(f.wagaLadunku) > 0); const sr_waga = (_wagi.length > 0 && f > 0) ? _wagi.reduce((s,f,_,arr) => s + (parseFloat(f.wagaLadunku)||0)/arr.length, 0) : (op?.srWaga || 0);
+                              return (<>
+                                <td className="text-right px-3 py-2.5 text-gray-400">{op?.kmLicznik ? op.kmLicznik.toLocaleString("pl-PL") : <span className="text-gray-200">—</span>}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-400">{op?.dni ? op.dni : <span className="text-gray-200">—</span>}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-400">{op?.paliwoL ? op.paliwoL.toLocaleString("pl-PL",{maximumFractionDigits:0})+" L" : <span className="text-gray-200">—</span>}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-400">{op?.spalanie ? op.spalanie.toFixed(1)+" L/100" : <span className="text-gray-200">—</span>}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-400">{op?.cenaPaliwa ? op.cenaPaliwa.toFixed(2)+" €/L" : <span className="text-gray-200">—</span>}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-400">{koszt_km ? koszt_km+" €/km" : <span className="text-gray-200">—</span>}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-400">{sr_waga > 0 ? Math.round(sr_waga)+" kg" : <span className="text-gray-200">—</span>}</td>
+                              </>);
+                            })()}
+                            <td className="px-3 py-2.5 flex gap-1 items-center justify-end">
+                              <button onClick={e=>{e.stopPropagation();const _op=operacyjne.find(o=>o.vehicleId===selVehicle&&o.year===selYear&&o.month===mi+1);setEditOp({vehicleId:selVehicle,year:selYear,month:mi+1,kmLicznik:_op?.kmLicznik||"",dni:_op?.dni||"",paliwoL:_op?.paliwoL||"",spalanie:_op?.spalanie||"",cenaPaliwa:_op?.cenaPaliwa||"",srWaga:_op?.srWaga||""});}} className="w-5 h-5 flex items-center justify-center text-gray-200 hover:text-blue-400 rounded transition-all">✏</button>
+                              {r && <button onClick={e=>{e.stopPropagation();onDelete(r.id);}} className="w-5 h-5 flex items-center justify-center text-gray-200 hover:text-red-400 rounded transition-all">✕</button>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+          {editOp && (
+            <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center" onClick={()=>setEditOp(null)}>
+              <div className="bg-white rounded-2xl shadow-2xl p-6 w-80" onClick={e=>e.stopPropagation()}>
+                <div className="text-sm font-semibold text-gray-700 mb-4">Dane operacyjne — {["Styczeń","Luty","Marzec","Kwiecień","Maj","Czerwiec","Lipiec","Sierpień","Wrzesień","Październik","Listopad","Grudzień"][editOp.month-1]} {editOp.year}</div>
+                {[["kmLicznik","KM licznik"],["dni","Dni w trasie"],["paliwoL","Paliwo L"],["spalanie","Spalanie L/100"],["cenaPaliwa","Cena paliwa €/L"],["srWaga","Śr. waga kg"]].map(([field,label])=>(
+                  <div key={field} className="mb-3">
+                    <label className="text-xs text-gray-500 mb-1 block">{label}</label>
+                    <input type="number" value={editOp[field]} onChange={e=>setEditOp(p=>({...p,[field]:e.target.value}))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" />
+                  </div>
+                ))}
+                <div className="flex gap-2 mt-4">
+                  <button onClick={()=>setEditOp(null)} className="flex-1 px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50">Anuluj</button>
+                  <button onClick={async()=>{
+                    const id=`${editOp.vehicleId}_${editOp.year}_${editOp.month}`;
+                    const d={vehicleId:editOp.vehicleId,year:editOp.year,month:editOp.month};
+                    if(editOp.kmLicznik!=="") d.kmLicznik=parseFloat(editOp.kmLicznik);
+                    if(editOp.dni!=="") d.dni=parseFloat(editOp.dni);
+                    if(editOp.paliwoL!=="") d.paliwoL=parseFloat(editOp.paliwoL);
+                    if(editOp.spalanie!=="") d.spalanie=parseFloat(editOp.spalanie);
+                    if(editOp.cenaPaliwa!=="") d.cenaPaliwa=parseFloat(editOp.cenaPaliwa);
+                    if(editOp.srWaga!=="") d.srWaga=parseFloat(editOp.srWaga);
+                    await onSaveOperacyjne(id,d);
+                    setEditOp(null);
+                  }} className="flex-1 px-4 py-2 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600">Zapisz</button>
+                </div>
+              </div>
+            </div>
+          )}
+          {editOp && (
+            <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center" onClick={()=>setEditOp(null)}>
+              <div className="bg-white rounded-2xl shadow-2xl p-6 w-80" onClick={e=>e.stopPropagation()}>
+                <div className="text-sm font-semibold text-gray-700 mb-4">Dane operacyjne — {["Styczeń","Luty","Marzec","Kwiecień","Maj","Czerwiec","Lipiec","Sierpień","Wrzesień","Październik","Listopad","Grudzień"][editOp.month-1]} {editOp.year}</div>
+                {[["kmLicznik","KM licznik"],["dni","Dni w trasie"],["paliwoL","Paliwo L"],["spalanie","Spalanie L/100"],["cenaPaliwa","Cena paliwa €/L"],["srWaga","Śr. waga kg"]].map(([field,label])=>(
+                  <div key={field} className="mb-3">
+                    <label className="text-xs text-gray-500 mb-1 block">{label}</label>
+                    <input type="number" value={editOp[field]} onChange={e=>setEditOp(p=>({...p,[field]:e.target.value}))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" />
+                  </div>
+                ))}
+                <div className="flex gap-2 mt-4">
+                  <button onClick={()=>setEditOp(null)} className="flex-1 px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50">Anuluj</button>
+                  <button onClick={async()=>{
+                    const id=`${editOp.vehicleId}_${editOp.year}_${editOp.month}`;
+                    const d={vehicleId:editOp.vehicleId,year:editOp.year,month:editOp.month};
+                    if(editOp.kmLicznik!=="") d.kmLicznik=parseFloat(editOp.kmLicznik);
+                    if(editOp.dni!=="") d.dni=parseFloat(editOp.dni);
+                    if(editOp.paliwoL!=="") d.paliwoL=parseFloat(editOp.paliwoL);
+                    if(editOp.spalanie!=="") d.spalanie=parseFloat(editOp.spalanie);
+                    if(editOp.cenaPaliwa!=="") d.cenaPaliwa=parseFloat(editOp.cenaPaliwa);
+                    if(editOp.srWaga!=="") d.srWaga=parseFloat(editOp.srWaga);
+                    await onSaveOperacyjne(id,d);
+                    setEditOp(null);
+                  }} className="flex-1 px-4 py-2 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600">Zapisz</button>
+                </div>
+              </div>
+            </div>
+          )}
+          {!selVehicle && (
+            <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center text-gray-400 text-sm">
+              Wybierz pojazd powyżej
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── VIEW 3: TRENDY ── */}
+      {view === "trendy" && (
+        <TrendyTab
+          vehicles={vehicles}
+          records={records}
+          frachtyList={frachtyList}
+          costs={costs}
+          operacyjne={operacyjne}
+          selYear={selYear}
+          getRecord={getRecord}
+        />
+      )}
+
+      {/* FORM MODAL */}
+      {showForm && (
+        <RentFormModal
+          vehicles={vehicles}
+          record={editRecord}
+          initVehicle={formVehicle}
+          initYear={formYear}
+          initMonth={formMonth}
+          onSave={(data) => {
+            if (editRecord) onUpdate(editRecord.id, data);
+            else onAdd(data);
+            setShowForm(false); setEditRecord(null);
+          }}
+          onClose={() => { setShowForm(false); setEditRecord(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne, selYear, getRecord }) {
+  const METRYKI = [
+    { id: "frachty",  label: "Frachty €",      color: "#3b82f6" },
+    { id: "koszty",   label: "Koszty €",       color: "#ef4444" },
+    { id: "zysk",     label: "Zysk €",         color: "#16a34a" },
+    { id: "kmLicznik",label: "KM licznik",     color: "#8b5cf6" },
+    { id: "paliwoL",  label: "Paliwo L",       color: "#f59e0b" },
+    { id: "spalanie", label: "Spalanie L/100", color: "#06b6d4" },
+    { id: "eurKm",    label: "€/km paliwo",     color: "#ec4899" },
+    { id: "dni",      label: "Dni w trasie",   color: "#64748b" },
+  ];
+  const [tVehicles, setTVehicles] = useState([]);
+  const [tYears,    setTYears]    = useState([selYear]);
+  const [tMetryki,  setTMetryki]  = useState(["frachty","zysk"]);
+  const [tMode,     setTMode]     = useState("vehicle");
+  useEffect(() => {
+    if (vehicles.length && tVehicles.length === 0) setTVehicles([vehicles[0].id]);
+  }, [vehicles]);
+  const toggleArr = (arr, setArr, val) => setArr(p => p.includes(val) ? p.filter(x=>x!==val) : [...p, val]);
+  const getVal = (vid, year, mi, metId) => {
+    // Single source of truth: getRecord handles all corrections (2025 Excel, 2026 fleet)
+    const r = getRecord(vid, year, mi);
+    const op = operacyjne.find(o => o.vehicleId===vid && o.year===year && o.month===mi+1);
+    const frachtyVal = r?.frachty || 0;
+    const kostyVal = r ? Object.values(r.costs||{}).reduce((s,v)=>s+(v||0),0) : 0;
+    if (metId==="frachty")   return frachtyVal;
+    if (metId==="koszty")    return kostyVal;
+    if (metId==="zysk")      return frachtyVal - kostyVal;
+    if (metId==="kmLicznik") return op?.kmLicznik || 0;
+    if (metId==="paliwoL")   return op?.paliwoL || 0;
+    if (metId==="spalanie")  return op?.spalanie || 0;
+    if (metId==="eurKm")     {
+      const fuelCost = r?.costs?.paliwo || 0;
+      return (op?.kmLicznik && fuelCost) ? parseFloat((fuelCost / op.kmLicznik).toFixed(2)) : 0;
+    }
+    if (metId==="dni")       return op?.dni || 0;
+    return 0;
+  };
+  const COLORS = ["#3b82f6","#ef4444","#16a34a","#8b5cf6","#f59e0b","#06b6d4","#ec4899","#64748b","#f97316","#0ea5e9"];
+  const series = [];
+  if (tMode === "vehicle") {
+    const met = tMetryki[0] || "frachty";
+    tVehicles.forEach((vid, i) => {
+      const veh = vehicles.find(v=>v.id===vid);
+      tYears.forEach((year, j) => {
+        const pts = Array.from({length:12}, (_,mi) => getVal(vid, year, mi, met));
+        series.push({ label: `${veh?.plate||vid} ${year}`, color: COLORS[(i*tYears.length+j)%COLORS.length], pts });
+      });
+    });
+  } else {
+    const vid = tVehicles[0] || vehicles[0]?.id;
+    tYears.forEach((year, j) => {
+      tMetryki.forEach((met, i) => {
+        const metDef = METRYKI.find(m=>m.id===met);
+        const pts = Array.from({length:12}, (_,mi) => getVal(vid, year, mi, met));
+        series.push({ label: `${metDef?.label} ${year}`, color: COLORS[(i*tYears.length+j)%COLORS.length], pts });
+      });
+    });
+  }
+  const allVals = series.flatMap(s=>s.pts).filter(v=>v!==0);
+  const _min = allVals.length ? Math.min(...allVals) : 0;
+  const minVal = _min >= 0 ? 0 : _min;
+  const maxVal = allVals.length ? Math.max(...allVals) : 1;
+  const range = maxVal - minVal || 1;
+  const H = 240, W_PT = 52, chartW = 12 * W_PT;
+  const PAD = 15;
+  const toY = v => H - ((v - minVal) / range * (H - 2*PAD)) - PAD;
+  const MS = ["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paź","Lis","Gru"];
+  return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4 space-y-3">
+        <div className="flex gap-2 items-center flex-wrap">
+          <span className="text-xs text-gray-500 w-20">Tryb:</span>
+          {[["vehicle","Porównaj pojazdy"],["metric","Porównaj metryki"]].map(([m,l])=>(
+            <button key={m} onClick={()=>setTMode(m)}
+              className={"px-3 py-1 rounded-lg text-xs font-medium transition-all "+(tMode===m?"bg-blue-500 text-white":"bg-gray-100 text-gray-500 hover:bg-gray-200")}>{l}</button>
+          ))}
+        </div>
+        <div className="flex gap-2 items-center flex-wrap">
+          <span className="text-xs text-gray-500 w-20">Rok:</span>
+          {[2024,2025,2026].map(y=>(
+            <button key={y} onClick={()=>toggleArr(tYears,setTYears,y)}
+              className={"px-3 py-1 rounded-lg text-xs font-medium transition-all "+(tYears.includes(y)?"bg-blue-500 text-white":"bg-gray-100 text-gray-500 hover:bg-gray-200")}>{y}</button>
+          ))}
+        </div>
+        <div className="flex gap-2 items-center flex-wrap">
+          <span className="text-xs text-gray-500 w-20">Pojazd:</span>
+          {vehicles.map(v=>(
+            <button key={v.id} onClick={()=>tMode==="vehicle"?toggleArr(tVehicles,setTVehicles,v.id):setTVehicles([v.id])}
+              className={"px-3 py-1 rounded-lg text-xs font-medium transition-all "+(tVehicles.includes(v.id)?"bg-indigo-500 text-white":"bg-gray-100 text-gray-500 hover:bg-gray-200")}>{v.plate}</button>
+          ))}
+        </div>
+        <div className="flex gap-2 items-center flex-wrap">
+          <span className="text-xs text-gray-500 w-20">Metryka:</span>
+          {METRYKI.map(m=>(
+            <button key={m.id} onClick={()=>tMode==="metric"?toggleArr(tMetryki,setTMetryki,m.id):setTMetryki([m.id])}
+              className={"px-3 py-1 rounded-lg text-xs font-medium transition-all "+(tMetryki.includes(m.id)?"text-white":"bg-gray-100 text-gray-500 hover:bg-gray-200")}
+              style={tMetryki.includes(m.id)?{background:m.color}:{}}>{m.label}</button>
+          ))}
+        </div>
+      </div>
+      <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
+        <div className="flex gap-3 flex-wrap mb-3">
+          {series.map((s,i)=>(
+            <div key={i} className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded-full flex-shrink-0" style={{background:s.color}}/>
+              <span className="text-xs text-gray-600">{s.label}</span>
+            </div>
+          ))}
+        </div>
+        {(() => {
+          // Grupuj serie wg roku — sumy lub średnie miesięczne
+          // Metryki stawkowe (rate) → średnia, reszta → suma
+          const RATE_METRICS = ["spalanie","eurKm"];
+          const isRate = tMetryki.length === 1 && RATE_METRICS.includes(tMetryki[0]);
+          const yearTotals = {};
+          const yearCounts = {}; // ile niezerowych wartości (do średniej)
+          series.forEach(s => {
+            const yrM = s.label.match(/(\d{4})$/);
+            if (!yrM) return;
+            const yr = yrM[1];
+            if (!yearTotals[yr]) { yearTotals[yr] = Array(12).fill(0); yearCounts[yr] = Array(12).fill(0); }
+            s.pts.forEach((v, mi) => {
+              yearTotals[yr][mi] += (v || 0);
+              if (v) yearCounts[yr][mi] += 1;
+            });
+          });
+          // Dla metryk stawkowych: podziel sumę przez liczbę pojazdów z danymi
+          if (isRate) {
+            Object.keys(yearTotals).forEach(yr => {
+              yearTotals[yr] = yearTotals[yr].map((sum, mi) =>
+                yearCounts[yr][mi] > 0 ? parseFloat((sum / yearCounts[yr][mi]).toFixed(4)) : 0
+              );
+            });
+          }
+          const sortedYrs = Object.keys(yearTotals).sort();
+          const yt25 = yearTotals["2025"], yt26 = yearTotals["2026"];
+          const hasDiff = yt25 && yt26;
+          const YRCOLORS = { "2024":"#8b5cf6", "2025":"#64748b", "2026":"#3b82f6" };
+          const fmtTk = v => {
+            if (v === 0) return "—";
+            const abs = Math.abs(v);
+            if (abs >= 1000) return (v/1000).toFixed(1) + "k";
+            if (isRate) return v.toFixed(abs < 1 ? 2 : 1);
+            return Number.isInteger(v) ? String(v) : v.toFixed(1);
+          };
+          // Marginesy wykresu — muszą pasować do tabeli pod spodem
+          const CHART_LEFT = 55; // margin.left(10) + YAxis width(45)
+          const TOTAL_COL = 80;  // szerokość kolumny total po prawej
+          // margin.right wykresu = TOTAL_COL → tabela repeat(12,1fr) + TOTAL_COL px pasuje idealnie
+
+          const showTable = sortedYrs.length > 0;
+          // Kolejność: bieżący rok pierwszy, potem poprzedni (desc)
+          const displayYrs = [...sortedYrs].reverse();
+          const curYr = displayYrs[0]; // najnowszy rok
+          const YRBG = { "2026":"#eff6ff", "2025":"#f8fafc", "2024":"#faf5ff" };
+          return (
+            <div>
+              {/* ── WYKRES ── */}
+              <ResponsiveContainer width="100%" height={270}>
+                <LineChart margin={{top:10,right:TOTAL_COL,left:10,bottom:8}}
+                  data={MS.map((m,mi)=>({name:m,...Object.fromEntries(series.map((s,si)=>[si,s.pts[mi]||null]))}))}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false}/>
+                  <XAxis dataKey="name" scale="band" tick={false} height={4} axisLine={false} tickLine={false} padding={{left:0,right:0}}/>
+                  <YAxis tick={{fontSize:10,fill:"#94a3b8"}} axisLine={false} tickLine={false} width={45}
+                    tickFormatter={v=>v>=1000?(v/1000).toFixed(1)+"k":v}/>
+                  <Tooltip formatter={(v,n)=>[v>=1000?(v/1000).toFixed(1)+"k":(isRate?v?.toFixed(v<1?2:1):v?.toFixed(0)), series[n]?.label||n]}
+                    contentStyle={{fontSize:12,borderRadius:8,border:"1px solid #e2e8f0"}}
+                    cursor={false}/>
+                  {series.map((s,si)=>(
+                    <Line key={si} type="monotone" dataKey={si} stroke={s.color} strokeWidth={2.5}
+                      dot={{r:3.5,fill:s.color,strokeWidth:2,stroke:"white"}}
+                      activeDot={{r:5}} connectNulls={false}/>
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+
+              {/* ── TABELA POD WYKRESEM — wariant C ── */}
+              {/* Nazwy miesięcy jako pierwszy wiersz tabeli — idealnie wyrównane z danymi */}
+              {showTable && (
+                <div style={{marginLeft:CHART_LEFT, fontSize:11}}>
+
+                  {/* Nagłówek miesięcy */}
+                  <div style={{display:"grid", gridTemplateColumns:`repeat(12,1fr) ${TOTAL_COL}px`,
+                    textAlign:"center", padding:"2px 0 4px"}}>
+                    {MS.map(m=><div key={m} style={{fontSize:11,color:"#94a3b8",fontWeight:500}}>{m}</div>)}
+                    <div/>
+                  </div>
+
+                  {/* Wiersze lat — bieżący rok pierwszy */}
+                  {displayYrs.map(yr=>{
+                    const isCur = yr===curYr;
+                    const col = YRCOLORS[yr]||"#64748b";
+                    const bg = YRBG[yr]||"#f8fafc";
+                    const yrVals = (yearTotals[yr]||[]).filter(v=>v>0);
+                    const yrTotal = isRate
+                      ? (yrVals.length ? parseFloat((yrVals.reduce((s,v)=>s+v,0)/yrVals.length).toFixed(4)) : 0)
+                      : (yearTotals[yr]||[]).reduce((s,v)=>s+(v||0),0);
+                    return (
+                      <div key={yr} style={{display:"grid", gridTemplateColumns:`repeat(12,1fr) ${TOTAL_COL}px`,
+                        background:bg, borderRadius:6, padding:"4px 0", marginTop:2, textAlign:"center", alignItems:"center"}}>
+                        {MS.map((_,mi)=>{
+                          const v = yearTotals[yr]?.[mi]||0;
+                          return (
+                            <div key={mi} style={{color:v===0?"#d1d5db":col, fontWeight:isCur?700:400, fontSize:11}}>
+                              {fmtTk(v)}
+                            </div>
+                          );
+                        })}
+                        <div style={{paddingLeft:8,paddingRight:4,fontWeight:700,color:col,fontSize:10,whiteSpace:"nowrap",
+                          borderLeft:"1px solid "+(isCur?"#dbeafe":"#e5e7eb")}}>
+                          {yr}{isRate?" ⌀":""}: {fmtTk(yrTotal)}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {/* Wiersz Δ (różnica) — tylko gdy oba lata */}
+                  {hasDiff && (()=>{
+                    let totalDiff;
+                    if (isRate) {
+                      const avg26 = yt26.filter(v=>v>0); const avg25 = yt25.filter(v=>v>0);
+                      const m26 = avg26.length ? avg26.reduce((s,v)=>s+v,0)/avg26.length : 0;
+                      const m25 = avg25.length ? avg25.reduce((s,v)=>s+v,0)/avg25.length : 0;
+                      totalDiff = parseFloat((m26 - m25).toFixed(4));
+                    } else {
+                      totalDiff = yt26.reduce((s,v,i)=>s+(v||0)-(yt25[i]||0),0);
+                    }
+                    const totalC = totalDiff>0?"#15803d":totalDiff<0?"#dc2626":"#9ca3af";
+                    return (
+                      <div style={{display:"grid", gridTemplateColumns:`repeat(12,1fr) ${TOTAL_COL}px`,
+                        borderTop:"1px solid #e5e7eb", marginTop:4, paddingTop:4, textAlign:"center", alignItems:"center"}}>
+                        {MS.map((_,mi)=>{
+                          const d = (yt26[mi]||0)-(yt25[mi]||0);
+                          const c = d===0?"#9ca3af":d>0?"#15803d":"#dc2626";
+                          return (
+                            <div key={mi} style={{fontWeight:700,fontSize:10,color:c}}>
+                              {d===0?"—":(d>0?"+":"")+fmtTk(d)}
+                            </div>
+                          );
+                        })}
+                        <div style={{paddingLeft:8,paddingRight:4,fontWeight:700,color:totalC,fontSize:10,whiteSpace:"nowrap",
+                          borderLeft:"1px solid #e5e7eb"}}>
+                          Δ: {totalDiff>0?"+":""}{fmtTk(totalDiff)}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+      </div>
+
+      {/* YoY TABELA — Scorecard */}
+      {(() => {
+        const METRICS = [
+          { id:"frachty",  label:"Frachty €",      fn:(vid,y,mi)=>{ const r=getRecord(vid,y,mi); return r?.frachty||0; } },
+          { id:"koszty",   label:"Koszty €",       fn:(vid,y,mi)=>{ const r=getRecord(vid,y,mi); return r?Object.values(r.costs||{}).reduce((s,v)=>s+(v||0),0):0; } },
+          { id:"zysk",     label:"Zysk €",         fn:(vid,y,mi)=>{ const r=getRecord(vid,y,mi); const f=r?.frachty||0; const k=r?Object.values(r.costs||{}).reduce((s,v)=>s+(v||0),0):0; return f-k; } },
+          { id:"km",       label:"KM licznik",     fn:(vid,y,mi)=>{ const op=operacyjne.find(o=>o.vehicleId===vid&&o.year===y&&o.month===mi+1); return op?.kmLicznik||0; } },
+          { id:"paliwo",   label:"Paliwo L",       fn:(vid,y,mi)=>{ const op=operacyjne.find(o=>o.vehicleId===vid&&o.year===y&&o.month===mi+1); return op?.paliwoL||0; } },
+          { id:"spalanie", label:"Spalanie L/100", fn:(vid,y,mi)=>{ const op=operacyjne.find(o=>o.vehicleId===vid&&o.year===y&&o.month===mi+1); return op?.spalanie||0; } },
+          { id:"eurkm",    label:"€/km",            fn:(vid,y,mi)=>{ const op=operacyjne.find(o=>o.vehicleId===vid&&o.year===y&&o.month===mi+1); const fc=getRecord(vid,y,mi)?.costs?.paliwo||0; return (op?.kmLicznik&&fc)?parseFloat((fc/op.kmLicznik).toFixed(2)):0; } },
+          { id:"dni",      label:"Dni w trasie",   fn:(vid,y,mi)=>{ const op=operacyjne.find(o=>o.vehicleId===vid&&o.year===y&&o.month===mi+1); return op?.dni||0; } },
+        ];
+        const [yoyMode, setYoyMode] = useState("flota");
+        const [yoyMet, setYoyMet] = useState("frachty");
+        const met = METRICS.find(m=>m.id===yoyMet);
+        const MS = ["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paź","Lis","Gru"];
+        const activeVehs = vehicles;
+        const getFlotaVal = (y, mi) => activeVehs.reduce((s,v)=>s+met.fn(v.id,y,mi),0);
+        const getVehVal   = (vid, y, mi) => met.fn(vid, y, mi);
+        const fmtV = (v) => v===0 ? "—" : Math.abs(v)>=1000?(v/1000).toFixed(1)+"k" : v.toFixed(v<10&&v>-10?1:0);
+        const fmtFull = (v) => !v ? "—" : v.toLocaleString("pl-PL",{maximumFractionDigits:0});
+        const qSum = (vals,q) => vals.slice(q*3,q*3+3).reduce((a,b)=>a+b,0);
+        const rows = yoyMode==="flota"
+          ? [{ label:"Flota total", vals25: MS.map((_,mi)=>getFlotaVal(2025,mi)), vals26: MS.map((_,mi)=>getFlotaVal(2026,mi)) }]
+          : vehicles.map(v=>({ label:v.plate, vals25: MS.map((_,mi)=>getVehVal(v.id,2025,mi)), vals26: MS.map((_,mi)=>getVehVal(v.id,2026,mi)) }));
+        const maxAll = Math.max(...rows.flatMap(r=>[...r.vals25,...r.vals26]));
+        return (
+          <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
+            {/* Header + toggles */}
+            <div className="flex gap-3 items-center flex-wrap mb-4">
+              <span className="text-sm font-semibold text-gray-700">Porównanie Y2Y</span>
+              <div className="flex gap-1 ml-2">
+                {[["flota","Flota total"],["pojazd","Per pojazd"]].map(([m,l])=>(
+                  <button key={m} onClick={()=>setYoyMode(m)}
+                    className={"px-3 py-1 rounded-lg text-xs font-medium transition-all "+(yoyMode===m?"bg-blue-500 text-white":"bg-gray-100 text-gray-500 hover:bg-gray-200")}>{l}</button>
+                ))}
+              </div>
+              <div className="flex gap-1 flex-wrap">
+                {METRICS.map(m=>(
+                  <button key={m.id} onClick={()=>setYoyMet(m.id)}
+                    className={"px-3 py-1 rounded-lg text-xs font-medium transition-all "+(yoyMet===m.id?"bg-indigo-500 text-white":"bg-gray-100 text-gray-500 hover:bg-gray-200")}>{m.label}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Per-row rendering */}
+            {rows.map((row,ri)=>{
+              // calendarMonths = ile miesięcy 2026 minęło wg kalendarza (kwiecień = 4)
+              const calendarMonths = Math.min(new Date().getMonth() + 1, 12);
+              // activeMonths = ile miesięcy ma dane w 2026 (do wyświetlenia "X mies.")
+              const activeMonths = Math.max(row.vals26.filter(v=>v>0).length, 0);
+              // YTD zawsze porównuje ten sam okres wg kalendarza, niezależnie od dostępności danych
+              const ytd26 = row.vals26.slice(0,calendarMonths).reduce((a,b)=>a+b,0);
+              const ytd25 = row.vals25.slice(0,calendarMonths).reduce((a,b)=>a+b,0);
+              const full25 = row.vals25.reduce((a,b)=>a+b,0);
+              const pctYtd = ytd25 ? ((ytd26-ytd25)/Math.abs(ytd25)*100) : 0;
+              const projection = activeMonths>0 ? Math.round(ytd26/activeMonths*12) : 0;
+              const rowMax = Math.max(...row.vals25,...row.vals26);
+
+              return (
+                <div key={ri} style={{marginBottom: rows.length>1?24:0}}>
+                  {rows.length>1&&<div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:8,paddingBottom:4,borderBottom:"1px solid #f1f5f9"}}>{row.label}</div>}
+
+                  {/* KPI Strip */}
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
+                    {[
+                      {label:"YTD 2026",value:fmtFull(ytd26)+" €",sub:activeMonths+" mies. · "+(full25?(ytd26/full25*100).toFixed(0):0)+"% rocznego 2025",vc:"#1d4ed8",bg:"#eff6ff",bc:"#bfdbfe"},
+                      {label:"YTD 2025",value:fmtFull(ytd25)+" €",sub:"okres porównywalny",vc:"#64748b",bg:"#f8fafc",bc:"#e5e7eb"},
+                      {label:"ZMIANA YTD",value:(pctYtd>=0?"+":"")+pctYtd.toFixed(1)+"%",sub:(pctYtd>=0?"+":"")+fmtFull(ytd26-ytd25)+" €",vc:pctYtd>=0?"#15803d":"#dc2626",bg:pctYtd>=0?"#f0fdf4":"#fef2f2",bc:pctYtd>=0?"#bbf7d0":"#fecaca"},
+                      {label:"PROJEKCJA ROCZNA",value:fmtFull(projection)+" €",sub:"vs "+fmtFull(full25)+" € w 2025",vc:"#6366f1",bg:"#f5f3ff",bc:"#ddd6fe"},
+                    ].map((c,i)=>(
+                      <div key={i} style={{background:c.bg,borderRadius:10,padding:"10px 14px",border:"1px solid "+c.bc}}>
+                        <div style={{fontSize:9,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4}}>{c.label}</div>
+                        <div style={{fontSize:20,fontWeight:800,color:c.vc,lineHeight:1.2}}>{c.value}</div>
+                        <div style={{fontSize:10,color:"#94a3b8",marginTop:3}}>{c.sub}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Table header */}
+                  <div style={{display:"grid",gridTemplateColumns:"44px 1fr 68px 68px 52px",gap:8,padding:"7px 12px",borderBottom:"1px solid #e5e7eb",background:"#f8fafc",borderRadius:"8px 8px 0 0"}}>
+                    {["","PORÓWNANIE","2026","2025","YoY"].map((h,i)=>(
+                      <div key={i} style={{fontSize:9,fontWeight:600,color:i===2?"#1d4ed8":"#94a3b8",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:i>=2?"right":"left"}}>{h}</div>
+                    ))}
+                  </div>
+
+                  {/* Monthly rows */}
+                  {MS.map((m,mi)=>{
+                    const v25=row.vals25[mi], v26=row.vals26[mi];
+                    const isFut=!v26;
+                    const pct=v25&&v26?((v26-v25)/Math.abs(v25)*100):null;
+                    const bW25=rowMax?(v25/rowMax*100):0;
+                    const bW26=rowMax?(v26/rowMax*100):0;
+                    const isQEnd=mi===2||mi===5||mi===8||mi===11;
+                    return (
+                      <div key={mi}>
+                        <div style={{display:"grid",gridTemplateColumns:"44px 1fr 68px 68px 52px",gap:8,padding:"5px 12px",alignItems:"center",opacity:isFut?0.28:1,background:mi%2===0?"#fff":"#fafbfc",borderBottom:isQEnd?"none":"1px solid #f3f4f6",transition:"background 0.15s"}}>
+                          <div style={{fontSize:11,fontWeight:600,color:"#334155"}}>{m}</div>
+                          <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                            <div style={{width:bW26+"%",height:8,background:!isFut&&v26>=v25?"linear-gradient(90deg,#3b82f6,#2563eb)":!isFut?"linear-gradient(90deg,#f97316,#ea580c)":"#e5e7eb",borderRadius:4,transition:"width 0.4s ease",minWidth:v26?3:0}}/>
+                            <div style={{width:bW25+"%",height:5,background:"#e2e8f0",borderRadius:3}}/>
+                          </div>
+                          <div style={{fontSize:12,fontWeight:700,color:"#1d4ed8",textAlign:"right"}}>{fmtV(v26)}</div>
+                          <div style={{fontSize:11,color:"#94a3b8",textAlign:"right"}}>{fmtV(v25)}</div>
+                          <div style={{textAlign:"right"}}>
+                            {pct!==null?<span style={{fontSize:10,fontWeight:700,color:pct>=0?"#15803d":"#dc2626"}}>{pct>=0?"▲":"▼"}{Math.abs(pct).toFixed(0)}%</span>:<span style={{color:"#d1d5db",fontSize:10}}>—</span>}
+                          </div>
+                        </div>
+                        {isQEnd&&(()=>{
+                          const q=Math.floor(mi/3);
+                          const q25=qSum(row.vals25,q), q26=qSum(row.vals26,q);
+                          const hasQ=q26>0;
+                          const qPct=q25&&q26?((q26-q25)/Math.abs(q25)*100):null;
+                          return (
+                            <div style={{display:"grid",gridTemplateColumns:"44px 1fr 68px 68px 52px",gap:8,padding:"5px 12px",background:"#f0f4ff",borderTop:"1px solid #e0e7ff",borderBottom:"1px solid #e0e7ff",alignItems:"center",opacity:hasQ?1:0.3,marginBottom:2}}>
+                              <div style={{fontSize:11,fontWeight:800,color:"#4338ca"}}>Q{q+1}</div>
+                              <div/>
+                              <div style={{fontSize:12,fontWeight:700,color:"#1d4ed8",textAlign:"right"}}>{fmtV(q26)}</div>
+                              <div style={{fontSize:11,fontWeight:500,color:"#94a3b8",textAlign:"right"}}>{fmtV(q25)}</div>
+                              <div style={{textAlign:"right"}}>
+                                {qPct!==null?<span style={{fontSize:10,fontWeight:800,color:qPct>=0?"#15803d":"#dc2626"}}>{qPct>=0?"+":""}{qPct.toFixed(1)}%</span>:<span style={{color:"#d1d5db",fontSize:10}}>—</span>}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    );
+                  })}
+
+                  {/* Half-year cards */}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:10}}>
+                    {[0,1].map(h=>{
+                      const h25=row.vals25.slice(h*6,h*6+6).reduce((a,b)=>a+b,0);
+                      const h26=row.vals26.slice(h*6,h*6+6).reduce((a,b)=>a+b,0);
+                      const hasH=h26>0;
+                      const hPct=h25&&h26?((h26-h25)/Math.abs(h25)*100):null;
+                      return (
+                        <div key={h} style={{background:"#f8fafc",borderRadius:10,padding:"10px 14px",border:"1px solid #e5e7eb",opacity:hasH?1:0.3,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <div>
+                            <div style={{fontSize:10,fontWeight:700,color:"#64748b",marginBottom:2}}>H{h+1}</div>
+                            <div style={{display:"flex",gap:12}}>
+                              <span style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{fmtV(h26)}</span>
+                              <span style={{fontSize:13,color:"#94a3b8"}}>vs {fmtV(h25)}</span>
+                            </div>
+                          </div>
+                          {hPct!==null?<span style={{fontSize:13,fontWeight:800,padding:"3px 10px",borderRadius:8,background:hPct>=0?"#f0fdf4":"#fef2f2",color:hPct>=0?"#15803d":"#dc2626",border:"1px solid "+(hPct>=0?"#bbf7d0":"#fecaca")}}>{hPct>=0?"+":""}{hPct.toFixed(1)}%</span>:<span style={{color:"#d1d5db"}}>—</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Year total */}
+                  <div style={{marginTop:8,background:"#f8fafc",borderRadius:10,padding:"10px 14px",border:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div>
+                      <div style={{fontSize:10,fontWeight:700,color:"#64748b",marginBottom:2}}>ROK TOTAL</div>
+                      <div style={{display:"flex",gap:12,alignItems:"baseline"}}>
+                        <span style={{fontSize:16,fontWeight:800,color:"#1d4ed8"}}>{fmtV(row.vals26.reduce((a,b)=>a+b,0))} <span style={{fontSize:10,fontWeight:500}}>({activeMonths} mies.)</span></span>
+                        <span style={{fontSize:14,color:"#94a3b8"}}>vs {fmtV(full25)}</span>
+                      </div>
+                    </div>
+                    {pctYtd?<span style={{fontSize:14,fontWeight:800,padding:"4px 12px",borderRadius:8,background:pctYtd>=0?"#f0fdf4":"#fef2f2",color:pctYtd>=0?"#15803d":"#dc2626",border:"1px solid "+(pctYtd>=0?"#bbf7d0":"#fecaca")}}>{pctYtd>=0?"+":""}{pctYtd.toFixed(1)}% YTD</span>:<span style={{color:"#d1d5db"}}>—</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+function RentFormModal({ vehicles, record, initVehicle, initYear, initMonth, onSave, onClose }) {
+  const [vehicleId, setVehicleId] = useState(record?.vehicleId || initVehicle || vehicles[0]?.id || "");
+  const [year,      setYear]      = useState(record?.year  ?? initYear);
+  const [month,     setMonth]     = useState(record?.month ?? initMonth);
+  const [frachty,   setFrachty]   = useState(record?.frachty  || "");
+  const [costs,     setCosts]     = useState(record?.costs    || {});
+  const [kmGoogle,  setKmGoogle]  = useState(record?.kmGoogle  || "");
+  const [kmLicznik, setKmLicznik] = useState(record?.kmLicznik || "");
+  const [litry,     setLitry]     = useState(record?.litry     || "");
+  const [dni,       setDni]       = useState(record?.dni       || "");
+  const [iloscFr,   setIloscFr]   = useState(record?.iloscFr   || "");
+  const [note,      setNote]      = useState(record?.note      || "");
+
+  const setC = (id, val) => setCosts(p => ({ ...p, [id]: val === "" ? undefined : Number(val) }));
+
+  const totalKoszty = RENT_COSTS.reduce((s,c) => s + (Number(costs[c.id]) || 0), 0);
+  const zysk = (Number(frachty)||0) - totalKoszty;
+
+  const handleSave = () => {
+    if (!vehicleId || frachty === "") return;
+    onSave({ vehicleId, year, month, frachty: Number(frachty), costs,
+             kmGoogle: Number(kmGoogle)||undefined, kmLicznik: Number(kmLicznik)||undefined,
+             litry: Number(litry)||undefined, dni: Number(dni)||undefined,
+             iloscFr: Number(iloscFr)||undefined, note });
+  };
+
+  const zyskColor = (z) => z > 0 ? "#16a34a" : z < 0 ? "#dc2626" : "#9ca3af";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background:"rgba(0,0,0,0.5)", backdropFilter:"blur(4px)" }}>
+      <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden" style={{ maxHeight:"90vh" }}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <div className="font-bold text-gray-900">
+            {record ? "✏️ Edytuj wpis" : "➕ Nowy wpis rentowności"}
+          </div>
+          <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs">✕</button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 px-5 py-4 space-y-4">
+          {/* Vehicle + period */}
+          <div className="grid grid-cols-3 gap-3">
+            <MF label="Pojazd">
+              <select value={vehicleId} onChange={e=>setVehicleId(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-gray-400">
+                {vehicles.map(v => <option key={v.id} value={v.id}>{v.plate}</option>)}
+              </select>
+            </MF>
+            <MF label="Rok">
+              <select value={year} onChange={e=>setYear(Number(e.target.value))}
+                className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-gray-400">
+                {[2024,2025,2026].map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </MF>
+            <MF label="Miesiąc">
+              <select value={month} onChange={e=>setMonth(Number(e.target.value))}
+                className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-gray-400">
+                {MONTHS_PL.map((m,i) => <option key={i} value={i}>{m}</option>)}
+              </select>
+            </MF>
+          </div>
+
+          {/* Frachty */}
+          <div className="rounded-2xl p-4" style={{ background:"#eff6ff", border:"1.5px solid #bfdbfe" }}>
+            <div className="text-xs font-bold text-blue-700 uppercase tracking-wider mb-2">💰 Przychód</div>
+            <MF label="Frachty (EUR)">
+              <MInput type="number" value={frachty} onChange={setFrachty} placeholder="np. 9750" />
+            </MF>
+            <div className="grid grid-cols-2 gap-3 mt-2">
+              <MF label="Ilość frachtów"><MInput type="number" value={iloscFr} onChange={setIloscFr} placeholder="np. 12" /></MF>
+              <MF label="Dni pracy"><MInput type="number" value={dni} onChange={setDni} placeholder="np. 22" /></MF>
+            </div>
+          </div>
+
+          {/* Costs */}
+          <div className="rounded-2xl p-4" style={{ background:"#fef2f2", border:"1.5px solid #fecaca" }}>
+            <div className="text-xs font-bold text-red-700 uppercase tracking-wider mb-3">📉 Koszty (EUR)</div>
+            <div className="grid grid-cols-2 gap-2">
+              {RENT_COSTS.map(c => (
+                <MF key={c.id} label={`${c.icon} ${c.label}`}>
+                  <MInput type="number" value={costs[c.id] ?? ""} onChange={val => setC(c.id, val)} placeholder="0" />
+                </MF>
+              ))}
+            </div>
+          </div>
+
+          {/* KM + paliwo */}
+          <div className="rounded-2xl p-4" style={{ background:"#f9fafb", border:"1.5px solid #e5e7eb" }}>
+            <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">📏 Dane eksploatacyjne</div>
+            <div className="grid grid-cols-2 gap-3">
+              <MF label="KM google"><MInput type="number" value={kmGoogle} onChange={setKmGoogle} placeholder="np. 8500" /></MF>
+              <MF label="KM licznik"><MInput type="number" value={kmLicznik} onChange={setKmLicznik} placeholder="np. 8750" /></MF>
+              <MF label="Litry paliwa"><MInput type="number" value={litry} onChange={setLitry} placeholder="np. 1340" /></MF>
+            </div>
+          </div>
+
+          <MF label="Notatka (opcjonalnie)">
+            <MInput value={note} onChange={setNote} placeholder="np. Urlop w połowie miesiąca..." />
+          </MF>
+        </div>
+
+        {/* Footer with live summary */}
+        <div className="px-5 py-4 border-t border-gray-100">
+          <div className="flex items-center justify-between mb-3 px-3 py-2 rounded-xl" style={{ background:"#f9fafb" }}>
+            <span className="text-xs text-gray-500">Frachty: <strong className="text-blue-600">{Number(frachty||0).toLocaleString("pl-PL")} €</strong></span>
+            <span className="text-xs text-gray-500">Koszty: <strong className="text-red-500">{totalKoszty.toLocaleString("pl-PL")} €</strong></span>
+            <span className="text-xs font-bold" style={{ color: zyskColor(zysk) }}>
+              Zysk: {zysk >= 0 ? "+" : ""}{zysk.toLocaleString("pl-PL")} €
+            </span>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={handleSave} disabled={!vehicleId || frachty === ""}
+              className="flex-1 py-3 rounded-xl text-sm font-bold text-white hover:opacity-90 transition-all disabled:opacity-40"
+              style={{ background:"#111827" }}>
+              ✅ Zapisz
+            </button>
+            <button onClick={onClose}
+              className="px-5 py-3 rounded-xl text-sm font-medium hover:bg-gray-200 transition-all"
+              style={{ background:"#e5e7eb", color:"#374151" }}>
+              Anuluj
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ServisTab({ vehicles, onUpdateVehicle }) {
+  const [editId, setEditId] = useState(null);
+  const today = new Date();
+
+  const daysUntilD = (d) => d ? Math.ceil((new Date(d) - today) / 86400000) : null;
+
+  const getVehicleAlerts = (v) => {
+    const alerts = [];
+    const push = (label, days, type="date") => {
+      if (days === null) return;
+      const urgent = type==="date" ? days <= 30 : days <= 1500;
+      const warn   = type==="date" ? days <= 60 : days <= 3000;
+      alerts.push({ label, days, type, urgent, warn });
+    };
+
+    push("OC",          daysUntilD(v.ocExpiry));
+    push("AC",          daysUntilD(v.acExpiry));
+    push("Przegląd",    daysUntilD(v.inspectionExpiry));
+    push("UDT ważność", daysUntilD(v.udtExpiry));
+    push("UDT przegląd",daysUntilD(v.udtNextDate));
+
+    const currKm = Number(v.currentKm) || 0;
+    // warranty
+    if (v.warrantyActive !== false && v.warrantyServiceEvery) {
+      const purKm = Number(v.warrantyPurchaseKm) || 0;
+      const evKm  = Number(v.warrantyServiceEvery);
+      const nextKm = purKm + Math.ceil((currKm - purKm + 1) / evKm) * evKm;
+      push("Serwis gwar.", nextKm - currKm, "km");
+    }
+    // own
+    if (v.lastOilServiceKm && v.oilServiceEveryKm) {
+      const nextKm = Number(v.lastOilServiceKm) + Number(v.oilServiceEveryKm);
+      push("Serwis olej.", nextKm - currKm, "km");
+    }
+    return alerts;
+  };
+
+  const sortedVehicles = [...vehicles].sort((a, b) => {
+    const aAlerts = getVehicleAlerts(a);
+    const bAlerts = getVehicleAlerts(b);
+    const aUrgent = aAlerts.filter(x => x.urgent).length;
+    const bUrgent = bAlerts.filter(x => x.urgent).length;
+    if (bUrgent !== aUrgent) return bUrgent - aUrgent;
+    return aAlerts.filter(x=>x.warn).length < bAlerts.filter(x=>x.warn).length ? 1 : -1;
+  });
+
+  const totalAlerts = vehicles.reduce((s, v) => s + getVehicleAlerts(v).filter(x=>x.urgent).length, 0);
+
+  const StatusPill = ({ alert: a }) => {
+    const expired = a.type==="date" ? a.days < 0 : a.days <= 0;
+    const bg = expired || a.urgent ? "#fef2f2" : a.warn ? "#fffbeb" : "#f0fdf4";
+    const cl = expired || a.urgent ? "#dc2626"  : a.warn ? "#d97706" : "#16a34a";
+    const icon = expired ? "⚠" : a.urgent ? "🔴" : a.warn ? "🟡" : "🟢";
+    const val = a.type === "km"
+      ? (a.days <= 0 ? "przekroczono" : `${a.days.toLocaleString("pl-PL")} km`)
+      : (a.days < 0  ? "wygasło" : `${a.days} dni`);
+    return (
+      <div className="flex items-center justify-between px-3 py-2 rounded-xl"
+        style={{ background: bg, border:`1px solid ${bg==="#f0fdf4"?"#bbf7d0":bg==="#fffbeb"?"#fde68a":"#fecaca"}` }}>
+        <span className="text-xs font-semibold text-gray-700">{icon} {a.label}</span>
+        <span className="text-xs font-bold" style={{ color: cl }}>{val}</span>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">🔧 Serwis & Terminarz</h2>
+          <p className="text-sm text-gray-400 mt-0.5">OC · AC · Przeglądy · UDT · Olej</p>
+        </div>
+        {totalAlerts > 0 && (
+          <div className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold"
+            style={{ background:"#fef2f2", border:"1px solid #fecaca", color:"#dc2626" }}>
+            ⚠️ {totalAlerts} {totalAlerts===1?"pilny termin":"pilne terminy"}
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-4">
+        {sortedVehicles.map(v => {
+          const alerts  = getVehicleAlerts(v);
+          const urgent  = alerts.filter(x => x.urgent || x.days < 0).length;
+          const currKm  = Number(v.currentKm) || 0;
+          const isEdit  = editId === v.id;
+
+          return (
+            <div key={v.id} className="bg-white rounded-2xl border overflow-hidden shadow-sm"
+              style={{ borderColor: urgent > 0 ? "#fecaca" : "#e5e7eb" }}>
+
+              {/* HEADER */}
+              <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-50"
+                style={{ background: urgent > 0 ? "#fef9f9" : "#fafafa" }}>
+                <div className="flex items-center gap-3">
+                  <span className="text-xl"><VehicleIcon v={v} size={20}/></span>
+                  <div>
+                    <span className="font-bold text-sm text-gray-900" style={{ fontFamily:"'DM Mono',monospace" }}>
+                      {v.plate}{v.plate2 ? ` / ${v.plate2}` : ""}
+                    </span>
+                    <div className="text-xs text-gray-400">{v.brand} · {v.year}</div>
+                  </div>
+                  {urgent > 0 && (
+                    <span className="px-2 py-0.5 rounded-full text-xs font-bold text-white" style={{ background:"#dc2626" }}>
+                      {urgent} pilne
+                    </span>
+                  )}
+                </div>
+                <button onClick={() => setEditId(isEdit ? null : v.id)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                  style={{ background: isEdit?"#111827":"#f3f4f6", color: isEdit?"#fff":"#6b7280" }}>
+                  {isEdit ? "Zamknij" : "✏️ Edytuj"}
+                </button>
+              </div>
+
+              {!isEdit && (
+                <div className="px-5 py-4">
+                  {alerts.length === 0 ? (
+                    <div className="text-xs text-gray-400 text-center py-4">
+                      Brak danych serwisowych — kliknij ✏️ Edytuj aby uzupełnić
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {alerts.map((a, i) => <StatusPill key={i} alert={a} />)}
+                      {currKm > 0 && (
+                        <div className="flex items-center justify-between px-3 py-2 rounded-xl"
+                          style={{ background:"#f3f4f6" }}>
+                          <span className="text-xs font-semibold text-gray-500">🏁 Przebieg</span>
+                          <span className="text-xs font-bold text-gray-700">{currKm.toLocaleString("pl-PL")} km</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* INLINE EDIT */}
+              {isEdit && (
+                <ServiceEditForm vehicle={v}
+                  onSave={(updated) => { onUpdateVehicle(updated); setEditId(null); }}
+                  onClose={() => setEditId(null)} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ServiceEditForm({ vehicle, onSave, onClose }) {
+  const [v, setV] = useState({
+    ocExpiry:             vehicle.ocExpiry             || "",
+    acExpiry:             vehicle.acExpiry             || "",
+    inspectionExpiry:     vehicle.inspectionExpiry     || "",
+    udtNumber:            vehicle.udtNumber            || "",
+    udtExpiry:            vehicle.udtExpiry            || "",
+    udtNextDate:          vehicle.udtNextDate          || "",
+    udtLiftName:          vehicle.udtLiftName          || "",
+    warrantyActive:       vehicle.warrantyActive !== false,
+    warrantyKmLimit:      vehicle.warrantyKmLimit      || "",
+    warrantyServiceEvery: vehicle.warrantyServiceEvery || "",
+    warrantyPurchaseKm:   vehicle.warrantyPurchaseKm   || "",
+    currentKm:            vehicle.currentKm            || "",
+    lastOilServiceKm:     vehicle.lastOilServiceKm     || "",
+    oilServiceEveryKm:    vehicle.oilServiceEveryKm    || "",
+  });
+  const set = (k, val) => setV(p => ({ ...p, [k]: val }));
+  const hasUdt = (vehicle.equipment||[]).includes("winda");
+
+  // live preview calculations
+  const currKm      = Number(v.currentKm) || 0;
+  const warNextKm   = v.warrantyActive && v.warrantyServiceEvery && v.warrantyPurchaseKm
+    ? (() => { const p=Number(v.warrantyPurchaseKm),e=Number(v.warrantyServiceEvery); return p+Math.ceil((currKm-p+1)/e)*e; })()
+    : null;
+  const ownNextKm   = v.lastOilServiceKm && v.oilServiceEveryKm
+    ? Number(v.lastOilServiceKm) + Number(v.oilServiceEveryKm) : null;
+
+  return (
+    <div className="px-5 py-5 space-y-5 border-t border-gray-100">
+
+      {/* DATY WE FLOCIE */}
+      <div className="rounded-2xl p-4 space-y-3" style={{ background:"#f0fdf4", border:"1.5px solid #bbf7d0" }}>
+        <div className="text-xs font-bold text-green-700 uppercase tracking-wider">📅 Daty we flocie</div>
+        <div className="grid grid-cols-2 gap-3">
+          <MF label="Data dołączenia do floty">
+            <input type="date" value={v.fleetJoinDate||""} onChange={e => setF("fleetJoinDate", e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-lg text-sm outline-none"
+              style={{ background:"#f9fafb", border:"1.5px solid #e5e7eb", fontFamily:"'DM Sans',sans-serif", color:"#111827" }} />
+          </MF>
+          <MF label="Data opuszczenia floty">
+            <input type="date" value={v.fleetLeaveDate||""} onChange={e => setF("fleetLeaveDate", e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-lg text-sm outline-none"
+              style={{ background:"#f9fafb", border:"1.5px solid #e5e7eb", fontFamily:"'DM Sans',sans-serif", color:"#111827" }} />
+          </MF>
+        </div>
+      </div>
+
+      {/* UBEZPIECZENIA + PRZEGLĄD */}
+      <div className="rounded-2xl p-4 space-y-3" style={{ background:"#f8faff", border:"1.5px solid #e0e7ff" }}>
+        <div className="text-xs font-bold text-indigo-600 uppercase tracking-wider">🛡️ Ubezpieczenia & Przegląd</div>
+        <div className="grid grid-cols-2 gap-3">
+          <MF label="OC — ważny do"><MInput type="date" value={v.ocExpiry} onChange={val=>set("ocExpiry",val)} /></MF>
+          <MF label="AC — ważny do"><MInput type="date" value={v.acExpiry} onChange={val=>set("acExpiry",val)} /></MF>
+          <MF label="Przegląd — ważny do"><MInput type="date" value={v.inspectionExpiry} onChange={val=>set("inspectionExpiry",val)} /></MF>
+        </div>
+      </div>
+
+      {/* UDT */}
+      {hasUdt && (
+        <div className="rounded-2xl p-4 space-y-3" style={{ background:"#fdf4ff", border:"1.5px solid #e9d5ff" }}>
+          <div className="text-xs font-bold text-purple-700 uppercase tracking-wider">🏗️ UDT — Winda</div>
+          <div className="grid grid-cols-2 gap-3">
+            <MF label="Nazwa / typ windy"><MInput value={v.udtLiftName} onChange={val=>set("udtLiftName",val)} placeholder="np. Zepro 1500 kg" /></MF>
+            <MF label="Nr ewidencyjny UDT"><MInput value={v.udtNumber} onChange={val=>set("udtNumber",val)} placeholder="UDT/W/..." /></MF>
+            <MF label="Data badania (ważność)"><MInput type="date" value={v.udtExpiry} onChange={val=>set("udtExpiry",val)} /></MF>
+            <MF label="Następny przegląd UDT"><MInput type="date" value={v.udtNextDate} onChange={val=>set("udtNextDate",val)} /></MF>
+          </div>
+        </div>
+      )}
+
+      {/* AKTUALNY PRZEBIEG */}
+      <div className="rounded-2xl p-4" style={{ background:"#f9fafb", border:"1.5px solid #e5e7eb" }}>
+        <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">🏁 Aktualny przebieg</div>
+        <MF label="Aktualny przebieg (KM)">
+          <MInput type="number" value={v.currentKm} onChange={val=>set("currentKm",val)} placeholder="np. 245000" />
+        </MF>
+      </div>
+
+      {/* SERWIS — GWARANCJA */}
+      <div className="rounded-2xl p-4 space-y-3" style={{ background:"#f0fdf4", border:"1.5px solid #bbf7d0" }}>
+        <div className="flex items-center justify-between">
+          <div className="text-xs font-bold text-green-700 uppercase tracking-wider">🔑 Serwis gwarancyjny</div>
+          <button onClick={() => set("warrantyActive", !v.warrantyActive)}
+            className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all"
+            style={{ background: v.warrantyActive?"#dcfce7":"#f3f4f6", color: v.warrantyActive?"#16a34a":"#9ca3af", border:`1.5px solid ${v.warrantyActive?"#86efac":"#e5e7eb"}` }}>
+            {v.warrantyActive ? "✓ Aktywna" : "Nieaktywna"}
+          </button>
+        </div>
+        {v.warrantyActive && (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <MF label="Limit KM gwarancji"><MInput type="number" value={v.warrantyKmLimit} onChange={val=>set("warrantyKmLimit",val)} placeholder="np. 100 000" /></MF>
+              <MF label="Co ile KM serwis"><MInput type="number" value={v.warrantyServiceEvery} onChange={val=>set("warrantyServiceEvery",val)} placeholder="np. 15 000" /></MF>
+              <MF label="KM przy zakupie"><MInput type="number" value={v.warrantyPurchaseKm} onChange={val=>set("warrantyPurchaseKm",val)} placeholder="np. 0" /></MF>
+            </div>
+            {warNextKm && currKm > 0 && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs" style={{ background:"#dcfce7" }}>
+                <span>📍 Następny serwis gwar.:</span>
+                <strong>{warNextKm.toLocaleString("pl-PL")} km</strong>
+                <span className="text-gray-500">({(warNextKm - currKm).toLocaleString("pl-PL")} km do serwisu)</span>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* SERWIS WŁASNY */}
+      <div className="rounded-2xl p-4 space-y-3" style={{ background:"#fffbeb", border:"1.5px solid #fde68a" }}>
+        <div className="text-xs font-bold text-amber-700 uppercase tracking-wider">🛢️ Serwis własny (po gwarancji)</div>
+        <div className="grid grid-cols-2 gap-3">
+          <MF label="KM przy ostatnim serwisie"><MInput type="number" value={v.lastOilServiceKm} onChange={val=>set("lastOilServiceKm",val)} placeholder="np. 230 000" /></MF>
+          <MF label="Co ile KM serwis"><MInput type="number" value={v.oilServiceEveryKm} onChange={val=>set("oilServiceEveryKm",val)} placeholder="np. 15 000" /></MF>
+        </div>
+        {ownNextKm && currKm > 0 && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs" style={{ background:"#fef9c3" }}>
+            <span>📍 Następny serwis własny:</span>
+            <strong>{ownNextKm.toLocaleString("pl-PL")} km</strong>
+            <span className="text-gray-500">
+              {ownNextKm - currKm <= 0 ? "⚠ przekroczono!" : `(${(ownNextKm - currKm).toLocaleString("pl-PL")} km do serwisu)`}
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div className="flex gap-2">
+        <button onClick={() => onSave({ ...vehicle, ...v })}
+          className="flex-1 py-3 rounded-xl text-sm font-bold text-white hover:opacity-90 transition-all active:scale-95"
+          style={{ background:"#111827" }}>
+          ✅ Zapisz
+        </button>
+        <button onClick={onClose}
+          className="px-5 py-3 rounded-xl text-sm font-medium hover:bg-gray-200 transition-all"
+          style={{ background:"#e5e7eb", color:"#374151" }}>
+          Anuluj
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function VehicleServicePanel({ vehicle: v }) {
+  const today = new Date();
+  const daysUntilDate = (d) => d ? Math.ceil((new Date(d) - today) / 86400000) : null;
+
+  // insurance & inspection
+  const ocDays   = daysUntilDate(v.ocExpiry);
+  const acDays   = daysUntilDate(v.acExpiry);
+  const insDays  = daysUntilDate(v.inspectionExpiry);
+  // UDT
+  const udtDays  = daysUntilDate(v.udtExpiry);
+  const udtNext  = daysUntilDate(v.udtNextDate);
+  // warranty oil service
+  const warActive = v.warrantyActive !== false && v.warrantyKmLimit;
+  const currKm    = Number(v.currentKm) || 0;
+  const warLimit  = Number(v.warrantyKmLimit) || 0;
+  const warLeft   = warActive ? (warLimit - currKm) : null;
+  const warServiceEvery = Number(v.warrantyServiceEvery) || 0;
+  const warPurchaseKm   = Number(v.warrantyPurchaseKm) || 0;
+  const warNextKm = warServiceEvery
+    ? warPurchaseKm + Math.ceil((currKm - warPurchaseKm) / warServiceEvery) * warServiceEvery
+    : null;
+  const warKmLeft = warNextKm ? (warNextKm - currKm) : null;
+  // own oil service
+  const lastSvcKm  = Number(v.lastOilServiceKm) || 0;
+  const svcEveryKm = Number(v.oilServiceEveryKm) || 0;
+  const nextSvcKm  = (lastSvcKm && svcEveryKm) ? lastSvcKm + svcEveryKm : null;
+  const ownKmLeft  = nextSvcKm ? (nextSvcKm - currKm) : null;
+  // months service
+  const lastSvcDate     = v.lastOilServiceDate;
+  const svcEveryMonths  = Number(v.oilServiceEveryMonths) || 0;
+  let monthsDays = null;
+  if (lastSvcDate && svcEveryMonths) {
+    const next = new Date(lastSvcDate);
+    next.setMonth(next.getMonth() + svcEveryMonths);
+    monthsDays = Math.ceil((next - today) / 86400000);
+  }
+
+  const hasAny = ocDays!==null || acDays!==null || insDays!==null || udtDays!==null || udtNext!==null ||
+    warKmLeft!==null || ownKmLeft!==null || monthsDays!==null || (warActive && warLeft!==null);
+
+  if (!hasAny) return null;
+
+  const alertCount = [
+    ocDays, acDays, insDays, udtDays, udtNext
+  ].filter(d => d !== null && d <= 30).length +
+  [warKmLeft, ownKmLeft].filter(d => d !== null && d <= 1500).length +
+  (monthsDays !== null && monthsDays <= 30 ? 1 : 0);
+
+  return (
+    <div className="px-5 py-3 border-t border-gray-50">
+      <div className="flex items-center gap-2 mb-2.5">
+        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Status serwisowy</span>
+        {alertCount > 0 && (
+          <span className="px-1.5 py-0.5 rounded-full text-xs font-bold text-white" style={{ background:"#dc2626", fontSize:10 }}>
+            {alertCount}
+          </span>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {ocDays  !== null && serviceStatusBadge(ocDays,  "OC")}
+        {acDays  !== null && serviceStatusBadge(acDays,  "AC")}
+        {insDays !== null && serviceStatusBadge(insDays, "Przegląd")}
+        {udtDays !== null && serviceStatusBadge(udtDays, "UDT ważność")}
+        {udtNext !== null && serviceStatusBadge(udtNext, "UDT przegląd")}
+        {warActive && warLeft !== null && (
+          <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
+            style={{ background: warLeft<=0?"#fef2f2": warLeft<=5000?"#fffbeb":"#f0fdf4",
+                     color:      warLeft<=0?"#dc2626": warLeft<=5000?"#d97706":"#16a34a" }}>
+            {warLeft<=0 ? "⚠ Gwarancja — wygasła KM" : `🔑 Gwarancja — ${warLeft.toLocaleString("pl-PL")} km do końca`}
+          </span>
+        )}
+        {warKmLeft !== null && kmStatusBadge(warKmLeft, "Serwis gwar.")}
+        {ownKmLeft !== null && kmStatusBadge(ownKmLeft, "Serwis olej.")}
+        {monthsDays !== null && serviceStatusBadge(monthsDays, "Serwis mies.")}
+        {currKm > 0 && (
+          <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ background:"#f3f4f6", color:"#6b7280" }}>
+            🏁 {Number(currKm).toLocaleString("pl-PL")} km
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DriverCopyRow({ vehicle: v, active }) {
+  const [copied, setCopied] = useState(false);
+  const [showText, setShowText] = useState(false);
+  const [offerText, setOfferText] = useState("");
+
+  const buildOffer = () => {
+    const eq = [
+      ...(v.equipment || []).map(id => DEFAULT_EQUIPMENT.find(e => e.id === id)?.label).filter(Boolean),
+      ...(v.customEquipment || []),
+    ];
+    const plate  = v.plate2 ? `${v.plate} / ${v.plate2}` : v.plate;
+    const dims   = v.plate2
+      ? `${v.dimensions || "—"} (${v.plate}) / ${v.dimensions2 || "—"} (${v.plate2})`
+      : (v.dimensions || "—");
+    const weight = v.plate2
+      ? `${v.maxWeight || "—"} kg (${v.plate}) / ${v.maxWeight2 || "—"} kg (${v.plate2})`
+      : `${v.maxWeight || "—"} kg`;
+    return [
+      `${v.brand} ${v.year}`,
+      `📋 Rejestracja: ${plate}`,
+      `👤 Kierowca: ${active.name}`,
+      active.phone ? `📞 Tel: ${active.phone}` : null,
+      `📦 Rodzaj: ${v.type}${v.plate2 ? " + Przyczepa" : ""}`,
+      v.loadingType ? `🔄 Załadunek: ${v.loadingType}` : null,
+      `📐 Wymiary: ${dims}`,
+      `⚖️ Max waga: ${weight}`,
+      eq.length > 0 ? `🔧 Wyposażenie: ${eq.join(", ")}` : null,
+    ].filter(Boolean).join("\n");
+  };
+
+  const copyOffer = () => {
+    if (!active) return;
+    const lines = buildOffer();
+    setOfferText(lines);
+
+    const fallbackCopy = (text) => {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;pointer-events:none;";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      try { document.execCommand("copy"); } catch (_) {}
+      document.body.removeChild(ta);
+    };
+
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(lines).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2500);
+        }).catch(() => {
+          fallbackCopy(lines);
+          setCopied(true);
+          setTimeout(() => { setCopied(false); setShowText(true); }, 2500);
+        });
+      } else {
+        fallbackCopy(lines);
+        setShowText(true);
+      }
+    } catch (_) {
+      setShowText(true);
+    }
+  };
+
+  return (
+    <>
+      <div className="px-5 py-3 border-b border-gray-50 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs text-gray-400 mb-0.5">Aktualny kierowca</div>
+          {active
+            ? <div className="flex items-center gap-2 flex-wrap">
+                <div className="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0" />
+                <span className="text-sm font-semibold text-gray-900">{active.name}</span>
+                {active.phone && (
+                  <span className="text-xs text-gray-400" style={{ fontFamily: "'DM Mono', monospace" }}>{active.phone}</span>
+                )}
+                <span className="text-xs text-gray-400">podjął {fmtDate(active.from)}</span>
+              </div>
+            : <div className="text-sm text-gray-400 italic">Brak przypisanego kierowcy</div>
+          }
+        </div>
+        {active && (
+          <button onClick={copyOffer}
+            className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:opacity-90 active:scale-95"
+            style={{
+              background: copied ? "#f0fdf4" : "#f3f4f6",
+              color:      copied ? "#16a34a" : "#374151",
+              border:     `1.5px solid ${copied ? "#86efac" : "#e5e7eb"}`,
+            }}>
+            {copied ? "✓ Skopiowano!" : "📋 Kopiuj ofertę"}
+          </button>
+        )}
+      </div>
+
+      {/* FALLBACK MODAL — gdy clipboard zablokowany */}
+      {showText && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.4)", backdropFilter: "blur(4px)" }}>
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl overflow-hidden"
+            style={{ fontFamily: "'DM Sans', sans-serif" }}>
+            <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-gray-100">
+              <span className="text-sm font-bold text-gray-900">Oferta — zaznacz i skopiuj</span>
+              <button onClick={() => setShowText(false)}
+                className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs">✕</button>
+            </div>
+            <div className="px-5 py-4">
+              <textarea readOnly value={offerText} rows={10}
+                onFocus={(e) => e.target.select()}
+                className="w-full text-xs rounded-xl p-3 outline-none resize-none"
+                style={{ background: "#f9fafb", border: "1.5px solid #e5e7eb", fontFamily: "'DM Mono', monospace", color: "#111827", lineHeight: "1.7" }} />
+              <p className="text-xs text-gray-400 mt-2 text-center">Kliknij w pole → Ctrl+A → Ctrl+C</p>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// VEHICLE EDIT PANEL (inline, inside vehicle card)
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+// CZAS PRACY — Modal z kalendarzem
+// ═══════════════════════════════════════════════════════════════════════════════
+const CZAS_STATUSY = [
+  { id: "jazda",    label: "Jazda",       color: "#15803d", bg: "#f0fdf4", border: "#bbf7d0", hours: 0 },
+  { id: "pauza9",   label: "Pauza 9h",    color: "#b45309", bg: "#fffbeb", border: "#fde68a", hours: 9 },
+  { id: "pauza11",  label: "Pauza 11h",   color: "#c2410c", bg: "#fff7ed", border: "#fed7aa", hours: 11 },
+  { id: "pauza24",  label: "Pauza 24h",   color: "#dc2626", bg: "#fef2f2", border: "#fecaca", hours: 24 },
+  { id: "pauza45",  label: "Pauza 45h",   color: "#9333ea", bg: "#faf5ff", border: "#e9d5ff", hours: 45 },
+  { id: "pauzaInne", label: "Pauza inne", color: "#0369a1", bg: "#f0f9ff", border: "#bae6fd", hours: 0, custom: true },
+  { id: "baza",     label: "Baza",        color: "#6b7280", bg: "#f3f4f6", border: "#d1d5db", hours: 0 },
+];
+
+function CzasPracyModal({ vehicle, entries, onSave, onDelete, onClose }) {
+  const [month, setMonth] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
+  const [selectedStatus, setSelectedStatus] = useState("jazda");
+  const [rangeStart, setRangeStart] = useState(null);
+  const [rangeEnd, setRangeEnd] = useState(null);
+  const [startTime, setStartTime] = useState("06:00");
+  const [customHours, setCustomHours] = useState("");
+  const [note, setNote] = useState("");
+
+  const driverName = (vehicle.driverHistory || []).find(d => !d.to)?.name || "—";
+
+  // Calendar helpers
+  const daysInMonth = new Date(month.y, month.m + 1, 0).getDate();
+  const firstDow = (new Date(month.y, month.m, 1).getDay() + 6) % 7; // Mon=0
+  const dayNames = ["Pn", "Wt", "Śr", "Cz", "Pt", "Sb", "Nd"];
+
+  const fmtDate = (y, m, d) => `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+  const today = new Date().toISOString().slice(0,10);
+
+  // Map entries by date
+  const entryMap = {};
+  entries.forEach(e => {
+    const start = new Date(e.start + "T00:00:00");
+    const end = new Date(e.end + "T00:00:00");
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      entryMap[d.toISOString().slice(0,10)] = e;
+    }
+  });
+
+  const getStatusForDate = (dateStr) => {
+    const e = entryMap[dateStr];
+    return e ? CZAS_STATUSY.find(s => s.id === e.status) : null;
+  };
+
+  const isInRange = (dateStr) => {
+    if (!rangeStart) return false;
+    const end = rangeEnd || rangeStart;
+    return dateStr >= (rangeStart < end ? rangeStart : end) && dateStr <= (rangeStart < end ? end : rangeStart);
+  };
+
+  const handleDayClick = (dateStr) => {
+    if (!rangeStart || (rangeStart && rangeEnd)) {
+      setRangeStart(dateStr);
+      setRangeEnd(null);
+    } else {
+      setRangeEnd(dateStr);
+    }
+  };
+
+  const calcEndTime = (time, hours) => {
+    if (!hours || !time) return null;
+    const [h, m] = time.split(":").map(Number);
+    const totalMin = h * 60 + m + hours * 60;
+    const endH = Math.floor(totalMin / 60) % 24;
+    const endM = totalMin % 60;
+    const overflowDays = Math.floor(totalMin / (24 * 60));
+    return { time: `${String(endH).padStart(2,"0")}:${String(endM).padStart(2,"0")}`, overflowDays };
+  };
+
+  const handleSaveRange = () => {
+    if (!rangeStart) return;
+    const end = rangeEnd || rangeStart;
+    const from = rangeStart < end ? rangeStart : end;
+    const to = rangeStart < end ? end : rangeStart;
+    const st = CZAS_STATUSY.find(s => s.id === selectedStatus);
+    const effectiveHours = st?.custom ? (parseInt(customHours) || 0) : (st?.hours || 0);
+    const endCalc = effectiveHours ? calcEndTime(startTime, effectiveHours) : null;
+    onSave({
+      vehicleId: vehicle.id,
+      plate: vehicle.plate,
+      driver: driverName,
+      status: selectedStatus,
+      start: from,
+      end: to,
+      startTime: startTime || null,
+      endTime: endCalc?.time || null,
+      hours: effectiveHours,
+      note: note.trim() || "",
+      created: new Date().toISOString(),
+    });
+    setRangeStart(null);
+    setRangeEnd(null);
+    setNote("");
+  };
+
+  const prevMonth = () => setMonth(p => p.m === 0 ? { y: p.y - 1, m: 11 } : { y: p.y, m: p.m - 1 });
+  const nextMonth = () => setMonth(p => p.m === 11 ? { y: p.y + 1, m: 0 } : { y: p.y, m: p.m + 1 });
+  const monthLabel = new Date(month.y, month.m).toLocaleDateString("pl-PL", { month: "long", year: "numeric" });
+
+  // Podsumowanie miesiąca
+  const monthEntries = entries.filter(e => {
+    const mStart = fmtDate(month.y, month.m, 1);
+    const mEnd = fmtDate(month.y, month.m, daysInMonth);
+    return e.start <= mEnd && e.end >= mStart;
+  });
+
+  const countDays = (statusId) => {
+    let count = 0;
+    for (let d = 1; d <= daysInMonth; d++) {
+      const ds = fmtDate(month.y, month.m, d);
+      const e = entryMap[ds];
+      if (e && e.status === statusId) count++;
+    }
+    return count;
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.4)" }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full flex flex-col" style={{ maxWidth: 720, maxHeight: "90vh" }}>
+
+        {/* HEADER */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <VehicleIcon v={vehicle} size={24} />
+            <div>
+              <div className="font-bold text-gray-900">{vehicle.plate} — Czas pracy</div>
+              <div className="text-xs text-gray-400">{vehicle.brand} · {driverName}</div>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 text-sm">✕</button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 px-6 py-4">
+          {/* STATUS SELECTOR */}
+          <div className="mb-4">
+            <div className="text-xs text-gray-500 mb-2 font-medium">Wybierz status i zaznacz zakres na kalendarzu:</div>
+            <div className="flex flex-wrap gap-1.5">
+              {CZAS_STATUSY.map(s => (
+                <button key={s.id} onClick={() => setSelectedStatus(s.id)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                  style={{
+                    background: selectedStatus === s.id ? s.color : s.bg,
+                    color: selectedStatus === s.id ? "#fff" : s.color,
+                    border: `1.5px solid ${selectedStatus === s.id ? s.color : s.border}`,
+                  }}>
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* NAWIGACJA MIESIĄCA */}
+          <div className="flex items-center justify-between mb-3">
+            <button onClick={prevMonth} className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 text-sm">←</button>
+            <span className="font-semibold text-gray-900 capitalize">{monthLabel}</span>
+            <button onClick={nextMonth} className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 text-sm">→</button>
+          </div>
+
+          {/* KALENDARZ */}
+          <div className="grid grid-cols-7 gap-1 mb-4">
+            {dayNames.map(d => <div key={d} className="text-center text-xs font-semibold text-gray-400 py-1">{d}</div>)}
+            {Array.from({ length: firstDow }, (_, i) => <div key={`e${i}`} />)}
+            {Array.from({ length: daysInMonth }, (_, i) => {
+              const day = i + 1;
+              const dateStr = fmtDate(month.y, month.m, day);
+              const status = getStatusForDate(dateStr);
+              const inRange = isInRange(dateStr);
+              const isToday = dateStr === today;
+              const isStart = dateStr === rangeStart;
+              const isEnd = dateStr === rangeEnd;
+              const selSt = CZAS_STATUSY.find(s => s.id === selectedStatus);
+
+              return (
+                <button key={day} onClick={() => handleDayClick(dateStr)}
+                  className="relative h-10 rounded-lg text-xs font-medium transition-all hover:ring-2 hover:ring-blue-300 flex flex-col items-center justify-center"
+                  style={{
+                    background: inRange ? (selSt?.bg || "#e0e7ff") : status ? status.bg : isToday ? "#f0f9ff" : "#fff",
+                    border: `1.5px solid ${inRange ? (selSt?.color || "#6366f1") : status ? status.border : isToday ? "#bfdbfe" : "#e5e7eb"}`,
+                    color: status ? status.color : "#374151",
+                    outline: (isStart || isEnd) ? `2px solid ${selSt?.color || "#1d4ed8"}` : "none",
+                    outlineOffset: "-1px",
+                  }}>
+                  <span>{day}</span>
+                  {status && <span className="w-1.5 h-1.5 rounded-full absolute bottom-1" style={{ background: status.color }} />}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* ZAKRES + GODZINA START + PRZYCISK ZAPISZ */}
+          {rangeStart && (() => {
+            const selSt = CZAS_STATUSY.find(s=>s.id===selectedStatus);
+            const endCalc = selSt?.hours ? calcEndTime(startTime, selSt.hours) : null;
+            return (
+              <div className="mb-4 p-3 rounded-xl" style={{ background: selSt?.bg, border: `1px solid ${selSt?.border}` }}>
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="flex-1 text-sm">
+                    <span className="font-semibold" style={{ color: selSt?.color }}>
+                      {selSt?.label}
+                    </span>
+                    <span className="text-gray-500 ml-2">
+                      {rangeStart}{rangeEnd && rangeEnd !== rangeStart ? ` → ${rangeEnd}` : ""}
+                    </span>
+                  </div>
+                  <button onClick={handleSaveRange}
+                    className="px-4 py-2 rounded-lg text-xs font-bold text-white transition-all hover:opacity-90"
+                    style={{ background: selSt?.color }}>
+                    Zapisz
+                  </button>
+                  <button onClick={() => { setRangeStart(null); setRangeEnd(null); }}
+                    className="px-3 py-2 rounded-lg text-xs font-medium text-gray-500 bg-gray-100 hover:bg-gray-200">
+                    Anuluj
+                  </button>
+                </div>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <label className="text-xs text-gray-500 font-medium">Start:</label>
+                  <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)}
+                    className="px-2.5 py-1.5 rounded-lg text-sm border border-gray-200 bg-white outline-none w-28"
+                    style={{ fontFamily: "'DM Sans', sans-serif" }} />
+                  {selSt?.custom && (
+                    <>
+                      <label className="text-xs text-gray-500 font-medium">Godziny:</label>
+                      <input type="number" value={customHours} onChange={e => setCustomHours(e.target.value)}
+                        placeholder="np. 34" min="1" max="168"
+                        className="px-2.5 py-1.5 rounded-lg text-sm border border-gray-200 bg-white outline-none w-20" />
+                    </>
+                  )}
+                  {(selSt?.hours || (selSt?.custom && parseInt(customHours))) ? (() => {
+                    const h = selSt?.custom ? (parseInt(customHours) || 0) : selSt.hours;
+                    const ec = h ? calcEndTime(startTime, h) : null;
+                    return ec ? (
+                      <span className="text-xs font-semibold" style={{ color: selSt?.color }}>
+                        → Koniec: {ec.time}{ec.overflowDays > 0 ? ` (+${ec.overflowDays} ${ec.overflowDays === 1 ? "dzień" : "dni"})` : ""}
+                      </span>
+                    ) : null;
+                  })() : null}
+                </div>
+                <div className="mt-2">
+                  <input type="text" value={note} onChange={e => setNote(e.target.value)}
+                    placeholder="Notatka (opcjonalnie, np. serwis, załadunek...)"
+                    className="w-full px-2.5 py-1.5 rounded-lg text-sm border border-gray-200 bg-white outline-none"
+                    style={{ fontFamily: "'DM Sans', sans-serif" }} />
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* LEGENDA / PODSUMOWANIE MIESIĄCA */}
+          <div className="grid grid-cols-3 gap-2 mb-4">
+            {CZAS_STATUSY.map(s => {
+              const cnt = countDays(s.id);
+              if (!cnt) return null;
+              return (
+                <div key={s.id} className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs"
+                  style={{ background: s.bg, border: `1px solid ${s.border}` }}>
+                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: s.color }} />
+                  <span className="font-medium" style={{ color: s.color }}>{s.label}</span>
+                  <span className="ml-auto font-bold" style={{ color: s.color }}>{cnt}d</span>
+                </div>
+              );
+            }).filter(Boolean)}
+          </div>
+
+          {/* WPISY Z BIEŻĄCEGO MIESIĄCA */}
+          <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Wpisy w tym miesiącu</div>
+          {monthEntries.length === 0 ? (
+            <div className="text-xs text-gray-400 italic py-2">Brak wpisów</div>
+          ) : (
+            <div className="space-y-1.5">
+              {monthEntries.sort((a,b) => b.start.localeCompare(a.start)).map(e => {
+                const st = CZAS_STATUSY.find(s => s.id === e.status);
+                const startD = new Date(e.start + "T00:00:00");
+                const endD = new Date(e.end + "T00:00:00");
+                const days = Math.round((endD - startD) / 86400000) + 1;
+                return (
+                  <div key={e.id} className="flex items-center justify-between px-3 py-2 rounded-xl text-xs"
+                    style={{ background: st?.bg || "#f9fafb", border: `1px solid ${st?.border || "#e5e7eb"}` }}>
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: st?.color }} />
+                      <span className="font-semibold flex-shrink-0" style={{ color: st?.color }}>{e.status === "pauzaInne" && e.hours ? `Pauza ${e.hours}h` : st?.label}</span>
+                      <span className="text-gray-500 flex-shrink-0">
+                        {startD.toLocaleDateString("pl-PL", { day:"numeric", month:"short" })}
+                        {e.startTime ? ` ${e.startTime}` : ""}
+                        {days > 1 ? ` → ${endD.toLocaleDateString("pl-PL", { day:"numeric", month:"short" })}` : ""}
+                        {e.endTime ? ` ${e.endTime}` : ""}
+                        {days > 1 ? ` (${days} dni)` : " (1 dzień)"}
+                      </span>
+                      {e.note && <span className="text-gray-400 italic truncate" title={e.note}>· {e.note}</span>}
+                    </div>
+                    <button onClick={() => onDelete(e.id)}
+                      className="w-5 h-5 rounded flex items-center justify-center text-gray-300 hover:text-red-400 transition-all flex-shrink-0">✕</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VehicleEditPanel({ vehicle, onSave, onClose }) {
+  const [v, setV] = useState({
+    ...vehicle,
+    plate2:          vehicle.plate2          || "",
+    equipment:       vehicle.equipment       || [],
+    customEquipment: vehicle.customEquipment || [],
+    dimensions:      vehicle.dimensions      || "",
+    dimensions2:     vehicle.dimensions2     || "",
+    loadingType:     vehicle.loadingType     || "",
+    maxWeight:       vehicle.maxWeight       || "",
+    maxWeight2:      vehicle.maxWeight2      || "",
+    driverHistory: (vehicle.driverHistory || []).map((d) => ({ ...d })),
+    // Insurance
+    ocNumber:        vehicle.ocNumber        || "",
+    ocAmount:        vehicle.ocAmount        || "",
+    ocExpiry:        vehicle.ocExpiry        || "",
+    acNumber:        vehicle.acNumber        || "",
+    acAmount:        vehicle.acAmount        || "",
+    acExpiry:        vehicle.acExpiry        || "",
+    assistance:      vehicle.assistance      || "",
+    autoszyba:       vehicle.autoszyba       || "",
+    nnw:             vehicle.nnw             || "",
+    ochronaZnizki:   vehicle.ochronaZnizki   || "",
+    caloscPolis:     vehicle.caloscPolis     || "",
+    gap:             vehicle.gap             || "",
+    gapExpiry:       vehicle.gapExpiry       || "",
+    vin:             vehicle.vin             || "",
+    wartoscNet:      vehicle.wartoscNet      || "",
+    // Inspection
+    inspectionExpiry: vehicle.inspectionExpiry || "",
+    // UDT
+    udtNumber:       vehicle.udtNumber       || "",
+    udtExpiry:       vehicle.udtExpiry       || "",
+    udtNextDate:     vehicle.udtNextDate     || "",
+    udtLiftName:     vehicle.udtLiftName     || "",
+    // Oil service - warranty
+    warrantyKmLimit:    vehicle.warrantyKmLimit    || "",
+    warrantyServiceEvery: vehicle.warrantyServiceEvery || "",
+    warrantyPurchaseKm: vehicle.warrantyPurchaseKm || "",
+    warrantyActive:     vehicle.warrantyActive !== false,
+    // Oil service - post-warranty
+    currentKm:          vehicle.currentKm          || "",
+    lastOilServiceKm:   vehicle.lastOilServiceKm   || "",
+    lastOilServiceDate: vehicle.lastOilServiceDate || "",
+    oilServiceEveryKm:  vehicle.oilServiceEveryKm  || "",
+    oilServiceEveryMonths: vehicle.oilServiceEveryMonths || "",
+    // Daty floty
+    fleetJoinDate:  vehicle.fleetJoinDate  || "",
+    fleetLeaveDate: vehicle.fleetLeaveDate || "",
+  });
+  const [newEqInput, setNewEqInput] = useState("");
+  const setF  = (k, val) => setV((p) => ({ ...p, [k]: val }));
+  const setDH = (hist)   => setV((p) => ({ ...p, driverHistory: hist }));
+
+  const addDriver = () => {
+    // close active driver if exists
+    const hist = v.driverHistory.map((d) =>
+      !d.to ? { ...d, to: new Date().toISOString().split("T")[0] } : d
+    );
+    setDH([...hist, { id: uid(), name: "", email: "", phone: "", from: new Date().toISOString().split("T")[0], to: "" }]);
+  };
+
+  const updateDriver = (id, field, val) => {
+    setDH(v.driverHistory.map((d) => d.id === id ? { ...d, [field]: val } : d));
+  };
+
+  const removeDriver = (id) => setDH(v.driverHistory.filter((d) => d.id !== id));
+
+  const handleSave = () => {
+    if (!v.plate.trim()) return;
+    onSave(v);
+  };
+
+  return (
+    <div className="border-t border-gray-100 bg-gray-50/50">
+      {/* ── DANE POJAZDU ── */}
+      <div className="px-5 py-4 border-b border-gray-100">
+        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Dane pojazdu</div>
+        <div className="grid grid-cols-2 gap-3">
+          <MF label="Rejestracja (główna)">
+            <MInput value={v.plate} onChange={(val) => setF("plate", val.toUpperCase())} placeholder="WGM 0000X" />
+          </MF>
+          <MF label="Rejestracja przyczepy (opcjonalnie)">
+            <MInput value={v.plate2} onChange={(val) => setF("plate2", val.toUpperCase())} placeholder="np. TK 760AP" />
+          </MF>
+          <MF label="Rok">
+            <MInput type="number" value={v.year} onChange={(val) => setF("year", val)} />
+          </MF>
+          <MF label="Typ pojazdu">
+            <MSelect value={v.type} onChange={(val) => setF("type", val)}>
+              {["Solo","Bus","Zestaw","Chłodnia","Plandeka","Inny"].map((t) => <option key={t}>{t}</option>)}
+            </MSelect>
+          </MF>
+          <div className="col-span-2">
+            <MF label="Marka / Model">
+              <MInput value={v.brand} onChange={(val) => setF("brand", val)} placeholder="np. MAN TGX" />
+            </MF>
+          </div>
+        </div>
+      </div>
+
+      {/* ── WYPOSAŻENIE ── */}
+      <div className="px-5 py-4 border-b border-gray-100">
+        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Wyposażenie</div>
+
+        {/* DEFAULT EQUIPMENT CHECKBOXES */}
+        <div className="grid grid-cols-2 gap-2 mb-3">
+          {DEFAULT_EQUIPMENT.map((eq) => {
+            const checked = v.equipment.includes(eq.id);
+            return (
+              <button key={eq.id}
+                onClick={() => setF("equipment", checked
+                  ? v.equipment.filter((e) => e !== eq.id)
+                  : [...v.equipment, eq.id]
+                )}
+                className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-left transition-all"
+                style={{
+                  background: checked ? "#f0fdf4" : "#f9fafb",
+                  border: `1.5px solid ${checked ? "#86efac" : "#e5e7eb"}`,
+                  color: checked ? "#166534" : "#6b7280",
+                }}>
+                <div className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0 transition-all"
+                  style={{ background: checked ? "#22c55e" : "#e5e7eb" }}>
+                  {checked && <span className="text-white text-xs leading-none">✓</span>}
+                </div>
+                {eq.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* CUSTOM EQUIPMENT TAGS */}
+        {v.customEquipment.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {v.customEquipment.map((item, i) => (
+              <span key={i} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium"
+                style={{ background: "#eff6ff", color: "#3b82f6", border: "1px solid #bfdbfe" }}>
+                {item}
+                <button onClick={() => setF("customEquipment", v.customEquipment.filter((_, idx) => idx !== i))}
+                  className="hover:text-red-400 transition-colors ml-0.5">✕</button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* ADD CUSTOM */}
+        <div className="flex gap-2">
+          <input
+            type="text"
+            placeholder="Dodaj własne wyposażenie..."
+            value={newEqInput}
+            onChange={(e) => setNewEqInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && newEqInput.trim()) {
+                setF("customEquipment", [...v.customEquipment, newEqInput.trim()]);
+                setNewEqInput("");
+              }
+            }}
+            className="flex-1 px-3 py-2 rounded-lg text-xs outline-none"
+            style={{ background: "#f9fafb", border: "1.5px solid #e5e7eb", fontFamily: "'DM Sans', sans-serif", color: "#111827" }}
+          />
+          <button
+            onClick={() => {
+              if (newEqInput.trim()) {
+                setF("customEquipment", [...v.customEquipment, newEqInput.trim()]);
+                setNewEqInput("");
+              }
+            }}
+            className="px-3 py-2 rounded-lg text-xs font-semibold text-white transition-all hover:opacity-90"
+            style={{ background: "#111827" }}>
+            + Dodaj
+          </button>
+        </div>
+        <p className="text-xs text-gray-400 mt-1.5">Możesz też wpisać i nacisnąć Enter</p>
+      </div>
+
+      {/* ── DANE TECHNICZNE ── */}
+      <div className="px-5 py-4 border-b border-gray-100">
+        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Dane techniczne</div>
+        <div className="grid grid-cols-2 gap-3">
+          <MF label="Wymiary — pojazd (cm)">
+            <MInput value={v.dimensions} onChange={(val) => setF("dimensions", val)} placeholder="607x243x245" />
+          </MF>
+          <MF label="Max waga — pojazd (kg)">
+            <MInput type="number" value={v.maxWeight} onChange={(val) => setF("maxWeight", val)} placeholder="3000" />
+          </MF>
+          {v.plate2 && (
+            <>
+              <MF label={`Wymiary — przyczepa (${v.plate2})`}>
+                <MInput value={v.dimensions2} onChange={(val) => setF("dimensions2", val)} placeholder="640x245x250" />
+              </MF>
+              <MF label="Max waga — przyczepa (kg)">
+                <MInput type="number" value={v.maxWeight2} onChange={(val) => setF("maxWeight2", val)} placeholder="2100" />
+              </MF>
+            </>
+          )}
+          <div className="col-span-2">
+            <MF label="Rodzaj załadunku">
+              <MInput value={v.loadingType} onChange={(val) => setF("loadingType", val)} placeholder="np. Bok, tył, góra" />
+            </MF>
+          </div>
+        </div>
+      </div>
+
+      {/* ── HISTORIA KIEROWCÓW ── */}
+      <div className="px-5 py-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Historia kierowców</div>
+          <button onClick={addDriver}
+            className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all hover:opacity-90"
+            style={{ background: "#111827", color: "#fff" }}>
+            + Dodaj kierowcę
+          </button>
+        </div>
+
+        {v.driverHistory.length === 0 && (
+          <div className="text-xs text-gray-400 italic py-2">Brak kierowców — dodaj pierwszego</div>
+        )}
+
+        <div className="space-y-3">
+          {v.driverHistory.map((d, idx) => {
+            const isActive = !d.to;
+            return (
+              <div key={d.id} className="rounded-xl p-3 relative"
+                style={{ background: isActive ? "#f0fdf4" : "#fff", border: `1px solid ${isActive ? "#bbf7d0" : "#e5e7eb"}` }}>
+                {/* Status badge */}
+                <div className="flex items-center justify-between mb-2.5">
+                  <div className="flex items-center gap-1.5">
+                    <div className={`w-2 h-2 rounded-full ${isActive ? "bg-emerald-400" : "bg-gray-300"}`} />
+                    <span className="text-xs font-medium" style={{ color: isActive ? "#059669" : "#9ca3af" }}>
+                      {isActive ? "Aktualny kierowca" : `Poprzedni (${idx + 1})`}
+                    </span>
+                  </div>
+                  <button onClick={() => removeDriver(d.id)}
+                    className="w-5 h-5 rounded flex items-center justify-center text-gray-300 hover:text-red-400 transition-all text-xs">✕</button>
+                </div>
+
+                <div className="grid grid-cols-1 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
+                    <MF label="Imię i nazwisko">
+                      <MInput
+                        value={d.name}
+                        onChange={(val) => updateDriver(d.id, "name", val)}
+                        placeholder="np. Jan Kowalski"
+                      />
+                    </MF>
+                    <MF label="Telefon">
+                      <MInput
+                        value={d.phone || ""}
+                        onChange={(val) => updateDriver(d.id, "phone", val)}
+                        placeholder="+48 600 000 000"
+                      />
+                    </MF>
+                    <MF label="Email (login kierowcy)">
+                      <MInput
+                        value={d.email || ""}
+                        onChange={(val) => updateDriver(d.id, "email", val.toLowerCase().trim())}
+                        placeholder="kierowca@email.com"
+                      />
+                    </MF>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <MF label="Podjęcie auta">
+                      <MInput type="date" value={d.from} onChange={(val) => updateDriver(d.id, "from", val)} />
+                    </MF>
+                    <MF label={isActive ? "Zdanie auta (puste = aktywny)" : "Zdanie auta"}>
+                      <MInput
+                        type="date"
+                        value={d.to}
+                        onChange={(val) => updateDriver(d.id, "to", val)}
+                      />
+                    </MF>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* SAVE */}
+        <div className="flex gap-2 mt-4">
+          <button onClick={handleSave}
+            className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-95"
+            style={{ background: "#111827" }}>
+            Zapisz zmiany
+          </button>
+          <button onClick={onClose}
+            className="px-4 py-2.5 rounded-xl text-sm font-medium transition-all hover:bg-gray-200"
+            style={{ background: "#e5e7eb", color: "#374151" }}>
+            Anuluj
+          </button>
+        </div>
+      </div>
+
+      {/* ── DANE POJAZDU ── */}
+      <div className="px-5 py-4 border-t border-gray-100">
+        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Dane pojazdu</div>
+        <div className="grid grid-cols-2 gap-3">
+          <MF label="VIN">
+            <MInput value={v.vin} onChange={val=>setF("vin",val)} placeholder="ZCFC672C5R56..." />
+          </MF>
+          <MF label="Wartość netto (zł)">
+            <MInput type="number" value={v.wartoscNet} onChange={val=>setF("wartoscNet",val)} placeholder="210000" />
+          </MF>
+        </div>
+      </div>
+
+      {/* ── UBEZPIECZENIA & PRZEGLĄD ── */}
+      <div className="px-5 py-4 border-t border-gray-100">
+        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">🛡️ OC</div>
+        <div className="grid grid-cols-3 gap-3 mb-4">
+          <MF label="Nr polisy OC">
+            <MInput value={v.ocNumber} onChange={val=>setF("ocNumber",val)} placeholder="1102324224" />
+          </MF>
+          <MF label="Składka OC (zł)">
+            <MInput type="number" value={v.ocAmount} onChange={val=>setF("ocAmount",val)} placeholder="2178" />
+          </MF>
+          <MF label="OC — ważna do">
+            <MInput type="date" value={v.ocExpiry} onChange={val=>setF("ocExpiry",val)} />
+          </MF>
+        </div>
+        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">🛡️ AC</div>
+        <div className="grid grid-cols-3 gap-3 mb-4">
+          <MF label="Nr polisy AC">
+            <MInput value={v.acNumber} onChange={val=>setF("acNumber",val)} placeholder="920059750652" />
+          </MF>
+          <MF label="Składka AC (zł)">
+            <MInput type="number" value={v.acAmount} onChange={val=>setF("acAmount",val)} placeholder="1954" />
+          </MF>
+          <MF label="AC — ważna do">
+            <MInput type="date" value={v.acExpiry} onChange={val=>setF("acExpiry",val)} />
+          </MF>
+        </div>
+        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">📦 Pakiet ubezpieczeń</div>
+        <div className="grid grid-cols-3 gap-3 mb-4">
+          <MF label="Assistance (zł)">
+            <MInput type="number" value={v.assistance} onChange={val=>setF("assistance",val)} placeholder="200" />
+          </MF>
+          <MF label="Autoszyba (zł)">
+            <MInput type="number" value={v.autoszyba} onChange={val=>setF("autoszyba",val)} placeholder="400" />
+          </MF>
+          <MF label="NNW (zł)">
+            <MInput type="number" value={v.nnw} onChange={val=>setF("nnw",val)} placeholder="50" />
+          </MF>
+          <MF label="Ochrona zniżki (zł)">
+            <MInput type="number" value={v.ochronaZnizki} onChange={val=>setF("ochronaZnizki",val)} placeholder="—" />
+          </MF>
+          <MF label="Całość polis (zł)">
+            <MInput type="number" value={v.caloscPolis} onChange={val=>setF("caloscPolis",val)} placeholder="5659" />
+          </MF>
+        </div>
+        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">📊 GAP</div>
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <MF label="Składka GAP (zł)">
+            <MInput type="number" value={v.gap} onChange={val=>setF("gap",val)} placeholder="6233" />
+          </MF>
+          <MF label="GAP — ważny do">
+            <MInput type="date" value={v.gapExpiry} onChange={val=>setF("gapExpiry",val)} />
+          </MF>
+        </div>
+        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">🔧 Przegląd</div>
+        <div className="grid grid-cols-1 gap-3">
+          <MF label="Przegląd techniczny — ważny do">
+            <MInput type="date" value={v.inspectionExpiry} onChange={val=>setF("inspectionExpiry",val)} />
+          </MF>
+        </div>
+        <div className="flex gap-2 mt-4">
+          <button onClick={()=>{ if(!v.plate.trim()) return; onSave(v); }}
+            className="flex-1 py-2 rounded-xl text-sm font-bold text-white hover:opacity-90"
+            style={{ background:"#111827" }}>Zapisz zmiany</button>
+          <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium hover:bg-gray-200" style={{ background:"#e5e7eb", color:"#374151" }}>Anuluj</button>
+        </div>
+      </div>
+
+      {/* ── UDT WINDY ── */}
+      {(v.equipment||[]).includes("winda") && (
+        <div className="px-5 py-4 border-t border-gray-100">
+          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">🏗️ UDT — Winda załadunkowa</div>
+          <div className="grid grid-cols-2 gap-3">
+            <MF label="Nazwa / typ windy">
+              <MInput value={v.udtLiftName} onChange={val=>setF("udtLiftName",val)} placeholder="np. Zepro 1500 kg" />
+            </MF>
+            <MF label="Nr ewidencyjny UDT">
+              <MInput value={v.udtNumber} onChange={val=>setF("udtNumber",val)} placeholder="np. UDT/W/12345" />
+            </MF>
+            <MF label="Data badania UDT (ważność)">
+              <MInput type="date" value={v.udtExpiry} onChange={val=>setF("udtExpiry",val)} />
+            </MF>
+            <MF label="Data następnego przeglądu UDT">
+              <MInput type="date" value={v.udtNextDate} onChange={val=>setF("udtNextDate",val)} />
+            </MF>
+          </div>
+          <div className="flex gap-2 mt-3">
+            <button onClick={()=>{ if(!v.plate.trim()) return; onSave(v); }}
+              className="flex-1 py-2 rounded-xl text-sm font-bold text-white hover:opacity-90"
+              style={{ background:"#111827" }}>Zapisz zmiany</button>
+            <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium hover:bg-gray-200" style={{ background:"#e5e7eb", color:"#374151" }}>Anuluj</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── SERWIS OLEJOWY — GWARANCJA ── */}
+      <div className="px-5 py-4 border-t border-gray-100">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">🔧 Serwis olejowy — Gwarancja</div>
+          <button onClick={()=>setF("warrantyActive",!v.warrantyActive)}
+            className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all"
+            style={{ background: v.warrantyActive?"#f0fdf4":"#f3f4f6", color: v.warrantyActive?"#16a34a":"#9ca3af", border:`1.5px solid ${v.warrantyActive?"#86efac":"#e5e7eb"}` }}>
+            {v.warrantyActive ? "✓ Aktywna" : "Nieaktywna"}
+          </button>
+        </div>
+        {v.warrantyActive && (
+          <div className="grid grid-cols-2 gap-3">
+            <MF label="KM przy zakupie">
+              <MInput type="number" value={v.warrantyPurchaseKm} onChange={val=>setF("warrantyPurchaseKm",val)} placeholder="np. 0" />
+            </MF>
+            <MF label="Limit KM gwarancji">
+              <MInput type="number" value={v.warrantyKmLimit} onChange={val=>setF("warrantyKmLimit",val)} placeholder="np. 100000" />
+            </MF>
+            <MF label="Co ile KM serwis gwarancyjny">
+              <MInput type="number" value={v.warrantyServiceEvery} onChange={val=>setF("warrantyServiceEvery",val)} placeholder="np. 15000" />
+            </MF>
+          </div>
+        )}
+        <div className="flex gap-2 mt-3">
+          <button onClick={()=>{ if(!v.plate.trim()) return; onSave(v); }}
+            className="flex-1 py-2 rounded-xl text-sm font-bold text-white hover:opacity-90"
+            style={{ background:"#111827" }}>Zapisz zmiany</button>
+          <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium hover:bg-gray-200" style={{ background:"#e5e7eb", color:"#374151" }}>Anuluj</button>
+        </div>
+      </div>
+
+      {/* ── SERWIS OLEJOWY — PO GWARANCJI ── */}
+      <div className="px-5 py-4 border-t border-gray-100">
+        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">🛢️ Serwis olejowy — Własny</div>
+        <div className="grid grid-cols-2 gap-3">
+          <MF label="Aktualny przebieg (KM)">
+            <MInput type="number" value={v.currentKm} onChange={val=>setF("currentKm",val)} placeholder="np. 245000" />
+          </MF>
+          <MF label="KM przy ostatnim serwisie">
+            <MInput type="number" value={v.lastOilServiceKm} onChange={val=>setF("lastOilServiceKm",val)} placeholder="np. 230000" />
+          </MF>
+          <MF label="Data ostatniego serwisu">
+            <MInput type="date" value={v.lastOilServiceDate} onChange={val=>setF("lastOilServiceDate",val)} />
+          </MF>
+          <MF label="Co ile KM serwis">
+            <MInput type="number" value={v.oilServiceEveryKm} onChange={val=>setF("oilServiceEveryKm",val)} placeholder="np. 15000" />
+          </MF>
+          <MF label="Co ile miesięcy serwis">
+            <MInput type="number" value={v.oilServiceEveryMonths} onChange={val=>setF("oilServiceEveryMonths",val)} placeholder="np. 12" />
+          </MF>
+        </div>
+        <div className="flex gap-2 mt-3">
+          <button onClick={()=>{ if(!v.plate.trim()) return; onSave(v); }}
+            className="flex-1 py-2 rounded-xl text-sm font-bold text-white hover:opacity-90"
+            style={{ background:"#111827" }}>Zapisz zmiany</button>
+          <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium hover:bg-gray-200" style={{ background:"#e5e7eb", color:"#374151" }}>Anuluj</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MODAL: ADD VEHICLE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DELETE VEHICLE MODAL
+// ═══════════════════════════════════════════════════════════════════════════════
+function DeleteVehicleModal({ plate, onConfirm, onClose }) {
+  const [reason, setReason] = useState("");
+  const REASONS = ["Sprzedaż pojazdu", "Koniec leasingu", "Szkoda całkowita", "Wymiana na nowy", "Inne"];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+      style={{ background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)" }}>
+      <div className="w-full sm:max-w-sm bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden"
+        style={{ fontFamily: "'DM Sans', sans-serif" }}>
+        <div className="px-6 pt-5 pb-4 border-b border-gray-100">
+          <h3 className="text-base font-bold text-gray-900">Usuń pojazd</h3>
+          <p className="text-sm text-gray-400 mt-0.5">{plate}</p>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <div>
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Przyczyna usunięcia</div>
+            <div className="space-y-1.5">
+              {REASONS.map(r => (
+                <button key={r} onClick={() => setReason(r)}
+                  className="w-full text-left px-3 py-2 rounded-lg text-sm transition-all"
+                  style={{
+                    background: reason === r ? "#fef2f2" : "#f9fafb",
+                    border: `1.5px solid ${reason === r ? "#fca5a5" : "#e5e7eb"}`,
+                    color: reason === r ? "#dc2626" : "#374151",
+                    fontWeight: reason === r ? 600 : 400,
+                  }}>
+                  {reason === r ? "✓ " : ""}{r}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Dodatkowe uwagi (opcjonalnie)</div>
+            <textarea rows={2} placeholder="np. sprzedano dnia 20.03.2026..."
+              value={reason && !["Sprzedaż pojazdu","Koniec leasingu","Szkoda całkowita","Wymiana na nowy","Inne"].includes(reason) ? reason : ""}
+              onChange={e => setReason(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-lg text-sm outline-none resize-none"
+              style={{ background: "#f9fafb", border: "1.5px solid #e5e7eb", fontFamily: "'DM Sans', sans-serif", color: "#111827" }} />
+          </div>
+          <div className="p-3 rounded-xl text-sm" style={{ background: "#fef2f2", color: "#991b1b" }}>
+            ⚠️ Tej operacji nie można cofnąć. Pojazd zostanie usunięty wraz z historią kierowców.
+          </div>
+        </div>
+        <div className="px-6 pb-6 flex gap-3">
+          <button onClick={onClose}
+            className="flex-1 py-2.5 rounded-xl text-sm font-semibold border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 transition-all">
+            Anuluj
+          </button>
+          <button onClick={() => onConfirm(reason)} disabled={!reason}
+            className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 disabled:opacity-30"
+            style={{ background: "#dc2626" }}>
+            Usuń pojazd
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AddVehicleModal({ onSave, onClose }) {
+  const today = new Date().toISOString().split("T")[0];
+  const [form, setForm] = useState({ plate: "", plate2: "", brand: "", type: "Solo", year: new Date().getFullYear(), equipment: [], customEquipment: [], dimensions: "", dimensions2: "", loadingType: "", maxWeight: "", maxWeight2: "", driverName: "", driverPhone: "", driverFrom: today, fleetJoinDate: today, fleetLeaveDate: "" });
+  const [newEqInput, setNewEqInput] = useState("");
+  const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  const toggleEq = (id) => set("equipment", form.equipment.includes(id)
+    ? form.equipment.filter((e) => e !== id)
+    : [...form.equipment, id]
+  );
+  const addCustomEq = () => {
+    if (newEqInput.trim()) { set("customEquipment", [...form.customEquipment, newEqInput.trim()]); setNewEqInput(""); }
+  };
+
+  const handleSave = () => {
+    if (!form.plate.trim()) return;
+    const driverHistory = form.driverName
+      ? [{ id: uid(), name: form.driverName, phone: form.driverPhone || "", from: form.driverFrom, to: "" }]
+      : [];
+    onSave({ plate: form.plate, plate2: form.plate2, brand: form.brand, type: form.type, year: Number(form.year), equipment: form.equipment, customEquipment: form.customEquipment, dimensions: form.dimensions, dimensions2: form.dimensions2, loadingType: form.loadingType, maxWeight: form.maxWeight, maxWeight2: form.maxWeight2, driverHistory, fleetJoinDate: form.fleetJoinDate, fleetLeaveDate: form.fleetLeaveDate });
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center p-0 sm:p-4"
+      style={{ background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col"
+        style={{ fontFamily: "'DM Sans', sans-serif", maxHeight: "90vh" }}
+        onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100 flex-shrink-0">
+          <h3 className="text-base font-bold text-gray-900">Nowy pojazd</h3>
+          <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs">✕</button>
+        </div>
+        <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
+          <div className="grid grid-cols-2 gap-3">
+            <MF label="Rejestracja (główna)"><MInput placeholder="WGM 0000X" value={form.plate} onChange={(v) => set("plate", v.toUpperCase())} /></MF>
+            <MF label="Rejestracja przyczepy"><MInput placeholder="np. TK 760AP" value={form.plate2} onChange={(v) => set("plate2", v.toUpperCase())} /></MF>
+            <MF label="Rok"><MInput type="number" value={form.year} onChange={(v) => set("year", v)} /></MF>
+            <MF label="Typ pojazdu">
+              <MSelect value={form.type} onChange={(v) => set("type", v)}>
+                {["Solo","Bus","Zestaw","Chłodnia","Plandeka","Inny"].map((t) => <option key={t}>{t}</option>)}
+              </MSelect>
+            </MF>
+          </div>
+          <MF label="Marka / Model"><MInput placeholder="np. MAN TGX" value={form.brand} onChange={(v) => set("brand", v)} /></MF>
+          <div className="pt-2 border-t border-gray-100">
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Wyposażenie</div>
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              {DEFAULT_EQUIPMENT.map((eq) => {
+                const checked = form.equipment.includes(eq.id);
+                return (
+                  <button key={eq.id} onClick={() => toggleEq(eq.id)}
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-left transition-all"
+                    style={{
+                      background: checked ? "#f0fdf4" : "#f9fafb",
+                      border: `1.5px solid ${checked ? "#86efac" : "#e5e7eb"}`,
+                      color: checked ? "#166534" : "#6b7280",
+                    }}>
+                    <div className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0"
+                      style={{ background: checked ? "#22c55e" : "#e5e7eb" }}>
+                      {checked && <span className="text-white text-xs leading-none">✓</span>}
+                    </div>
+                    {eq.label}
+                  </button>
+                );
+              })}
+            </div>
+            {form.customEquipment.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {form.customEquipment.map((item, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium"
+                    style={{ background: "#eff6ff", color: "#3b82f6", border: "1px solid #bfdbfe" }}>
+                    {item}
+                    <button onClick={() => set("customEquipment", form.customEquipment.filter((_, idx) => idx !== i))}
+                      className="hover:text-red-400 transition-colors">✕</button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <input type="text" placeholder="Inne wyposażenie..." value={newEqInput}
+                onChange={(e) => setNewEqInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") addCustomEq(); }}
+                className="flex-1 px-3 py-2 rounded-lg text-xs outline-none"
+                style={{ background: "#f9fafb", border: "1.5px solid #e5e7eb", fontFamily: "'DM Sans', sans-serif", color: "#111827" }} />
+              <button onClick={addCustomEq} className="px-3 py-2 rounded-lg text-xs font-semibold text-white" style={{ background: "#111827" }}>+ Dodaj</button>
+            </div>
+          </div>
+          <div className="pt-2 border-t border-gray-100">
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Dane techniczne (opcjonalnie)</div>
+            <div className="grid grid-cols-2 gap-3">
+              <MF label="Wymiary — pojazd (cm)"><MInput placeholder="607x243x245" value={form.dimensions} onChange={(v) => set("dimensions", v)} /></MF>
+              <MF label="Max waga — pojazd (kg)"><MInput type="number" placeholder="3000" value={form.maxWeight} onChange={(v) => set("maxWeight", v)} /></MF>
+              {form.plate2 && (
+                <>
+                  <MF label="Wymiary — przyczepa (cm)"><MInput placeholder="640x245x250" value={form.dimensions2} onChange={(v) => set("dimensions2", v)} /></MF>
+                  <MF label="Max waga — przyczepa (kg)"><MInput type="number" placeholder="2100" value={form.maxWeight2} onChange={(v) => set("maxWeight2", v)} /></MF>
+                </>
+              )}
+              <div className="col-span-2">
+                <MF label="Rodzaj załadunku"><MInput placeholder="np. Bok, tył, góra" value={form.loadingType} onChange={(v) => set("loadingType", v)} /></MF>
+              </div>
+            </div>
+          </div>
+          <div className="pt-2 border-t border-gray-100">
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Daty we flocie</div>
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <MF label="Data dołączenia">
+                <MInput type="date" value={form.fleetJoinDate} onChange={(v) => set("fleetJoinDate", v)} />
+              </MF>
+              <MF label="Data opuszczenia (opcjonalnie)">
+                <MInput type="date" value={form.fleetLeaveDate} onChange={(v) => set("fleetLeaveDate", v)} />
+              </MF>
+            </div>
+          </div>
+
+          <div className="pt-2 border-t border-gray-100">
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Kierowca startowy (opcjonalnie)</div>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <MF label="Imię i nazwisko kierowcy">
+                  <MInput placeholder="np. Jan Kowalski" value={form.driverName} onChange={(v) => set("driverName", v)} />
+                </MF>
+                <MF label="Telefon">
+                  <MInput placeholder="+48 600 000 000" value={form.driverPhone || ""} onChange={(v) => set("driverPhone", v)} />
+                </MF>
+              </div>
+              <MF label="Podjęcie auta">
+                <MInput type="date" value={form.driverFrom} onChange={(v) => set("driverFrom", v)} />
+              </MF>
+            </div>
+          </div>
+        </div>
+        <div className="px-6 pb-6 pt-3 border-t border-gray-100 flex-shrink-0">
+          <button onClick={handleSave} disabled={!form.plate}
+            className="w-full py-3 rounded-xl text-sm font-bold text-white transition-all hover:opacity-90 active:scale-95 disabled:opacity-30"
+            style={{ background: "#111827" }}>
+            Dodaj do floty
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── SHARED UI ─────────────────────────────────────────────────────────────────
+function PageTitle({ children }) {
+  return <h1 className="text-xl font-bold text-gray-900 mb-5">{children}</h1>;
+}
+function KpiCard({ label, value, sub, accent }) {
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 p-4">
+      <div className="text-xs text-gray-400 font-medium mb-1.5">{label}</div>
+      <div className="font-bold text-gray-900 text-lg leading-tight">{value}</div>
+      <div className="text-xs text-gray-400 mt-0.5">{sub}</div>
+      <div className="h-0.5 mt-3 rounded-full" style={{ background: accent, width: "36%", opacity: 0.7 }} />
+    </div>
+  );
+}
+function FSel({ value, onChange, options }) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)}
+      className="px-3 py-2 rounded-lg text-sm outline-none appearance-none cursor-pointer"
+      style={{ background: "#fff", border: "1px solid #e5e7eb", color: "#374151", minWidth: "140px", fontFamily: "'DM Sans', sans-serif" }}>
+      {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  );
+}
+function MF({ label, children }) {
+  return (
+    <div>
+      <div className="text-xs font-medium text-gray-500 mb-1.5">{label}</div>
+      {children}
+    </div>
+  );
+}
+function MInput({ type = "text", placeholder, value, onChange, highlight }) {
+  return (
+    <input type={type} placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)}
+      className="w-full px-3.5 py-2.5 rounded-lg text-sm outline-none transition-all"
+      style={{
+        background: "#f9fafb",
+        border: `1.5px solid ${highlight ? "#111827" : "#e5e7eb"}`,
+        fontFamily: "'DM Sans', sans-serif",
+        color: "#111827",
+      }} />
+  );
+}
+function MSelect({ value, onChange, children }) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)}
+      className="w-full px-3.5 py-2.5 rounded-lg text-sm outline-none appearance-none"
+      style={{ background: "#f9fafb", border: "1.5px solid #e5e7eb", fontFamily: "'DM Sans', sans-serif", color: "#111827" }}>
+      {children}
+    </select>
+  );
+}
+
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DOC UPLOAD CELL — wgrywanie FV / Zlecenia z AI odczytem
+// ═══════════════════════════════════════════════════════════════════════════════
+function DocUploadCell({ frachtId, docType, existingUrl, onUploaded }) {
+  const [status, setStatus] = useState("idle"); // idle | uploading | reading | done | error
+  const [errorMsg, setErrorMsg] = useState("");
+  const fileRef = useRef(null);
+  const isFV = docType === "fv";
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setStatus("uploading");
+    setErrorMsg("");
+    try {
+      // 1. Upload do Firebase Storage
+      const path = `documents/${frachtId}/${docType}_${Date.now()}_${file.name}`;
+      const sRef = storageRef(storage, path);
+      await uploadBytes(sRef, file);
+      const url = await getDownloadURL(sRef);
+
+      // 2. Jeśli FV — odczytaj przez AI (Claude Vision)
+      if (isFV) {
+        setStatus("reading");
+        const base64 = await new Promise((res, rej) => {
+          const reader = new FileReader();
+          reader.onload = () => res(reader.result.split(",")[1]);
+          reader.onerror = rej;
+          reader.readAsDataURL(file);
+        });
+
+        const isPDF = file.type === "application/pdf";
+        const mediaType = isPDF ? "application/pdf" : file.type;
+
+        const body = {
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1000,
+          messages: [{
+            role: "user",
+            content: [
+              {
+                type: isPDF ? "document" : "image",
+                source: { type: "base64", media_type: mediaType, data: base64 },
+              },
+              {
+                type: "text",
+                text: `Przeanalizuj ten dokument (faktura/invoice). Wyodrębnij następujące dane i odpowiedz TYLKO w formacie JSON, bez żadnego dodatkowego tekstu:
+{
+  "nrFV": "numer faktury",
+  "klient": "nazwa klienta/firmy",
+  "cenaEur": "kwota w EUR jako liczba lub null",
+  "dataWyslania": "data wystawienia YYYY-MM-DD lub null",
+  "terminPlatnosci": "termin płatności YYYY-MM-DD lub null"
+}
+Jeśli nie możesz odczytać danego pola, wpisz null.`,
+              }
+            ]
+          }]
+        };
+
+        const resp = await fetch("/api/claude", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await resp.json();
+        const text = data.content?.find(b => b.type === "text")?.text || "{}";
+        let fields = {};
+        try {
+          const clean = text.replace(/```json|```/g, "").trim();
+          const parsed = JSON.parse(clean);
+          // Tylko niepuste pola
+          if (parsed.nrFV)             fields.nrFV = parsed.nrFV;
+          if (parsed.klient)            fields.klient = parsed.klient;
+          // cenaEur nie jest nadpisywana - wartosc wpisana przez dyspozytora jest wiazaca
+          if (parsed.dataWyslania)      fields.dataWyslania = parsed.dataWyslania;
+          if (parsed.terminPlatnosci)   fields.terminPlatnosci = parsed.terminPlatnosci;
+        } catch {}
+        onUploaded(url, fields);
+      } else {
+        onUploaded(url, {});
+      }
+      setStatus("done");
+    } catch (err) {
+      console.error("DocUpload error", err);
+      setErrorMsg(err.message || "Błąd");
+      setStatus("error");
+    }
+    // reset input
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  if (existingUrl) {
+    return (
+      <div className="flex items-center gap-1">
+        <a href={safeHref(existingUrl)} target="_blank" rel="noopener noreferrer"
+          className="text-xs px-2 py-1 rounded-lg font-semibold"
+          style={{ background: isFV ? "#f0fdf4" : "#eff6ff", color: isFV ? "#166534" : "#1d4ed8" }}>
+          {isFV ? "📄 FV" : "📋 Zlec."}
+        </a>
+        <button onClick={() => fileRef.current?.click()} title="Zastąp plik"
+          className="text-gray-300 hover:text-gray-500 text-xs">↺</button>
+        <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" className="hidden" onChange={handleFile} />
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {status === "idle" && (
+        <button onClick={() => fileRef.current?.click()}
+          className="text-xs px-2 py-1 rounded-lg border border-dashed transition-all font-medium"
+          style={{ borderColor: isFV ? "#86efac" : "#93c5fd", color: isFV ? "#16a34a" : "#2563eb", background: "white" }}>
+          {isFV ? "+ FV" : "+ Zlec."}
+        </button>
+      )}
+      {status === "uploading" && <span className="text-xs text-gray-400 animate-pulse">⬆️ wysyłam…</span>}
+      {status === "reading"   && <span className="text-xs text-amber-500 animate-pulse">🤖 AI czyta…</span>}
+      {status === "done"      && <span className="text-xs text-green-600">✅ zapisano</span>}
+      {status === "error"     && (
+        <button onClick={() => setStatus("idle")} title={errorMsg}
+          className="text-xs text-red-500 hover:underline">⚠️ błąd</button>
+      )}
+      <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" className="hidden" onChange={handleFile} />
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// COSTS IMPORT MODAL
+// ═══════════════════════════════════════════════════════════════════════════════
+function CostsImportModal({ vehicles, categories, onImport, onClose }) {
+  const [status, setStatus] = useState("idle");
+  const [rows, setRows]     = useState([]);
+  const [errorMsg, setErrorMsg] = useState("");
+  const fileRef = useRef(null);
+
+  const fmt = (n) => n ? parseFloat(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-";
+
+  const CAT_VALID = ["paliwo","leasing","naprawa","serwis","ubezpieczenie","polisa","opony","oplaty","myto","nego","inne","wyplata","wynagrodzenie","zus","hotele","mandaty","slickshift","telefon","uruchomienie","imi","ocpd","przyczepa"];
+
+  const parseFile = async (file) => {
+    setStatus("parsing");
+    setErrorMsg("");
+    try {
+      const XLSX = window.XLSX || await new Promise((res, rej) => {
+        const s = document.createElement("script");
+        s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+        s.onload = () => res(window.XLSX);
+        s.onerror = () => rej(new Error("Błąd ładowania XLSX"));
+        document.head.appendChild(s);
+      });
+
+      const ab = await file.arrayBuffer();
+      const wb = XLSX.read(ab, { type: "array", cellDates: true });
+      const sheetName = wb.SheetNames.find(n => n.toLowerCase().includes("koszt")) || wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+
+      // Znajdź wiersz nagłówkowy z "vehicleId"
+      let keyRow = -1;
+      for (let i = 0; i < Math.min(10, raw.length); i++) {
+        if (raw[i].some(c => String(c).toLowerCase().includes("vehicleid") || String(c).toLowerCase().includes("pojazd id"))) {
+          keyRow = i; break;
+        }
+      }
+      if (keyRow === -1) throw new Error("Nie znaleziono nagłówka. Upewnij się że używasz szablonu VBS-Stat_Koszty.");
+
+      const keys = raw[keyRow].map(k => String(k).trim().toLowerCase());
+      const parsed = [];
+
+      for (let i = keyRow + 1; i < raw.length; i++) {
+        const row = raw[i];
+        if (!row || row.every(c => c === "" || c === null)) continue;
+
+        const get = (name) => {
+          const idx = keys.findIndex(k => k.includes(name));
+          return idx >= 0 ? row[idx] : "";
+        };
+
+        const vid      = String(get("vehicleid") || get("pojazd id") || "").trim();
+        const cat      = String(get("kategoria") || "").trim().toLowerCase();
+        const amtPLN   = parseFloat(String(get("kwota pln") || get("amountpln") || "").replace(",",".")) || null;
+        const amtEUR   = parseFloat(String(get("kwota eur") || get("amounteur") || "").replace(",",".")) || null;
+        const currency = String(get("waluta") || get("currency") || "PLN").trim().toUpperCase();
+        let   date     = get("data") || get("date") || "";
+        const note     = String(get("opis") || get("note") || "").trim();
+
+        if (!vid || !cat) continue;
+        if (!amtPLN && !amtEUR) continue;
+
+        // Normalizuj datę
+        if (date instanceof Date) {
+          date = date.toISOString().slice(0, 10);
+        } else {
+          date = String(date).trim();
+          if (!date.match(/\d{4}-\d{2}-\d{2}/)) date = "2025-01-01";
+        }
+
+        // Normalizuj kategorię
+        const catNorm = cat.replace(/[^a-ząćęłńóśźż]/gi,"").toLowerCase();
+        const catId = CAT_VALID.includes(catNorm) ? catNorm :
+          catNorm.includes("paliw") ? "paliwo" :
+          catNorm.includes("leas")  ? "leasing" :
+          catNorm.includes("napr") || catNorm.includes("serwis") ? "naprawa" :
+          catNorm.includes("ubezp") || catNorm.includes("ocpd") ? "ubezpieczenie" :
+          catNorm.includes("opon")  ? "opony" :
+          catNorm.includes("myto") || catNorm.includes("toll") || catNorm.includes("etoll") || catNorm.includes("autostr") || catNorm.includes("oplaty") || catNorm.includes("opłaty") || catNorm.includes("nego") || catNorm.includes("negometal") ? "oplaty" :
+          catNorm.includes("wyplat") || catNorm.includes("zus") || catNorm.includes("podatek") ? "wyplata" : "inne";
+
+        parsed.push({
+          vehicleId:  vid,
+          category:   catId,
+          amountPLN:  currency === "PLN" ? (amtPLN || null) : null,
+          amountEUR:  currency === "EUR" ? (amtEUR || null) : null,
+          currency,
+          date,
+          note,
+        });
+      }
+
+      if (parsed.length === 0) throw new Error("Brak danych do importu. Sprawdź format pliku.");
+      setRows(parsed);
+      setStatus("preview");
+    } catch (e) {
+      setErrorMsg(e.message || "Błąd parsowania");
+      setStatus("error");
+    }
+  };
+
+  const handleFile = (e) => { const f = e.target.files?.[0]; if (f) parseFile(f); };
+
+  // Statystyki podglądu
+  const totalAmt  = rows.reduce((s,r) => s + (r.currency==="EUR" ? (r.amountEUR||0) : (r.amountPLN||0)), 0);
+  const byCat     = {};
+  const byVehicle = {};
+  rows.forEach(r => {
+    byCat[r.category] = (byCat[r.category]||0) + (r.currency==="EUR" ? (r.amountEUR||0) : (r.amountPLN||0));
+    byVehicle[r.vehicleId] = (byVehicle[r.vehicleId]||0) + (r.currency==="EUR" ? (r.amountEUR||0) : (r.amountPLN||0));
+  });
+  const currency0 = rows[0]?.currency || "PLN";
+  const vName = (id) => vehicles.find(v => v.id === id)?.plate || id;
+
+  const CAT_ICONS = {paliwo:"⛽",leasing:"🏦",naprawa:"🔧",serwis:"🔧",ubezpieczenie:"🛡️",polisa:"🛡️",opony:"🔄",oplaty:"🛣️",myto:"🛣️",nego:"🛣️",inne:"📋",wyplata:"👤",zus:"📋",hotele:"🏨",mandaty:"⚠️",slickshift:"📡",telefon:"📱",uruchomienie:"🔑",imi:"🌍",ocpd:"🛡️",przyczepa:"🚛"};
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background:"rgba(0,0,0,0.45)", backdropFilter:"blur(4px)" }}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col" style={{ maxHeight:"90vh" }}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
+          <div>
+            <h3 className="text-base font-bold text-gray-900">Import kosztów z Excel</h3>
+            <p className="text-xs text-gray-400 mt-0.5">Wgraj plik VBS-Stat_Koszty_2025_EUR.xlsx</p>
+          </div>
+          <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200">✕</button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 px-6 py-5">
+          {(status === "idle" || status === "error") && (
+            <div>
+              <div onClick={() => fileRef.current?.click()}
+                className="border-2 border-dashed border-gray-200 rounded-xl p-10 text-center cursor-pointer hover:border-gray-400 hover:bg-gray-50 transition-all">
+                <div className="text-4xl mb-3">📂</div>
+                <div className="font-semibold text-gray-700 mb-1">Kliknij aby wybrać plik</div>
+                <div className="text-xs text-gray-400">Obsługiwane: .xlsx (szablon VBS-Stat_Koszty)</div>
+                <input ref={fileRef} type="file" accept=".xlsx" className="hidden" onChange={handleFile} />
+              </div>
+              {status === "error" && (
+                <div className="mt-4 px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-red-600 text-sm">⚠️ {errorMsg}</div>
+              )}
+            </div>
+          )}
+
+          {status === "parsing" && (
+            <div className="text-center py-16 text-gray-400">
+              <div className="text-3xl mb-4">⏳</div>
+              <div className="font-medium">Parsowanie pliku…</div>
+            </div>
+          )}
+
+          {status === "preview" && (
+            <div>
+              {/* KPI */}
+              <div className="grid grid-cols-3 gap-3 mb-5">
+                <div className="rounded-xl p-3 bg-gray-50 border border-gray-100">
+                  <div className="text-xs text-gray-400 mb-1">Wpisów</div>
+                  <div className="text-xl font-bold text-gray-900">{rows.length}</div>
+                </div>
+                <div className="rounded-xl p-3 bg-green-50 border border-green-100">
+                  <div className="text-xs text-gray-400 mb-1">Łącznie {currency0}</div>
+                  <div className="text-xl font-bold text-green-700">{fmt(totalAmt)}</div>
+                </div>
+                <div className="rounded-xl p-3 bg-blue-50 border border-blue-100">
+                  <div className="text-xs text-gray-400 mb-1">Pojazdów</div>
+                  <div className="text-xl font-bold text-blue-700">{Object.keys(byVehicle).length}</div>
+                </div>
+              </div>
+
+              {/* Per kategoria */}
+              <div className="mb-4">
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Per kategoria</div>
+                <div className="grid grid-cols-2 gap-2">
+                  {Object.entries(byCat).sort((a,b) => b[1]-a[1]).map(([cat, amt]) => (
+                    <div key={cat} className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-50 border border-gray-100">
+                      <span className="text-xs font-medium text-gray-700">{CAT_ICONS[cat]||"📋"} {cat}</span>
+                      <span className="text-xs font-bold text-gray-900">{fmt(amt)} {currency0}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Per pojazd */}
+              <div>
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Per pojazd</div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                  {Object.entries(byVehicle).sort().map(([vid, amt]) => (
+                    <div key={vid} className="px-3 py-2 rounded-lg bg-gray-50 border border-gray-100">
+                      <div className="text-xs font-bold text-blue-700">{vName(vid)}</div>
+                      <div className="text-xs font-semibold text-gray-900 mt-0.5">{fmt(amt)} {currency0}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-100">
+            {status === "done" ? "Zamknij" : "Anuluj"}
+          </button>
+          {status === "preview" && (
+            <button onClick={() => onImport(rows)}
+              className="px-5 py-2 rounded-lg text-sm font-semibold text-white"
+              style={{ background:"#111827" }}>
+              Importuj {rows.length} kosztów →
+            </button>
+          )}
+          {status === "error" && (
+            <button onClick={() => { setStatus("idle"); if(fileRef.current) fileRef.current.value=""; }}
+              className="px-5 py-2 rounded-lg text-sm font-semibold text-white" style={{ background:"#111827" }}>
+              Spróbuj ponownie
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FV / PŁATNOŚCI TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+const FV_STATUSES = [
+  { id: "nie_wyslana",     label: "Nie wysłana",     bg: "#f3f4f6", color: "#6b7280", dot: "#9ca3af", emoji: "⚪" },
+  { id: "wyslana",         label: "Wysłana / czeka", bg: "#fefce8", color: "#92400e", dot: "#f59e0b", emoji: "🟡" },
+  { id: "przeterminowana", label: "Przeterminowana", bg: "#fef2f2", color: "#991b1b", dot: "#ef4444", emoji: "🔴" },
+  { id: "zaplacona",       label: "Zapłacona",       bg: "#f0fdf4", color: "#166534", dot: "#22c55e", emoji: "🟢" },
+];
+
+function FVTab({ frachtyList, vehicles, onUpdate }) {
+  const [selectedVehicle, setSelectedVehicle] = useState(null);
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterYear, setFilterYear] = useState(String(new Date().getFullYear()));
+  const [filterMonth, setFilterMonth] = useState(String(new Date().getMonth()+1).padStart(2,"0"));
+  const [editFVId, setEditFVId] = useState(null);
+
+  const fmt = (n) => n ? parseFloat(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-";
+  const MONTHS = ["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paź","Lis","Gru"];
+
+  const getStatus = (r) => {
+    const isOverdue = r.terminPlatnosci && r.statusFV !== "zaplacona" && new Date(r.terminPlatnosci) < new Date();
+    if (isOverdue && (!r.statusFV || r.statusFV === "wyslana" || r.statusFV === "nie_wyslana")) return "przeterminowana";
+    return r.statusFV || "nie_wyslana";
+  };
+
+  const frachtyWithFV = frachtyList.filter(r => r.cenaEur);
+
+  // Filtruj wg roku i miesiąca
+  const filtered = frachtyWithFV.filter(r => {
+    const d = r.dataZaladunku || r.dataZlecenia || "";
+    if (filterYear !== "all" && !d.startsWith(filterYear)) return false;
+    if (filterMonth !== "all" && d.slice(5,7) !== filterMonth) return false;
+    return true;
+  });
+
+  // Overview — karty pojazdów
+  if (!selectedVehicle) {
+    const kpiAll = {
+      total:           filtered.reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0),
+      count:           filtered.length,
+      przeterminowane: filtered.filter(r => getStatus(r) === "przeterminowana").reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0),
+      przeterminowane_count: filtered.filter(r => getStatus(r) === "przeterminowana").length,
+      czeka:           filtered.filter(r => getStatus(r) === "wyslana").reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0),
+      czeka_count:     filtered.filter(r => getStatus(r) === "wyslana").length,
+      nie_wyslane:     filtered.filter(r => getStatus(r) === "nie_wyslana").reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0),
+      nie_wyslane_count: filtered.filter(r => getStatus(r) === "nie_wyslana").length,
+      zaplacone:       filtered.filter(r => getStatus(r) === "zaplacona").reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0),
+      zaplacone_count: filtered.filter(r => getStatus(r) === "zaplacona").length,
+    };
+
+    return (
+      <div className="p-4 md:p-6">
+
+        {/* FILTR OKRESU */}
+        <div className="mb-5">
+          <div className="flex items-center gap-2 flex-wrap mb-3">
+            <div className="flex gap-1.5 flex-shrink-0">
+              {[["2026","2026","#0ea5e9","#f0f9ff","#bae6fd"],["2025","2025","#6366f1","#eef2ff","#c7d2fe"],["all","Wszystkie","#111827","#f9fafb","#e5e7eb"]].map(([key,label,color,bg,border]) => {
+                const active = filterYear===key && filterMonth==="all";
+                return (
+                  <button key={key} onClick={() => { setFilterYear(key); setFilterMonth("all"); }}
+                    className="rounded-xl px-3 py-1.5 transition-all whitespace-nowrap"
+                    style={{ background: active ? bg : "#fff", border: `2px solid ${active ? border : "#f3f4f6"}`, color: active ? color : "#9ca3af", fontWeight: active ? 700 : 500, fontSize: "13px" }}>
+                    {active && "✓ "}{label}
+                  </button>
+                );
+              })}
+            </div>
+            {filterYear !== "all" && (
+              <div className="flex gap-1 flex-wrap">
+                {MONTHS.map((m,i) => {
+                  const mm = String(i+1).padStart(2,"0");
+                  return (
+                    <button key={mm} onClick={() => setFilterMonth(filterMonth===mm ? "all" : mm)}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
+                      style={{ background: filterMonth===mm ? "#111827" : "#f3f4f6", color: filterMonth===mm ? "#fff" : "#6b7280" }}>
+                      {m}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <div className="ml-auto text-xs text-gray-400">
+              {filtered.length} faktur · {filterYear === "all" ? "wszystkie lata" : filterMonth === "all" ? filterYear : `${MONTHS[parseInt(filterMonth)-1]} ${filterYear}`}
+            </div>
+          </div>
+        </div>
+
+        {/* KPI — 2 rzędy */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+          <div className="rounded-xl p-3 border border-gray-100 bg-gray-50">
+            <div className="text-xs text-gray-500 mb-1">Łącznie EUR</div>
+            <div className="text-lg font-bold text-gray-900">{fmt(kpiAll.total)}</div>
+            <div className="text-xs text-gray-400">{kpiAll.count} faktur</div>
+          </div>
+          <div className="rounded-xl p-3 border border-red-100 bg-red-50">
+            <div className="text-xs text-red-700 mb-1">🔴 Przeterminowane</div>
+            <div className="text-lg font-bold text-red-600">{fmt(kpiAll.przeterminowane)}</div>
+            <div className="text-xs text-red-400">{kpiAll.przeterminowane_count} faktur</div>
+          </div>
+          <div className="rounded-xl p-3 border border-yellow-100 bg-yellow-50">
+            <div className="text-xs text-yellow-700 mb-1">🟡 Wysłane / czekają</div>
+            <div className="text-lg font-bold text-yellow-600">{fmt(kpiAll.czeka)}</div>
+            <div className="text-xs text-yellow-500">{kpiAll.czeka_count} faktur</div>
+          </div>
+          <div className="rounded-xl p-3 border border-green-100 bg-green-50">
+            <div className="text-xs text-green-700 mb-1">🟢 Zapłacone</div>
+            <div className="text-lg font-bold text-green-600">{fmt(kpiAll.zaplacone)}</div>
+            <div className="text-xs text-green-400">{kpiAll.zaplacone_count} faktur</div>
+          </div>
+        </div>
+
+        {/* KARTY KIEROWCÓW — wysłane/przeterminowane */}
+        <div className="mb-4">
+          <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Per pojazd / kierowca</div>
+          <div className="space-y-2">
+            {vehicles.filter(v => !v.archived).map(v => {
+              const vf = filtered.filter(r => r.vehicleId === v.id);
+              if (vf.length === 0) return null;
+              const przet = vf.filter(r => getStatus(r) === "przeterminowana");
+              const suma = vf.reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0);
+              const driver = (v.driverHistory||[]).find(d => !d.to)?.name || "—";
+              const initials = driver.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
+              const hasPrzet = przet.length > 0;
+              return (
+                <div key={v.id} onClick={() => setSelectedVehicle(v.id)}
+                  className="flex items-center justify-between px-4 py-3 rounded-xl border cursor-pointer hover:shadow-sm transition-all"
+                  style={{ borderColor: hasPrzet ? "#fca5a5" : "#f3f4f6", background: hasPrzet ? "#fff7f7" : "#fff" }}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0"
+                      style={{ background: hasPrzet ? "#fef2f2" : "#f0fdf4", color: hasPrzet ? "#dc2626" : "#15803d" }}>
+                      {initials || <VehicleIcon v={v} size={16}/>}
+                    </div>
+                    <div>
+                      <div className="text-sm font-semibold text-gray-900">{driver !== "—" ? driver : v.plate} · {v.plate}</div>
+                      <div className="text-xs text-gray-400">{vf.length} faktur</div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm font-semibold text-green-700">{fmt(suma)}</div>
+                    {hasPrzet
+                      ? <div className="text-xs text-red-500">{przet.length} przeterminowane</div>
+                      : <div className="text-xs text-gray-300">ok</div>}
+                  </div>
+                </div>
+              );
+            }).filter(Boolean)}
+          </div>
+        </div>
+
+      </div>
+    );
+  }
+
+  // Widok per pojazd
+  const v = vehicles.find(x => x.id === selectedVehicle);
+  let rows = frachtyWithFV.filter(r => r.vehicleId === selectedVehicle);
+  if (filterStatus !== "all") rows = rows.filter(r => getStatus(r) === filterStatus);
+  if (filterYear !== "all") rows = rows.filter(r => (r.dataZaladunku||r.dataZlecenia)?.startsWith(filterYear));
+  if (filterMonth !== "all") rows = rows.filter(r => (r.dataZaladunku||r.dataZlecenia||"").slice(5,7) === filterMonth);
+  rows = rows.sort((a,b) => (b.dataZaladunku||b.dataZlecenia||"").localeCompare(a.dataZaladunku||a.dataZlecenia||""));
+
+  const totalEur = rows.reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0);
+  const totalPrzet = rows.filter(r => getStatus(r) === "przeterminowana").reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0);
+
+  return (
+    <div className="p-4 md:p-6">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-3 mb-5">
+        <button onClick={() => setSelectedVehicle(null)} className="px-3 py-1.5 rounded-lg text-sm text-gray-500 hover:bg-gray-100 border border-gray-200">← Powrót</button>
+        <div className="flex-1">
+          <h2 className="text-xl font-bold text-gray-900">{v?.plate} · FV / Płatności</h2>
+          <p className="text-sm text-gray-400">{v?.brand}</p>
+        </div>
+      </div>
+
+      {/* Filtry */}
+      <div className="flex flex-wrap gap-2 mb-5">
+        <div className="flex gap-1.5">
+          {[["all","Wszystkie"],["2026","2026"],["2025","2025"]].map(([key,label]) => (
+            <button key={key} onClick={() => { setFilterYear(key); setFilterMonth("all"); }}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style={{ background: filterYear===key && filterMonth==="all" ? "#111827" : "#f3f4f6", color: filterYear===key && filterMonth==="all" ? "#fff" : "#6b7280" }}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {filterYear !== "all" && (
+          <div className="flex gap-1 flex-wrap">
+            {["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paź","Lis","Gru"].map((m,i) => {
+              const mm = String(i+1).padStart(2,"0");
+              return (
+                <button key={mm} onClick={() => setFilterMonth(filterMonth===mm ? "all" : mm)}
+                  className="px-2 py-1.5 rounded-lg text-xs font-medium transition-all"
+                  style={{ background: filterMonth===mm ? "#111827" : "#f3f4f6", color: filterMonth===mm ? "#fff" : "#6b7280" }}>
+                  {m}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <div className="flex gap-1 flex-wrap">
+          {[["all","Wszystkie","#111827","#f3f4f6"], ...FV_STATUSES.map(s => [s.id, s.emoji+" "+s.label, s.color, s.bg])].map(([id, label, color, bg]) => (
+            <button key={id} onClick={() => setFilterStatus(id)}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style={{ background: filterStatus===id ? (id==="all"?"#111827":bg) : "#f3f4f6", color: filterStatus===id ? (id==="all"?"#fff":color) : "#6b7280", border: filterStatus===id ? `1.5px solid ${id==="all"?"#111827":color}` : "1.5px solid transparent" }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* KPI */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        {[
+          ["Faktur", rows.length, "#6366f1", "#eef2ff"],
+          ["Łącznie EUR", fmt(totalEur), "#16a34a", "#f0fdf4"],
+          ["Przeterminowane", fmt(totalPrzet), "#dc2626", "#fef2f2"],
+          ["Do otrzymania", fmt(rows.filter(r=>getStatus(r)!=="zaplacona").reduce((s,r)=>s+(parseFloat(r.cenaEur)||0),0)), "#d97706", "#fffbeb"],
+        ].map(([label,value,color,bg]) => (
+          <div key={label} className="rounded-xl p-3 border border-gray-100" style={{background:bg}}>
+            <div className="text-xs text-gray-500 mb-1">{label}</div>
+            <div className="text-base font-bold" style={{color}}>{value}</div>
+            <div className="text-xs mt-0.5" style={{color, opacity:0.6}}>
+              {filterMonth !== "all"
+                ? `${["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paź","Lis","Gru"][parseInt(filterMonth)-1]} ${filterYear}`
+                : filterYear !== "all" ? filterYear : "wszystkie"}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Tabela */}
+      <div className="overflow-x-auto rounded-xl border border-gray-100 bg-white">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-gray-100 text-gray-400 uppercase bg-gray-50 text-xs">
+              <th className="px-3 py-2.5 text-center whitespace-nowrap font-semibold">Data zlec.</th>
+              <th className="px-3 py-2.5 text-left whitespace-nowrap font-semibold">Klient</th>
+              <th className="px-3 py-2.5 text-center whitespace-nowrap font-semibold">Cena EUR</th>
+              <th className="px-3 py-2.5 text-center whitespace-nowrap font-semibold">Nr FV</th>
+              <th className="px-3 py-2.5 text-center whitespace-nowrap font-semibold">Nr zlec.</th>
+              <th className="px-3 py-2.5 text-center whitespace-nowrap font-semibold">Wysłano FV</th>
+              <th className="px-3 py-2.5 text-center whitespace-nowrap font-semibold">Termin płatn.</th>
+              <th className="px-3 py-2.5 text-center whitespace-nowrap font-semibold">Status FV</th>
+              <th className="px-3 py-2.5 text-center whitespace-nowrap font-semibold">📄 FV</th>
+              <th className="px-3 py-2.5 text-center whitespace-nowrap font-semibold"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && (
+              <tr><td colSpan={11} className="text-center py-10 text-gray-400">Brak faktur dla wybranych filtrów</td></tr>
+            )}
+            {rows.map(r => {
+              const st = getStatus(r);
+              const stObj = FV_STATUSES.find(s => s.id === st) || FV_STATUSES[0];
+              const isOverdue = st === "przeterminowana";
+              const daysOverdue = r.terminPlatnosci && isOverdue
+                ? Math.floor((new Date() - new Date(r.terminPlatnosci)) / 86400000)
+                : null;
+              return (
+                <tr key={r.id} className="border-b border-gray-50 transition-colors"
+                  style={{ background: isOverdue ? "#fff7f7" : "white" }}>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-700 text-center">{r.dataZlecenia||"-"}</td>
+                  <td className="px-3 py-2.5 max-w-36 truncate font-medium text-gray-800">{r.klient||"-"}</td>
+                  <td className="px-3 py-2.5 text-center font-bold text-green-700 whitespace-nowrap">{r.cenaEur ? fmt(r.cenaEur) : "-"}</td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-600 font-mono text-xs text-center">{r.nrFV||"-"}</td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-500 font-mono text-xs text-center">{r.nrZlecenia||"-"}</td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-gray-500 text-center">{r.dataWyslania||"-"}</td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-center">
+                    <span style={{ color: isOverdue ? "#dc2626" : "#6b7280", fontWeight: isOverdue ? 700 : 400 }}>
+                      {r.terminPlatnosci||"-"}
+                    </span>
+                    {daysOverdue !== null && (
+                      <span className="ml-1.5 text-xs px-1.5 py-0.5 rounded-full font-bold" style={{background:"#fef2f2",color:"#dc2626"}}>
+                        +{daysOverdue}d
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-center">
+                    <select
+                      value={r.statusFV || "nie_wyslana"}
+                      onChange={e => onUpdate(r.id, { statusFV: e.target.value })}
+                      onClick={e => e.stopPropagation()}
+                      className="text-xs font-semibold rounded-lg px-2 py-1 cursor-pointer outline-none border-0"
+                      style={{ background: stObj.bg, color: stObj.color, minWidth: 130 }}>
+                      {FV_STATUSES.map(s => <option key={s.id} value={s.id}>{s.emoji} {s.label}</option>)}
+                    </select>
+                  </td>
+                  <td className="px-3 py-2.5 whitespace-nowrap">
+                    <DocUploadCell
+                      frachtId={r.id}
+                      docType="fv"
+                      existingUrl={r.urlFV}
+                      onUploaded={(url, fields) => onUpdate(r.id, { urlFV: url, ...fields })}
+                    />
+                  </td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-right">
+                    <div className="flex items-center gap-1 justify-end">
+                      {r.urlZlecenie
+                        ? <a href={safeHref(r.urlZlecenie)} target="_blank" rel="noopener noreferrer"
+                            className="text-xs px-2 py-1 rounded-lg font-medium transition-all hover:bg-blue-100"
+                            style={{background:"#f0fdf4", color:"#15803d"}}>📄 Otwórz</a>
+                        : <ZlecenieUploadBtn frachtId={r.id}
+                            onUploaded={(url, parsed) => { const p = parsed || {}; const existing = frachtyList.find(x => x.id === r.id) || {}; const onlyNew = Object.fromEntries(Object.entries(p).filter(([k,v]) => v != null && v !== "" && !existing[k])); onUpdate(r.id, { urlZlecenie: url, ...onlyNew }); }} />
+                      }
+                      <button onClick={() => setEditFVId(r.id)}
+                        className="w-6 h-6 rounded-lg flex items-center justify-center transition-all hover:bg-indigo-50 text-xs"
+                        style={{background:"#f3f4f6"}} title="Edytuj">
+                        ✏️
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {editFVId && (
+        <FVEditModal
+          record={frachtyList.find(r => r.id === editFVId)}
+          onSave={(data) => { onUpdate(editFVId, data); setEditFVId(null); }}
+          onClose={() => setEditFVId(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+
+// ─── KOMENTARZ BANER ─────────────────────────────────────────────────────────
+function KomentarzBaner({ frachtyList, vehicleId, onUpdate }) {
+  const [open, setOpen] = useState(false);
+  const doRemind = frachtyList.filter(r =>
+    r.vehicleId === vehicleId &&
+    r.statusRozladunku === "rozladowano" &&
+    !r.komentarzKlienta
+  );
+
+  if (!doRemind.length) {
+    return <div className="mt-3 text-xs text-gray-400 text-right">kliknij aby zobaczyc frachty →</div>;
+  }
+
+  return (
+    <div className="mt-3 relative" onClick={e => e.stopPropagation()}>
+      {/* Baner-przycisk */}
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full px-3 py-2 rounded-xl flex items-center gap-2 transition-all"
+        style={{ background: "#fefce8", border: "1.5px solid #fde68a" }}>
+        <span className="text-sm">⭐</span>
+        <div className="flex-1 min-w-0 text-left">
+          <div className="text-xs font-semibold text-amber-800">
+            Poproś o komentarz ({doRemind.length})
+          </div>
+          <div className="text-xs text-amber-500 truncate">
+            {doRemind.map(r => r.klient || r.dataZlecenia).filter(Boolean).slice(0, 2).join(", ")}
+            {doRemind.length > 2 ? ` +${doRemind.length - 2}` : ""}
+          </div>
+        </div>
+        <span className="text-amber-400 text-xs">{open ? "▲" : "▼"}</span>
+      </button>
+
+      {/* Dropdown lista */}
+      {open && (
+        <div className="absolute left-0 right-0 z-20 mt-1 rounded-xl shadow-xl overflow-hidden"
+          style={{ background: "#fff", border: "1.5px solid #fde68a" }}>
+          <div className="px-3 py-2 border-b" style={{ background: "#fefce8" }}>
+            <span className="text-xs font-bold text-amber-800">Klienci do przypomnienia</span>
+          </div>
+          <div className="max-h-56 overflow-y-auto">
+            {doRemind.map(r => (
+              <div key={r.id}
+                className="flex items-center gap-3 px-3 py-2.5 border-b border-gray-50 hover:bg-amber-50 transition-colors">
+                <button
+                  onClick={() => onUpdate(r.id, { komentarzKlienta: "✓" })}
+                  className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0 border-2 transition-all"
+                  style={{ borderColor: "#fbbf24", background: "#fff" }}
+                  title="Oznacz jako wysłane">
+                  <span className="text-xs text-amber-400">✓</span>
+                </button>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-semibold text-gray-800 truncate">
+                    {r.klient || "—"}
+                  </div>
+                  <div className="text-xs text-gray-400">
+                    {r.dataZlecenia} · {r.dokod || r.zaladunekKod || "—"}
+                  </div>
+                </div>
+                <div className="text-xs font-bold text-green-700 flex-shrink-0">
+                  {r.cenaEur ? `${parseFloat(r.cenaEur).toLocaleString("pl-PL")} €` : ""}
+                </div>
+              </div>
+            ))}
+          </div>
+          {doRemind.length > 1 && (
+            <div className="px-3 py-2 border-t" style={{ background: "#fefce8" }}>
+              <button
+                onClick={() => {
+                  doRemind.forEach(r => onUpdate(r.id, { komentarzKlienta: "✓" }));
+                  setOpen(false);
+                }}
+                className="w-full text-xs font-bold py-1.5 rounded-lg"
+                style={{ background: "#fbbf24", color: "#fff" }}>
+                ✓ Oznacz wszystkich ({doRemind.length})
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete, onUpdate, onBulkAdd }) {
+  // Index driverEvents by frachtId for quick lookup
+  const eventsByFracht = useMemo(() => {
+    const map = {};
+    driverEvents.forEach(ev => {
+      if (!ev.frachtId) return;
+      if (!map[ev.frachtId]) map[ev.frachtId] = [];
+      map[ev.frachtId].push(ev);
+    });
+    return map;
+  }, [driverEvents]);
+  const [selectedVehicle, setSelectedVehicle] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [driverStatusId, setDriverStatusId] = useState(null); // rozwinięty panel statusów kierowcy
+  const [showImport, setShowImport] = useState(false);
+  const [overviewYear, setOverviewYear] = useState(String(new Date().getFullYear()));
+  const [overviewMonth, setOverviewMonth] = useState(String(new Date().getMonth() + 1).padStart(2, "0"));
+  const [filterMonth, setFilterMonth] = useState(new Date().getMonth());
+  const [filterYear, setFilterYear] = useState(new Date().getFullYear());
+  const fmt = (n) => n && parseFloat(n) > 0 ? parseFloat(n).toLocaleString("pl-PL",{minimumFractionDigits:2,maximumFractionDigits:2}) : "—";
+  const monthFreights = (vid) => frachtyList.filter(r => {
+    if (r.vehicleId !== vid) return false;
+    const dateStr = r.dataZaladunku || r.dataZlecenia;
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    if (filterMonth !== null && d.getMonth() !== filterMonth) return false;
+    return d.getFullYear() === filterYear;
+  }).sort((a,b) => (a.dataZaladunku||a.dataZlecenia||"").localeCompare(b.dataZaladunku||b.dataZlecenia||""));
+  const editRecord = editId ? frachtyList.find(r => r.id === editId) : null;
+
+  // Filtruje frachty po roku na overview
+  const filterByYear = (list, year) => year === "all" ? list : list.filter(r => (r.dataZaladunku||r.dataZlecenia)?.startsWith(year));
+  const visibleList = filterByYear(frachtyList, overviewYear).filter(r => {
+    if (overviewMonth === "all") return true;
+    return (r.dataZaladunku||r.dataZlecenia||"").slice(5,7) === overviewMonth;
+  });
+
+  // KPI per rok dla baner-przycisków
+  const yearStats = (year) => {
+    const l = filterByYear(frachtyList, year);
+    return {
+      count: l.length,
+      eur: l.reduce((s,r) => s + (parseFloat(r.cenaEur)||0), 0),
+      km: l.reduce((s,r) => s + (parseInt(r.kmWszystkie)||parseInt(r.kmLadowne)||0), 0),
+    };
+  };
+
+  if (!selectedVehicle) {
+    const kpi = { count: visibleList.length, eur: visibleList.reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0), km: visibleList.reduce((s,r) => s+(parseInt(r.kmWszystkie)||parseInt(r.kmLadowne)||0),0) };
+    return (
+      <div className="p-4 md:p-6">
+        {showImport && (
+          <FrachtyImportModal
+            vehicles={vehicles}
+            onImport={(rows) => { onBulkAdd(rows); setTimeout(() => setShowImport(false), 1500); }}
+            onClose={() => setShowImport(false)}
+          />
+        )}
+
+        {/* HEADER */}
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+          <div><h2 className="text-xl font-bold text-gray-900">Frachty</h2><p className="text-sm text-gray-400 mt-0.5">{frachtyList.length} wpisów łącznie</p></div>
+          <button onClick={() => setShowImport(true)} className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 flex items-center gap-2">
+            📥 Importuj z Excel
+          </button>
+        </div>
+
+        {/* SELEKTOR LAT + MIESIĄCE + KPI */}
+        <div className="mb-5">
+          {/* Lata + miesiące w jednym rzędzie */}
+          <div className="flex items-center gap-2 flex-wrap mb-3">
+            <div className="flex gap-1.5 flex-shrink-0">
+              {[
+                { key: "2026", label: "2026", color: "#0ea5e9", bg: "#f0f9ff", border: "#bae6fd" },
+                { key: "2025", label: "2025", color: "#6366f1", bg: "#eef2ff", border: "#c7d2fe" },
+                { key: "all",  label: "Wszystkie", color: "#111827", bg: "#f9fafb", border: "#e5e7eb" },
+              ].map(({ key, label, color, bg, border }) => {
+                const active = overviewYear === key;
+                return (
+                  <button key={key} onClick={() => { setOverviewYear(key); setOverviewMonth("all"); }}
+                    className="rounded-xl px-3 py-1.5 transition-all whitespace-nowrap"
+                    style={{ background: active ? bg : "#fff", border: `2px solid ${active ? border : "#f3f4f6"}`, color: active ? color : "#9ca3af", fontWeight: active ? 700 : 500, fontSize: "13px" }}>
+                    {active && "✓ "}{label}
+                  </button>
+                );
+              })}
+            </div>
+            {overviewYear !== "all" && (
+              <div className="flex gap-1 flex-wrap">
+                {["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paź","Lis","Gru"].map((m,i) => {
+                  const mm = String(i+1).padStart(2,"0");
+                  return (
+                    <button key={mm} onClick={() => setOverviewMonth(overviewMonth===mm ? "all" : mm)}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
+                      style={{ background: overviewMonth===mm ? "#111827" : "#f3f4f6", color: overviewMonth===mm ? "#fff" : "#6b7280" }}>
+                      {m}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          {/* KPI */}
+          <div className="grid grid-cols-3 gap-3">
+            {(() => {
+              const s = { count: visibleList.length, eur: visibleList.reduce((a,r)=>a+(parseFloat(r.cenaEur)||0),0), km: visibleList.reduce((a,r)=>a+(parseInt(r.kmWszystkie)||parseInt(r.kmLadowne)||0),0) };
+              const avgKm = s.km > 0 ? (s.eur / s.km).toFixed(2) : "—";
+              return [
+                ["Frachtów", s.count, "#6366f1"],
+                ["Łącznie EUR", s.eur > 0 ? parseFloat(s.eur).toLocaleString("pl-PL",{maximumFractionDigits:0})+" €" : "—", "#16a34a"],
+                ["Śr. €/km", avgKm !== "—" ? avgKm+" €" : "—", "#f59e0b"],
+              ].map(([label, value, color]) => (
+                <div key={label} className="rounded-xl p-3 border border-gray-100 bg-white flex flex-col justify-center">
+                  <div className="text-xs text-gray-400 mb-1">{label}</div>
+                  <div className="text-lg font-bold leading-tight" style={{color}}>{value}</div>
+                </div>
+              ));
+            })()}
+          </div>
+        </div>
+
+        {/* KARTY POJAZDÓW */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {vehicles.filter(v => !v.archived).map(v => {
+            const vf = visibleList.filter(r => r.vehicleId === v.id);
+            if (vf.length === 0) return null;
+            const suma = vf.reduce((s,r) => s + (parseFloat(r.cenaEur)||0), 0);
+            const km = vf.reduce((s,r) => s + (parseInt(r.kmWszystkie)||parseInt(r.kmLadowne)||0), 0);
+            return (
+              <div key={v.id} onClick={() => setSelectedVehicle(v.id)} className="bg-white rounded-2xl border border-gray-100 p-4 cursor-pointer hover:border-gray-300 hover:shadow-sm transition-all">
+                <div className="flex items-center justify-between mb-3">
+                  <div><div className="font-bold text-gray-900 text-base">{v.plate}</div><div className="text-xs text-gray-400">{v.brand} · {v.year}</div></div>
+                  <div className="text-2xl"><VehicleIcon v={v} size={20}/></div>
+                </div>
+                <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-gray-50">
+                  <div><div className="text-xs text-gray-400">Frachtów</div><div className="font-bold text-gray-900">{vf.length}</div></div>
+                  <div><div className="text-xs text-gray-400">Przychód</div><div className="font-bold text-green-700 text-sm">{fmt(suma)}</div></div>
+                  <div><div className="text-xs text-gray-400">Śr. €/km</div><div className="font-bold text-amber-500 text-sm">{km > 0 ? (suma/km).toFixed(2) : "—"}</div></div>
+                </div>
+                <KomentarzBaner
+                  frachtyList={frachtyList}
+                  vehicleId={v.id}
+                  onUpdate={onUpdate}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+  const v = vehicles.find(v => v.id === selectedVehicle);
+  const rows = monthFreights(selectedVehicle);
+  const totalCena = rows.reduce((s,r) => s + (parseFloat(r.cenaEur)||0), 0);
+  const totalKmWszAll = rows.reduce((s,r) => s + (parseInt(r.kmWszystkie)||parseInt(r.kmLadowne)||0), 0);
+  const totalKmPodj = rows.reduce((s,r) => s + (parseInt(r.kmPodjazd)||0), 0);
+  const totalKmLad = rows.reduce((s,r) => s + (parseInt(r.kmLadowne)||0), 0);
+  const totalKmWsz = rows.reduce((s,r) => s + (parseInt(r.kmWszystkie)||0), 0);
+  const avgEurKm = totalKmWszAll > 0 ? (totalCena/totalKmWszAll).toFixed(2) : (totalKmLad > 0 ? (totalCena/totalKmLad).toFixed(2) : "-");
+  const avgEurKmWsz = totalKmWsz > 0 ? (totalCena/totalKmWsz).toFixed(2) : "-";
+  const miesiaceL = ["Styczniu","Lutym","Marcu","Kwietniu","Maju","Czerwcu","Lipcu","Sierpniu","Wrzesniu","Pazdzierniku","Listopadzie","Grudniu"];
+  return (
+    <div className="p-4 md:p-6">
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <button onClick={() => setSelectedVehicle(null)} className="px-3 py-1.5 rounded-lg text-sm text-gray-500 hover:bg-gray-100 border border-gray-200">← Powrot</button>
+        <div className="flex-1"><h2 className="text-xl font-bold text-gray-900">{v?.plate} · Frachty</h2><p className="text-sm text-gray-400">{v?.brand} · {v?.year}</p></div>
+        <button onClick={() => { setEditId(null); setShowForm(true); }} className="px-4 py-2 rounded-lg text-sm font-semibold text-white" style={{background:"#111827"}}>+ Dodaj fracht</button>
+      </div>
+      <div className="flex flex-wrap gap-2 mb-4">
+        <div className="flex gap-1.5">
+          {[2026,2025,2024].map(y => (
+            <button key={y} onClick={() => setFilterYear(y)}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style={{ background: filterYear===y ? "#111827" : "#f3f4f6", color: filterYear===y ? "#fff" : "#6b7280" }}>
+              {y}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-1 flex-wrap">
+          <button onClick={() => setFilterMonth(null)}
+            className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
+            style={{ background: filterMonth===null ? "#111827" : "#f3f4f6", color: filterMonth===null ? "#fff" : "#6b7280" }}>
+            Wszystkie
+          </button>
+          {["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paz","Lis","Gru"].map((m,i) => (
+            <button key={i} onClick={() => setFilterMonth(i)} className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all" style={{background:filterMonth===i?"#111827":"#f3f4f6",color:filterMonth===i?"#fff":"#6b7280"}}>{m}</button>
+          ))}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        {[["Frachtow",rows.length,"#6366f1"],["Przychod EUR",fmt(totalCena),"#16a34a"],["KM wszystkie",totalKmWszAll.toLocaleString("pl-PL"),"#0ea5e9"],["Sr. EUR/km",avgEurKm,"#f59e0b"]].map(([label,value,color]) => (
+          <div key={label} className="rounded-xl p-3 border border-gray-100 bg-white"><div className="text-xs text-gray-400 mb-1">{label}</div><div className="text-lg font-bold" style={{color}}>{value}</div></div>
+        ))}
+      </div>
+      {/* MOBILE — widok kartkowy */}
+      <div className="md:hidden space-y-3 mb-4">
+        {rows.length === 0 && <div className="text-center py-8 text-gray-400 text-sm">Brak frachtów w tym miesiącu</div>}
+        {rows.map((r, idx) => {
+          const eurKmLad = (r.kmWszystkie||r.kmLadowne) && r.cenaEur ? (parseFloat(r.cenaEur)/(parseInt(r.kmWszystkie)||parseInt(r.kmLadowne))).toFixed(2) : null;
+          const stRozl = r.statusRozladunku || "w_trasie";
+          const stColors = { rozladowano: ["#f0fdf4","#166534","✅"], w_trasie: ["#f0f9ff","#0369a1","→"], problem: ["#fef2f2","#991b1b","⚠️"] };
+          const [stBg, stColor, stEmoji] = stColors[stRozl] || stColors.w_trasie;
+          return (
+            <div key={r.id} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <div className="font-bold text-gray-900">{r.klient || "—"}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">{r.dataZlecenia} · #{idx+1}</div>
+                </div>
+                <div className="text-right">
+                  <div className="font-bold text-green-700 text-lg">{r.cenaEur ? `${parseFloat(r.cenaEur).toLocaleString("pl-PL",{minimumFractionDigits:2})} €` : "—"}</div>
+                  {eurKmLad && <div className="text-xs text-amber-600">{eurKmLad} €/km</div>}
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 mb-3">
+                <span className="text-xs px-2 py-1 rounded-lg bg-gray-50 text-gray-600">📍 {[[r.zaladunekKod,r.zaladunekKod2,r.zaladunekKod3].filter(s=>s&&s.trim()).join("/"), [r.dokod,r.dokod2,r.dokod3].filter(s=>s&&s.trim()).join("/")].filter(Boolean).join(" → ") || "—"}</span>
+                {r.kmLadowne && <span className="text-xs px-2 py-1 rounded-lg bg-blue-50 text-blue-700">🛣 {r.kmLadowne} km lad.</span>}
+                <span className="text-xs px-2 py-1 rounded-lg font-semibold" style={{background: stBg, color: stColor}}>{stEmoji} {stRozl === "rozladowano" ? "Rozładowano" : stRozl === "w_trasie" ? "W trasie" : "Problem"}</span>
+              </div>
+              <div className="flex items-center justify-between pt-2 border-t border-gray-50">
+                <div className="text-xs text-gray-400">{r.dyspozytor || "—"} · {r.nrFV || "brak FV"}</div>
+                <div className="flex gap-1 flex-wrap">
+                  {r.urlZlecenie && (
+                    <a href={safeHref(r.urlZlecenie)} target="_blank" rel="noopener noreferrer"
+                      className="h-8 px-2 rounded-lg flex items-center justify-center bg-blue-50 text-blue-600 text-xs font-semibold hover:bg-blue-100">📄 Zlecenie</a>
+                  )}
+                  {r.urlFV && (
+                    <a href={safeHref(r.urlFV)} target="_blank" rel="noopener noreferrer"
+                      className="h-8 px-2 rounded-lg flex items-center justify-center bg-green-50 text-green-600 text-xs font-semibold hover:bg-green-100">🧾 FV</a>
+                  )}
+                  <button onClick={() => { setEditId(r.id); setShowForm(true); }}
+                    className="w-8 h-8 rounded-lg flex items-center justify-center bg-gray-100 hover:bg-gray-200">✏️</button>
+                  <button onClick={() => { if(window.confirm("Usunąć?")) onDelete(r.id); }}
+                    className="w-8 h-8 rounded-lg flex items-center justify-center bg-red-50 hover:bg-red-100 text-red-400">✕</button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* DESKTOP — tabela */}
+      <div className="hidden md:block overflow-x-auto rounded-xl border border-gray-100 bg-white">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-gray-100 text-gray-400 uppercase bg-gray-50">
+              {["#","Zlec.","Zał.","Rozł.","Załadunek","Rozładunek","Status","Klient","EUR","KM p.","KM ł.","KM w.","€/km ł.","€/km w.","Waga","Dysp.","FV","Uwagi",""].map(h => <th key={h} className="px-1.5 py-2 text-left whitespace-nowrap" style={{fontSize:11}}>{h}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && <tr><td colSpan={19} className="text-center py-10 text-gray-400">Brak frachtow w {miesiaceL[filterMonth]} {filterYear}</td></tr>}
+            {rows.map((r,idx) => {
+              const eurKmLad = r.kmLadowne && r.cenaEur ? (parseFloat(r.cenaEur)/parseInt(r.kmLadowne)).toFixed(2) : "-";
+              const eurKmWsz = r.kmWszystkie && r.cenaEur ? (parseFloat(r.cenaEur)/parseInt(r.kmWszystkie)).toFixed(2) : "-";
+              const FV_STATUSES = [
+                { id: "nie_wyslana",  label: "Nie wysłana",    bg: "#f3f4f6", color: "#6b7280", dot: "#9ca3af" },
+                { id: "wyslana",      label: "Wysłana / czeka", bg: "#fefce8", color: "#92400e", dot: "#f59e0b" },
+                { id: "przeterminowana", label: "Przeterminowana", bg: "#fef2f2", color: "#991b1b", dot: "#ef4444" },
+                { id: "zaplacona",    label: "Zapłacona",      bg: "#f0fdf4", color: "#166534", dot: "#22c55e" },
+              ];
+              return [
+                <tr key={r.id} className="border-b border-gray-50 hover:bg-blue-50 transition-colors" style={{fontSize: 12}}>
+                  <td className="px-1.5 py-1.5 text-gray-400">{idx+1}</td>
+                  <td className="px-1.5 py-1.5 whitespace-nowrap">{r.dataZlecenia||"-"}</td>
+                  <td className="px-1.5 py-1.5 whitespace-nowrap text-gray-500">{r.dataZaladunku||"-"}</td>
+                  <td className="px-1.5 py-1.5 whitespace-nowrap text-gray-500">{r.dataRozladunku||"-"}</td>
+                  <td className="px-1.5 py-1.5 whitespace-nowrap" style={{maxWidth:120,overflow:"hidden",textOverflow:"ellipsis"}}>{[r.zaladunekKod,r.zaladunekKod2,r.zaladunekKod3].filter(s=>s&&s.trim()).join(" / ")||[r.skad].filter(Boolean).join("")||"-"}</td>
+                  <td className="px-1.5 py-1.5 whitespace-nowrap" style={{maxWidth:120,overflow:"hidden",textOverflow:"ellipsis"}}>{[r.dokod,r.dokod2,r.dokod3].filter(s=>s&&s.trim()).join(" / ")||"-"}</td>
+                  <td className="px-2 py-2 whitespace-nowrap">
+                    {(() => {
+                      const s = r.statusRozladunku || "w_trasie";
+                      const cfg = {
+                        rozladowano: { emoji:"✅", label:"Rozładowano", bg:"#f0fdf4", color:"#166534" },
+                        w_trasie:    { emoji:"→", label:"W trasie",    bg:"#f0f9ff", color:"#0369a1" },
+                        problem:     { emoji:"⚠️", label:"Problem",     bg:"#fef2f2", color:"#991b1b" },
+                      };
+                      const c = cfg[s] || cfg.w_trasie;
+                      const evts = eventsByFracht[r.id] || [];
+                      const hasZal = evts.some(e => e.type === "zaladowano");
+                      const hasRoz = evts.some(e => e.type === "rozladowano");
+                      return (
+                        <div className="flex items-center gap-1">
+                          <select
+                            value={s}
+                            onChange={e => onUpdate(r.id, { statusRozladunku: e.target.value })}
+                            onClick={ev => ev.stopPropagation()}
+                            className="text-xs font-semibold rounded-lg px-2 py-1 cursor-pointer outline-none border-0"
+                            style={{ background: c.bg, color: c.color, minWidth: 118 }}
+                          >
+                            <option value="w_trasie">→ W trasie</option>
+                            <option value="rozladowano">✅ Rozładowano</option>
+                            <option value="problem">⚠️ Problem</option>
+                          </select>
+                          {evts.length > 0 && (
+                            <button onClick={(ev) => { ev.stopPropagation(); setDriverStatusId(driverStatusId === r.id ? null : r.id); }}
+                              className="flex gap-0.5 ml-1 px-1.5 py-0.5 rounded-lg hover:bg-gray-100 transition-all cursor-pointer"
+                              title="Pokaż statusy kierowcy">
+                              {hasZal && <span className="text-[10px]">📦</span>}
+                              {hasRoz && <span className="text-[10px]">✅</span>}
+                              {evts.some(e=>e.type?.includes("cmr")) && <span className="text-[10px]">📄</span>}
+                              {evts.some(e=>e.type?.includes("photo")) && <span className="text-[10px]">📸</span>}
+                              <span className="text-[10px] text-gray-400">{driverStatusId === r.id ? "▲" : "▼"}</span>
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </td>
+                  <td className="px-1.5 py-1.5 whitespace-nowrap max-w-20 truncate">{r.klient||"-"}</td>
+                  <td className="px-1.5 py-1.5 text-right font-semibold text-green-700 whitespace-nowrap">{r.cenaEur ? fmt(r.cenaEur) : "-"}</td>
+                  <td className="px-1.5 py-1.5 text-right text-gray-600">{r.kmPodjazd||"-"}</td>
+                  <td className="px-1.5 py-1.5 text-right text-gray-600">{r.kmLadowne||"-"}</td>
+                  <td className="px-1.5 py-1.5 text-right text-gray-600">{r.kmWszystkie||"-"}</td>
+                  <td className="px-1.5 py-1.5 text-right text-amber-600 font-medium">{eurKmLad}</td>
+                  <td className="px-1.5 py-1.5 text-right text-blue-600 font-medium">{eurKmWsz}</td>
+                  <td className="px-1.5 py-1.5 text-gray-500">{r.wagaLadunku||"-"}</td>
+                  <td className="px-1.5 py-1.5 whitespace-nowrap text-gray-500">{r.dyspozytor||"-"}</td>
+                  <td className="px-1.5 py-1.5 whitespace-nowrap text-gray-500">{r.nrFV||"-"}</td>
+                  <td className="px-1.5 py-1.5 text-gray-500 max-w-20 truncate">{r.uwagi||""}</td>
+                  <td className="px-1.5 py-1.5 whitespace-nowrap text-right">
+                    <div className="flex gap-1 justify-end items-center">
+                      {r.urlZlecenie
+                        ? <a href={safeHref(r.urlZlecenie)} target="_blank" rel="noopener noreferrer"
+                            className="text-xs px-2 py-1 rounded-lg font-medium transition-all hover:bg-blue-100"
+                            style={{background:"#f0fdf4", color:"#15803d"}}>📄 Otwórz</a>
+                        : <ZlecenieUploadBtn frachtId={r.id}
+                            onUploaded={(url, parsed) => { const p = parsed || {}; const existing = frachtyList.find(x => x.id === r.id) || {}; const onlyNew = Object.fromEntries(Object.entries(p).filter(([k,v]) => v != null && v !== "" && !existing[k])); onUpdate(r.id, { urlZlecenie: url, ...onlyNew }); }} />
+                      }
+                      <button onClick={() => { setEditId(r.id); setShowForm(true); }} className="w-6 h-6 rounded-lg flex items-center justify-center transition-all hover:bg-indigo-50 text-xs" style={{background:"#f3f4f6"}} title="Edytuj">✏️</button>
+                      <button onClick={() => { if(window.confirm("Usunac?")) onDelete(r.id); }} className="w-6 h-6 rounded-lg flex items-center justify-center text-xs bg-red-50 hover:bg-red-100 text-red-400">✕</button>
+                    </div>
+                  </td>
+                </tr>,
+                driverStatusId === r.id && (() => {
+                  const allEvts = (eventsByFracht[r.id] || []).sort((a,b) => (a.ts||"").localeCompare(b.ts||""));
+                  if (allEvts.length === 0) return null;
+                  // Filtruj: pokaż tylko aktualny stan (bez cofniętych)
+                  const lastZal = allEvts.filter(e => e.type === "zaladowano").pop();
+                  const lastZalUndo = allEvts.filter(e => e.type === "cofnij_zaladowano").pop();
+                  const lastRoz = allEvts.filter(e => e.type === "rozladowano").pop();
+                  const lastRozUndo = allEvts.filter(e => e.type === "cofnij_rozladowano").pop();
+                  const isZalActive = lastZal && (!lastZalUndo || lastZal.ts > lastZalUndo.ts);
+                  const isRozActive = lastRoz && (!lastRozUndo || lastRoz.ts > lastRozUndo.ts);
+                  // Zbierz tylko aktualne eventy
+                  const evts = [];
+                  if (isZalActive) evts.push(lastZal);
+                  // Zdjęcia towaru — wszystkie (nie cofane)
+                  allEvts.filter(e => e.type === "towar_photo").forEach(e => evts.push(e));
+                  // CMR załadunek
+                  const cmrZal = allEvts.find(e => e.type === "cmr_zaladunek_photo");
+                  if (cmrZal) evts.push(cmrZal);
+                  if (isRozActive) evts.push(lastRoz);
+                  // CMR rozładunek
+                  const cmrRoz = allEvts.find(e => e.type === "cmr_rozladunek_photo") || allEvts.find(e => e.type === "cmr_photo");
+                  if (cmrRoz) evts.push(cmrRoz);
+                  // Uwagi kierowcy
+                  allEvts.filter(e => e.type === "uwagi_zaladunek" || e.type === "uwagi_rozladunek").forEach(e => evts.push(e));
+                  // Zdjęcia uszkodzeń
+                  allEvts.filter(e => e.type === "towar_damage_photo").forEach(e => evts.push(e));
+                  // Nowe statusy
+                  const dotZal = allEvts.filter(e => e.type === "dotarcie_zaladunek").pop();
+                  const startRoz = allEvts.filter(e => e.type === "start_rozladunek").pop();
+                  const dotRoz = allEvts.filter(e => e.type === "dotarcie_rozladunek").pop();
+                  if (dotZal) evts.push(dotZal);
+                  if (startRoz) evts.push(startRoz);
+                  if (dotRoz) evts.push(dotRoz);
+                  // Sortuj po czasie
+                  evts.sort((a,b) => (a.ts||"").localeCompare(b.ts||""));
+                  const typeLabels = {
+                    dotarcie_zaladunek: { icon: "📍", label: "Dotarcie na załadunek", color: "#2563eb" },
+                    zaladowano: { icon: "📦", label: "Załadunek potwierdzony", color: "#2563eb" },
+                    towar_photo: { icon: "📸", label: "Zdjęcie towaru", color: "#7c3aed" },
+                    cmr_zaladunek_photo: { icon: "📄", label: "CMR załadunek", color: "#6366f1" },
+                    start_rozladunek: { icon: "🚛", label: "Start do rozładunku", color: "#0891b2" },
+                    dotarcie_rozladunek: { icon: "📍", label: "Dotarcie na rozładunek", color: "#059669" },
+                    rozladowano: { icon: "✅", label: "Rozładunek potwierdzony", color: "#15803d" },
+                    cmr_rozladunek_photo: { icon: "📄", label: "CMR rozładunek", color: "#6366f1" },
+                    cmr_photo: { icon: "📄", label: "CMR", color: "#6366f1" },
+                    towar_damage_photo: { icon: "⚠️", label: "Zdjęcie uszkodzenia", color: "#dc2626" },
+                    uwagi_zaladunek: { icon: "📝", label: "Uwagi — załadunek", color: "#6b7280" },
+                    uwagi_rozladunek: { icon: "📝", label: "Uwagi — rozładunek", color: "#6b7280" },
+                  };
+                  return (
+                    <tr key={`${r.id}_status`}>
+                      <td colSpan={19} style={{ padding: 0 }}>
+                        <div style={{ background: "#f8fafc", borderTop: "1px solid #e5e7eb", borderBottom: "2px solid #e5e7eb", padding: "12px 16px" }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
+                            Status kierowcy — {evts[0]?.driverName || evts[0]?.driverEmail || "—"}
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            {/* Załadunek: plan vs dotarł w jednej linii */}
+                            {r.dataZaladunku && (() => {
+                              const dotEv = evts.find(e => e.type === "dotarcie_zaladunek");
+                              const srEv = evts.find(e => e.type === "start_rozladunek");
+                              const planned = new Date(`${r.dataZaladunku}T${r.godzZaladunku || "23:59"}:00`);
+                              const dotTime = dotEv ? new Date(dotEv.value || dotEv.ts) : null;
+                              const diffMin = dotTime ? Math.round((dotTime - planned) / 60000) : null;
+                              const dotColor = diffMin === null ? "#6b7280" : diffMin <= 0 ? "#15803d" : diffMin <= 30 ? "#d97706" : "#dc2626";
+                              const dotStr = dotTime ? dotTime.toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : null;
+                              const srStr = srEv ? new Date(srEv.value||srEv.ts).toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : null;
+                              return (
+                                <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 20, flexShrink: 0 }}>
+                                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#3b82f6", marginTop: 4 }}></div>
+                                    <div style={{ width: 1, height: 20, background: "#d1d5db" }}></div>
+                                  </div>
+                                  <div style={{ flex: 1 }}>
+                                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1d4ed8", marginBottom: 3 }}>📦 Załadunek</div>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                      <span style={{ fontSize: 12, color: "#6b7280" }}>Plan: {r.dataZaladunku?.slice(5)}{r.godzZaladunku ? ` · ${r.godzZaladunku}` : ""}</span>
+                                      {dotStr && <span style={{ fontSize: 12, fontWeight: 700, color: dotColor }}>→ Dotarł: {dotStr}</span>}
+                                    </div>
+                                    {srStr && <div style={{ fontSize: 12, color: "#0891b2", fontWeight: 600, marginTop: 2 }}>🚛 Ruszył: {srStr}</div>}
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                            {/* Rozładunek: plan vs dotarł w jednej linii */}
+                            {r.dataRozladunku && (() => {
+                              const dotEv = evts.find(e => e.type === "dotarcie_rozladunek");
+                              const planned = new Date(`${r.dataRozladunku}T${r.godzRozladunku || "23:59"}:00`);
+                              const dotTime = dotEv ? new Date(dotEv.value || dotEv.ts) : null;
+                              const diffMin = dotTime ? Math.round((dotTime - planned) / 60000) : null;
+                              const dotColor = diffMin === null ? "#6b7280" : diffMin <= 0 ? "#15803d" : diffMin <= 30 ? "#d97706" : "#dc2626";
+                              const dotStr = dotTime ? dotTime.toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : null;
+                              return (
+                                <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 20, flexShrink: 0 }}>
+                                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#10b981", marginTop: 4 }}></div>
+                                    <div style={{ width: 1, height: 20, background: "#d1d5db" }}></div>
+                                  </div>
+                                  <div style={{ flex: 1 }}>
+                                    <div style={{ fontSize: 13, fontWeight: 600, color: "#059669", marginBottom: 3 }}>📦 Rozładunek</div>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                      <span style={{ fontSize: 12, color: "#6b7280" }}>Plan: {r.dataRozladunku?.slice(5)}{r.godzRozladunku ? ` · ${r.godzRozladunku}` : ""}</span>
+                                      {dotStr && <span style={{ fontSize: 12, fontWeight: 700, color: dotColor }}>→ Dotarł: {dotStr}</span>}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                            {/* Pozostałe eventy (zdjęcia, CMR, uwagi) */}
+                            {evts.filter(e => !["dotarcie_zaladunek","start_rozladunek","dotarcie_rozladunek"].includes(e.type)).map((ev, i) => {
+                              const meta = typeLabels[ev.type] || { icon: "•", label: ev.type, color: "#6b7280" };
+                              const time = ev.value || ev.ts;
+                              const timeStr = time ? new Date(time).toLocaleString("pl-PL", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" }) : "";
+                              return (
+                                <div key={ev.id || i} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                                  {/* Timeline line */}
+                                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 20, flexShrink: 0 }}>
+                                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: meta.color, marginTop: 4 }}></div>
+                                    {i < evts.length - 1 && <div style={{ width: 1, height: 20, background: "#d1d5db" }}></div>}
+                                  </div>
+                                  {/* Content */}
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                      <span style={{ fontSize: 13, fontWeight: 600, color: meta.color }}>{meta.icon} {meta.label}</span>
+                                      <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: "auto", flexShrink: 0 }}>{timeStr}</span>
+                                      {ev.id && (
+                                        <button onClick={async () => {
+                                          if (!window.confirm("Usunąć ten wpis?")) return;
+                                          try { await deleteDoc(doc(db, "driverEvents", ev.id)); } catch(e) { console.error(e); }
+                                        }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "#d1d5db", padding: "2px 4px" }}
+                                          title="Usuń wpis">✕</button>
+                                      )}
+                                    </div>
+                                    {ev.photoUrl && (
+                                      <a href={ev.photoUrl} target="_blank" rel="noopener noreferrer"
+                                        style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 4,
+                                          fontSize: 11, color: "#6366f1", textDecoration: "none", padding: "3px 8px",
+                                          borderRadius: 6, background: "#f5f3ff", border: "1px solid #e9e5ff" }}>
+                                        🔍 Zobacz zdjęcie
+                                      </a>
+                                    )}
+                                    {ev.note && (
+                                      <div style={{ marginTop: 4, fontSize: 12, color: "#374151", padding: "6px 10px",
+                                        borderRadius: 6, background: "#f9fafb", border: "1px solid #f3f4f6", fontStyle: "italic" }}>
+                                        „{ev.note}"
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })()
+              ];
+            })}
+            {rows.length > 0 && (
+              <tr className="bg-gray-50 font-bold border-t-2 border-gray-200">
+                <td colSpan={7} className="px-2 py-2.5 text-gray-700 text-xs uppercase">SUMA</td>
+                <td className="px-2 py-2.5 text-right text-green-700">{fmt(totalCena)}</td>
+                <td></td>
+                <td className="px-2 py-2.5 text-right text-blue-700">{totalKmPodj.toLocaleString("pl-PL")}</td>
+                <td className="px-2 py-2.5 text-right text-blue-700">{totalKmLad.toLocaleString("pl-PL")}</td>
+                <td className="px-2 py-2.5 text-right text-blue-700">{totalKmWsz.toLocaleString("pl-PL")}</td>
+                <td className="px-2 py-2.5 text-right text-amber-600">{avgEurKm}</td>
+                <td className="px-2 py-2.5 text-right text-blue-600">{avgEurKmWsz}</td>
+                <td colSpan={5}></td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {showForm && <FrachtyModal record={editRecord} vehicles={vehicles} defaultVehicleId={selectedVehicle} onSave={(data) => { if(editId) onUpdate(editId,data); else onAdd(data); setShowForm(false); setEditId(null); }} onClose={() => { setShowForm(false); setEditId(null); }} />}
+    </div>
+  );
+}
+
+
+// ─── FRACHTY IMPORT MODAL ────────────────────────────────────────────────────
+function FrachtyImportModal({ vehicles, onImport, onClose }) {
+  const [status, setStatus] = useState("idle"); // idle | parsing | preview | importing | done | error
+  const [rows, setRows]     = useState([]);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [skipDupes, setSkipDupes] = useState(true);
+  const fileRef = useRef(null);
+
+  const TEMPLATE_KEYS = [
+    "vehicleId","dataZlecenia","dataZaladunku","dataRozladunku",
+    "godzZaladunku","godzRozladunku","skad","zaladunekKod","dokod",
+    "klient","cenaEur","kmPodjazd","kmLadowne","kmWszystkie",
+    "eurKmLad","eurKmWsz","wagaLadunku","dyspozytor",
+    "nrFV","dataWyslania","terminPlatnosci","uwagi"
+  ];
+  const FORMULA_KEYS = new Set(["kmWszystkie","eurKmLad","eurKmWsz"]);
+
+  const parseXLSX = async (file) => {
+    setStatus("parsing");
+    setErrorMsg("");
+    try {
+      const XLSX = window.XLSX || await new Promise((res, rej) => {
+        if (window.XLSX) { res(window.XLSX); return; }
+        const s = document.createElement("script");
+        s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+        s.onload = () => res(window.XLSX);
+        s.onerror = () => rej(new Error("Nie udało się załadować biblioteki XLSX"));
+        document.head.appendChild(s);
+      });
+      const ab = await file.arrayBuffer();
+      const wb = XLSX.read(ab, { type: "array", cellDates: true });
+
+      // Szukaj arkusza IMPORT
+      const sheetName = wb.SheetNames.find(n => n === "IMPORT") || wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+
+      // Znajdź wiersz z kluczami (wiersz 3 w szablonie = indeks 2)
+      let keyRow = -1;
+      for (let i = 0; i < Math.min(10, raw.length); i++) {
+        if (raw[i].includes("vehicleId")) { keyRow = i; break; }
+      }
+      if (keyRow === -1) throw new Error("Nie znaleziono wiersza z kluczami (vehicleId). Upewnij się że używasz właściwego szablonu.");
+
+      const keys = raw[keyRow];
+      const parsed = [];
+      for (let i = keyRow + 2; i < raw.length; i++) { // +2 bo wiersz 4 to labele
+        const rowArr = raw[i];
+        if (!rowArr || rowArr.every(c => c === "" || c === null || c === undefined)) continue;
+
+        const obj = {};
+        keys.forEach((k, ci) => {
+          if (!k || FORMULA_KEYS.has(k)) return;
+          let val = rowArr[ci];
+          if (val === null || val === undefined) val = "";
+          // Daty z XLSX mogą być obiektami Date
+          if (val instanceof Date) {
+            const y = val.getFullYear();
+            if (y < 2000 || y > 2035) { val = ""; }
+            else val = val.toISOString().slice(0, 10);
+          } else {
+            val = String(val).trim();
+            if (val.toLowerCase() === "nan" || val.toLowerCase() === "none") val = "";
+          }
+          obj[k] = val;
+        });
+
+        // Walidacja minimalna: vehicleId + cenaEur
+        if (!obj.vehicleId || !obj.cenaEur || parseFloat(obj.cenaEur) <= 0) continue;
+        // Przelicz km wszystkie
+        const kp = parseInt(obj.kmPodjazd) || 0;
+        const kl = parseInt(obj.kmLadowne) || 0;
+        if (kp + kl > 0) obj.kmWszystkie = String(kp + kl);
+        parsed.push(obj);
+      }
+
+      if (parsed.length === 0) throw new Error("Brak danych do importu. Sprawdź czy arkusz IMPORT zawiera wiersze z vehicleId i cenaEur.");
+      setRows(parsed);
+      setStatus("preview");
+    } catch (e) {
+      setErrorMsg(e.message || "Błąd parsowania pliku");
+      setStatus("error");
+    }
+  };
+
+  const handleFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    parseXLSX(file);
+  };
+
+  const doImport = () => {
+    setStatus("importing");
+    onImport(rows);
+    setStatus("done");
+  };
+
+  const vName = (id) => {
+    const v = vehicles.find(v => v.id === id);
+    return v ? v.plate : id;
+  };
+
+  const fmt = (n) => n ? parseFloat(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-";
+
+  const byVehicle = {};
+  rows.forEach(r => {
+    if (!byVehicle[r.vehicleId]) byVehicle[r.vehicleId] = { count: 0, sum: 0 };
+    byVehicle[r.vehicleId].count++;
+    byVehicle[r.vehicleId].sum += parseFloat(r.cenaEur) || 0;
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)" }}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col" style={{ maxHeight: "88vh" }}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
+          <div>
+            <h3 className="text-base font-bold text-gray-900">Import frachtów z Excel</h3>
+            <p className="text-xs text-gray-400 mt-0.5">Wgraj plik .xlsx ze szablonu VBS-Stat</p>
+          </div>
+          <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs hover:bg-gray-200">✕</button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 px-6 py-5">
+
+          {/* IDLE / DROP ZONE */}
+          {(status === "idle" || status === "error") && (
+            <div>
+              <div
+                onClick={() => fileRef.current?.click()}
+                className="border-2 border-dashed border-gray-200 rounded-xl p-10 text-center cursor-pointer hover:border-gray-400 hover:bg-gray-50 transition-all"
+              >
+                <div className="text-4xl mb-3">📂</div>
+                <div className="font-semibold text-gray-700 mb-1">Kliknij aby wybrać plik</div>
+                <div className="text-xs text-gray-400">Obsługiwane: .xlsx (szablon VBS-Stat_Frachty_Import)</div>
+                <input ref={fileRef} type="file" accept=".xlsx" className="hidden" onChange={handleFile} />
+              </div>
+              {status === "error" && (
+                <div className="mt-4 px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-red-600 text-sm">
+                  ⚠️ {errorMsg}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* PARSING */}
+          {status === "parsing" && (
+            <div className="text-center py-16 text-gray-400">
+              <div className="text-3xl mb-4 animate-spin">⏳</div>
+              <div className="font-medium">Parsowanie pliku…</div>
+            </div>
+          )}
+
+          {/* PREVIEW */}
+          {status === "preview" && (
+            <div>
+              {/* Podsumowanie per pojazd */}
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
+                {Object.entries(byVehicle).map(([vid, stat]) => (
+                  <div key={vid} className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
+                    <div className="font-bold text-sm text-gray-900">{vName(vid)}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">{stat.count} frachtów · {fmt(stat.sum)} €</div>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-semibold text-gray-700">Podgląd danych ({rows.length} wierszy)</div>
+              </div>
+              {/* Tabela podglądu */}
+              <div className="overflow-x-auto rounded-xl border border-gray-100">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-100">
+                      {["Pojazd","Data zlec.","Klient","Skąd","Dokąd","EUR","KM lad.","Nr FV","Dyspozytor"].map(h => (
+                        <th key={h} className="px-3 py-2 text-left font-semibold text-gray-500">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.slice(0, 50).map((r, i) => (
+                      <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
+                        <td className="px-3 py-1.5 font-semibold text-blue-700">{vName(r.vehicleId)}</td>
+                        <td className="px-3 py-1.5 text-gray-500">{r.dataZlecenia || "-"}</td>
+                        <td className="px-3 py-1.5 max-w-32 truncate">{r.klient || "-"}</td>
+                        <td className="px-3 py-1.5 text-gray-500">{r.skad || "-"}</td>
+                        <td className="px-3 py-1.5 text-gray-500">{r.dokod || "-"}</td>
+                        <td className="px-3 py-1.5 text-right font-semibold text-green-700">{fmt(r.cenaEur)}</td>
+                        <td className="px-3 py-1.5 text-right text-gray-500">{r.kmLadowne || "-"}</td>
+                        <td className="px-3 py-1.5 text-gray-400">{r.nrFV || "-"}</td>
+                        <td className="px-3 py-1.5 text-gray-400">{r.dyspozytor || "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {rows.length > 50 && (
+                  <div className="text-xs text-gray-400 text-center py-2">… i {rows.length - 50} więcej wierszy</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* IMPORTING */}
+          {status === "importing" && (
+            <div className="text-center py-16 text-gray-400">
+              <div className="text-3xl mb-4">💾</div>
+              <div className="font-medium">Zapisywanie do Firebase…</div>
+            </div>
+          )}
+
+          {/* DONE */}
+          {status === "done" && (
+            <div className="text-center py-16">
+              <div className="text-4xl mb-4">✅</div>
+              <div className="font-bold text-gray-900 text-lg mb-1">Import zakończony!</div>
+              <div className="text-sm text-gray-400">Zaimportowano {rows.length} frachtów</div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-100">
+            {status === "done" ? "Zamknij" : "Anuluj"}
+          </button>
+          {status === "preview" && (
+            <button
+              onClick={doImport}
+              className="px-5 py-2 rounded-lg text-sm font-semibold text-white"
+              style={{ background: "#111827" }}
+            >
+              Importuj {rows.length} frachtów →
+            </button>
+          )}
+          {status === "error" && (
+            <button onClick={() => { setStatus("idle"); fileRef.current && (fileRef.current.value = ""); }}
+              className="px-5 py-2 rounded-lg text-sm font-semibold text-white" style={{ background: "#111827" }}>
+              Spróbuj ponownie
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+// ─── FV EDIT MODAL ───────────────────────────────────────────────────────────
+function FVEditModal({ record, onSave, onClose }) {
+  const [f, setF] = useState({
+    nrFV:            record?.nrFV            || "",
+    klient:          record?.klient          || "",
+    cenaEur:         record?.cenaEur         || "",
+    dataWyslania:    record?.dataWyslania     || "",
+    terminPlatnosci: record?.terminPlatnosci  || "",
+    statusFV:        record?.statusFV         || "nie_wyslana",
+    nrZlecenia:      record?.nrZlecenia       || "",
+    uwagi:           record?.uwagi            || "",
+  });
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const inp = "w-full text-sm px-3 py-2 rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-gray-400";
+  const lbl = "text-xs font-semibold text-gray-500 mb-1 block";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)" }}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col" style={{ maxHeight: "90vh" }}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
+          <div>
+            <h3 className="text-base font-bold text-gray-900">Edycja FV / Płatności</h3>
+            <p className="text-xs text-gray-400 mt-0.5">{record?.dataZlecenia} · {record?.skad} → {record?.dokod}</p>
+          </div>
+          <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs hover:bg-gray-200">✕</button>
+        </div>
+        <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={lbl}>Nr FV</label><input placeholder="F/01/2026" value={f.nrFV} onChange={e => set("nrFV", e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>Nr zlecenia</label><input placeholder="auto z AI" value={f.nrZlecenia} onChange={e => set("nrZlecenia", e.target.value)} className={inp} /></div>
+          </div>
+          <div><label className={lbl}>Klient</label><input placeholder="nazwa klienta" value={f.klient} onChange={e => set("klient", e.target.value)} className={inp} /></div>
+          <div><label className={lbl}>Cena EUR</label><input type="number" placeholder="0.00" value={f.cenaEur} onChange={e => set("cenaEur", e.target.value)} className={inp} /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={lbl}>Data wysłania FV</label><input type="date" value={f.dataWyslania} onChange={e => set("dataWyslania", e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>Termin płatności</label><input type="date" value={f.terminPlatnosci} onChange={e => set("terminPlatnosci", e.target.value)} className={inp} /></div>
+          </div>
+          <div>
+            <label className={lbl}>Status FV</label>
+            <select value={f.statusFV} onChange={e => set("statusFV", e.target.value)} className={inp}>
+              {FV_STATUSES.map(s => <option key={s.id} value={s.id}>{s.emoji} {s.label}</option>)}
+            </select>
+          </div>
+          <div><label className={lbl}>Uwagi</label><textarea rows={2} value={f.uwagi} onChange={e => set("uwagi", e.target.value)} className={inp + " resize-none"} /></div>
+        </div>
+        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-100">Anuluj</button>
+          <button onClick={() => onSave(f)} className="px-5 py-2 rounded-lg text-sm font-semibold text-white" style={{ background: "#111827" }}>Zapisz zmiany</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── ZLECENIE UPLOAD BTN ─────────────────────────────────────────────────────
+function ZlecenieUploadBtn({ frachtId, onUploaded, label = "+ Dodaj zlecenie", fullWidth = false }) {
+  // onUploaded(url, parsedData) — parsedData = { nrZlecenia, nrRef, zaladunekAdres, ... }
+  const [status, setStatus] = useState("idle");
+  const fileRef = useRef(null);
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setStatus("uploading");
+    try {
+      const path = `documents/${frachtId}/zlecenie_${Date.now()}_${file.name}`;
+      const sRef = storageRef(storage, path);
+      await uploadBytes(sRef, file);
+      const url = await getDownloadURL(sRef);
+
+      // AI parsowanie zlecenia — wyciąga pełne dane operacyjne
+      setStatus("reading");
+      const base64 = await new Promise((res, rej) => {
+        const reader = new FileReader();
+        reader.onload = () => res(reader.result.split(",")[1]);
+        reader.onerror = rej;
+        reader.readAsDataURL(file);
+      });
+      const isPDF = file.type === "application/pdf";
+      const body = {
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1200,
+        messages: [{
+          role: "user",
+          content: [
+            { type: isPDF ? "document" : "image", source: { type: "base64", media_type: file.type, data: base64 } },
+            { type: "text", text: `Przeanalizuj to zlecenie transportowe i wyciągnij dane operacyjne.
+Odpowiedz TYLKO w formacie JSON (bez markdown):
+{
+  "nrZlecenia": "numer zlecenia lub null",
+  "nrRef": "numer referencyjny lub skrócony identyfikator zlecenia",
+  "dataZaladunku": "YYYY-MM-DD lub null",
+  "godzZaladunku": "HH:MM lub null",
+  "dataRozladunku": "YYYY-MM-DD lub null",
+  "godzRozladunku": "HH:MM lub null",
+  "zaladunekKod": "kod pocztowy + miasto załadunku (np. ES 46720 Villalonga)",
+  "zaladunekAdres": "pełny adres ulicy załadunku",
+  "zaladunekTelefon": "telefon kontaktowy na załadunku lub null",
+  "dokod": "kod pocztowy + miasto rozładunku (np. IT 34151 Trieste)",
+  "rozladunekAdres": "pełny adres ulicy rozładunku",
+  "rozladunekTelefon": "telefon kontaktowy na rozładunku lub null",
+  "klient": "nazwa zleceniodawcy/klienta",
+  "towarOpis": "krótki opis towaru (np. Palety, Kartony)",
+  "towarIloscPalet": "ilość palet/sztuk (cyfra)",
+  "towarPalety": "wymiary towaru, każda pozycja w nowej linii (np. 2× 240x120x240\\n1× 120x120xH240)",
+  "wagaLadunku": "waga w kg (sama cyfra)",
+  "zaladunekTyp": "typ załadunku (bok, tył, góra) lub null",
+  "uwagi": "uwagi operacyjne istotne dla kierowcy (BEZ cen, BEZ warunków płatności, BEZ danych zleceniodawcy)"
+}
+NIE podawaj cen frachtu, warunków płatności, NIP, danych spedytora ani warunków umowy.` }
+          ]
+        }]
+      };
+      try {
+        const resp = await fetch("/api/claude", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+        });
+        const data = await resp.json();
+        const text = data.content?.find(b => b.type === "text")?.text || "{}";
+        const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
+        onUploaded(url, parsed);
+      } catch { onUploaded(url, { nrZlecenia: null }); }
+
+      setStatus("done");
+    } catch (err) {
+      console.error(err);
+      setStatus("error");
+    }
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  return (
+    <div className={fullWidth ? "w-full" : ""}>
+      {status === "idle" && (
+        <button onClick={() => fileRef.current?.click()}
+          className={`text-xs px-2 py-1 rounded-lg border border-dashed font-medium transition-all hover:bg-gray-50 ${fullWidth ? "w-full text-center" : ""}`}
+          style={{ borderColor: "#d1d5db", color: "#6b7280" }}>
+          {label}
+        </button>
+      )}
+      {status === "uploading" && <span className="text-xs text-gray-400 animate-pulse">⬆️ wysyłam…</span>}
+      {status === "done"      && <span className="text-xs text-green-600">✅ wgrane!</span>}
+      {status === "error"     && <button onClick={() => setStatus("idle")} className="text-xs text-red-500">⚠️ błąd — spróbuj ponownie</button>}
+      <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" className="hidden" onChange={handleFile} />
+    </div>
+  );
+}
+
+// ═══════ GEO PICKER — mini mapa Leaflet do wyboru lokalizacji ═══════
+function GeoPickerModal({ initialGeo, address, onSave, onClose }) {
+  const mapRef = useRef(null);
+  const mapInstance = useRef(null);
+  const markerRef = useRef(null);
+  const [searchQuery, setSearchQuery] = useState(address || "");
+  const [coords, setCoords] = useState(() => {
+    if (initialGeo) {
+      const [lat, lng] = initialGeo.split(",").map(Number);
+      if (lat && lng && !(Math.abs(lat - 51.5) < 0.01 && Math.abs(lng - 19.0) < 0.01)) return { lat, lng };
+    }
+    return { lat: 51.5, lng: 19.0 }; // Polska centrum
+  });
+  const hasRealGeo = initialGeo && (() => {
+    const [lat, lng] = initialGeo.split(",").map(Number);
+    return lat && lng && !(Math.abs(lat - 51.5) < 0.01 && Math.abs(lng - 19.0) < 0.01);
+  })();
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    if (!mapRef.current || mapInstance.current) return;
+    if (typeof window.L === "undefined") return;
+    const map = window.L.map(mapRef.current).setView([coords.lat, coords.lng], hasRealGeo ? 15 : 6);
+    window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© OpenStreetMap",
+      maxZoom: 19,
+    }).addTo(map);
+    const marker = window.L.marker([coords.lat, coords.lng], { draggable: true }).addTo(map);
+    marker.on("dragend", () => {
+      const pos = marker.getLatLng();
+      setCoords({ lat: pos.lat, lng: pos.lng });
+    });
+    map.on("click", (e) => {
+      marker.setLatLng(e.latlng);
+      setCoords({ lat: e.latlng.lat, lng: e.latlng.lng });
+    });
+    mapInstance.current = map;
+    markerRef.current = marker;
+    // Zawsze szukaj adresu automatycznie jeśli jest dostępny
+    if (address) {
+      setTimeout(() => searchAddress(address), 500);
+    }
+    return () => { map.remove(); mapInstance.current = null; };
+  }, []);
+
+  const searchAddress = async (query) => {
+    if (!query?.trim()) return;
+    setSearching(true);
+    try {
+      const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`);
+      const data = await resp.json();
+      if (data.length > 0) {
+        const { lat, lon } = data[0];
+        const newCoords = { lat: parseFloat(lat), lng: parseFloat(lon) };
+        setCoords(newCoords);
+        if (mapInstance.current) {
+          mapInstance.current.setView([newCoords.lat, newCoords.lng], 16);
+          markerRef.current?.setLatLng([newCoords.lat, newCoords.lng]);
+        }
+      }
+    } catch (e) { console.error("Geocoding error:", e); }
+    setSearching(false);
+  };
+
+  return (
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{background:"rgba(0,0,0,0.6)", zIndex: 9999}}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl flex flex-col" style={{maxHeight:"90vh"}}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <h3 className="text-base font-bold text-gray-900">📍 Wybierz lokalizację</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+        </div>
+        <div className="px-5 py-3">
+          <div className="flex gap-2">
+            <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && searchAddress(searchQuery)}
+              placeholder="Szukaj adresu..."
+              className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+            <button onClick={() => searchAddress(searchQuery)} disabled={searching}
+              className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+              style={{background: searching ? "#9ca3af" : "#3b82f6"}}>
+              {searching ? "..." : "Szukaj"}
+            </button>
+          </div>
+          <div className="text-xs text-gray-400 mt-1">Kliknij w mapę lub przeciągnij pin na dokładne miejsce (np. brama wjazdowa)</div>
+        </div>
+        <div ref={mapRef} style={{height: 350, width: "100%"}}></div>
+        <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between">
+          <span className="text-xs text-gray-500">
+            {coords.lat.toFixed(6)}, {coords.lng.toFixed(6)}
+          </span>
+          <div className="flex gap-2">
+            <button onClick={onClose}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-gray-500 hover:bg-gray-100">Anuluj</button>
+            <button onClick={() => onSave(`${coords.lat.toFixed(6)},${coords.lng.toFixed(6)}`)}
+              className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+              style={{background:"#111827"}}>
+              ✓ Zapisz lokalizację
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }) {
+  const empty = {dataZlecenia:"",dataZaladunku:"",dataRozladunku:"",godzZaladunku:"",godzRozladunku:"",skad:"",zaladunekKod:"",zaladunekKod2:"",zaladunekKod3:"",zaladunekAdres:"",zaladunekTelefon:"",zaladunekGeo:"",dokod:"",dokod2:"",dokod3:"",rozladunekAdres:"",rozladunekTelefon:"",rozladunekGeo:"",klient:"",cenaEur:"",kmPodjazd:"",kmLadowne:"",kmWszystkie:"",wagaLadunku:"",dyspozytor:"",nrFV:"",dataWyslania:"",terminPlatnosci:"",uwagi:"",urlZlecenie:"",nrZlecenia:"",nrRef:"",towarOpis:"",towarPalety:"",towarIloscPalet:"",zaladunekTyp:"",vehicleId:defaultVehicleId};
+  const [f, setF] = useState(record ? {...empty,...record} : empty);
+  const set = (k,v) => setF(prev => { const next={...prev,[k]:v}; const pod=parseInt(next.kmPodjazd)||0; const lad=parseInt(next.kmLadowne)||0; next.kmWszystkie=pod+lad>0?String(pod+lad):""; return next; });
+  const eurKmLad = f.kmLadowne && f.cenaEur ? (parseFloat(f.cenaEur)/parseInt(f.kmLadowne)).toFixed(2) : null;
+  const eurKmWsz = f.kmWszystkie && f.cenaEur ? (parseFloat(f.cenaEur)/parseInt(f.kmWszystkie)).toFixed(2) : null;
+  const [geoPickerFor, setGeoPickerFor] = useState(null); // "zaladunek" | "rozladunek" | null
+  const inp = "w-full text-sm px-3 py-2 rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-gray-400";
+  const lbl = "text-xs font-semibold text-gray-500 mb-1 block";
+  return (
+    <>
+    {geoPickerFor && (
+      <GeoPickerModal
+        initialGeo={geoPickerFor === "zaladunek" ? f.zaladunekGeo : f.rozladunekGeo}
+        address={geoPickerFor === "zaladunek"
+          ? [f.zaladunekAdres, f.zaladunekKod].filter(Boolean).join(", ")
+          : [f.rozladunekAdres, f.dokod].filter(Boolean).join(", ")}
+        onSave={(geo) => {
+          set(geoPickerFor === "zaladunek" ? "zaladunekGeo" : "rozladunekGeo", geo);
+          setGeoPickerFor(null);
+        }}
+        onClose={() => setGeoPickerFor(null)}
+      />
+    )}
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{background:"rgba(0,0,0,0.4)"}}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col" style={{maxHeight:"92vh"}}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
+          <h3 className="text-base font-bold text-gray-900">{record ? "Edytuj fracht" : "Nowy fracht"}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">x</button>
+        </div>
+        <div className="overflow-y-auto flex-1 px-6 py-4 space-y-4">
+          {/* Legenda */}
+          <div className="flex items-center gap-4 text-xs">
+            <span className="flex items-center gap-1"><span style={{width:10,height:10,borderRadius:3,background:"#ecfdf5",border:"1px solid #a7f3d0",display:"inline-block"}}></span> Widoczne dla kierowcy</span>
+            <span className="flex items-center gap-1"><span style={{width:10,height:10,borderRadius:3,background:"#fff",border:"1px solid #e5e7eb",display:"inline-block"}}></span> Tylko biuro</span>
+          </div>
+
+          <div><label className={lbl}>Pojazd</label><select value={f.vehicleId} onChange={e => set("vehicleId",e.target.value)} className={inp}><option value="">wybierz pojazd</option>{vehicles.map(v => <option key={v.id} value={v.id}>{v.plate} {v.brand}</option>)}</select></div>
+
+          {/* ── SEKCJA KIEROWCY (zielona ramka) ── */}
+          <div style={{border:"2px solid #a7f3d0", borderRadius:12, padding:"12px", background:"#fafffe"}}>
+            <div className="text-xs font-semibold text-emerald-600 uppercase tracking-wider mb-3">🧑‍✈️ Dane widoczne dla kierowcy</div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <div><label className={lbl}>Data zlecenia</label><input type="date" value={f.dataZlecenia} onChange={e => set("dataZlecenia",e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>Data zaladunku</label><input type="date" value={f.dataZaladunku} onChange={e => set("dataZaladunku",e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>Data rozladunku</label><input type="date" value={f.dataRozladunku} onChange={e => set("dataRozladunku",e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>Godz. zaladunku</label><input type="time" value={f.godzZaladunku} onChange={e => set("godzZaladunku",e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>Godz. rozladunku</label><input type="time" value={f.godzRozladunku} onChange={e => set("godzRozladunku",e.target.value)} className={inp} /></div>
+          </div>
+          {/* ZAŁADUNEK — dynamiczne kody */}
+          <div className="space-y-2">
+            <label className={lbl}>Załadunek (kody)</label>
+            <div className="flex gap-2 items-center">
+              <input placeholder="np. PL44-100" value={f.zaladunekKod} onChange={e => set("zaladunekKod",e.target.value)} className={inp+" flex-1"} />
+            </div>
+            {(f.zaladunekKod2 !== undefined || f.zaladunekKod) && f.zaladunekKod && (
+              <div className="flex gap-2 items-center">
+                <input placeholder="kod 2" value={f.zaladunekKod2||""} onChange={e => set("zaladunekKod2",e.target.value)} className={inp+" flex-1"} />
+                {!f.zaladunekKod2 && <button type="button" onClick={() => set("zaladunekKod2","")} className="text-xs text-blue-500 hover:text-blue-700 whitespace-nowrap">+ dodaj</button>}
+                {f.zaladunekKod2 && (
+                  <button type="button" onClick={() => set("zaladunekKod2","")} className="text-gray-400 hover:text-red-400 text-sm">✕</button>
+                )}
+              </div>
+            )}
+            {f.zaladunekKod2 && (
+              <div className="flex gap-2 items-center">
+                <input placeholder="kod 3" value={f.zaladunekKod3||""} onChange={e => set("zaladunekKod3",e.target.value)} className={inp+" flex-1"} />
+                {f.zaladunekKod3 && (
+                  <button type="button" onClick={() => set("zaladunekKod3","")} className="text-gray-400 hover:text-red-400 text-sm">✕</button>
+                )}
+              </div>
+            )}
+            {f.zaladunekKod && !f.zaladunekKod2 && (
+              <button type="button" onClick={() => set("zaladunekKod2"," ")}
+                className="text-xs text-blue-500 hover:text-blue-700 flex items-center gap-1">
+                <span>＋</span> dodaj miejsce załadunku
+              </button>
+            )}
+          </div>
+
+          {/* ROZŁADUNEK — dynamiczne kody */}
+          <div className="space-y-2">
+            <label className={lbl}>Rozładunek (kody)</label>
+            <div className="flex gap-2 items-center">
+              <input placeholder="np. FR 93000" value={f.dokod} onChange={e => set("dokod",e.target.value)} className={inp+" flex-1"} />
+            </div>
+            {f.dokod && (
+              <div className="flex gap-2 items-center">
+                <input placeholder="kod 2" value={f.dokod2||""} onChange={e => set("dokod2",e.target.value)} className={inp+" flex-1"} />
+                {f.dokod2 && (
+                  <button type="button" onClick={() => set("dokod2","")} className="text-gray-400 hover:text-red-400 text-sm">✕</button>
+                )}
+              </div>
+            )}
+            {f.dokod2 && (
+              <div className="flex gap-2 items-center">
+                <input placeholder="kod 3" value={f.dokod3||""} onChange={e => set("dokod3",e.target.value)} className={inp+" flex-1"} />
+                {f.dokod3 && (
+                  <button type="button" onClick={() => set("dokod3","")} className="text-gray-400 hover:text-red-400 text-sm">✕</button>
+                )}
+              </div>
+            )}
+            {f.dokod && !f.dokod2 && (
+              <button type="button" onClick={() => set("dokod2"," ")}
+                className="text-xs text-blue-500 hover:text-blue-700 flex items-center gap-1">
+                <span>＋</span> dodaj miejsce rozładunku
+              </button>
+            )}
+          </div>
+          {/* ADRESY + TELEFONY + GEO */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className={lbl}>Adres załadunku (pełny)</label>
+              <input placeholder="ulica, miasto" value={f.zaladunekAdres||""} onChange={e => set("zaladunekAdres",e.target.value)} className={inp} />
+              <div className="flex items-center gap-2 mt-1">
+                <button type="button" onClick={() => setGeoPickerFor("zaladunek")}
+                  className="text-xs font-medium px-2 py-1 rounded-lg transition-all hover:bg-blue-50"
+                  style={{ color: f.zaladunekGeo ? "#15803d" : "#3b82f6", background: f.zaladunekGeo ? "#f0fdf4" : "transparent" }}>
+                  {f.zaladunekGeo ? `✅ ${f.zaladunekGeo}` : "📍 Ustaw lokalizację"}
+                </button>
+                {f.zaladunekGeo && <button type="button" onClick={() => set("zaladunekGeo","")} className="text-xs text-gray-400 hover:text-red-400">✕</button>}
+              </div>
+            </div>
+            <div><label className={lbl}>Telefon na załadunku</label><input placeholder="+48..." value={f.zaladunekTelefon||""} onChange={e => set("zaladunekTelefon",e.target.value)} className={inp} /></div>
+            <div>
+              <label className={lbl}>Adres rozładunku (pełny)</label>
+              <input placeholder="ulica, miasto" value={f.rozladunekAdres||""} onChange={e => set("rozladunekAdres",e.target.value)} className={inp} />
+              <div className="flex items-center gap-2 mt-1">
+                <button type="button" onClick={() => setGeoPickerFor("rozladunek")}
+                  className="text-xs font-medium px-2 py-1 rounded-lg transition-all hover:bg-blue-50"
+                  style={{ color: f.rozladunekGeo ? "#15803d" : "#3b82f6", background: f.rozladunekGeo ? "#f0fdf4" : "transparent" }}>
+                  {f.rozladunekGeo ? `✅ ${f.rozladunekGeo}` : "📍 Ustaw lokalizację"}
+                </button>
+                {f.rozladunekGeo && <button type="button" onClick={() => set("rozladunekGeo","")} className="text-xs text-gray-400 hover:text-red-400">✕</button>}
+              </div>
+            </div>
+            <div><label className={lbl}>Telefon na rozładunku</label><input placeholder="+39..." value={f.rozladunekTelefon||""} onChange={e => set("rozladunekTelefon",e.target.value)} className={inp} /></div>
+          </div>
+          {/* TOWAR */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div><label className={lbl}>Nr referencyjny</label><input placeholder="np. ESTE-0097" value={f.nrRef||""} onChange={e => set("nrRef",e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>Towar (opis)</label><input placeholder="Palety, kartony..." value={f.towarOpis||""} onChange={e => set("towarOpis",e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>Ilość palet/szt</label><input placeholder="4" value={f.towarIloscPalet||""} onChange={e => set("towarIloscPalet",e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>Typ załadunku</label><input placeholder="Bok, tył, góra" value={f.zaladunekTyp||""} onChange={e => set("zaladunekTyp",e.target.value)} className={inp} /></div>
+          </div>
+          <div><label className={lbl}>Wymiary palet / szczegóły towaru</label><textarea rows={2} placeholder="2× 240x120x240, 1× 240x120xH200..." value={f.towarPalety||""} onChange={e => set("towarPalety",e.target.value)} className={inp+" resize-none"} /></div>
+          <div><label className={lbl}>Uwagi dla kierowcy</label><textarea rows={2} placeholder="dodatkowe informacje..." value={f.uwagi} onChange={e => set("uwagi",e.target.value)} className={inp+" resize-none"} /></div>
+          </div>{/* zamknięcie zielonej sekcji kierowcy */}
+
+          {/* ── SEKCJA BIUROWA (szara) ── */}
+          <div style={{border:"1px solid #e5e7eb", borderRadius:12, padding:"12px", background:"#fafafa"}}>
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">🏢 Dane biurowe (kierowca nie widzi)</div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div><label className={lbl}>Klient</label><input placeholder="nazwa klienta" value={f.klient} onChange={e => set("klient",e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>Dyspozytor</label><input placeholder="imie dyspozytora" value={f.dyspozytor} onChange={e => set("dyspozytor",e.target.value)} className={inp} /></div>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+            <div><label className={lbl}>Cena EUR</label><input type="number" placeholder="0.00" value={f.cenaEur} onChange={e => set("cenaEur",e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>KM podjazd</label><input type="number" placeholder="0" value={f.kmPodjazd} onChange={e => set("kmPodjazd",e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>KM ladowne</label><input type="number" placeholder="0" value={f.kmLadowne} onChange={e => set("kmLadowne",e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>KM wszystkie (auto)</label><input readOnly value={f.kmWszystkie} className={inp+" bg-gray-50 text-gray-400"} /></div>
+          </div>
+          {(eurKmLad||eurKmWsz) && <div className="flex gap-4 text-sm">{eurKmLad && <span className="px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 font-semibold">EUR/km lad: {eurKmLad}</span>}{eurKmWsz && <span className="px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 font-semibold">EUR/km wsz: {eurKmWsz}</span>}</div>}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div><label className={lbl}>Waga (kg)</label><input type="number" placeholder="0" value={f.wagaLadunku} onChange={e => set("wagaLadunku",e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>Nr FV</label><input placeholder="F/01/2026" value={f.nrFV} onChange={e => set("nrFV",e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>Data wyslania FV</label><input type="date" value={f.dataWyslania} onChange={e => set("dataWyslania",e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>Termin platnosci</label><input type="date" value={f.terminPlatnosci} onChange={e => set("terminPlatnosci",e.target.value)} className={inp} /></div>
+          </div>
+          </div>{/* zamknięcie szarej sekcji biurowej */}
+
+          {/* ZLECENIE */}
+          <div className="pt-2 border-t border-gray-100">
+            <label className={lbl}>📋 Zlecenie transportowe</label>
+            {f.urlZlecenie ? (
+              <div className="flex items-center gap-3 p-3 rounded-xl bg-blue-50 border border-blue-100">
+                <span className="text-2xl">📋</span>
+                <div className="flex-1">
+                  <div className="text-sm font-semibold text-blue-800">Zlecenie wgrane</div>
+                  <a href={safeHref(f.urlZlecenie)} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">Otwórz dokument →</a>
+                </div>
+                <ZlecenieUploadBtn
+                  frachtId={record?.id || "new"}
+                  onUploaded={(url, parsed) => { set("urlZlecenie", url); if(parsed) Object.entries(parsed).forEach(([k,v]) => { if(v != null && v !== "" && !f[k]) set(k, String(v)); }); }}
+                  label="Zastąp"
+                />
+                <button type="button" onClick={() => set("urlZlecenie", "")}
+                  className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50" title="Usuń zlecenie">✕</button>
+              </div>
+            ) : (
+              <ZlecenieUploadBtn
+                frachtId={record?.id || "new"}
+                onUploaded={(url, parsed) => { set("urlZlecenie", url); if(parsed) Object.entries(parsed).forEach(([k,v]) => { if(v != null && v !== "" && !f[k]) set(k, String(v)); }); }}
+                label="📎 Wgraj zlecenie (PDF / JPG)"
+                fullWidth
+              />
+            )}
+          </div>
+        </div>
+        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-100">Anuluj</button>
+          <button onClick={() => { if(!f.vehicleId){alert("Wybierz pojazd");return;} if(!f.cenaEur){alert("Wpisz cene EUR");return;} onSave(f); }} className="px-5 py-2 rounded-lg text-sm font-semibold text-white" style={{background:"#111827"}}>{record ? "Zapisz zmiany" : "Dodaj fracht"}</button>
+        </div>
+      </div>
+    </div>
+    </>
+  );
+}
