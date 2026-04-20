@@ -1,12 +1,32 @@
 # Integracja GPS + Tachograf + Kalendarz Czasu Pracy
 
-## Status: CZEKAMY NA API od widziszwszystko.eu
+## Status: API DOSTEPNE — Cloud Function proxy gotowa, czeka na deploy
 
-### GPS - widziszwszystko.eu
+### GPS - widziszwszystko.eu (Atlas API)
 - Panel: https://beta.widziszwszystko.eu/app/reports/dynamic/list
 - Dokumentacja: https://doc.widziszwszystko.eu/docs
-- API: REST/HTTPS, dedykowane — napisano na serwis po dostep
-- Potrzebne: endpoint pozycji pojazdow, lista pojazdow, historia tras, dane logowania
+- Base URL: https://widziszwszystko.eu/atlas/:group/:username/:endpoint
+- Auth: API 3.x — haslo base64 w headerze Authorization
+- Credentiale: group=vbs, username=vbs, password=Vbs7
+- Cloud Function: gpsProxy (callable, europe-west1)
+- Firestore config: config/gps {group, username, password}
+
+### Atlas API Endpointy
+1. GET /devices — lista urzadzen GPS
+2. GET /positions — aktualne pozycje
+3. GET /positionsWithDistance — pozycje + dystans
+4. GET /positionsWithCanDistance — pozycje + dystans CAN
+5. GET /positionsWithCanDetails — pozycje + pelne dane CAN (paliwo, obroty, temp)
+6. GET /history?year=YYYY&month=MM — historia tras miesieczna
+- Wariant /shares/... — dla udostepnionych urzadzen
+
+### TODO GPS
+- [ ] Deploy Cloud Function gpsProxy + setGpsConfig
+- [ ] Ustawic config/gps w Firestore (przez setGpsConfig)
+- [ ] Przetestowac endpointy — zobaczyc format odpowiedzi JSON
+- [ ] Zmapowac devices na pojazdy FleetStat (po nr rej. lub manualnie)
+- [ ] Widget GPS na dashboardzie (pozycje na mapie)
+- [ ] Historia tras per pojazd
 
 ### Pliki DDD (odczyt tachografu)
 - Format binarny TLV, regulacja EU 2016/799

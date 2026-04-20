@@ -599,3 +599,109 @@ exports.onNewChatMessage = onDocumentCreated(
     console.log(`📊 Push sent: ${sent}/${tokens.length} for room ${roomName}`);
   }
 );
+
+// ═══════════════════════════════════════════════════════════════
+// 5. GPS PROXY — Atlas API (widziszwszystko.eu)
+//    Callable function: pośredniczy w zapytaniach do API GPS.
+//    Credentiale w Firestore: config/gps
+//    Dostępne endpointy: devices, positions, positionsWithCanDetails, history
+// ═══════════════════════════════════════════════════════════════
+const ATLAS_BASE = "https://widziszwszystko.eu/atlas";
+const ATLAS_ALLOWED = ["devices", "positions", "positionsWithDistance", "positionsWithCanDistance", "positionsWithCanDetails", "history"];
+
+exports.gpsProxy = onCall(
+  { region: "europe-west1", timeoutSeconds: 30 },
+  async (request) => {
+    // Auth check — must be logged in
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Musisz byc zalogowany.");
+    }
+    const callerRole = request.auth.token.role;
+    if (!["admin", "dyspozytor"].includes(callerRole)) {
+      throw new HttpsError("permission-denied", "Brak dostepu do GPS.");
+    }
+
+    const { endpoint, params } = request.data || {};
+    if (!endpoint || !ATLAS_ALLOWED.includes(endpoint)) {
+      throw new HttpsError("invalid-argument", `Nieprawidlowy endpoint. Dozwolone: ${ATLAS_ALLOWED.join(", ")}`);
+    }
+
+    // Get GPS credentials from Firestore config (or fallback defaults)
+    const db = getFirestore();
+    let group, username, password;
+    const configSnap = await db.doc("config/gps").get();
+    if (configSnap.exists && configSnap.data().group) {
+      ({ group, username, password } = configSnap.data());
+    } else {
+      // Fallback — auto-create config in Firestore for future use
+      group = "vbs"; username = "vbs"; password = "Vbs7";
+      await db.doc("config/gps").set({ group, username, password, updatedAt: new Date().toISOString(), autoCreated: true });
+      console.log("GPS config auto-created in Firestore");
+    }
+
+    // Build URL
+    let url = `${ATLAS_BASE}/${group}/${username}/${endpoint}`;
+
+    // For history endpoint, add year/month params
+    if (endpoint === "history" && params) {
+      const qp = new URLSearchParams();
+      if (params.year) qp.set("year", params.year);
+      if (params.month) qp.set("month", params.month);
+      if (params.device) qp.set("device", params.device);
+      const qs = qp.toString();
+      if (qs) url += `?${qs}`;
+    }
+
+    // API 3.x auth: base64 password in Authorization header
+    const authHeader = Buffer.from(password).toString("base64");
+
+    try {
+      console.log(`GPS Proxy: ${endpoint} -> ${url}`);
+      const resp = await fetch(url, {
+        method: "GET",
+        headers: {
+          "Authorization": authHeader,
+          "Accept": "application/json",
+        },
+        signal: AbortSignal.timeout(20000),
+      });
+
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        console.error(`GPS API error: ${resp.status} ${resp.statusText} — ${body.slice(0, 200)}`);
+        throw new HttpsError("unavailable", `GPS API zwrocil ${resp.status}: ${resp.statusText}`);
+      }
+
+      const data = await resp.json();
+      console.log(`GPS Proxy OK: ${endpoint} — ${Array.isArray(data) ? data.length + " items" : "object"}`);
+      return { success: true, data, endpoint, timestamp: new Date().toISOString() };
+    } catch (e) {
+      if (e.code) throw e; // re-throw HttpsError
+      console.error("GPS Proxy fetch error:", e);
+      throw new HttpsError("unavailable", `Blad polaczenia z GPS API: ${e.message}`);
+    }
+  }
+);
+
+// ── GPS CONFIG SETUP (one-time admin callable) ──
+exports.setGpsConfig = onCall(
+  { region: "europe-west1" },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musisz byc zalogowany.");
+    if (request.auth.token.role !== "admin") throw new HttpsError("permission-denied", "Tylko admin.");
+
+    const { group, username, password } = request.data || {};
+    if (!group || !username || !password) {
+      throw new HttpsError("invalid-argument", "Wymagane: group, username, password.");
+    }
+
+    await getFirestore().doc("config/gps").set({
+      group, username, password,
+      updatedAt: new Date().toISOString(),
+      updatedBy: request.auth.uid,
+    });
+
+    console.log(`GPS config updated by ${request.auth.uid}`);
+    return { success: true };
+  }
+);

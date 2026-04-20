@@ -5644,6 +5644,91 @@ function EmailStatusTab({ showToast }) {
           </div>
         </div>
       )}
+
+      {/* ═══ GPS MONITORING — widziszwszystko.eu ═══ */}
+      <GpsConfigPanel showToast={showToast} />
+    </div>
+  );
+}
+
+// ── GPS CONFIG + TEST PANEL (admin only) ──
+function GpsConfigPanel({ showToast }) {
+  const [gpsResult, setGpsResult] = useState(null);
+  const [gpsLoading, setGpsLoading] = useState(false);
+  const [gpsEndpoint, setGpsEndpoint] = useState("devices");
+
+  const testGps = async () => {
+    setGpsLoading(true);
+    setGpsResult(null);
+    try {
+      const gpsProxy = httpsCallable(functions, "gpsProxy");
+      const params = gpsEndpoint === "history"
+        ? { year: new Date().getFullYear(), month: new Date().getMonth() + 1 }
+        : undefined;
+      const res = await gpsProxy({ endpoint: gpsEndpoint, params });
+      setGpsResult({ ok: true, data: res.data });
+      showToast("GPS OK");
+    } catch(e) {
+      setGpsResult({ ok: false, error: e.message || "Blad" });
+      showToast("GPS blad: " + (e.message || "").slice(0, 60));
+    }
+    setGpsLoading(false);
+  };
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 p-5 mt-4">
+      <div className="flex items-center gap-3 mb-4">
+        <span className="text-xl">📡</span>
+        <div>
+          <h3 className="text-sm font-semibold text-gray-800">GPS Monitoring — widziszwszystko.eu</h3>
+          <p className="text-xs text-gray-400">Atlas API · konfiguracja automatyczna przy pierwszym wywolaniu</p>
+        </div>
+      </div>
+
+      <div className="flex gap-2 items-end flex-wrap">
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Endpoint</label>
+          <select value={gpsEndpoint} onChange={e => setGpsEndpoint(e.target.value)}
+            className="px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white">
+            <option value="devices">devices — lista urzadzen</option>
+            <option value="positions">positions — pozycje</option>
+            <option value="positionsWithDistance">positionsWithDistance</option>
+            <option value="positionsWithCanDistance">positionsWithCanDistance</option>
+            <option value="positionsWithCanDetails">positionsWithCanDetails — pelne CAN</option>
+            <option value="history">history — historia (biezacy miesiac)</option>
+          </select>
+        </div>
+        <button onClick={testGps} disabled={gpsLoading}
+          className="px-4 py-2 rounded-xl text-sm font-bold text-white transition-all"
+          style={{ background: gpsLoading ? "#9ca3af" : "#7c3aed" }}>
+          {gpsLoading ? "Laczenie..." : "Testuj GPS"}
+        </button>
+      </div>
+
+      {gpsResult && (
+        <div className="mt-4">
+          {gpsResult.ok ? (
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-green-600 font-semibold text-sm">OK</span>
+                <span className="text-xs text-gray-400">
+                  {Array.isArray(gpsResult.data?.data)
+                    ? `${gpsResult.data.data.length} elementow`
+                    : typeof gpsResult.data?.data === "object" ? "obiekt" : ""}
+                </span>
+              </div>
+              <pre className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs text-gray-700 overflow-x-auto max-h-72 overflow-y-auto"
+                style={{ fontFamily:"'DM Mono',monospace", whiteSpace:"pre-wrap", wordBreak:"break-all" }}>
+                {JSON.stringify(gpsResult.data?.data, null, 2)}
+              </pre>
+            </div>
+          ) : (
+            <div className="p-3 rounded-xl text-sm" style={{ background:"#fef2f2", color:"#dc2626" }}>
+              Blad: {gpsResult.error}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
