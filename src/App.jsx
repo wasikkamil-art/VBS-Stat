@@ -3618,7 +3618,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             <div>
               <h2 className="text-xl font-bold text-gray-900 mb-1">GPS / Monitoring</h2>
               <p className="text-sm text-gray-400 mb-5">Atlas API · widziszwszystko.eu</p>
-              <GpsTab vehicles={vehicles} frachtyList={frachtyList} showToast={showToast} />
+              <GpsTab vehicles={vehicles} frachtyList={frachtyList} driverEvents={driverEvents} fuelEntries={fuelEntries} showToast={showToast} />
             </div>
           )}
 
@@ -6060,7 +6060,7 @@ function EmailStatusTab({ showToast }) {
 // Sekcje: Mapa online, Kilometry/CAN, Trasy, Karta kierowcy, Pliki DDD
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function GpsTab({ vehicles, frachtyList = [], showToast }) {
+function GpsTab({ vehicles, frachtyList = [], driverEvents = [], fuelEntries = [], showToast }) {
   const [gpsDevices, setGpsDevices] = useState([]);
   const [gpsPositions, setGpsPositions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -6259,7 +6259,17 @@ function GpsTab({ vehicles, frachtyList = [], showToast }) {
             </div>
 
             {/* Sub-tab content */}
-            {subTab === "mapa" && <GpsMapSection device={selectedDev} position={selectedPos} allPositions={gpsPositions} allDevices={gpsDevices} frachtyList={frachtyList} vehicles={vehicles} />}
+            {subTab === "mapa" && (
+              <>
+                <GpsMapSection device={selectedDev} position={selectedPos} allPositions={gpsPositions} allDevices={gpsDevices} frachtyList={frachtyList} vehicles={vehicles} />
+                <VehicleOrdersSection
+                  vehicle={selectedDev?.fleetVehicle}
+                  frachtyList={frachtyList}
+                  driverEvents={driverEvents}
+                  fuelEntries={fuelEntries}
+                />
+              </>
+            )}
             {subTab === "kilometry" && <GpsKilometrySection device={selectedDev} position={selectedPos} showToast={showToast} />}
             {subTab === "trasy" && <GpsTrasySection device={selectedDev} showToast={showToast} />}
             {subTab === "karta" && <GpsKartaSection device={selectedDev} showToast={showToast} />}
@@ -6271,6 +6281,224 @@ function GpsTab({ vehicles, frachtyList = [], showToast }) {
             <p className="text-gray-500">Wybierz pojazd z listy po lewej</p>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── Sekcja: LISTA ZLECEŃ POJAZDU (pod mapą) ──
+function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fuelEntries = [] }) {
+  const [expandedId, setExpandedId] = useState(null);
+  const [filter, setFilter] = useState("all"); // "all" | "active" | "done"
+
+  if (!vehicle?.id) {
+    return (
+      <div className="bg-white rounded-2xl border border-gray-100 p-6 mt-4 text-center">
+        <div className="text-xs text-gray-400">Brak przypisanego pojazdu do tego urządzenia — nie mogę wyświetlić zleceń.</div>
+      </div>
+    );
+  }
+
+  // Wszystkie zlecenia tego pojazdu
+  const orders = frachtyList
+    .filter(f => f.vehicleId === vehicle.id)
+    .sort((a, b) => (b.dataZaladunku || "").localeCompare(a.dataZaladunku || ""));
+
+  const filtered = orders.filter(f => {
+    if (filter === "active") return f.statusRozladunku !== "rozladowano";
+    if (filter === "done") return f.statusRozladunku === "rozladowano";
+    return true;
+  });
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const fmt = (d) => d ? new Date(d + "T12:00:00").toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—";
+
+  const formatKody = (f) => {
+    const zal = [f.zaladunekKod, f.zaladunekKod2, f.zaladunekKod3].filter(s => s && s.trim()).join(" / ") || "—";
+    const roz = [f.dokod, f.dokod2, f.dokod3].filter(s => s && s.trim()).join(" / ") || "—";
+    return { zal, roz };
+  };
+
+  const statusInfo = (f) => {
+    if (f.statusRozladunku === "rozladowano") return { bg: "#f0fdf4", color: "#166534", label: "Rozładowano", icon: "✅" };
+    if (f.statusRozladunku === "problem") return { bg: "#fef2f2", color: "#991b1b", label: "Problem", icon: "⚠️" };
+    if (f.dataZaladunku && f.dataZaladunku <= todayStr && (!f.dataRozladunku || f.dataRozladunku >= todayStr)) {
+      return { bg: "#eff6ff", color: "#1d4ed8", label: "W trasie", icon: "🚛" };
+    }
+    if (f.dataZaladunku && f.dataZaladunku > todayStr) return { bg: "#fffbeb", color: "#92400e", label: "Zaplanowane", icon: "📋" };
+    return { bg: "#f9fafb", color: "#6b7280", label: "—", icon: "•" };
+  };
+
+  // Kolor oceny ogólnej dla rozładowanych
+  const ocenaPill = (f) => {
+    if (f.statusRozladunku !== "rozladowano") return null;
+    const stats = computeTripStats(f, vehicle, driverEvents, fuelEntries);
+    if (!stats) return null;
+    const palette = {
+      ok:    { bg: "#f0fdf4", color: "#15803d", text: "OK" },
+      warn:  { bg: "#fffbeb", color: "#92400e", text: "Uwaga" },
+      alarm: { bg: "#fef2f2", color: "#b91c1c", text: "Alarm" },
+    }[stats.ocenaOgolna];
+    return (
+      <span style={{
+        padding: "3px 8px", borderRadius: 8, fontSize: 10, fontWeight: 700,
+        background: palette.bg, color: palette.color, textTransform: "uppercase", letterSpacing: 0.5,
+      }}>{palette.text}</span>
+    );
+  };
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 p-5 mt-4">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+        <div>
+          <h3 className="text-sm font-bold text-gray-900">Zlecenia pojazdu {vehicle.plate}</h3>
+          <div className="text-xs text-gray-400 mt-0.5">Łącznie: {orders.length}</div>
+        </div>
+        <div className="flex gap-1 bg-gray-50 rounded-xl p-1">
+          {[
+            { id: "all", label: "Wszystkie", count: orders.length },
+            { id: "active", label: "Aktywne", count: orders.filter(f => f.statusRozladunku !== "rozladowano").length },
+            { id: "done", label: "Zakończone", count: orders.filter(f => f.statusRozladunku === "rozladowano").length },
+          ].map(b => (
+            <button key={b.id} onClick={() => setFilter(b.id)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${filter === b.id ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"}`}>
+              {b.label} <span className="text-[10px] text-gray-400 ml-1">{b.count}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {filtered.length === 0 && (
+        <div className="text-center py-8 text-gray-400 text-sm">Brak zleceń w tym filtrze</div>
+      )}
+
+      <div className="space-y-2">
+        {filtered.map(f => {
+          const kody = formatKody(f);
+          const st = statusInfo(f);
+          const isExpanded = expandedId === f.id;
+          return (
+            <div key={f.id} style={{
+              border: `1px solid ${isExpanded ? "#c7d2fe" : "#e5e7eb"}`, borderRadius: 12,
+              background: isExpanded ? "#fafbff" : "#fff", transition: "all 0.15s",
+            }}>
+              {/* Nagłówek karty — klikalny */}
+              <button onClick={() => setExpandedId(isExpanded ? null : f.id)}
+                style={{
+                  width: "100%", padding: "12px 16px", background: "transparent",
+                  border: "none", cursor: "pointer", textAlign: "left",
+                  display: "flex", alignItems: "center", gap: 12,
+                }}>
+                {/* Status */}
+                <span style={{
+                  padding: "4px 10px", borderRadius: 8, fontSize: 11, fontWeight: 700,
+                  background: st.bg, color: st.color, whiteSpace: "nowrap", flexShrink: 0,
+                }}>{st.icon} {st.label}</span>
+
+                {/* Trasa */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="flex items-center gap-2" style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>
+                    <span>{kody.zal}</span>
+                    <span style={{ color: "#9ca3af" }}>→</span>
+                    <span>{kody.roz}</span>
+                    {f.nrRef && <span style={{ fontSize: 11, color: "#9ca3af", fontWeight: 400, marginLeft: "auto" }}>REF: {f.nrRef}</span>}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <span>📅 {fmt(f.dataZaladunku)} → {fmt(f.dataRozladunku)}</span>
+                    {f.klient && <span>· 🏢 {f.klient}</span>}
+                    {f.kmWszystkie && <span>· {f.kmWszystkie} km</span>}
+                    {f.cenaEur && <span>· {Number(f.cenaEur).toFixed(0)} €</span>}
+                  </div>
+                </div>
+
+                {/* Ocena + strzałka */}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {ocenaPill(f)}
+                  <span style={{ fontSize: 12, color: "#9ca3af" }}>{isExpanded ? "▲" : "▼"}</span>
+                </div>
+              </button>
+
+              {/* Rozwinięcie */}
+              {isExpanded && (
+                <div style={{ borderTop: "1px solid #e5e7eb", padding: 16 }}>
+                  {/* Podstawowe dane */}
+                  <div style={{
+                    display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: 10, marginBottom: 12,
+                  }}>
+                    <div style={{ padding: 10, borderRadius: 10, background: "#f8fafc", border: "1px solid #f1f5f9" }}>
+                      <div style={{ fontSize: 10, color: "#9ca3af", fontWeight: 600, textTransform: "uppercase" }}>Załadunek</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", marginTop: 2 }}>{kody.zal}</div>
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>{fmt(f.dataZaladunku)}{f.godzZaladunku ? ` · ${f.godzZaladunku}` : ""}</div>
+                      {f.zaladunekAdres && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>{f.zaladunekAdres}</div>}
+                    </div>
+                    <div style={{ padding: 10, borderRadius: 10, background: "#f8fafc", border: "1px solid #f1f5f9" }}>
+                      <div style={{ fontSize: 10, color: "#9ca3af", fontWeight: 600, textTransform: "uppercase" }}>Rozładunek</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", marginTop: 2 }}>{kody.roz}</div>
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>{fmt(f.dataRozladunku)}{f.godzRozladunku ? ` · ${f.godzRozladunku}` : ""}</div>
+                      {f.rozladunekAdres && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>{f.rozladunekAdres}</div>}
+                    </div>
+                    {(f.klient || f.dyspozytor) && (
+                      <div style={{ padding: 10, borderRadius: 10, background: "#f8fafc", border: "1px solid #f1f5f9" }}>
+                        <div style={{ fontSize: 10, color: "#9ca3af", fontWeight: 600, textTransform: "uppercase" }}>Strony</div>
+                        {f.klient && <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", marginTop: 2 }}>🏢 {f.klient}</div>}
+                        {f.dyspozytor && <div style={{ fontSize: 11, color: "#6b7280" }}>👤 {f.dyspozytor}</div>}
+                      </div>
+                    )}
+                    {(f.cenaEur || f.kmWszystkie || f.wagaLadunku) && (
+                      <div style={{ padding: 10, borderRadius: 10, background: "#f8fafc", border: "1px solid #f1f5f9" }}>
+                        <div style={{ fontSize: 10, color: "#9ca3af", fontWeight: 600, textTransform: "uppercase" }}>Finanse / Ładunek</div>
+                        {f.cenaEur && <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", marginTop: 2 }}>{Number(f.cenaEur).toFixed(2)} €</div>}
+                        <div style={{ fontSize: 11, color: "#6b7280" }}>
+                          {f.kmWszystkie ? `${f.kmWszystkie} km` : ""}
+                          {f.wagaLadunku ? ` · ${f.wagaLadunku} kg` : ""}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Uwagi */}
+                  {f.uwagi && (
+                    <div style={{
+                      padding: "8px 12px", borderRadius: 10, background: "#fffbeb",
+                      border: "1px solid #fde68a", fontSize: 12, color: "#78350f", marginBottom: 12,
+                    }}>
+                      <span style={{ fontWeight: 700 }}>Uwagi: </span>{f.uwagi}
+                    </div>
+                  )}
+
+                  {/* Link do pełnego dokumentu */}
+                  {f.urlZlecenie && (
+                    <a href={f.urlZlecenie} target="_blank" rel="noopener noreferrer"
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px",
+                        borderRadius: 8, background: "#eff6ff", color: "#1d4ed8",
+                        fontSize: 12, fontWeight: 600, textDecoration: "none", marginBottom: 12,
+                      }}>
+                      📋 Zlecenie transportowe →
+                    </a>
+                  )}
+
+                  {/* Trip Summary (jeśli rozładowano) */}
+                  {f.statusRozladunku === "rozladowano" && (
+                    <TripSummaryPanel
+                      fracht={f}
+                      vehicle={vehicle}
+                      driverEvents={driverEvents}
+                      fuelEntries={fuelEntries}
+                      variant="full"
+                    />
+                  )}
+                  {f.statusRozladunku !== "rozladowano" && (
+                    <div style={{ fontSize: 11, color: "#9ca3af", fontStyle: "italic", textAlign: "center", padding: 8 }}>
+                      Podsumowanie trasy pojawi się po rozładunku
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -6480,32 +6708,30 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
         routeLayerRef.current = [];
 
         if (route) {
-          // Rysuj trasę
+          // Rysuj trasę (niebieska przerywana linia)
           const polyline = L.polyline(route.coordinates, {
             color: "#3b82f6", weight: 5, opacity: 0.7, dashArray: "10 6",
           }).addTo(mapInstanceRef.current);
           routeLayerRef.current.push(polyline);
 
-          // Markery załadunku (zielone)
-          geocoded.slice(0, loadPoints.length).filter(Boolean).forEach((pt, i) => {
-            const label = loadPoints[i] || `Załadunek ${i + 1}`;
+          // Markery załadunku — flaga startowa 🚩 (bez tła, bez tekstu kodu)
+          geocoded.slice(0, loadPoints.length).filter(Boolean).forEach((pt) => {
             const m = L.marker(pt, {
               icon: L.divIcon({
-                className: "route-marker",
-                html: `<div style="background:#16a34a;color:white;font-size:10px;font-weight:700;padding:4px 8px;border-radius:8px;white-space:nowrap;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3);transform:translate(-50%,-100%);">📦 ${label.length > 25 ? label.slice(0, 25) + "…" : label}</div>`,
+                className: "route-marker-flag",
+                html: `<div style="font-size:24px;line-height:1;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.4));transform:translate(-50%,-100%);">🚩</div>`,
                 iconSize: [0, 0], iconAnchor: [0, 0],
               })
             }).addTo(mapInstanceRef.current);
             routeLayerRef.current.push(m);
           });
 
-          // Markery rozładunku (czerwone)
-          geocoded.slice(loadPoints.length).filter(Boolean).forEach((pt, i) => {
-            const label = unloadPoints[i] || `Rozładunek ${i + 1}`;
+          // Markery rozładunku — paczka 📦 (bez tła, bez tekstu kodu)
+          geocoded.slice(loadPoints.length).filter(Boolean).forEach((pt) => {
             const m = L.marker(pt, {
               icon: L.divIcon({
-                className: "route-marker",
-                html: `<div style="background:#dc2626;color:white;font-size:10px;font-weight:700;padding:4px 8px;border-radius:8px;white-space:nowrap;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3);transform:translate(-50%,-100%);">🏁 ${label.length > 25 ? label.slice(0, 25) + "…" : label}</div>`,
+                className: "route-marker-pack",
+                html: `<div style="font-size:24px;line-height:1;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.4));transform:translate(-50%,-100%);">📦</div>`,
                 iconSize: [0, 0], iconAnchor: [0, 0],
               })
             }).addTo(mapInstanceRef.current);
