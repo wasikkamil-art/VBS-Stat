@@ -821,8 +821,8 @@ function exportCostsToExcel(costs, vehicles, categories, filterYear, filterMonth
 
 // ── Per-role default tab access (fallback kiedy user nie ma jeszcze allowedTabs) ──
 const DEFAULT_TABS_BY_ROLE = {
-  admin:      ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","payments","users","email","logi","sprawy","kierowcy","chat"],
-  dyspozytor: ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","sprawy","chat"],
+  admin:      ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","payments","users","email","logi","sprawy","kierowcy","chat","gps"],
+  dyspozytor: ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","sprawy","chat","gps"],
   podglad:    ["dashboard","frachty","vehicles","serwis","docs","imi","chat"],
   kierowca:   ["driver"],  // kierowca widzi TYLKO swój panel
 };
@@ -2167,7 +2167,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 );
               };
 
-              const pojazdyChildren = ["vehicles","kierowcy","imi","serwis","docs"];
+              const pojazdyChildren = ["vehicles","kierowcy","imi","serwis","docs","gps"];
               const pojazdyOpen = sidebarOpen.pojazdy || pojazdyChildren.includes(tab);
 
               return (<>
@@ -2197,6 +2197,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                     <NavBtn indent id="imi" label="IMI / SIPSI" icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>} />
                     <NavBtn indent id="serwis" label="Serwis" icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>} />
                     <NavBtn indent id="docs" label="Dokumenty" icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>} />
+                    <NavBtn indent id="gps" label="GPS / Monitoring" icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3"/><path d="M12 19v3"/><path d="M2 12h3"/><path d="M19 12h3"/></svg>} />
                   </div>
                 )}
 
@@ -3250,6 +3251,15 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               onDelete={(id) => setDocs((p) => p.filter((d) => d.id !== id))}
               onEdit={(id, data) => setDocs((p) => p.map((d) => d.id === id ? { ...d, ...data } : d))}
             />
+          )}
+
+          {/* ══ GPS / MONITORING ════════════════════════════════════════════ */}
+          {tab === "gps" && canSeeTab("gps") && (
+            <div>
+              <h2 className="text-xl font-bold text-gray-900 mb-1">GPS / Monitoring</h2>
+              <p className="text-sm text-gray-400 mb-5">Atlas API · widziszwszystko.eu</p>
+              <GpsConfigPanel showToast={showToast} />
+            </div>
           )}
 
           {tab === "rent" && canSeeTab("rent") && (
@@ -5680,8 +5690,6 @@ function EmailStatusTab({ showToast }) {
         </div>
       )}
 
-      {/* ═══ GPS MONITORING — widziszwszystko.eu ═══ */}
-      <GpsConfigPanel showToast={showToast} />
     </div>
   );
 }
@@ -5801,6 +5809,7 @@ const ASSIGNABLE_TABS = [
   { id: "logi",      label: "Logi aktywności", icon: "📝" },
   { id: "sprawy",    label: "Sprawy",        icon: "📋" },
   { id: "chat",      label: "Czat",          icon: "💬" },
+  { id: "gps",       label: "GPS / Monitoring", icon: "📡" },
 ];
 
 // ═══════════════════════════════════════════════════════════════════
@@ -6004,8 +6013,8 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
 
   // Defaulty per rola (muszą być zgodne z DEFAULT_TABS_BY_ROLE w App)
   const DEFAULTS = {
-    admin:      ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","sprawy","chat"],
-    dyspozytor: ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","sprawy","chat"],
+    admin:      ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","sprawy","chat","gps"],
+    dyspozytor: ["dashboard","frachty","fv","costs","vehicles","serwis","rent","docs","imi","sprawy","chat","gps"],
     kierowca:   ["driver"],
     podglad:    ["dashboard","frachty","vehicles","serwis","docs","imi","chat"],
   };
