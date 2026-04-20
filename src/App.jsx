@@ -3258,7 +3258,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             <div>
               <h2 className="text-xl font-bold text-gray-900 mb-1">GPS / Monitoring</h2>
               <p className="text-sm text-gray-400 mb-5">Atlas API · widziszwszystko.eu</p>
-              <GpsConfigPanel showToast={showToast} />
+              <GpsTab vehicles={vehicles} showToast={showToast} />
             </div>
           )}
 
@@ -5694,98 +5694,728 @@ function EmailStatusTab({ showToast }) {
   );
 }
 
-// ── GPS CONFIG + TEST PANEL (admin only) ──
-function GpsConfigPanel({ showToast }) {
-  const [gpsResult, setGpsResult] = useState(null);
-  const [gpsLoading, setGpsLoading] = useState(false);
-  const [gpsEndpoint, setGpsEndpoint] = useState("devices");
+// ═══════════════════════════════════════════════════════════════════════════════
+// GPS TAB — pełny dashboard z zakładkami per pojazd
+// Sekcje: Mapa online, Kilometry/CAN, Trasy, Karta kierowcy, Pliki DDD
+// ═══════════════════════════════════════════════════════════════════════════════
 
-  const testGps = async () => {
-    setGpsLoading(true);
-    setGpsResult(null);
+function GpsTab({ vehicles, showToast }) {
+  const [gpsDevices, setGpsDevices] = useState([]);
+  const [gpsPositions, setGpsPositions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedDevice, setSelectedDevice] = useState(null);
+  const [subTab, setSubTab] = useState("mapa");
+  const [error, setError] = useState(null);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const refreshRef = useRef(null);
+
+  // ── Fetch devices + positions on mount ──
+  const fetchGpsData = async (showLoader) => {
+    if (showLoader) setLoading(true);
+    setError(null);
     try {
       const gpsProxy = httpsCallable(functions, "gpsProxy");
-      const params = gpsEndpoint === "history"
-        ? { year: new Date().getFullYear(), month: new Date().getMonth() + 1 }
-        : undefined;
-      const res = await gpsProxy({ endpoint: gpsEndpoint, params });
-      if (res.data?.success) {
-        setGpsResult({ ok: true, data: res.data });
-        showToast("GPS OK (" + (res.data.authMethod || "") + ")");
-      } else {
-        setGpsResult({ ok: false, data: res.data });
-        showToast("GPS: auth failed — zobacz diagnostyke");
+      const [devRes, posRes] = await Promise.all([
+        gpsProxy({ endpoint: "devices" }),
+        gpsProxy({ endpoint: "positionsWithCanDetails" }),
+      ]);
+      if (devRes.data?.success && Array.isArray(devRes.data.data)) {
+        // Map GPS devices to fleet vehicles by plate
+        const mapped = devRes.data.data.map(dev => {
+          const devPlate = (dev.plate || dev.name || "").replace(/\s+/g, "").toUpperCase();
+          const fleetVeh = vehicles.find(v => {
+            const fp = (v.plate || "").replace(/\s+/g, "").toUpperCase();
+            return fp && (fp === devPlate || devPlate.includes(fp) || fp.includes(devPlate));
+          });
+          return { ...dev, fleetVehicle: fleetVeh || null, normalizedPlate: devPlate };
+        });
+        setGpsDevices(mapped);
+        if (!selectedDevice && mapped.length > 0) setSelectedDevice(mapped[0].deviceId || mapped[0].id);
+      }
+      if (posRes.data?.success && Array.isArray(posRes.data.data)) {
+        setGpsPositions(posRes.data.data);
       }
     } catch(e) {
-      setGpsResult({ ok: false, error: e.message || "Blad" });
-      showToast("GPS blad: " + (e.message || "").slice(0, 60));
+      setError(e.message || "Błąd połączenia z GPS API");
+      showToast("GPS: " + (e.message || "błąd").slice(0, 60));
     }
-    setGpsLoading(false);
+    setLoading(false);
   };
 
-  return (
-    <div className="bg-white rounded-2xl border border-gray-100 p-5 mt-4">
-      <div className="flex items-center gap-3 mb-4">
-        <span className="text-xl">📡</span>
-        <div>
-          <h3 className="text-sm font-semibold text-gray-800">GPS Monitoring — widziszwszystko.eu</h3>
-          <p className="text-xs text-gray-400">Atlas API · konfiguracja automatyczna przy pierwszym wywolaniu</p>
-        </div>
-      </div>
+  useEffect(() => { fetchGpsData(true); }, []);
 
-      <div className="flex gap-2 items-end flex-wrap">
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">Endpoint</label>
-          <select value={gpsEndpoint} onChange={e => setGpsEndpoint(e.target.value)}
-            className="px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white">
-            <option value="devices">devices — lista urzadzen</option>
-            <option value="positions">positions — pozycje</option>
-            <option value="positionsWithDistance">positionsWithDistance</option>
-            <option value="positionsWithCanDistance">positionsWithCanDistance</option>
-            <option value="positionsWithCanDetails">positionsWithCanDetails — pelne CAN</option>
-            <option value="history">history — historia (biezacy miesiac)</option>
-          </select>
+  // Auto-refresh co 30s
+  useEffect(() => {
+    if (autoRefresh) {
+      refreshRef.current = setInterval(() => fetchGpsData(false), 30000);
+    }
+    return () => { if (refreshRef.current) clearInterval(refreshRef.current); };
+  }, [autoRefresh]);
+
+  // ── Helpers ──
+  const getDevicePosition = (deviceId) => gpsPositions.find(p => (p.deviceId || p.id) === deviceId);
+  const selectedDev = gpsDevices.find(d => (d.deviceId || d.id) === selectedDevice);
+  const selectedPos = selectedDev ? getDevicePosition(selectedDev.deviceId || selectedDev.id) : null;
+
+  const formatDate = (ts) => {
+    if (!ts) return "—";
+    const d = new Date(typeof ts === "number" ? ts * 1000 : ts);
+    return d.toLocaleString("pl-PL", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" });
+  };
+
+  const SUB_TABS = [
+    { id: "mapa", label: "Mapa online", icon: "🗺️" },
+    { id: "kilometry", label: "Kilometry", icon: "📊" },
+    { id: "trasy", label: "Trasy", icon: "🛣️" },
+    { id: "karta", label: "Karta kierowcy", icon: "💳" },
+    { id: "ddd", label: "Pliki DDD", icon: "💾" },
+  ];
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600"></div>
+        <span className="ml-3 text-sm text-gray-500">Łączenie z GPS API...</span>
+      </div>
+    );
+  }
+
+  if (error && gpsDevices.length === 0) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-center">
+        <p className="text-red-600 font-semibold mb-2">Błąd połączenia z GPS</p>
+        <p className="text-sm text-red-500 mb-4">{error}</p>
+        <button onClick={() => fetchGpsData(true)} className="px-4 py-2 rounded-xl text-sm font-bold text-white bg-violet-600 hover:bg-violet-700">
+          Ponów próbę
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex gap-4" style={{ minHeight: "calc(100vh - 180px)" }}>
+      {/* ── LEWY PANEL: lista pojazdów GPS ── */}
+      <div className="w-56 flex-shrink-0">
+        <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Pojazdy GPS</span>
+            <span className="text-xs text-gray-400">{gpsDevices.length}</span>
+          </div>
+          <div className="max-h-[calc(100vh-280px)] overflow-y-auto">
+            {gpsDevices.map(dev => {
+              const devId = dev.deviceId || dev.id;
+              const pos = getDevicePosition(devId);
+              const isActive = devId === selectedDevice;
+              const plate = dev.plate || dev.name || `#${devId}`;
+              const isOnline = pos && pos.timestamp && (Date.now() / 1000 - (typeof pos.timestamp === "number" ? pos.timestamp : new Date(pos.timestamp).getTime() / 1000)) < 600;
+              return (
+                <button key={devId} onClick={() => { setSelectedDevice(devId); setSubTab("mapa"); }}
+                  className={`w-full text-left px-4 py-3 border-b border-gray-50 transition-all ${isActive ? "bg-violet-50 border-l-4 border-l-violet-500" : "hover:bg-gray-50 border-l-4 border-l-transparent"}`}>
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isOnline ? "bg-green-500" : "bg-gray-300"}`}></span>
+                    <span className={`text-sm font-semibold ${isActive ? "text-violet-700" : "text-gray-800"}`}>{plate}</span>
+                  </div>
+                  {dev.fleetVehicle && (
+                    <div className="text-xs text-gray-400 ml-4 mt-0.5">{dev.fleetVehicle.brand} {dev.fleetVehicle.model}</div>
+                  )}
+                  {pos && (
+                    <div className="text-xs text-gray-400 ml-4 mt-0.5">
+                      {pos.speed != null && <span>{Math.round(pos.speed)} km/h · </span>}
+                      {formatDate(pos.timestamp)}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+            {gpsDevices.length === 0 && (
+              <div className="px-4 py-6 text-center text-xs text-gray-400">Brak urządzeń GPS</div>
+            )}
+          </div>
         </div>
-        <button onClick={testGps} disabled={gpsLoading}
-          className="px-4 py-2 rounded-xl text-sm font-bold text-white transition-all"
-          style={{ background: gpsLoading ? "#9ca3af" : "#7c3aed" }}>
-          {gpsLoading ? "Laczenie..." : "Testuj GPS"}
+        {/* Auto-refresh toggle */}
+        <div className="mt-3 flex items-center gap-2 px-1">
+          <button onClick={() => setAutoRefresh(!autoRefresh)}
+            className={`w-8 h-5 rounded-full transition-all flex items-center ${autoRefresh ? "bg-green-500 justify-end" : "bg-gray-300 justify-start"}`}>
+            <span className="w-4 h-4 bg-white rounded-full shadow-sm mx-0.5"></span>
+          </button>
+          <span className="text-xs text-gray-500">Auto-odświeżanie (30s)</span>
+        </div>
+        <button onClick={() => fetchGpsData(false)} className="mt-2 w-full text-xs text-violet-600 hover:text-violet-800 py-1">
+          ↻ Odśwież teraz
         </button>
       </div>
 
-      {gpsResult && (
-        <div className="mt-4">
-          {gpsResult.ok ? (
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-green-600 font-semibold text-sm">OK</span>
-                <span className="text-xs text-gray-400">
-                  auth: {gpsResult.data?.authMethod || "?"} ·{" "}
-                  {Array.isArray(gpsResult.data?.data)
-                    ? `${gpsResult.data.data.length} elementow`
-                    : typeof gpsResult.data?.data === "object" ? "obiekt" : ""}
-                </span>
+      {/* ── PRAWY PANEL: szczegóły wybranego pojazdu ── */}
+      <div className="flex-1 min-w-0">
+        {selectedDev ? (
+          <>
+            {/* Header pojazdu */}
+            <div className="bg-white rounded-2xl border border-gray-100 p-4 mb-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center">
+                    <span className="text-lg">🚛</span>
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-gray-900">{selectedDev.plate || selectedDev.name || `Device #${selectedDevice}`}</h3>
+                    <div className="flex items-center gap-3 text-xs text-gray-400">
+                      {selectedDev.fleetVehicle && <span>{selectedDev.fleetVehicle.brand} {selectedDev.fleetVehicle.model}</span>}
+                      <span>ID: {selectedDevice}</span>
+                      {selectedPos && selectedPos.speed != null && (
+                        <span className="font-semibold text-gray-600">{Math.round(selectedPos.speed)} km/h</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                {selectedPos && (
+                  <div className="text-right text-xs text-gray-400">
+                    <div>Ostatnia pozycja</div>
+                    <div className="font-semibold text-gray-600">{formatDate(selectedPos.timestamp)}</div>
+                  </div>
+                )}
               </div>
-              <pre className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs text-gray-700 overflow-x-auto max-h-72 overflow-y-auto"
-                style={{ fontFamily:"'DM Mono',monospace", whiteSpace:"pre-wrap", wordBreak:"break-all" }}>
-                {JSON.stringify(gpsResult.data?.data, null, 2)}
-              </pre>
             </div>
-          ) : (
-            <div>
-              <div className="p-3 rounded-xl text-sm mb-2" style={{ background:"#fef2f2", color:"#dc2626" }}>
-                {gpsResult.error || "Auth failed"}
-              </div>
-              {gpsResult.data?.diagnostics && (
-                <pre className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs text-gray-700 overflow-x-auto max-h-72 overflow-y-auto"
-                  style={{ fontFamily:"'DM Mono',monospace", whiteSpace:"pre-wrap", wordBreak:"break-all" }}>
-                  {JSON.stringify(gpsResult.data, null, 2)}
-                </pre>
-              )}
+
+            {/* Sub-tabs */}
+            <div className="flex gap-1 mb-4 bg-white rounded-2xl border border-gray-100 p-1.5">
+              {SUB_TABS.map(st => (
+                <button key={st.id} onClick={() => setSubTab(st.id)}
+                  className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold transition-all ${subTab === st.id ? "bg-violet-600 text-white shadow-sm" : "text-gray-500 hover:bg-gray-50"}`}>
+                  <span className="mr-1">{st.icon}</span> {st.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Sub-tab content */}
+            {subTab === "mapa" && <GpsMapSection device={selectedDev} position={selectedPos} allPositions={gpsPositions} allDevices={gpsDevices} />}
+            {subTab === "kilometry" && <GpsKilometrySection device={selectedDev} position={selectedPos} showToast={showToast} />}
+            {subTab === "trasy" && <GpsTrasySection device={selectedDev} showToast={showToast} />}
+            {subTab === "karta" && <GpsKartaSection device={selectedDev} showToast={showToast} />}
+            {subTab === "ddd" && <GpsDddSection device={selectedDev} showToast={showToast} />}
+          </>
+        ) : (
+          <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center">
+            <span className="text-4xl mb-4 block">📡</span>
+            <p className="text-gray-500">Wybierz pojazd z listy po lewej</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Sekcja: MAPA ONLINE ──
+function GpsMapSection({ device, position, allPositions, allDevices }) {
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markersRef = useRef([]);
+
+  useEffect(() => {
+    // Dynamically load Leaflet CSS
+    if (!document.getElementById("leaflet-css")) {
+      const link = document.createElement("link");
+      link.id = "leaflet-css";
+      link.rel = "stylesheet";
+      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      document.head.appendChild(link);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!mapRef.current || typeof window === "undefined") return;
+    let L;
+    try { L = require("leaflet"); } catch(e) { return; }
+
+    const lat = position?.latitude || position?.lat || 52.0;
+    const lng = position?.longitude || position?.lng || position?.lon || 19.0;
+
+    // Init map
+    if (!mapInstanceRef.current) {
+      mapInstanceRef.current = L.map(mapRef.current).setView([lat, lng], 7);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: '&copy; OpenStreetMap',
+        maxZoom: 19,
+      }).addTo(mapInstanceRef.current);
+    }
+
+    // Clear old markers
+    markersRef.current.forEach(m => m.remove());
+    markersRef.current = [];
+
+    // Add markers for ALL devices
+    allDevices.forEach(dev => {
+      const devId = dev.deviceId || dev.id;
+      const pos = allPositions.find(p => (p.deviceId || p.id) === devId);
+      if (!pos) return;
+      const pLat = pos.latitude || pos.lat;
+      const pLng = pos.longitude || pos.lng || pos.lon;
+      if (!pLat || !pLng) return;
+
+      const isSelected = devId === (device.deviceId || device.id);
+      const plate = dev.plate || dev.name || `#${devId}`;
+      const speed = pos.speed != null ? Math.round(pos.speed) : "?";
+      const isMoving = pos.speed && pos.speed > 3;
+
+      const icon = L.divIcon({
+        className: "gps-marker",
+        html: `<div style="
+          background: ${isSelected ? "#7c3aed" : isMoving ? "#16a34a" : "#6b7280"};
+          color: white; font-size: 10px; font-weight: 700; padding: 3px 8px;
+          border-radius: 12px; white-space: nowrap; border: 2px solid white;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.25); transform: translate(-50%, -50%);
+          ${isSelected ? "z-index: 999; font-size: 12px; padding: 4px 10px;" : ""}
+        ">${plate} · ${speed} km/h</div>`,
+        iconSize: [0, 0],
+        iconAnchor: [0, 0],
+      });
+
+      const marker = L.marker([pLat, pLng], { icon }).addTo(mapInstanceRef.current);
+      marker.bindPopup(`
+        <div style="font-size:13px;">
+          <strong>${plate}</strong><br/>
+          Prędkość: ${speed} km/h<br/>
+          ${pos.mileage ? `Przebieg: ${Math.round(pos.mileage).toLocaleString("pl-PL")} km<br/>` : ""}
+          ${pos.fuelLevel != null ? `Paliwo: ${pos.fuelLevel}%<br/>` : ""}
+          Czas: ${new Date(typeof pos.timestamp === "number" ? pos.timestamp * 1000 : pos.timestamp).toLocaleString("pl-PL")}
+        </div>
+      `);
+      markersRef.current.push(marker);
+    });
+
+    // Center on selected device
+    if (position) {
+      const cLat = position.latitude || position.lat;
+      const cLng = position.longitude || position.lng || position.lon;
+      if (cLat && cLng) mapInstanceRef.current.setView([cLat, cLng], 13);
+    }
+
+    return () => {};
+  }, [position, allPositions, allDevices, device]);
+
+  // Cleanup map on unmount
+  useEffect(() => {
+    return () => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
+    };
+  }, []);
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+      <div ref={mapRef} style={{ height: "500px", width: "100%" }}></div>
+      {/* CAN data bar under map */}
+      {position && (
+        <div className="flex flex-wrap gap-4 px-5 py-3 bg-gray-50 border-t border-gray-100">
+          {position.speed != null && (
+            <div className="text-center">
+              <div className="text-lg font-bold text-gray-800">{Math.round(position.speed)}</div>
+              <div className="text-xs text-gray-400">km/h</div>
+            </div>
+          )}
+          {position.mileage != null && (
+            <div className="text-center">
+              <div className="text-lg font-bold text-gray-800">{Math.round(position.mileage).toLocaleString("pl-PL")}</div>
+              <div className="text-xs text-gray-400">km przebieg</div>
+            </div>
+          )}
+          {position.fuelLevel != null && (
+            <div className="text-center">
+              <div className="text-lg font-bold text-gray-800">{position.fuelLevel}%</div>
+              <div className="text-xs text-gray-400">paliwo</div>
+            </div>
+          )}
+          {position.voltage != null && (
+            <div className="text-center">
+              <div className="text-lg font-bold text-gray-800">{position.voltage}V</div>
+              <div className="text-xs text-gray-400">napięcie</div>
+            </div>
+          )}
+          {position.rpm != null && (
+            <div className="text-center">
+              <div className="text-lg font-bold text-gray-800">{position.rpm}</div>
+              <div className="text-xs text-gray-400">RPM</div>
+            </div>
+          )}
+          {(position.engineTemperature || position.engineTemp) != null && (
+            <div className="text-center">
+              <div className="text-lg font-bold text-gray-800">{position.engineTemperature || position.engineTemp}°C</div>
+              <div className="text-xs text-gray-400">temp. silnika</div>
             </div>
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Sekcja: KILOMETRY (dane CAN bus) ──
+function GpsKilometrySection({ device, position, showToast }) {
+  const [canHistory, setCanHistory] = useState([]);
+  const [histLoading, setHistLoading] = useState(false);
+  const [month, setMonth] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
+
+  const fetchCanHistory = async () => {
+    setHistLoading(true);
+    try {
+      const [y, m] = month.split("-").map(Number);
+      const gpsProxy = httpsCallable(functions, "gpsProxy");
+      const res = await gpsProxy({ endpoint: "history", params: { year: y, month: m } });
+      if (res.data?.success) {
+        const devId = String(device.deviceId || device.id);
+        const allData = res.data.data || {};
+        // History returns object keyed by deviceId or array — search for our device
+        let deviceHistory = [];
+        if (Array.isArray(allData)) {
+          deviceHistory = allData.filter(h => String(h.deviceId || h.id) === devId);
+        } else if (allData[devId]) {
+          deviceHistory = Array.isArray(allData[devId]) ? allData[devId] : [allData[devId]];
+        } else {
+          // Try searching all entries
+          Object.values(allData).forEach(v => {
+            if (Array.isArray(v)) deviceHistory.push(...v.filter(h => String(h.deviceId || h.id) === devId));
+          });
+        }
+        setCanHistory(deviceHistory);
+      }
+    } catch(e) {
+      showToast("Błąd historii: " + (e.message || "").slice(0, 60));
+    }
+    setHistLoading(false);
+  };
+
+  // Current CAN stats from live position
+  const canStats = position ? {
+    mileage: position.mileage != null ? Math.round(position.mileage) : null,
+    fuelLevel: position.fuelLevel,
+    voltage: position.voltage,
+    rpm: position.rpm,
+    speed: position.speed != null ? Math.round(position.speed) : null,
+    engineTemp: position.engineTemperature || position.engineTemp,
+    fuelUsed: position.fuelUsed || position.totalFuelUsed,
+  } : {};
+
+  return (
+    <div>
+      {/* Live CAN stats */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-5 mb-4">
+        <h4 className="text-sm font-semibold text-gray-800 mb-4">Aktualne dane CAN bus</h4>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+          {[
+            { label: "Przebieg", value: canStats.mileage != null ? `${canStats.mileage.toLocaleString("pl-PL")} km` : "—", icon: "🛣️", color: "#7c3aed" },
+            { label: "Paliwo", value: canStats.fuelLevel != null ? `${canStats.fuelLevel}%` : "—", icon: "⛽", color: "#f59e0b" },
+            { label: "Prędkość", value: canStats.speed != null ? `${canStats.speed} km/h` : "—", icon: "💨", color: "#3b82f6" },
+            { label: "Obroty", value: canStats.rpm != null ? `${canStats.rpm} RPM` : "—", icon: "⚙️", color: "#6b7280" },
+            { label: "Napięcie", value: canStats.voltage != null ? `${canStats.voltage} V` : "—", icon: "🔋", color: "#10b981" },
+            { label: "Temp. silnika", value: canStats.engineTemp != null ? `${canStats.engineTemp}°C` : "—", icon: "🌡️", color: "#ef4444" },
+            { label: "Zużycie paliwa", value: canStats.fuelUsed != null ? `${Math.round(canStats.fuelUsed)} L` : "—", icon: "📉", color: "#8b5cf6" },
+          ].map((s, i) => (
+            <div key={i} className="bg-gray-50 rounded-xl p-3">
+              <div className="flex items-center gap-2 mb-1">
+                <span>{s.icon}</span>
+                <span className="text-xs text-gray-500">{s.label}</span>
+              </div>
+              <div className="text-lg font-bold" style={{ color: s.color }}>{s.value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Monthly history */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h4 className="text-sm font-semibold text-gray-800">Historia miesięczna</h4>
+          <div className="flex gap-2 items-center">
+            <input type="month" value={month} onChange={e => setMonth(e.target.value)}
+              className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm" />
+            <button onClick={fetchCanHistory} disabled={histLoading}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:bg-gray-400">
+              {histLoading ? "..." : "Pobierz"}
+            </button>
+          </div>
+        </div>
+        {canHistory.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-gray-400 border-b border-gray-100">
+                  <th className="py-2 pr-4">Data</th>
+                  <th className="py-2 pr-4">Dystans</th>
+                  <th className="py-2 pr-4">Czas jazdy</th>
+                  <th className="py-2 pr-4">Śr. prędkość</th>
+                  <th className="py-2 pr-4">Max prędkość</th>
+                </tr>
+              </thead>
+              <tbody>
+                {canHistory.map((h, i) => (
+                  <tr key={i} className="border-b border-gray-50">
+                    <td className="py-2 pr-4 font-medium text-gray-700">{h.date || h.day || `Dzień ${i + 1}`}</td>
+                    <td className="py-2 pr-4">{h.distance != null ? `${Math.round(h.distance)} km` : "—"}</td>
+                    <td className="py-2 pr-4">{h.driveTime || h.duration || "—"}</td>
+                    <td className="py-2 pr-4">{h.avgSpeed != null ? `${Math.round(h.avgSpeed)} km/h` : "—"}</td>
+                    <td className="py-2 pr-4">{h.maxSpeed != null ? `${Math.round(h.maxSpeed)} km/h` : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="text-center py-8 text-xs text-gray-400">
+            Kliknij "Pobierz" aby załadować historię za wybrany miesiąc
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Sekcja: TRASY (historia tras na mapie) ──
+function GpsTrasySection({ device, showToast }) {
+  const [routes, setRoutes] = useState([]);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+
+  useEffect(() => {
+    if (!document.getElementById("leaflet-css")) {
+      const link = document.createElement("link");
+      link.id = "leaflet-css";
+      link.rel = "stylesheet";
+      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      document.head.appendChild(link);
+    }
+  }, []);
+
+  const fetchRoute = async () => {
+    setRouteLoading(true);
+    try {
+      const d = new Date(selectedDate);
+      const gpsProxy = httpsCallable(functions, "gpsProxy");
+      const res = await gpsProxy({ endpoint: "history", params: { year: d.getFullYear(), month: d.getMonth() + 1 } });
+      if (res.data?.success) {
+        setRoutes(res.data.data || []);
+        showToast("Trasy załadowane");
+      }
+    } catch(e) {
+      showToast("Błąd tras: " + (e.message || "").slice(0, 60));
+    }
+    setRouteLoading(false);
+  };
+
+  // Render route on map
+  useEffect(() => {
+    if (!mapRef.current || routes.length === 0) return;
+    let L;
+    try { L = require("leaflet"); } catch(e) { return; }
+
+    if (!mapInstanceRef.current) {
+      mapInstanceRef.current = L.map(mapRef.current).setView([52.0, 19.0], 7);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: '&copy; OpenStreetMap', maxZoom: 19,
+      }).addTo(mapInstanceRef.current);
+    }
+
+    // Clear previous layers
+    mapInstanceRef.current.eachLayer(layer => {
+      if (layer instanceof L.Polyline || layer instanceof L.Marker) layer.remove();
+    });
+
+    // Try to find route points for selected device
+    const devId = String(device.deviceId || device.id);
+    let points = [];
+    if (Array.isArray(routes)) {
+      points = routes.filter(r => String(r.deviceId || r.id) === devId && (r.latitude || r.lat));
+    }
+
+    if (points.length > 0) {
+      const coords = points.map(p => [p.latitude || p.lat, p.longitude || p.lng || p.lon]).filter(c => c[0] && c[1]);
+      if (coords.length > 0) {
+        L.polyline(coords, { color: "#7c3aed", weight: 4, opacity: 0.8 }).addTo(mapInstanceRef.current);
+        // Start/end markers
+        L.circleMarker(coords[0], { radius: 8, fillColor: "#16a34a", color: "white", weight: 2, fillOpacity: 1 })
+          .bindPopup("Start").addTo(mapInstanceRef.current);
+        L.circleMarker(coords[coords.length - 1], { radius: 8, fillColor: "#dc2626", color: "white", weight: 2, fillOpacity: 1 })
+          .bindPopup("Koniec").addTo(mapInstanceRef.current);
+        mapInstanceRef.current.fitBounds(coords);
+      }
+    }
+  }, [routes, device]);
+
+  useEffect(() => {
+    return () => {
+      if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null; }
+    };
+  }, []);
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+        <h4 className="text-sm font-semibold text-gray-800">Historia tras</h4>
+        <div className="flex gap-2 items-center">
+          <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
+            className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm" />
+          <button onClick={fetchRoute} disabled={routeLoading}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:bg-gray-400">
+            {routeLoading ? "..." : "Pokaż trasę"}
+          </button>
+        </div>
+      </div>
+      <div ref={mapRef} style={{ height: "450px", width: "100%" }}></div>
+      {routes.length === 0 && (
+        <div className="text-center py-6 text-xs text-gray-400">Wybierz datę i kliknij "Pokaż trasę"</div>
+      )}
+    </div>
+  );
+}
+
+// ── Sekcja: KARTA KIEROWCY ──
+function GpsKartaSection({ device, showToast }) {
+  const [kartaData, setKartaData] = useState(null);
+
+  const driverInfo = device.fleetVehicle?.assignedDriver;
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 p-5">
+      <h4 className="text-sm font-semibold text-gray-800 mb-4">Karta kierowcy</h4>
+
+      {driverInfo ? (
+        <div className="mb-6 p-4 bg-violet-50 rounded-xl">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-violet-200 flex items-center justify-center font-bold text-violet-700">
+              {(typeof driverInfo === "string" ? driverInfo : driverInfo.name || "?").charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <div className="font-semibold text-gray-800">{typeof driverInfo === "string" ? driverInfo : driverInfo.name || "Kierowca"}</div>
+              <div className="text-xs text-gray-400">Przypisany do: {device.plate || device.name}</div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="mb-6 p-4 bg-gray-50 rounded-xl text-center text-sm text-gray-400">
+          Brak przypisanego kierowcy do tego pojazdu
+        </div>
+      )}
+
+      <div className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center">
+        <span className="text-3xl mb-3 block">💳</span>
+        <p className="text-sm text-gray-500 mb-2">Wgraj odczyt karty kierowcy</p>
+        <p className="text-xs text-gray-400 mb-4">Obsługiwane formaty: .ddd, .esm, .tgd, .v1b</p>
+        <label className="inline-block px-4 py-2 rounded-xl text-sm font-bold text-white bg-violet-600 hover:bg-violet-700 cursor-pointer transition-all">
+          Wybierz plik
+          <input type="file" accept=".ddd,.esm,.tgd,.v1b,.DDD,.ESM" className="hidden"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              showToast(`Wgrywanie: ${file.name}...`);
+              // For now, store file reference — parsing will be implemented with readesm-js
+              setKartaData({ name: file.name, size: file.size, date: new Date().toISOString() });
+              showToast(`Plik ${file.name} wgrany (parsowanie wkrótce)`);
+            }} />
+        </label>
+      </div>
+
+      {kartaData && (
+        <div className="mt-4 p-3 bg-green-50 rounded-xl flex items-center gap-3">
+          <span className="text-green-600">✓</span>
+          <div>
+            <div className="text-sm font-medium text-gray-800">{kartaData.name}</div>
+            <div className="text-xs text-gray-400">{(kartaData.size / 1024).toFixed(1)} KB · {new Date(kartaData.date).toLocaleString("pl-PL")}</div>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-6 p-4 bg-amber-50 rounded-xl text-xs text-amber-700">
+        <strong>W przygotowaniu:</strong> Automatyczny odczyt karty — analiza aktywności kierowcy (jazda, praca, dyspozycyjność, odpoczynek), weryfikacja rozporządzenia 561/2006, timeline dzienny.
+      </div>
+    </div>
+  );
+}
+
+// ── Sekcja: PLIKI DDD (tachograf) ──
+function GpsDddSection({ device, showToast }) {
+  const [dddFiles, setDddFiles] = useState([]);
+  const [uploading, setUploading] = useState(false);
+
+  const uploadDdd = async (file) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const entry = {
+          id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+          name: file.name,
+          size: file.size,
+          date: new Date().toISOString(),
+          deviceId: device.deviceId || device.id,
+          plate: device.plate || device.name,
+          status: "uploaded",
+          // Raw binary data for future parsing
+          dataUrl: reader.result,
+        };
+        setDddFiles(prev => [entry, ...prev]);
+        showToast(`Plik DDD wgrany: ${file.name}`);
+        setUploading(false);
+      };
+      reader.readAsDataURL(file);
+    } catch(e) {
+      showToast("Błąd uploadu: " + (e.message || ""));
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div>
+      {/* Upload area */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-5 mb-4">
+        <h4 className="text-sm font-semibold text-gray-800 mb-4">Pliki DDD — odczyt tachografu</h4>
+        <div className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center">
+          <span className="text-3xl mb-3 block">💾</span>
+          <p className="text-sm text-gray-500 mb-2">Wgraj plik DDD z tachografu cyfrowego</p>
+          <p className="text-xs text-gray-400 mb-4">Format binarny TLV · rozporządzenie EU 2016/799 · Gen1/Gen2</p>
+          <label className={`inline-block px-4 py-2 rounded-xl text-sm font-bold text-white cursor-pointer transition-all ${uploading ? "bg-gray-400" : "bg-violet-600 hover:bg-violet-700"}`}>
+            {uploading ? "Wgrywanie..." : "Wybierz plik DDD"}
+            <input type="file" accept=".ddd,.DDD" className="hidden" disabled={uploading}
+              onChange={e => uploadDdd(e.target.files?.[0])} />
+          </label>
+        </div>
+      </div>
+
+      {/* Uploaded files list */}
+      {dddFiles.length > 0 && (
+        <div className="bg-white rounded-2xl border border-gray-100 p-5">
+          <h4 className="text-sm font-semibold text-gray-800 mb-3">Wgrane pliki</h4>
+          <div className="space-y-2">
+            {dddFiles.map(f => (
+              <div key={f.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+                <div className="flex items-center gap-3">
+                  <span className="text-lg">💾</span>
+                  <div>
+                    <div className="text-sm font-medium text-gray-800">{f.name}</div>
+                    <div className="text-xs text-gray-400">
+                      {(f.size / 1024).toFixed(1)} KB · {f.plate} · {new Date(f.date).toLocaleString("pl-PL")}
+                    </div>
+                  </div>
+                </div>
+                <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                  f.status === "parsed" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
+                }`}>
+                  {f.status === "parsed" ? "Sparsowany" : "Do analizy"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="mt-4 p-4 bg-amber-50 rounded-xl text-xs text-amber-700">
+        <strong>W przygotowaniu:</strong> Automatyczne parsowanie plików DDD — aktywności kierowcy z timestampami, zdarzenia, anomalie, weryfikacja podpisów RSA. Integracja z kalendarzem czasu pracy 561/2006.
+      </div>
     </div>
   );
 }
