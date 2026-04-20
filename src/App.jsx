@@ -6405,8 +6405,6 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
   const [autoRefresh, setAutoRefresh] = useState(true);
   // Wybrane zlecenie z listy pod mapą — nadpisuje domyślny "aktywny fracht"
   const [selectedOrderId, setSelectedOrderId] = useState(null);
-  // Modal diagnostyki Atlas API
-  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const refreshRef = useRef(null);
 
   // ── Fetch devices + positions on mount ──
@@ -6625,10 +6623,6 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
         <button onClick={() => fetchGpsData(false)} className="mt-2 w-full text-xs text-violet-600 hover:text-violet-800 py-1">
           ↻ Odśwież teraz
         </button>
-        <button onClick={() => setShowDiagnostics(true)}
-          className="mt-1 w-full text-xs text-gray-500 hover:text-gray-700 py-1 border-t border-gray-100">
-          🔍 Diagnostyka Atlas API
-        </button>
       </div>
 
       {/* ── PRAWY PANEL: szczegóły wybranego pojazdu ── */}
@@ -6711,171 +6705,6 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
         )}
       </div>
 
-      {/* Modal diagnostyki Atlas API */}
-      {showDiagnostics && (
-        <AtlasDiagnosticsModal
-          selectedDev={selectedDev}
-          onClose={() => setShowDiagnostics(false)}
-        />
-      )}
-    </div>
-  );
-}
-
-// ── Modal diagnostyczny Atlas API (sprawdzanie czy mamy dane tachografu) ──
-function AtlasDiagnosticsModal({ selectedDev, onClose }) {
-  const [results, setResults] = useState({}); // { endpoint: {loading, data, error} }
-  const [runningAll, setRunningAll] = useState(false);
-
-  // Endpointy do przetestowania — część znana, część eksperymentalna
-  const ENDPOINTS = [
-    { id: "devices", label: "devices", desc: "Lista urządzeń (znany)", params: null },
-    { id: "positionsWithCanDetails", label: "positionsWithCanDetails", desc: "Pozycje + CAN (znany — sprawdzamy WSZYSTKIE pola)", params: null },
-    { id: "tachograph", label: "tachograph", desc: "Dane tachografu (eksperyment)", params: null },
-    { id: "tachographs", label: "tachographs", desc: "Lista tachografów (eksperyment)", params: null },
-    { id: "driverCard", label: "driverCard", desc: "Dane karty kierowcy (eksperyment)", params: null },
-    { id: "driverCards", label: "driverCards", desc: "Karty kierowców (eksperyment)", params: null },
-    { id: "cards", label: "cards", desc: "Karty (eksperyment)", params: null },
-    { id: "ddd", label: "ddd", desc: "Pliki DDD (eksperyment)", params: null },
-    { id: "drivers", label: "drivers", desc: "Kierowcy (eksperyment)", params: null },
-    { id: "driverActivity", label: "driverActivity", desc: "Aktywność kierowcy (eksperyment)", params: null },
-    { id: "activities", label: "activities", desc: "Aktywności (eksperyment)", params: null },
-    { id: "workTime", label: "workTime", desc: "Czas pracy (eksperyment)", params: null },
-    { id: "history-current", label: "history (bieżący mies.)", desc: "Historia z tego miesiąca (znany)", params: { year: new Date().getFullYear(), month: new Date().getMonth() + 1 } },
-  ];
-
-  const runEndpoint = async (ep) => {
-    setResults(r => ({ ...r, [ep.id]: { loading: true } }));
-    try {
-      const gpsProxy = httpsCallable(functions, "gpsProxy");
-      const callArgs = {
-        endpoint: ep.id.startsWith("history-") ? "history" : ep.id,
-        mode: "diagnostic", // Pozwala na eksperymentalne endpointy (admin only)
-      };
-      if (ep.params) callArgs.params = ep.params;
-      const res = await gpsProxy(callArgs);
-      setResults(r => ({ ...r, [ep.id]: { loading: false, data: res.data } }));
-    } catch (e) {
-      setResults(r => ({ ...r, [ep.id]: { loading: false, error: e?.message || String(e) } }));
-    }
-  };
-
-  const runAll = async () => {
-    setRunningAll(true);
-    for (const ep of ENDPOINTS) {
-      await runEndpoint(ep);
-    }
-    setRunningAll(false);
-  };
-
-  // Wykrywa słowa kluczowe związane z tachografem w odpowiedzi
-  const detectTachoKeywords = (data) => {
-    const str = JSON.stringify(data || "").toLowerCase();
-    const hits = [];
-    const keywords = ["tacho", "driver", "activity", "card", "ddd", "work", "rest", "break", "duty"];
-    for (const k of keywords) {
-      if (str.includes(k)) hits.push(k);
-    }
-    return hits;
-  };
-
-  // Kopiowanie do clipboard
-  const copyJson = (data) => {
-    try {
-      navigator.clipboard.writeText(JSON.stringify(data, null, 2));
-    } catch {}
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.5)" }}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col" style={{ maxHeight: "92vh" }}>
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
-          <div>
-            <h3 className="text-base font-bold text-gray-900">🔍 Diagnostyka Atlas API</h3>
-            <div className="text-xs text-gray-500 mt-0.5">
-              Sprawdzenie czy widziszwszystko.eu eksponuje dane tachografu
-              {selectedDev && ` · Pojazd: ${selectedDev.plate || selectedDev.deviceName || selectedDev.deviceId}`}
-            </div>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
-        </div>
-
-        <div className="px-6 py-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-          <div className="text-xs text-gray-600">
-            Wywołam {ENDPOINTS.length} endpointów. <strong>Słowa-klucze</strong> tacho/driver/activity/card/ddd zostaną oznaczone w odpowiedziach.
-          </div>
-          <button onClick={runAll} disabled={runningAll}
-            className="px-4 py-2 rounded-lg text-sm font-bold text-white disabled:bg-gray-400"
-            style={{ background: runningAll ? "#9ca3af" : "#7c3aed" }}>
-            {runningAll ? "Testuję..." : "▶ Uruchom wszystkie testy"}
-          </button>
-        </div>
-
-        <div className="overflow-y-auto flex-1 p-6 space-y-3">
-          {ENDPOINTS.map(ep => {
-            const r = results[ep.id];
-            const hits = r?.data ? detectTachoKeywords(r.data) : [];
-            const keyHits = hits.filter(h => ["tacho", "ddd", "card", "activity"].includes(h));
-            return (
-              <div key={ep.id} style={{
-                border: "1px solid #e5e7eb", borderRadius: 12, padding: 12,
-                background: keyHits.length > 0 ? "#fef3c7" : r?.data ? "#f0fdf4" : r?.error ? "#fef2f2" : "#fff",
-              }}>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <code className="text-xs font-mono font-bold text-violet-700">{ep.label}</code>
-                    <span className="text-xs text-gray-500">{ep.desc}</span>
-                    {keyHits.length > 0 && (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white uppercase">
-                        🎯 Trafienia: {keyHits.join(", ")}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {r?.data && (
-                      <button onClick={() => copyJson(r.data)}
-                        className="px-2 py-1 rounded text-[11px] text-gray-500 hover:bg-gray-100">
-                        📋 Kopiuj
-                      </button>
-                    )}
-                    <button onClick={() => runEndpoint(ep)} disabled={r?.loading}
-                      className="px-3 py-1 rounded-lg text-xs font-bold text-white"
-                      style={{ background: r?.loading ? "#9ca3af" : r?.data ? "#22c55e" : r?.error ? "#dc2626" : "#3b82f6" }}>
-                      {r?.loading ? "..." : r?.data ? "✓ Ponów" : r?.error ? "✕ Błąd — Ponów" : "Testuj"}
-                    </button>
-                  </div>
-                </div>
-                {r?.loading && <div className="text-xs text-gray-500 italic">Wywołuję {ep.label}...</div>}
-                {r?.error && (
-                  <div className="text-xs text-red-700 font-mono bg-red-50 p-2 rounded border border-red-200 mt-1">
-                    ❌ {r.error}
-                  </div>
-                )}
-                {r?.data && (
-                  <details className="mt-2">
-                    <summary className="text-xs text-gray-600 cursor-pointer hover:text-gray-900">
-                      Pokaż odpowiedź ({JSON.stringify(r.data).length.toLocaleString("pl-PL")} znaków)
-                      {hits.length > 0 && <span className="ml-2 text-amber-700 font-semibold">· słowa-klucze: {hits.join(", ")}</span>}
-                    </summary>
-                    <pre className="mt-2 p-3 rounded-lg text-[11px] font-mono overflow-x-auto max-h-80" style={{ background: "#0f172a", color: "#e2e8f0" }}>
-{JSON.stringify(r.data, null, 2)}
-                    </pre>
-                  </details>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between flex-shrink-0 bg-gray-50">
-          <div className="text-[11px] text-gray-500">
-            <strong>Co szukamy:</strong> pola typu <code>driverActivity</code>, <code>tachographData</code>, <code>cardInserted</code>, <code>dddFile</code>, <code>duty</code> — świadczą o dostępie do tachografu przez Atlas.
-          </div>
-          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100">
-            Zamknij
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
