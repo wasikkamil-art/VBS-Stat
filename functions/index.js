@@ -652,34 +652,48 @@ exports.gpsProxy = onCall(
       if (qs) url += `?${qs}`;
     }
 
-    // API 3.x auth: base64 password in Authorization header
-    const authHeader = Buffer.from(password).toString("base64");
+    // Try multiple auth methods (API docs are ambiguous)
+    const authVariants = [
+      { name: "base64-pass", headers: { "Authorization": Buffer.from(password).toString("base64") } },
+      { name: "basic-user-pass", headers: { "Authorization": "Basic " + Buffer.from(`${username}:${password}`).toString("base64") } },
+      { name: "basic-pass", headers: { "Authorization": "Basic " + Buffer.from(password).toString("base64") } },
+      { name: "query-pass", headers: {}, querySuffix: `${url.includes("?") ? "&" : "?"}=${password}` },
+    ];
 
-    try {
-      console.log(`GPS Proxy: ${endpoint} -> ${url}`);
-      const resp = await fetch(url, {
-        method: "GET",
-        headers: {
-          "Authorization": authHeader,
-          "Accept": "application/json",
-        },
-        signal: AbortSignal.timeout(20000),
-      });
+    // If specific auth method is known (saved from previous success), use only that
+    const knownAuth = request.data?.authMethod;
+    const tryVariants = knownAuth
+      ? authVariants.filter(v => v.name === knownAuth)
+      : authVariants;
 
-      if (!resp.ok) {
-        const body = await resp.text().catch(() => "");
-        console.error(`GPS API error: ${resp.status} ${resp.statusText} — ${body.slice(0, 200)}`);
-        throw new HttpsError("unavailable", `GPS API zwrocil ${resp.status}: ${resp.statusText}`);
+    const results = [];
+    for (const variant of tryVariants) {
+      const tryUrl = url + (variant.querySuffix || "");
+      try {
+        console.log(`GPS Proxy: trying ${variant.name} -> ${tryUrl}`);
+        const resp = await fetch(tryUrl, {
+          method: "GET",
+          headers: { "Accept": "application/json", ...variant.headers },
+          signal: AbortSignal.timeout(15000),
+        });
+
+        const body = await resp.text();
+        results.push({ method: variant.name, status: resp.status, bodyPreview: body.slice(0, 500) });
+
+        if (resp.ok) {
+          let data;
+          try { data = JSON.parse(body); } catch { data = body; }
+          console.log(`GPS Proxy OK with ${variant.name}: ${endpoint}`);
+          return { success: true, data, endpoint, authMethod: variant.name, timestamp: new Date().toISOString() };
+        }
+      } catch (e) {
+        results.push({ method: variant.name, error: e.message });
       }
-
-      const data = await resp.json();
-      console.log(`GPS Proxy OK: ${endpoint} — ${Array.isArray(data) ? data.length + " items" : "object"}`);
-      return { success: true, data, endpoint, timestamp: new Date().toISOString() };
-    } catch (e) {
-      if (e.code) throw e; // re-throw HttpsError
-      console.error("GPS Proxy fetch error:", e);
-      throw new HttpsError("unavailable", `Blad polaczenia z GPS API: ${e.message}`);
     }
+
+    // All failed — return diagnostic info
+    console.error("GPS Proxy: all auth methods failed", JSON.stringify(results));
+    return { success: false, error: "Wszystkie metody auth zawiodly", diagnostics: results, url, endpoint };
   }
 );
 

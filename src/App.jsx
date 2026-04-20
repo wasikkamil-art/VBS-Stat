@@ -5666,8 +5666,13 @@ function GpsConfigPanel({ showToast }) {
         ? { year: new Date().getFullYear(), month: new Date().getMonth() + 1 }
         : undefined;
       const res = await gpsProxy({ endpoint: gpsEndpoint, params });
-      setGpsResult({ ok: true, data: res.data });
-      showToast("GPS OK");
+      if (res.data?.success) {
+        setGpsResult({ ok: true, data: res.data });
+        showToast("GPS OK (" + (res.data.authMethod || "") + ")");
+      } else {
+        setGpsResult({ ok: false, data: res.data });
+        showToast("GPS: auth failed — zobacz diagnostyke");
+      }
     } catch(e) {
       setGpsResult({ ok: false, error: e.message || "Blad" });
       showToast("GPS blad: " + (e.message || "").slice(0, 60));
@@ -5712,6 +5717,7 @@ function GpsConfigPanel({ showToast }) {
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-green-600 font-semibold text-sm">OK</span>
                 <span className="text-xs text-gray-400">
+                  auth: {gpsResult.data?.authMethod || "?"} ·{" "}
                   {Array.isArray(gpsResult.data?.data)
                     ? `${gpsResult.data.data.length} elementow`
                     : typeof gpsResult.data?.data === "object" ? "obiekt" : ""}
@@ -5723,8 +5729,16 @@ function GpsConfigPanel({ showToast }) {
               </pre>
             </div>
           ) : (
-            <div className="p-3 rounded-xl text-sm" style={{ background:"#fef2f2", color:"#dc2626" }}>
-              Blad: {gpsResult.error}
+            <div>
+              <div className="p-3 rounded-xl text-sm mb-2" style={{ background:"#fef2f2", color:"#dc2626" }}>
+                {gpsResult.error || "Auth failed"}
+              </div>
+              {gpsResult.data?.diagnostics && (
+                <pre className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs text-gray-700 overflow-x-auto max-h-72 overflow-y-auto"
+                  style={{ fontFamily:"'DM Mono',monospace", whiteSpace:"pre-wrap", wordBreak:"break-all" }}>
+                  {JSON.stringify(gpsResult.data, null, 2)}
+                </pre>
+              )}
             </div>
           )}
         </div>
