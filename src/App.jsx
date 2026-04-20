@@ -5715,10 +5715,13 @@ function GpsTab({ vehicles, showToast }) {
     setError(null);
     try {
       const gpsProxy = httpsCallable(functions, "gpsProxy");
+      console.log("[GPS] Calling gpsProxy...");
       const [devRes, posRes] = await Promise.all([
         gpsProxy({ endpoint: "devices" }),
         gpsProxy({ endpoint: "positionsWithCanDetails" }),
       ]);
+      console.log("[GPS] devices response:", JSON.stringify(devRes.data).slice(0, 500));
+      console.log("[GPS] positions response:", JSON.stringify(posRes.data).slice(0, 500));
       if (devRes.data?.success && Array.isArray(devRes.data.data)) {
         // Map GPS devices to fleet vehicles by plate
         const mapped = devRes.data.data.map(dev => {
@@ -5736,6 +5739,7 @@ function GpsTab({ vehicles, showToast }) {
         setGpsPositions(posRes.data.data);
       }
     } catch(e) {
+      console.error("[GPS] Error:", e);
       setError(e.message || "Błąd połączenia z GPS API");
       showToast("GPS: " + (e.message || "błąd").slice(0, 60));
     }
