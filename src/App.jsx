@@ -6867,7 +6867,7 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
             const planned = await buildPlanned(targetFracht);
             if (planned) {
               const polyline = L.polyline(planned.route.coordinates, {
-                color: "#94a3b8", weight: 4, opacity: 0.6, dashArray: "4 4",
+                color: "#60a5fa", weight: 5, opacity: 0.8, dashArray: "8 5",
               }).addTo(mapInstanceRef.current);
               routeLayerRef.current.push(polyline);
 
@@ -6984,7 +6984,7 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
       )}
       {routeInfo && (() => {
         const palette = routeInfo.kind === "real" ? { bg: "#f0fdf4", border: "#bbf7d0", text: "#15803d", label: "✅ Rzeczywista trasa", emoji: "🛣️" }
-                     : routeInfo.kind === "real_missing" ? { bg: "#f9fafb", border: "#e5e7eb", text: "#6b7280", label: "⚠️ Brak danych historycznych — pokazuję trasę planowaną", emoji: "🗺️" }
+                     : routeInfo.kind === "real_missing" ? { bg: "#f0f9ff", border: "#bae6fd", text: "#0369a1", label: "⚠️ Brak danych historycznych — pokazuję trasę planowaną", emoji: "🗺️" }
                      : { bg: "#eff6ff", border: "#bfdbfe", text: "#1d4ed8", label: "🗺️ Trasa planowana", emoji: "🗺️" };
         return (
           <div style={{ padding: "12px 20px", background: palette.bg, borderTop: `1px solid ${palette.border}` }}>
