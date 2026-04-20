@@ -5971,15 +5971,18 @@ function GpsMapSection({ device, position, allPositions, allDevices }) {
       const speed = pos.speed != null ? Math.round(pos.speed) : "?";
       const isMoving = pos.speed && pos.speed > 3;
 
+      const markerColor = isSelected ? "#7c3aed" : isMoving ? "#16a34a" : "#6b7280";
+      const truckSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 24" width="${isSelected ? 40 : 32}" height="${isSelected ? 30 : 24}"><rect x="0" y="2" width="22" height="14" rx="3" fill="${markerColor}"/><rect x="22" y="6" width="10" height="10" rx="2" fill="${markerColor}"/><polygon points="28,6 32,10 32,16 28,16" fill="${markerColor}" opacity="0.8"/><rect x="23" y="8" width="6" height="5" rx="1" fill="rgba(255,255,255,0.3)"/><circle cx="7" cy="18" r="3.5" fill="#333" stroke="white" stroke-width="1.5"/><circle cx="7" cy="18" r="1.5" fill="#888"/><circle cx="26" cy="18" r="3.5" fill="#333" stroke="white" stroke-width="1.5"/><circle cx="26" cy="18" r="1.5" fill="#888"/><rect x="2" y="4" width="8" height="5" rx="1" fill="rgba(255,255,255,0.25)"/></svg>`;
       const icon = L.divIcon({
         className: "gps-marker",
-        html: `<div style="
-          background: ${isSelected ? "#7c3aed" : isMoving ? "#16a34a" : "#6b7280"};
-          color: white; font-size: 10px; font-weight: 700; padding: 3px 8px;
-          border-radius: 12px; white-space: nowrap; border: 2px solid white;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.25); transform: translate(-50%, -50%);
-          ${isSelected ? "z-index: 999; font-size: 12px; padding: 4px 10px;" : ""}
-        ">${plate} · ${speed} km/h</div>`,
+        html: `<div style="display:flex; flex-direction:column; align-items:center; transform:translate(-50%,-100%); ${isSelected ? "z-index:999;" : ""}">
+          <div style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">${truckSvg}</div>
+          <div style="
+            background: ${markerColor}; color: white; font-size: ${isSelected ? "11px" : "9px"}; font-weight: 700;
+            padding: 2px 6px; border-radius: 8px; white-space: nowrap; margin-top: 2px;
+            border: 1.5px solid white; box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+          ">${plate} · ${speed} km/h</div>
+        </div>`,
         iconSize: [0, 0],
         iconAnchor: [0, 0],
       });
