@@ -468,21 +468,25 @@ function computeTripStats(fracht, vehicle, driverEvents = [], fuelEntries = []) 
   };
 
   const dotarcieZal = effective("dotarcie_zaladunek");
+  const startRoz = effective("start_rozladunek");       // kierowca ruszył z załadunku
+  const dotarcieRoz = effective("dotarcie_rozladunek"); // dotarł na rozładunek
+  // Legacy/admin eventy (mogą istnieć w starych danych lub być ustawione ręcznie)
   const zaladowano = effective("zaladowano");
-  const dotarcieRoz = effective("dotarcie_rozladunek");
   const rozladowano = effective("rozladowano");
 
-  const zalTs = dotarcieZal?.value || dotarcieZal?.ts || null;
+  const zalTs = dotarcieZal?.value || dotarcieZal?.ts || zaladowano?.value || zaladowano?.ts || null;
   const rozTs = dotarcieRoz?.value || dotarcieRoz?.ts || rozladowano?.value || rozladowano?.ts || null;
 
-  // Punktualność
+  // Punktualność — liczona z dotarć (kierowca klika "dotarłem")
   const punktZal = calcTripPunctuality(f.dataZaladunku, f.godzZaladunku, zalTs);
   const punktRoz = calcTripPunctuality(f.dataRozladunku, f.godzRozladunku, rozTs);
 
-  // Czas trasy (od zaladowano do rozladowano — pełen cykl jazda+rozładunek)
+  // Czas trasy: od momentu gdy kierowca ruszył z załadunku (start_rozladunek)
+  // do momentu dotarcia na rozładunek (dotarcie_rozladunek) — czysty czas jazdy
+  // Fallback: jeśli brak start_rozladunek, użyj dotarcie_zaladunek (z załadunkiem)
   let czasTrasyMin = null;
-  const tStart = zaladowano?.value || zaladowano?.ts || zalTs;
-  const tEnd = rozladowano?.value || rozladowano?.ts || rozTs;
+  const tStart = startRoz?.value || startRoz?.ts || zaladowano?.value || zaladowano?.ts || zalTs;
+  const tEnd = dotarcieRoz?.value || dotarcieRoz?.ts || rozladowano?.value || rozladowano?.ts || rozTs;
   if (tStart && tEnd) {
     const diff = Math.round((new Date(tEnd) - new Date(tStart)) / 60000);
     if (diff > 0) czasTrasyMin = diff;
@@ -7788,6 +7792,25 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     }
   };
 
+  // Pomocnicza: ręczny zapis km do frachtu (fallback gdy CAN nie zadziałał / korekta)
+  const saveManualKm = async (fracht, field, raw) => {
+    const num = Number(String(raw).replace(",", "."));
+    if (!isFinite(num) || num <= 0) {
+      showToast("❌ Podaj prawidłowy stan licznika");
+      return;
+    }
+    // Jeśli wartość się nie zmieniła — nie rób nic
+    if (Number(fracht[field]) === num) return;
+    try {
+      await updateDoc(doc(db, "frachty", fracht.id), { [field]: num });
+      logAction(`manual_${field}`, "frachty", { frachtId: fracht.id, km: num });
+      showToast("✅ Zapisano stan licznika");
+    } catch (e) {
+      console.error("saveManualKm error", e);
+      showToast("❌ Błąd zapisu");
+    }
+  };
+
   // Pomocnicza: pobierz aktualny przebieg z CAN dla danego pojazdu (Atlas API)
   // Zwraca km (number) lub null gdy nie udało się odczytać
   const captureCanMileage = async () => {
@@ -7823,16 +7846,25 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
         ts: new Date().toISOString(),
       });
       logAction(field, "driverEvents", { frachtId: fracht.id, vehicleId: vehicle?.id });
-      showToast(field === "zaladowano" ? "✅ Załadunek potwierdzony" : "✅ Rozładunek potwierdzony");
+      const toastMap = {
+        zaladowano: "✅ Załadunek potwierdzony",
+        rozladowano: "✅ Rozładunek potwierdzony",
+        dotarcie_zaladunek: "📍 Dotarcie zapisane",
+        start_rozladunek: "🚛 Start zapisany",
+        dotarcie_rozladunek: "📍 Dotarcie zapisane",
+      };
+      if (toastMap[field]) showToast(toastMap[field]);
 
-      // Auto-capture km z CAN — tylko dla eventów zaladowano/rozladowano, asynchronicznie
-      if (field === "zaladowano" || field === "rozladowano") {
-        // Nie blokujemy UI — lecimy w tle
+      // Auto-capture km z CAN — w momentach gdy licznik ma sens:
+      //   start_rozladunek   → kmStart  (kierowca rusza z załadunku = pełny przebieg przed jazdą)
+      //   dotarcie_rozladunek → kmEnd   (kierowca dotarł na rozładunek = koniec jazdy)
+      const kmFieldMap = { start_rozladunek: "kmStart", dotarcie_rozladunek: "kmEnd" };
+      const kmField = kmFieldMap[field];
+      if (kmField) {
         (async () => {
           const km = await captureCanMileage();
           if (km == null) return;
-          const kmField = field === "zaladowano" ? "kmStart" : "kmEnd";
-          // Nie nadpisuj istniejącego kmStart/End (jeśli kierowca kliknął dwa razy)
+          // Nie nadpisuj ręcznie wpisanej wartości (kierowca mógł już skorygować)
           if (fracht[kmField] && Math.abs(Number(fracht[kmField]) - km) < 5) return;
           try {
             await updateDoc(doc(db, "frachty", fracht.id), { [kmField]: km });
@@ -8251,6 +8283,24 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
 
             {/* 5. Start do rozładunku */}
             {hasDotarcieZal && renderStatusStep(hasStartRoz, "Start do rozładunku", startRozEvent, hasCmrZal, () => updateFrachtStatus(f, "start_rozladunek", new Date().toISOString()), () => undoFrachtStatus(f, "start_rozladunek"))}
+
+            {/* 6. Stan licznika przy starcie (fallback gdy CAN nie zadziałał) */}
+            {hasStartRoz && (
+              <div style={{padding: 12, borderRadius: 12, marginBottom: 8, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
+                <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 4}}>🔢 Stan licznika — start trasy</div>
+                <div style={{fontSize: 11, color: "#9ca3af", marginBottom: 8}}>
+                  {f.kmStart ? "📡 Odczyt z CAN — skoryguj jeśli nieprawidłowy" : "⚠️ Auto nie zapisało — wpisz ręcznie"}
+                </div>
+                <input
+                  type="number"
+                  step="1"
+                  defaultValue={f.kmStart || ""}
+                  placeholder="np. 234567"
+                  onBlur={(e) => { if (e.target.value) saveManualKm(f, "kmStart", e.target.value); }}
+                  style={{width: "100%", fontSize: 16, padding: "10px 12px", borderRadius: 10,
+                    border: "1px solid #e5e7eb", background: "#fff", fontFamily: "inherit", boxSizing: "border-box"}} />
+              </div>
+            )}
           </div>); })()}
 
           {/* ═══ KAFELEK 2: ROZŁADUNEK ═══ */}
@@ -8266,6 +8316,27 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
 
             {/* 1. Dotarcie na rozładunek */}
             {renderStatusStep(hasDotarcieRoz, "Dotarcie na rozładunek", dotarcieRozEvent, hasStartRoz, () => updateFrachtStatus(f, "dotarcie_rozladunek", new Date().toISOString()), () => undoFrachtStatus(f, "dotarcie_rozladunek"))}
+
+            {/* 1b. Stan licznika — koniec trasy (fallback gdy CAN nie zadziałał) */}
+            {hasDotarcieRoz && (
+              <div style={{padding: 12, borderRadius: 12, marginBottom: 8, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
+                <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 4}}>🔢 Stan licznika — koniec trasy</div>
+                <div style={{fontSize: 11, color: "#9ca3af", marginBottom: 8}}>
+                  {f.kmEnd ? "📡 Odczyt z CAN — skoryguj jeśli nieprawidłowy" : "⚠️ Auto nie zapisało — wpisz ręcznie"}
+                  {f.kmStart && f.kmEnd && Number(f.kmEnd) > Number(f.kmStart) && (
+                    <span style={{color: "#15803d", fontWeight: 600}}> · Trasa: {Number(f.kmEnd) - Number(f.kmStart)} km</span>
+                  )}
+                </div>
+                <input
+                  type="number"
+                  step="1"
+                  defaultValue={f.kmEnd || ""}
+                  placeholder="np. 234789"
+                  onBlur={(e) => { if (e.target.value) saveManualKm(f, "kmEnd", e.target.value); }}
+                  style={{width: "100%", fontSize: 16, padding: "10px 12px", borderRadius: 10,
+                    border: "1px solid #e5e7eb", background: "#fff", fontFamily: "inherit", boxSizing: "border-box"}} />
+              </div>
+            )}
 
             {/* 2. CMR rozładunek */}
             {hasDotarcieRoz && renderPhotoStep(hasCmrRoz, "CMR rozładunek", cmrRozPhoto || cmrPhotoLegacy, hasDotarcieRoz, "cmr_rozladunek")}
