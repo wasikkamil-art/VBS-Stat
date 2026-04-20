@@ -5958,6 +5958,8 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
   const mapInstanceRef = useRef(null);
   const markersRef = useRef([]);
   const routeLayerRef = useRef(null);
+  const initialViewSetRef = useRef(false); // czy już ustawiono pierwszy widok
+  const lastSelectedDevRef = useRef(null); // ostatnio wybrany pojazd — reset widoku przy zmianie
   const [routeInfo, setRouteInfo] = useState(null);
   const [routeLoading, setRouteLoading] = useState(false);
 
@@ -6040,11 +6042,17 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
       markersRef.current.push(marker);
     });
 
-    // Center on selected device
-    if (position) {
-      const cLat = position.coordinate?.latitude || position.latitude || position.lat;
-      const cLng = position.coordinate?.longitude || position.longitude || position.lng || position.lon;
-      if (cLat && cLng) mapInstanceRef.current.setView([cLat, cLng], 13);
+    // Center on selected device — TYLKO przy zmianie pojazdu lub pierwszym ładowaniu
+    const devId = device.deviceId || device.id;
+    const deviceChanged = lastSelectedDevRef.current !== devId;
+    if (deviceChanged || !initialViewSetRef.current) {
+      lastSelectedDevRef.current = devId;
+      initialViewSetRef.current = true;
+      if (position) {
+        const cLat = position.coordinate?.latitude || position.latitude || position.lat;
+        const cLng = position.coordinate?.longitude || position.longitude || position.lng || position.lon;
+        if (cLat && cLng) mapInstanceRef.current.setView([cLat, cLng], 13);
+      }
     }
 
     return () => {};
@@ -6155,14 +6163,21 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
             unloadLabel: unloadPoints.join(" → "),
           });
 
-          // Dopasuj zoom do trasy + pozycja pojazdu
-          const allCoords = [...route.coordinates];
-          if (position) {
-            const vLat = position.coordinate?.latitude || position.latitude;
-            const vLng = position.coordinate?.longitude || position.longitude;
-            if (vLat && vLng) allCoords.push([vLat, vLng]);
+          // Dopasuj zoom do trasy — TYLKO przy zmianie pojazdu (nie przy auto-refresh)
+          const routeDevId = device.deviceId || device.id;
+          if (lastSelectedDevRef.current === routeDevId) {
+            // Pierwszy raz dla tego pojazdu — fitBounds
+            const allCoords = [...route.coordinates];
+            if (position) {
+              const vLat = position.coordinate?.latitude || position.latitude;
+              const vLng = position.coordinate?.longitude || position.longitude;
+              if (vLat && vLng) allCoords.push([vLat, vLng]);
+            }
+            // Sprawdź czy to pierwszy route render dla tego pojazdu
+            if (!routeLayerRef.current || routeLayerRef.current.length === 0) {
+              mapInstanceRef.current.fitBounds(L.latLngBounds(allCoords).pad(0.1));
+            }
           }
-          mapInstanceRef.current.fitBounds(L.latLngBounds(allCoords).pad(0.1));
         }
       } catch(e) {
         console.error("[GPS Route] error:", e);
@@ -6180,6 +6195,8 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
       }
+      initialViewSetRef.current = false;
+      lastSelectedDevRef.current = null;
     };
   }, []);
 
