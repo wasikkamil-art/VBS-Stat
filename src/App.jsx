@@ -3189,7 +3189,29 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
           {tab === "docs" && canSeeTab("docs") && (
             <DocsTab
               docs={docs} vehicles={vehicles}
-              onAdd={(d) => setDocs((p) => [...p, { ...d, id: uid() }])}
+              onAdd={async (d) => {
+                const docId = uid();
+                let docToSave = { ...d, id: docId };
+                // Upload file to Storage instead of saving base64 in Firestore
+                if (d.fileData && user?.uid) {
+                  try {
+                    const ext = d.fileName?.split(".").pop() || "pdf";
+                    const path = `docs/${user.uid}/${docId}.${ext}`;
+                    const sRef = storageRef(storage, path);
+                    // Convert base64 data URL to blob
+                    const resp = await fetch(d.fileData);
+                    const blob = await resp.blob();
+                    await uploadBytes(sRef, blob);
+                    const fileUrl = await getDownloadURL(sRef);
+                    docToSave = { ...docToSave, fileUrl, fileData: null };
+                  } catch(e) {
+                    console.error("Doc file upload error:", e);
+                    // Fallback: save without file rather than losing the doc
+                    docToSave = { ...docToSave, fileData: null };
+                  }
+                }
+                setDocs((p) => [...p, docToSave]);
+              }}
               onDelete={(id) => setDocs((p) => p.filter((d) => d.id !== id))}
               onEdit={(id, data) => setDocs((p) => p.map((d) => d.id === id ? { ...d, ...data } : d))}
             />
@@ -10180,6 +10202,8 @@ function DocStatusBadge({ expiryDate }) {
 function FilePreviewModal({ file, onClose }) {
   if (!file) return null;
   const isPdf = file.fileType === "application/pdf";
+  const src = file.fileUrl || file.fileData; // prefer Storage URL, fallback to legacy base64
+  if (!src) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background:"rgba(0,0,0,0.7)", backdropFilter:"blur(6px)" }}>
@@ -10190,12 +10214,12 @@ function FilePreviewModal({ file, onClose }) {
         </div>
         <div className="flex-1 overflow-auto p-4 flex items-center justify-center" style={{ minHeight:400 }}>
           {isPdf
-            ? <iframe src={file.fileData} className="w-full rounded-lg" style={{ height:520, border:"none" }} title={file.fileName} />
-            : <img src={file.fileData} alt={file.fileName} className="max-w-full max-h-96 rounded-xl object-contain shadow" />
+            ? <iframe src={src} className="w-full rounded-lg" style={{ height:520, border:"none" }} title={file.fileName} />
+            : <img src={src} alt={file.fileName} className="max-w-full max-h-96 rounded-xl object-contain shadow" />
           }
         </div>
         <div className="px-5 py-3 border-t border-gray-100 flex justify-end">
-          <a href={file.fileData} download={file.fileName}
+          <a href={src} download={file.fileName} target="_blank" rel="noopener noreferrer"
             className="px-4 py-2 rounded-xl text-xs font-semibold text-white"
             style={{ background:"#111827" }}>
             ⬇ Pobierz
@@ -10247,7 +10271,7 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
     const d  = daysUntil(doc.expiryDate);
     const isExpired = d !== null && d < 0;
     const isUrgent  = d !== null && d >= 0 && d <= 30;
-    const hasFile   = !!doc.fileData;
+    const hasFile   = !!(doc.fileUrl || doc.fileData);
     return (
       <div className="bg-white rounded-xl border flex gap-3 px-4 py-3 transition-all hover:shadow-sm"
         style={{ borderColor: isExpired?"#fecaca": isUrgent?"#fde68a":"#e5e7eb" }}>
@@ -10337,7 +10361,7 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-900">Dokumenty & Ubezpieczenia</h2>
-          <p className="text-sm text-gray-400 mt-0.5">{docs.length} dokumentów · {docs.filter(d=>d.fileData).length} z plikiem</p>
+          <p className="text-sm text-gray-400 mt-0.5">{docs.length} dokumentów · {docs.filter(d=>d.fileUrl||d.fileData).length} z plikiem</p>
         </div>
         <div className="flex gap-2 flex-wrap">
           <button onClick={() => setShowBulkUpload(true)}
