@@ -5715,19 +5715,15 @@ function GpsTab({ vehicles, frachtyList = [], showToast }) {
     setError(null);
     try {
       const gpsProxy = httpsCallable(functions, "gpsProxy");
-      console.log("[GPS] Calling gpsProxy...");
       const [devRes, posRes] = await Promise.all([
         gpsProxy({ endpoint: "devices" }),
         gpsProxy({ endpoint: "positionsWithCanDetails" }),
       ]);
-      console.log("[GPS] devices response:", JSON.stringify(devRes.data).slice(0, 500));
-      console.log("[GPS] positions response:", JSON.stringify(posRes.data).slice(0, 500));
       // Atlas API zwraca: data.deviceList / data.positionList (nie surowa tablica)
       const deviceList = devRes.data?.data?.deviceList || devRes.data?.data || [];
       const positionList = posRes.data?.data?.positionList || posRes.data?.data || [];
       const devArray = Array.isArray(deviceList) ? deviceList : [];
       const posArray = Array.isArray(positionList) ? positionList : [];
-      console.log("[GPS] parsed devices:", devArray.length, "positions:", posArray.length);
       if (devRes.data?.success && devArray.length > 0) {
         // Map GPS devices to fleet vehicles by plate
         const mapped = devArray.map(dev => {
@@ -5958,8 +5954,9 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
   const mapInstanceRef = useRef(null);
   const markersRef = useRef([]);
   const routeLayerRef = useRef(null);
-  const initialViewSetRef = useRef(false); // czy już ustawiono pierwszy widok
-  const lastSelectedDevRef = useRef(null); // ostatnio wybrany pojazd — reset widoku przy zmianie
+  const initialViewSetRef = useRef(false);
+  const lastSelectedDevRef = useRef(null);
+  const lastRouteFrachtIdRef = useRef(null); // cache — nie przeliczaj trasy jeśli ten sam fracht
   const [routeInfo, setRouteInfo] = useState(null);
   const [routeLoading, setRouteLoading] = useState(false);
 
@@ -6058,38 +6055,45 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
     return () => {};
   }, [position, allPositions, allDevices, device]);
 
-  // ── Aktywny fracht → wyznacz trasę ──
+  // ── Aktywny fracht → wyznacz trasę (tylko aktywne, cache wynik) ──
   useEffect(() => {
     if (!mapInstanceRef.current || !device) return;
     const L = window.L; if (!L) return;
 
-    // Znajdź pojazd floty powiązany z GPS device
     const fleetVeh = device.fleetVehicle;
-    if (!fleetVeh) return;
-
-    // Znajdź aktywne/ostatnie frachty dla tego pojazdu
-    const vehFrachty = frachtyList
-      .filter(f => f.vehicleId === fleetVeh.id)
-      .sort((a, b) => (b.dataZaladunku || b.dataZlecenia || "").localeCompare(a.dataZaladunku || a.dataZlecenia || ""));
-
-    // Weź najnowszy fracht z kodami/adresami
-    const activeFracht = vehFrachty.find(f => {
-      const hasLoad = f.zaladunekGeo || f.zaladunekKod || f.zaladunekAdres;
-      const hasUnload = f.rozladunekGeo || f.dokod || f.rozladunekAdres;
-      return hasLoad && hasUnload;
-    });
-
-    if (!activeFracht) {
+    if (!fleetVeh) {
+      // Brak mapowania na flotę — wyczyść trasę
       if (routeLayerRef.current) { routeLayerRef.current.forEach(l => l.remove()); routeLayerRef.current = null; }
-      setRouteInfo(null);
+      if (routeInfo) setRouteInfo(null);
+      lastRouteFrachtIdRef.current = null;
       return;
     }
 
-    // Geokoduj i wyznacz trasę
+    // Znajdź AKTYWNY fracht (nie rozładowany) z adresami
+    const activeFracht = frachtyList
+      .filter(f => f.vehicleId === fleetVeh.id && f.statusRozladunku !== "rozladowano")
+      .sort((a, b) => (b.dataZaladunku || b.dataZlecenia || "").localeCompare(a.dataZaladunku || a.dataZlecenia || ""))
+      .find(f => {
+        const hasLoad = f.zaladunekGeo || f.zaladunekKod || f.zaladunekAdres;
+        const hasUnload = f.rozladunekGeo || f.dokod || f.rozladunekAdres;
+        return hasLoad && hasUnload;
+      });
+
+    if (!activeFracht) {
+      // Brak aktywnego frachtu — wyczyść trasę
+      if (routeLayerRef.current) { routeLayerRef.current.forEach(l => l.remove()); routeLayerRef.current = null; }
+      if (routeInfo) setRouteInfo(null);
+      lastRouteFrachtIdRef.current = null;
+      return;
+    }
+
+    // Jeśli ten sam fracht co poprzednio — NIE przeliczaj (trasa jest na mapie)
+    if (lastRouteFrachtIdRef.current === activeFracht.id) return;
+
+    // Nowy fracht lub zmiana pojazdu — buduj trasę
     const buildRoute = async () => {
       setRouteLoading(true);
       try {
-        // Zbierz wszystkie punkty trasy (załadunki + rozładunki)
         const loadPoints = [activeFracht.zaladunekGeo || activeFracht.zaladunekAdres || activeFracht.zaladunekKod];
         if (activeFracht.zaladunekKod2?.trim()) loadPoints.push(activeFracht.zaladunekKod2);
         if (activeFracht.zaladunekKod3?.trim()) loadPoints.push(activeFracht.zaladunekKod3);
@@ -6103,12 +6107,11 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
         const validPoints = geocoded.filter(p => p !== null);
 
         if (validPoints.length < 2) {
-          console.warn("[GPS Route] Nie udało się geokodować punktów:", allPoints);
+          console.warn("[GPS Route] Nie udało się geokodować:", allPoints);
           setRouteLoading(false);
           return;
         }
 
-        // Wyznacz trasę OSRM
         const route = await getRoute(validPoints);
 
         // Wyczyść starą trasę
@@ -6123,15 +6126,12 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
           routeLayerRef.current.push(polyline);
 
           // Markery załadunku (zielone)
-          const loadGeo = geocoded.slice(0, loadPoints.length).filter(Boolean);
-          loadGeo.forEach((pt, i) => {
+          geocoded.slice(0, loadPoints.length).filter(Boolean).forEach((pt, i) => {
             const label = loadPoints[i] || `Załadunek ${i + 1}`;
             const m = L.marker(pt, {
               icon: L.divIcon({
                 className: "route-marker",
-                html: `<div style="background:#16a34a;color:white;font-size:10px;font-weight:700;padding:4px 8px;border-radius:8px;white-space:nowrap;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3);transform:translate(-50%,-100%);">
-                  📦 ${label.length > 25 ? label.slice(0, 25) + "…" : label}
-                </div>`,
+                html: `<div style="background:#16a34a;color:white;font-size:10px;font-weight:700;padding:4px 8px;border-radius:8px;white-space:nowrap;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3);transform:translate(-50%,-100%);">📦 ${label.length > 25 ? label.slice(0, 25) + "…" : label}</div>`,
                 iconSize: [0, 0], iconAnchor: [0, 0],
               })
             }).addTo(mapInstanceRef.current);
@@ -6139,22 +6139,21 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
           });
 
           // Markery rozładunku (czerwone)
-          const unloadGeo = geocoded.slice(loadPoints.length).filter(Boolean);
-          unloadGeo.forEach((pt, i) => {
+          geocoded.slice(loadPoints.length).filter(Boolean).forEach((pt, i) => {
             const label = unloadPoints[i] || `Rozładunek ${i + 1}`;
             const m = L.marker(pt, {
               icon: L.divIcon({
                 className: "route-marker",
-                html: `<div style="background:#dc2626;color:white;font-size:10px;font-weight:700;padding:4px 8px;border-radius:8px;white-space:nowrap;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3);transform:translate(-50%,-100%);">
-                  🏁 ${label.length > 25 ? label.slice(0, 25) + "…" : label}
-                </div>`,
+                html: `<div style="background:#dc2626;color:white;font-size:10px;font-weight:700;padding:4px 8px;border-radius:8px;white-space:nowrap;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3);transform:translate(-50%,-100%);">🏁 ${label.length > 25 ? label.slice(0, 25) + "…" : label}</div>`,
                 iconSize: [0, 0], iconAnchor: [0, 0],
               })
             }).addTo(mapInstanceRef.current);
             routeLayerRef.current.push(m);
           });
 
-          // Info o trasie
+          // Zapamiętaj fracht ID — nie przeliczaj ponownie
+          lastRouteFrachtIdRef.current = activeFracht.id;
+
           setRouteInfo({
             distance: Math.round(route.distance / 1000),
             duration: Math.round(route.duration / 60),
@@ -6163,21 +6162,14 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
             unloadLabel: unloadPoints.join(" → "),
           });
 
-          // Dopasuj zoom do trasy — TYLKO przy zmianie pojazdu (nie przy auto-refresh)
-          const routeDevId = device.deviceId || device.id;
-          if (lastSelectedDevRef.current === routeDevId) {
-            // Pierwszy raz dla tego pojazdu — fitBounds
-            const allCoords = [...route.coordinates];
-            if (position) {
-              const vLat = position.coordinate?.latitude || position.latitude;
-              const vLng = position.coordinate?.longitude || position.longitude;
-              if (vLat && vLng) allCoords.push([vLat, vLng]);
-            }
-            // Sprawdź czy to pierwszy route render dla tego pojazdu
-            if (!routeLayerRef.current || routeLayerRef.current.length === 0) {
-              mapInstanceRef.current.fitBounds(L.latLngBounds(allCoords).pad(0.1));
-            }
+          // Dopasuj zoom — tylko za pierwszym razem
+          const allCoords = [...route.coordinates];
+          if (position) {
+            const vLat = position.coordinate?.latitude || position.latitude;
+            const vLng = position.coordinate?.longitude || position.longitude;
+            if (vLat && vLng) allCoords.push([vLat, vLng]);
           }
+          mapInstanceRef.current.fitBounds(L.latLngBounds(allCoords).pad(0.1));
         }
       } catch(e) {
         console.error("[GPS Route] error:", e);
@@ -6186,7 +6178,7 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
     };
 
     buildRoute();
-  }, [device, frachtyList, position]);
+  }, [device, frachtyList]);
 
   // Cleanup map on unmount
   useEffect(() => {
