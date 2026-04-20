@@ -359,6 +359,362 @@ const INSURANCE_TYPES = ["oc","ac","gap","nnw","assistance","cargo"];
 const CONTRACT_TYPES  = ["umowa_leasing","umowa_gps","umowa_serwis","umowa_inna"];
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// TRIP SUMMARY HELPERS (podsumowanie trasy)
+// ═══════════════════════════════════════════════════════════════════════════════
+const TRIP_TOLERANCE_MIN = 15; // ≤15 min spóźnienia = "na czas"
+const SPALANIE_DEFAULT_NORMA = 30;   // fallback gdy pojazd nie ma ustawionego progu (l/100km)
+const SPALANIE_DEFAULT_ALARM = 38;
+
+// Parsuje "YYYY-MM-DD" + "HH:MM" do Date (lokalny czas)
+function parsePlannedDateTime(date, time) {
+  if (!date) return null;
+  try {
+    // Gdy brak godziny — przyjmujemy koniec dnia (23:59) jako deadline "soft"
+    const t = (time && /^\d{1,2}:\d{2}$/.test(time)) ? time : "23:59";
+    const d = new Date(`${date}T${t.length === 4 ? "0" + t : t}:00`);
+    return isNaN(d.getTime()) ? null : d;
+  } catch { return null; }
+}
+
+// Zwraca obiekt opisujący punktualność dotarcia
+//   { onTime, minutes (>0 = spóźnienie), text, status: "ok"|"late" }  lub null gdy brak danych
+function calcTripPunctuality(plannedDate, plannedTime, actualIso) {
+  if (!plannedDate || !actualIso) return null;
+  const planned = parsePlannedDateTime(plannedDate, plannedTime);
+  const actual = new Date(actualIso);
+  if (!planned || isNaN(actual.getTime())) return null;
+  const diffMin = Math.round((actual - planned) / 60000);
+  if (diffMin <= TRIP_TOLERANCE_MIN) {
+    const early = diffMin < 0 ? ` (${Math.abs(diffMin)} min przed)` : diffMin === 0 ? "" : ` (+${diffMin} min)`;
+    return { onTime: true, minutes: diffMin, text: `Na czas${early}`, status: "ok" };
+  }
+  const h = Math.floor(diffMin / 60);
+  const m = diffMin % 60;
+  return {
+    onTime: false,
+    minutes: diffMin,
+    text: h > 0 ? `Spóźnienie ${h}h ${m}min` : `Spóźnienie ${m} min`,
+    status: "late",
+  };
+}
+
+// Oblicza średnie spalanie pojazdu w okresie (metoda "brimming" między pełnymi tankowaniami)
+//   vehicleId, startDate ISO, endDate ISO, fuelEntries[] — zwraca { avgL100km, liters, km, tankings } lub null
+function computeFuelConsumption(vehicleId, startDate, endDate, fuelEntries) {
+  if (!vehicleId || !Array.isArray(fuelEntries) || fuelEntries.length < 2) return null;
+  try {
+    const windowStart = new Date(startDate);
+    const windowEnd = new Date(endDate);
+    if (isNaN(windowStart.getTime()) || isNaN(windowEnd.getTime())) return null;
+    // rozszerz okno ±3 dni
+    windowStart.setDate(windowStart.getDate() - 3);
+    windowEnd.setDate(windowEnd.getDate() + 3);
+
+    const entries = fuelEntries
+      .filter(e => e.vehicleId === vehicleId && e.fullTank && !e.isAdblue && e.mileage && e.liters && e.date)
+      .map(e => ({ ...e, _d: new Date(e.date), _mil: Number(e.mileage), _l: Number(e.liters) }))
+      .filter(e => !isNaN(e._d.getTime()) && e._mil > 0 && e._l > 0)
+      .filter(e => e._d >= windowStart && e._d <= windowEnd)
+      .sort((a, b) => a._mil - b._mil);
+
+    if (entries.length < 2) return null;
+    const first = entries[0];
+    const last = entries[entries.length - 1];
+    const km = last._mil - first._mil;
+    if (km <= 0) return null;
+    // Litry: suma wszystkich tankowań od indeksu 1 (bo pierwsze = stan referencyjny)
+    const liters = entries.slice(1).reduce((s, e) => s + e._l, 0);
+    const avg = (liters / km) * 100;
+    if (!isFinite(avg) || avg <= 0) return null;
+    return {
+      avgL100km: Number(avg.toFixed(2)),
+      liters: Number(liters.toFixed(1)),
+      km,
+      tankings: entries.length,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Klasyfikuje spalanie wg progów pojazdu
+//   vehicle.spalanieNorma, vehicle.spalanieAlarm → "ok" | "warn" | "alarm"
+function classifyFuel(avgL100km, vehicle) {
+  if (avgL100km == null) return null;
+  const norma = Number(vehicle?.spalanieNorma) || SPALANIE_DEFAULT_NORMA;
+  const alarm = Number(vehicle?.spalanieAlarm) || SPALANIE_DEFAULT_ALARM;
+  if (avgL100km <= norma) return "ok";
+  if (avgL100km <= alarm) return "warn";
+  return "alarm";
+}
+
+// GŁÓWNA funkcja — buduje pełne podsumowanie trasy
+//   fracht — pełny dokument frachtu (z dataZaladunku, godzZaladunku, kmStart, kmEnd, kmWszystkie...)
+//   vehicle — dokument pojazdu (z spalanieNorma, spalanieAlarm)
+//   driverEvents — wszystkie driverEvents (będą filtrowane po frachtId)
+//   fuelEntries — wszystkie fuelEntries (filtrowane po vehicleId + okres)
+function computeTripStats(fracht, vehicle, driverEvents = [], fuelEntries = []) {
+  if (!fracht) return null;
+  const f = fracht;
+  const evs = driverEvents.filter(ev => ev.frachtId === f.id).sort((a, b) => (a.ts || "").localeCompare(b.ts || ""));
+  const latestOf = (type) => evs.filter(e => e.type === type).pop();
+  const undoOf = (type) => evs.filter(e => e.type === `cofnij_${type}`).pop();
+  const effective = (type) => {
+    const ev = latestOf(type);
+    const un = undoOf(type);
+    if (!ev) return null;
+    if (un && un.ts > ev.ts) return null;
+    return ev;
+  };
+
+  const dotarcieZal = effective("dotarcie_zaladunek");
+  const zaladowano = effective("zaladowano");
+  const dotarcieRoz = effective("dotarcie_rozladunek");
+  const rozladowano = effective("rozladowano");
+
+  const zalTs = dotarcieZal?.value || dotarcieZal?.ts || null;
+  const rozTs = dotarcieRoz?.value || dotarcieRoz?.ts || rozladowano?.value || rozladowano?.ts || null;
+
+  // Punktualność
+  const punktZal = calcTripPunctuality(f.dataZaladunku, f.godzZaladunku, zalTs);
+  const punktRoz = calcTripPunctuality(f.dataRozladunku, f.godzRozladunku, rozTs);
+
+  // Czas trasy (od zaladowano do rozladowano — pełen cykl jazda+rozładunek)
+  let czasTrasyMin = null;
+  const tStart = zaladowano?.value || zaladowano?.ts || zalTs;
+  const tEnd = rozladowano?.value || rozladowano?.ts || rozTs;
+  if (tStart && tEnd) {
+    const diff = Math.round((new Date(tEnd) - new Date(tStart)) / 60000);
+    if (diff > 0) czasTrasyMin = diff;
+  }
+
+  // Czas planowany: z dataZaladunku+godzZaladunku do dataRozladunku+godzRozladunku
+  let czasPlanowanyMin = null;
+  const planStart = parsePlannedDateTime(f.dataZaladunku, f.godzZaladunku);
+  const planEnd = parsePlannedDateTime(f.dataRozladunku, f.godzRozladunku);
+  if (planStart && planEnd) {
+    const diff = Math.round((planEnd - planStart) / 60000);
+    if (diff > 0) czasPlanowanyMin = diff;
+  }
+
+  // Kilometry
+  const kmStart = Number(f.kmStart);
+  const kmEnd = Number(f.kmEnd);
+  const kmRzeczywiste = (isFinite(kmStart) && isFinite(kmEnd) && kmEnd > kmStart) ? (kmEnd - kmStart) : null;
+  const kmPlanowane = Number(f.kmWszystkie) || null;
+
+  // Średnia prędkość (km/h) — tylko gdy mamy oba (km i czas)
+  let sredniaPredkosc = null;
+  if (kmRzeczywiste && czasTrasyMin) {
+    sredniaPredkosc = Math.round((kmRzeczywiste / (czasTrasyMin / 60)) * 10) / 10;
+  }
+
+  // Spalanie — w okresie trasy
+  let spalanie = null;
+  if (vehicle?.id && f.dataZaladunku && (f.dataRozladunku || tEnd)) {
+    const endDateISO = f.dataRozladunku || new Date(tEnd).toISOString().slice(0, 10);
+    const fc = computeFuelConsumption(vehicle.id, f.dataZaladunku, endDateISO, fuelEntries);
+    if (fc) {
+      spalanie = { ...fc, status: classifyFuel(fc.avgL100km, vehicle) };
+    }
+  }
+
+  // Ocena ogólna — najgorszy ze statusów
+  const statuses = [
+    punktZal?.status === "late" ? "late" : null,
+    punktRoz?.status === "late" ? "late" : null,
+    spalanie?.status === "alarm" ? "alarm" : spalanie?.status === "warn" ? "warn" : null,
+  ].filter(Boolean);
+  let ocenaOgolna = "ok";
+  if (statuses.includes("alarm") || statuses.filter(s => s === "late").length >= 1) ocenaOgolna = "alarm";
+  else if (statuses.includes("warn")) ocenaOgolna = "warn";
+
+  return {
+    punktZal, punktRoz,
+    czasTrasyMin, czasPlanowanyMin,
+    kmRzeczywiste, kmPlanowane,
+    sredniaPredkosc,
+    spalanie,
+    ocenaOgolna,
+    // raw events do debugowania/diff
+    _zalTs: zalTs, _rozTs: rozTs,
+  };
+}
+
+// Formatter: minuty → "Xh Ymin" lub "Ymin"
+function fmtTripDuration(min) {
+  if (min == null || !isFinite(min)) return "—";
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  if (h === 0) return `${m} min`;
+  if (m === 0) return `${h} h`;
+  return `${h} h ${m} min`;
+}
+
+// ─── TRIP SUMMARY PANEL — prezentacja metryk trasy ─────────────────────────────
+function TripTile({ label, value, sub, status }) {
+  const palette = {
+    ok:    { bg: "#f0fdf4", border: "#bbf7d0", label: "#15803d", value: "#166534" },
+    warn:  { bg: "#fffbeb", border: "#fde68a", label: "#92400e", value: "#78350f" },
+    alarm: { bg: "#fef2f2", border: "#fecaca", label: "#b91c1c", value: "#991b1b" },
+    neutral: { bg: "#f8fafc", border: "#e5e7eb", label: "#6b7280", value: "#111827" },
+  }[status || "neutral"];
+  return (
+    <div style={{
+      padding: 12, borderRadius: 12, background: palette.bg,
+      border: `1px solid ${palette.border}`, minHeight: 74,
+    }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: palette.label, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 16, fontWeight: 700, color: palette.value, lineHeight: 1.2 }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function TripSummaryPanel({ fracht, vehicle, driverEvents = [], fuelEntries = [], variant = "full" }) {
+  const stats = computeTripStats(fracht, vehicle, driverEvents, fuelEntries);
+  if (!stats) return null;
+
+  const { punktZal, punktRoz, czasTrasyMin, czasPlanowanyMin, kmRzeczywiste, kmPlanowane, sredniaPredkosc, spalanie, ocenaOgolna } = stats;
+
+  // Czy jest sens w ogóle renderować — wymagamy przynajmniej jednej metryki
+  const hasAny = punktZal || punktRoz || czasTrasyMin || kmRzeczywiste || spalanie;
+  if (!hasAny) return null;
+
+  // Nagłówek z oceną ogólną
+  const ocenaPalette = {
+    ok:    { bg: "#f0fdf4", border: "#bbf7d0", color: "#15803d", icon: "✅", text: "Trasa zakończona OK" },
+    warn:  { bg: "#fffbeb", border: "#fde68a", color: "#92400e", icon: "⚠️", text: "Trasa z zastrzeżeniami" },
+    alarm: { bg: "#fef2f2", border: "#fecaca", color: "#b91c1c", icon: "🚨", text: "Trasa — przekroczenia" },
+  }[ocenaOgolna];
+
+  const isCompact = variant === "compact";
+  const isDriver = variant === "driver";
+  const showSpalanie = !isDriver;  // Kierowca nie widzi spalania (ograniczony panel)
+
+  const punktZalStatus = punktZal?.status || null;
+  const punktRozStatus = punktRoz?.status || null;
+
+  // Czas planowany — różnica względem rzeczywistego (tylko info)
+  const czasDiffMin = (czasTrasyMin != null && czasPlanowanyMin != null) ? czasTrasyMin - czasPlanowanyMin : null;
+  const czasDiffText = czasDiffMin == null ? null :
+    czasDiffMin > 0 ? `+${fmtTripDuration(czasDiffMin)} vs plan` :
+    czasDiffMin < 0 ? `-${fmtTripDuration(Math.abs(czasDiffMin))} vs plan` :
+    "dokładnie wg planu";
+
+  // Km — różnica od planu
+  const kmDiff = (kmRzeczywiste != null && kmPlanowane != null) ? kmRzeczywiste - kmPlanowane : null;
+  const kmDiffText = kmDiff == null ? null :
+    Math.abs(kmDiff) < 5 ? "≈ plan" :
+    kmDiff > 0 ? `+${kmDiff} km vs plan` : `${kmDiff} km vs plan`;
+
+  return (
+    <div style={{
+      background: "#fff", borderRadius: 16,
+      border: `1px solid ${ocenaPalette.border}`,
+      padding: isCompact ? 12 : 16,
+      marginTop: isCompact ? 8 : 16,
+      marginBottom: isCompact ? 8 : 16,
+    }}>
+      {/* Nagłówek z oceną */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "8px 12px", borderRadius: 10,
+        background: ocenaPalette.bg, border: `1px solid ${ocenaPalette.border}`,
+        marginBottom: 12,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 18 }}>{ocenaPalette.icon}</span>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: ocenaPalette.color, textTransform: "uppercase", letterSpacing: 0.5 }}>Podsumowanie trasy</div>
+            <div style={{ fontSize: 13, color: ocenaPalette.color, fontWeight: 600 }}>{ocenaPalette.text}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Metryki — siatka */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: isCompact ? "repeat(2, 1fr)" : "repeat(auto-fit, minmax(140px, 1fr))",
+        gap: 8,
+      }}>
+        {/* Punktualność załadunku */}
+        {punktZal && (
+          <TripTile
+            label="Załadunek"
+            value={punktZal.onTime ? "Na czas" : `+${punktZal.minutes} min`}
+            sub={punktZal.onTime ? "w tolerancji 15 min" : "spóźnienie"}
+            status={punktZalStatus === "late" ? "alarm" : "ok"}
+          />
+        )}
+        {/* Punktualność rozładunku */}
+        {punktRoz && (
+          <TripTile
+            label="Rozładunek"
+            value={punktRoz.onTime ? "Na czas" : `+${punktRoz.minutes} min`}
+            sub={punktRoz.onTime ? "w tolerancji 15 min" : "spóźnienie"}
+            status={punktRozStatus === "late" ? "alarm" : "ok"}
+          />
+        )}
+        {/* Czas trasy */}
+        {czasTrasyMin != null && (
+          <TripTile
+            label="Czas trasy"
+            value={fmtTripDuration(czasTrasyMin)}
+            sub={czasDiffText || (czasPlanowanyMin ? `plan: ${fmtTripDuration(czasPlanowanyMin)}` : null)}
+            status="neutral"
+          />
+        )}
+        {/* Km rzeczywiste */}
+        {kmRzeczywiste != null && (
+          <TripTile
+            label="Kilometry"
+            value={`${kmRzeczywiste.toLocaleString("pl-PL")} km`}
+            sub={kmDiffText || (kmPlanowane ? `plan: ${kmPlanowane} km` : null)}
+            status="neutral"
+          />
+        )}
+        {/* Średnia prędkość */}
+        {sredniaPredkosc != null && (
+          <TripTile
+            label="Średnia prędkość"
+            value={`${sredniaPredkosc} km/h`}
+            sub={null}
+            status="neutral"
+          />
+        )}
+        {/* Spalanie (ukryte dla kierowcy) */}
+        {showSpalanie && spalanie && (
+          <TripTile
+            label="Spalanie"
+            value={`${spalanie.avgL100km} l/100km`}
+            sub={
+              spalanie.status === "ok"    ? "w normie" :
+              spalanie.status === "warn"  ? "powyżej normy" :
+              spalanie.status === "alarm" ? "przekroczenie alarmu" : null
+            }
+            status={spalanie.status || "neutral"}
+          />
+        )}
+      </div>
+
+      {/* Dodatkowe info w wersji pełnej */}
+      {!isCompact && !isDriver && spalanie && (
+        <div style={{ marginTop: 10, fontSize: 11, color: "#9ca3af" }}>
+          Spalanie wyliczone z {spalanie.tankings} pełnych tankowań pojazdu w okresie trasy (±3 dni).
+          Porównanie: norma {Number(vehicle?.spalanieNorma) || SPALANIE_DEFAULT_NORMA} / alarm {Number(vehicle?.spalanieAlarm) || SPALANIE_DEFAULT_ALARM} l/100km.
+        </div>
+      )}
+      {!isCompact && kmRzeczywiste == null && (
+        <div style={{ marginTop: 10, fontSize: 11, color: "#9ca3af" }}>
+          Km rzeczywiste: brak odczytu z CAN. Sprawdź konfigurację Atlas API dla tego pojazdu.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -3289,6 +3645,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               frachtyList={frachtyList}
               vehicles={vehicles}
               driverEvents={driverEvents}
+              fuelEntries={fuelEntries}
               onAdd={(r) => { const fid = uid(); setFrachtyList(p => [{ ...r, id: fid }, ...p]); logAction("add", "frachty", { id: fid, vehicleId: r.vehicleId, dokod: r.dokod }); }}
               onDelete={(id) => { setFrachtyList(p => p.filter(r => r.id !== id)); logAction("delete", "frachty", { id }); }}
               onUpdate={(id, data) => { setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r)); logAction("update", "frachty", { id }); }}
@@ -7431,7 +7788,29 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     }
   };
 
-  // Aktualizacja statusu frachtu
+  // Pomocnicza: pobierz aktualny przebieg z CAN dla danego pojazdu (Atlas API)
+  // Zwraca km (number) lub null gdy nie udało się odczytać
+  const captureCanMileage = async () => {
+    if (!vehicle?.plate) return null;
+    try {
+      const gpsProxy = httpsCallable(functions, "gpsProxy");
+      const res = await gpsProxy({ endpoint: "positionsWithCanDetails" });
+      const positions = res?.data?.data?.positionList || res?.data?.data || [];
+      if (!Array.isArray(positions)) return null;
+      const plate = (vehicle.plate || "").replace(/\s+/g, "").toUpperCase();
+      const match = positions.find(p => {
+        const pPlate = ((p.plate || p.deviceName || p.name || "") + "").replace(/\s+/g, "").toUpperCase();
+        return pPlate && (pPlate === plate || pPlate.includes(plate) || plate.includes(pPlate));
+      });
+      const km = Number(match?.can?.mileage?.value);
+      return isFinite(km) && km > 0 ? km : null;
+    } catch (e) {
+      console.warn("CAN mileage capture failed:", e?.message || e);
+      return null;
+    }
+  };
+
+  // Aktualizacja statusu frachtu (+ auto-capture km z CAN przy załadunku/rozładunku)
   const updateFrachtStatus = async (fracht, field, value) => {
     try {
       await addDoc(collection(db, "driverEvents"), {
@@ -7445,6 +7824,24 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
       });
       logAction(field, "driverEvents", { frachtId: fracht.id, vehicleId: vehicle?.id });
       showToast(field === "zaladowano" ? "✅ Załadunek potwierdzony" : "✅ Rozładunek potwierdzony");
+
+      // Auto-capture km z CAN — tylko dla eventów zaladowano/rozladowano, asynchronicznie
+      if (field === "zaladowano" || field === "rozladowano") {
+        // Nie blokujemy UI — lecimy w tle
+        (async () => {
+          const km = await captureCanMileage();
+          if (km == null) return;
+          const kmField = field === "zaladowano" ? "kmStart" : "kmEnd";
+          // Nie nadpisuj istniejącego kmStart/End (jeśli kierowca kliknął dwa razy)
+          if (fracht[kmField] && Math.abs(Number(fracht[kmField]) - km) < 5) return;
+          try {
+            await updateDoc(doc(db, "frachty", fracht.id), { [kmField]: km });
+            logAction(`can_${kmField}`, "frachty", { frachtId: fracht.id, km });
+          } catch (e) {
+            console.warn(`${kmField} save failed:`, e?.message || e);
+          }
+        })();
+      }
     } catch (e) {
       console.error("driverEvent error", e);
       showToast("❌ Błąd zapisu");
@@ -7919,6 +8316,17 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
               </div>
             )}
           </div>); })()}
+
+          {/* ═══ PODSUMOWANIE TRASY (tylko po rozładunku, wariant kierowcy) ═══ */}
+          {hasRoz && (
+            <TripSummaryPanel
+              fracht={f}
+              vehicle={vehicle}
+              driverEvents={driverEvents}
+              fuelEntries={fuelEntries}
+              variant="driver"
+            />
+          )}
         </div>
       </div>
     );
@@ -14307,6 +14715,9 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
     // Daty floty
     fleetJoinDate:  vehicle.fleetJoinDate  || "",
     fleetLeaveDate: vehicle.fleetLeaveDate || "",
+    // Progi spalania (l/100km) — używane w Trip Summary
+    spalanieNorma:  vehicle.spalanieNorma  || "",
+    spalanieAlarm:  vehicle.spalanieAlarm  || "",
   });
   const [newEqInput, setNewEqInput] = useState("");
   const setF  = (k, val) => setV((p) => ({ ...p, [k]: val }));
@@ -14458,6 +14869,16 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
             <MF label="Rodzaj załadunku">
               <MInput value={v.loadingType} onChange={(val) => setF("loadingType", val)} placeholder="np. Bok, tył, góra" />
             </MF>
+          </div>
+          {/* ── Progi spalania dla Trip Summary ── */}
+          <MF label="Spalanie — norma (l/100km)">
+            <MInput type="number" step="0.1" value={v.spalanieNorma} onChange={(val) => setF("spalanieNorma", val)} placeholder="np. 30" />
+          </MF>
+          <MF label="Spalanie — alarm (l/100km)">
+            <MInput type="number" step="0.1" value={v.spalanieAlarm} onChange={(val) => setF("spalanieAlarm", val)} placeholder="np. 38" />
+          </MF>
+          <div className="col-span-2 text-[11px] text-gray-400 -mt-1">
+            Progi używane w podsumowaniu trasy. Poniżej normy = OK, między normą a alarmem = uwaga, powyżej alarmu = przekroczenie.
           </div>
         </div>
       </div>
@@ -15753,7 +16174,7 @@ function KomentarzBaner({ frachtyList, vehicleId, onUpdate }) {
   );
 }
 
-function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete, onUpdate, onBulkAdd }) {
+function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = [], onAdd, onDelete, onUpdate, onBulkAdd }) {
   // Index driverEvents by frachtId for quick lookup
   const eventsByFracht = useMemo(() => {
     const map = {};
@@ -16239,6 +16660,16 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
                               );
                             })}
                           </div>
+                          {/* ── Trip Summary (tylko zakończone) ── */}
+                          {r.statusRozladunku === "rozladowano" && (
+                            <TripSummaryPanel
+                              fracht={r}
+                              vehicle={vehicles.find(v => v.id === r.vehicleId)}
+                              driverEvents={driverEvents}
+                              fuelEntries={fuelEntries}
+                              variant="compact"
+                            />
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -16262,7 +16693,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], onAdd, onDelete,
           </tbody>
         </table>
       </div>
-      {showForm && <FrachtyModal record={editRecord} vehicles={vehicles} defaultVehicleId={selectedVehicle} onSave={(data) => { if(editId) onUpdate(editId,data); else onAdd(data); setShowForm(false); setEditId(null); }} onClose={() => { setShowForm(false); setEditId(null); }} />}
+      {showForm && <FrachtyModal record={editRecord} vehicles={vehicles} driverEvents={driverEvents} fuelEntries={fuelEntries} defaultVehicleId={selectedVehicle} onSave={(data) => { if(editId) onUpdate(editId,data); else onAdd(data); setShowForm(false); setEditId(null); }} onClose={() => { setShowForm(false); setEditId(null); }} />}
     </div>
   );
 }
@@ -16768,7 +17199,7 @@ function GeoPickerModal({ initialGeo, address, onSave, onClose }) {
   );
 }
 
-function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }) {
+function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], onSave, onClose, defaultVehicleId="" }) {
   const empty = {dataZlecenia:"",dataZaladunku:"",dataRozladunku:"",godzZaladunku:"",godzRozladunku:"",skad:"",zaladunekKod:"",zaladunekKod2:"",zaladunekKod3:"",zaladunekAdres:"",zaladunekTelefon:"",zaladunekGeo:"",dokod:"",dokod2:"",dokod3:"",rozladunekAdres:"",rozladunekTelefon:"",rozladunekGeo:"",klient:"",cenaEur:"",kmPodjazd:"",kmLadowne:"",kmWszystkie:"",wagaLadunku:"",dyspozytor:"",nrFV:"",dataWyslania:"",terminPlatnosci:"",uwagi:"",urlZlecenie:"",nrZlecenia:"",nrRef:"",towarOpis:"",towarPalety:"",towarIloscPalet:"",zaladunekTyp:"",vehicleId:defaultVehicleId};
   const [f, setF] = useState(record ? {...empty,...record} : empty);
   const set = (k,v) => setF(prev => { const next={...prev,[k]:v}; const pod=parseInt(next.kmPodjazd)||0; const lad=parseInt(next.kmLadowne)||0; next.kmWszystkie=pod+lad>0?String(pod+lad):""; return next; });
@@ -16938,6 +17369,20 @@ function FrachtyModal({ record, vehicles, onSave, onClose, defaultVehicleId="" }
             <div><label className={lbl}>Termin platnosci</label><input type="date" value={f.terminPlatnosci} onChange={e => set("terminPlatnosci",e.target.value)} className={inp} /></div>
           </div>
           </div>{/* zamknięcie szarej sekcji biurowej */}
+
+          {/* ── PODSUMOWANIE TRASY (tylko dla zakończonych zleceń) ── */}
+          {record?.statusRozladunku === "rozladowano" && (() => {
+            const vehForSummary = vehicles.find(vv => vv.id === (record.vehicleId || f.vehicleId));
+            return (
+              <TripSummaryPanel
+                fracht={record}
+                vehicle={vehForSummary}
+                driverEvents={driverEvents}
+                fuelEntries={fuelEntries}
+                variant="full"
+              />
+            );
+          })()}
 
           {/* ZLECENIE */}
           <div className="pt-2 border-t border-gray-100">
