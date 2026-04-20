@@ -5934,7 +5934,7 @@ function GpsMapSection({ device, position, allPositions, allDevices }) {
   useEffect(() => {
     if (!mapRef.current || typeof window === "undefined") return;
     let L;
-    try { L = require("leaflet"); } catch(e) { return; }
+    L = window.L; if (!L) return;
 
     const lat = position?.latitude || position?.lat || 52.0;
     const lng = position?.longitude || position?.lng || position?.lon || 19.0;
@@ -6221,7 +6221,7 @@ function GpsTrasySection({ device, showToast }) {
   useEffect(() => {
     if (!mapRef.current || routes.length === 0) return;
     let L;
-    try { L = require("leaflet"); } catch(e) { return; }
+    L = window.L; if (!L) return;
 
     if (!mapInstanceRef.current) {
       mapInstanceRef.current = L.map(mapRef.current).setView([52.0, 19.0], 7);
