@@ -6434,11 +6434,6 @@ function GpsTrasySection({ device, showToast }) {
       const coords = points.map(p => [p.latitude || p.lat, p.longitude || p.lng || p.lon]).filter(c => c[0] && c[1]);
       if (coords.length > 0) {
         L.polyline(coords, { color: "#7c3aed", weight: 4, opacity: 0.8 }).addTo(mapInstanceRef.current);
-        // Start/end markers
-        L.circleMarker(coords[0], { radius: 8, fillColor: "#16a34a", color: "white", weight: 2, fillOpacity: 1 })
-          .bindPopup("Start").addTo(mapInstanceRef.current);
-        L.circleMarker(coords[coords.length - 1], { radius: 8, fillColor: "#dc2626", color: "white", weight: 2, fillOpacity: 1 })
-          .bindPopup("Koniec").addTo(mapInstanceRef.current);
         mapInstanceRef.current.fitBounds(coords);
       }
     }
