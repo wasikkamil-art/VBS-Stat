@@ -5763,12 +5763,16 @@ function GpsTab({ vehicles, showToast }) {
   }, [autoRefresh]);
 
   // ── Helpers ──
-  const getDevicePosition = (deviceId) => gpsPositions.find(p => (p.deviceId || p.id) === deviceId);
+  const getDevicePosition = (deviceId) => gpsPositions.find(p => String(p.deviceId || p.id) === String(deviceId));
   const selectedDev = gpsDevices.find(d => (d.deviceId || d.id) === selectedDevice);
   const selectedPos = selectedDev ? getDevicePosition(selectedDev.deviceId || selectedDev.id) : null;
 
   const formatDate = (ts) => {
     if (!ts) return "—";
+    // Atlas API zwraca dateTime jako obiekt {year, month, day, hour, minute, seconds}
+    if (typeof ts === "object" && ts.year) {
+      return `${ts.day}.${String(ts.month).padStart(2,"0")}.${ts.year} ${String(ts.hour).padStart(2,"0")}:${String(ts.minute).padStart(2,"0")}`;
+    }
     const d = new Date(typeof ts === "number" ? ts * 1000 : ts);
     return d.toLocaleString("pl-PL", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" });
   };
@@ -5817,7 +5821,8 @@ function GpsTab({ vehicles, showToast }) {
               const pos = getDevicePosition(devId);
               const isActive = devId === selectedDevice;
               const plate = dev.plate || dev.deviceName || dev.name || `#${devId}`;
-              const isOnline = pos && pos.timestamp && (Date.now() / 1000 - (typeof pos.timestamp === "number" ? pos.timestamp : new Date(pos.timestamp).getTime() / 1000)) < 600;
+              const posTime = pos?.dateTime || pos?.timestamp;
+              const isOnline = pos && pos.ignitionState === "ON" || (posTime && typeof posTime === "object" && (() => { const d = new Date(posTime.year, posTime.month - 1, posTime.day, posTime.hour, posTime.minute, posTime.seconds || 0); return (Date.now() - d.getTime()) < 600000; })());
               return (
                 <button key={devId} onClick={() => { setSelectedDevice(devId); setSubTab("mapa"); }}
                   className={`w-full text-left px-4 py-3 border-b border-gray-50 transition-all ${isActive ? "bg-violet-50 border-l-4 border-l-violet-500" : "hover:bg-gray-50 border-l-4 border-l-transparent"}`}>
@@ -5831,7 +5836,7 @@ function GpsTab({ vehicles, showToast }) {
                   {pos && (
                     <div className="text-xs text-gray-400 ml-4 mt-0.5">
                       {pos.speed != null && <span>{Math.round(pos.speed)} km/h · </span>}
-                      {formatDate(pos.timestamp)}
+                      {formatDate(pos.dateTime || pos.timestamp)}
                     </div>
                   )}
                 </button>
@@ -5880,7 +5885,7 @@ function GpsTab({ vehicles, showToast }) {
                 {selectedPos && (
                   <div className="text-right text-xs text-gray-400">
                     <div>Ostatnia pozycja</div>
-                    <div className="font-semibold text-gray-600">{formatDate(selectedPos.timestamp)}</div>
+                    <div className="font-semibold text-gray-600">{formatDate(selectedPos.dateTime || selectedPos.timestamp)}</div>
                   </div>
                 )}
               </div>
@@ -5955,10 +5960,10 @@ function GpsMapSection({ device, position, allPositions, allDevices }) {
     // Add markers for ALL devices
     allDevices.forEach(dev => {
       const devId = dev.deviceId || dev.id;
-      const pos = allPositions.find(p => (p.deviceId || p.id) === devId);
+      const pos = allPositions.find(p => String(p.deviceId || p.id) === String(devId));
       if (!pos) return;
-      const pLat = pos.latitude || pos.lat;
-      const pLng = pos.longitude || pos.lng || pos.lon;
+      const pLat = pos.coordinate?.latitude || pos.latitude || pos.lat;
+      const pLng = pos.coordinate?.longitude || pos.longitude || pos.lng || pos.lon;
       if (!pLat || !pLng) return;
 
       const isSelected = devId === (device.deviceId || device.id);
@@ -5980,13 +5985,17 @@ function GpsMapSection({ device, position, allPositions, allDevices }) {
       });
 
       const marker = L.marker([pLat, pLng], { icon }).addTo(mapInstanceRef.current);
+      const pCan = pos.can || {};
+      const pMileage = pCan.mileage?.value ?? pos.mileage;
+      const pFuel = pCan.fuelLevel?.value ?? pos.fuelLevel;
+      const pTime = pos.dateTime || pos.timestamp;
       marker.bindPopup(`
         <div style="font-size:13px;">
           <strong>${plate}</strong><br/>
           Prędkość: ${speed} km/h<br/>
-          ${pos.mileage ? `Przebieg: ${Math.round(pos.mileage).toLocaleString("pl-PL")} km<br/>` : ""}
-          ${pos.fuelLevel != null ? `Paliwo: ${pos.fuelLevel}%<br/>` : ""}
-          Czas: ${new Date(typeof pos.timestamp === "number" ? pos.timestamp * 1000 : pos.timestamp).toLocaleString("pl-PL")}
+          ${pMileage ? `Przebieg: ${Math.round(pMileage).toLocaleString("pl-PL")} km<br/>` : ""}
+          ${pFuel != null ? `Paliwo: ${pFuel}%<br/>` : ""}
+          ${pTime ? `Czas: ${typeof pTime === "object" ? `${pTime.day}.${String(pTime.month).padStart(2,"0")}.${pTime.year} ${pTime.hour}:${String(pTime.minute).padStart(2,"0")}` : new Date(typeof pTime === "number" ? pTime * 1000 : pTime).toLocaleString("pl-PL")}` : ""}
         </div>
       `);
       markersRef.current.push(marker);
@@ -5994,8 +6003,8 @@ function GpsMapSection({ device, position, allPositions, allDevices }) {
 
     // Center on selected device
     if (position) {
-      const cLat = position.latitude || position.lat;
-      const cLng = position.longitude || position.lng || position.lon;
+      const cLat = position.coordinate?.latitude || position.latitude || position.lat;
+      const cLng = position.coordinate?.longitude || position.longitude || position.lng || position.lon;
       if (cLat && cLng) mapInstanceRef.current.setView([cLat, cLng], 13);
     }
 
@@ -6015,47 +6024,26 @@ function GpsMapSection({ device, position, allPositions, allDevices }) {
   return (
     <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
       <div ref={mapRef} style={{ height: "500px", width: "100%" }}></div>
-      {/* CAN data bar under map */}
-      {position && (
-        <div className="flex flex-wrap gap-4 px-5 py-3 bg-gray-50 border-t border-gray-100">
-          {position.speed != null && (
-            <div className="text-center">
-              <div className="text-lg font-bold text-gray-800">{Math.round(position.speed)}</div>
-              <div className="text-xs text-gray-400">km/h</div>
-            </div>
-          )}
-          {position.mileage != null && (
-            <div className="text-center">
-              <div className="text-lg font-bold text-gray-800">{Math.round(position.mileage).toLocaleString("pl-PL")}</div>
-              <div className="text-xs text-gray-400">km przebieg</div>
-            </div>
-          )}
-          {position.fuelLevel != null && (
-            <div className="text-center">
-              <div className="text-lg font-bold text-gray-800">{position.fuelLevel}%</div>
-              <div className="text-xs text-gray-400">paliwo</div>
-            </div>
-          )}
-          {position.voltage != null && (
-            <div className="text-center">
-              <div className="text-lg font-bold text-gray-800">{position.voltage}V</div>
-              <div className="text-xs text-gray-400">napięcie</div>
-            </div>
-          )}
-          {position.rpm != null && (
-            <div className="text-center">
-              <div className="text-lg font-bold text-gray-800">{position.rpm}</div>
-              <div className="text-xs text-gray-400">RPM</div>
-            </div>
-          )}
-          {(position.engineTemperature || position.engineTemp) != null && (
-            <div className="text-center">
-              <div className="text-lg font-bold text-gray-800">{position.engineTemperature || position.engineTemp}°C</div>
-              <div className="text-xs text-gray-400">temp. silnika</div>
-            </div>
-          )}
-        </div>
-      )}
+      {/* CAN data bar under map — dane mogą być w position.can.* lub position.* */}
+      {position && (() => {
+        const can = position.can || {};
+        const mileage = can.mileage?.value ?? position.mileage;
+        const fuel = can.fuelLevel?.value ?? position.fuelLevel;
+        const volt = can.voltage?.value ?? position.voltage;
+        const rpm = can.rpm?.value ?? position.rpm;
+        const engTemp = can.engineTemperature?.value ?? position.engineTemperature ?? position.engineTemp;
+        const spd = position.speed;
+        return (
+          <div className="flex flex-wrap gap-6 px-5 py-3 bg-gray-50 border-t border-gray-100">
+            {spd != null && <div className="text-center"><div className="text-lg font-bold text-gray-800">{Math.round(spd)}</div><div className="text-xs text-gray-400">km/h</div></div>}
+            {mileage != null && <div className="text-center"><div className="text-lg font-bold text-gray-800">{Math.round(mileage).toLocaleString("pl-PL")}</div><div className="text-xs text-gray-400">km przebieg</div></div>}
+            {fuel != null && <div className="text-center"><div className="text-lg font-bold text-gray-800">{fuel}%</div><div className="text-xs text-gray-400">paliwo</div></div>}
+            {volt != null && <div className="text-center"><div className="text-lg font-bold text-gray-800">{volt}V</div><div className="text-xs text-gray-400">napięcie</div></div>}
+            {rpm != null && <div className="text-center"><div className="text-lg font-bold text-gray-800">{rpm}</div><div className="text-xs text-gray-400">RPM</div></div>}
+            {engTemp != null && <div className="text-center"><div className="text-lg font-bold text-gray-800">{engTemp}°C</div><div className="text-xs text-gray-400">temp. silnika</div></div>}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -6098,15 +6086,16 @@ function GpsKilometrySection({ device, position, showToast }) {
     setHistLoading(false);
   };
 
-  // Current CAN stats from live position
+  // Current CAN stats from live position — dane mogą być w position.can.* lub flat
+  const can = position?.can || {};
   const canStats = position ? {
-    mileage: position.mileage != null ? Math.round(position.mileage) : null,
-    fuelLevel: position.fuelLevel,
-    voltage: position.voltage,
-    rpm: position.rpm,
+    mileage: can.mileage?.value ?? position.mileage != null ? Math.round(can.mileage?.value ?? position.mileage) : null,
+    fuelLevel: can.fuelLevel?.value ?? position.fuelLevel,
+    voltage: can.voltage?.value ?? position.voltage,
+    rpm: can.rpm?.value ?? position.rpm,
     speed: position.speed != null ? Math.round(position.speed) : null,
-    engineTemp: position.engineTemperature || position.engineTemp,
-    fuelUsed: position.fuelUsed || position.totalFuelUsed,
+    engineTemp: can.engineTemperature?.value ?? position.engineTemperature ?? position.engineTemp,
+    fuelUsed: can.fuelUsed?.value ?? position.fuelUsed ?? position.totalFuelUsed,
   } : {};
 
   return (
