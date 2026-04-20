@@ -5722,10 +5722,16 @@ function GpsTab({ vehicles, showToast }) {
       ]);
       console.log("[GPS] devices response:", JSON.stringify(devRes.data).slice(0, 500));
       console.log("[GPS] positions response:", JSON.stringify(posRes.data).slice(0, 500));
-      if (devRes.data?.success && Array.isArray(devRes.data.data)) {
+      // Atlas API zwraca: data.deviceList / data.positionList (nie surowa tablica)
+      const deviceList = devRes.data?.data?.deviceList || devRes.data?.data || [];
+      const positionList = posRes.data?.data?.positionList || posRes.data?.data || [];
+      const devArray = Array.isArray(deviceList) ? deviceList : [];
+      const posArray = Array.isArray(positionList) ? positionList : [];
+      console.log("[GPS] parsed devices:", devArray.length, "positions:", posArray.length);
+      if (devRes.data?.success && devArray.length > 0) {
         // Map GPS devices to fleet vehicles by plate
-        const mapped = devRes.data.data.map(dev => {
-          const devPlate = (dev.plate || dev.name || "").replace(/\s+/g, "").toUpperCase();
+        const mapped = devArray.map(dev => {
+          const devPlate = (dev.plate || dev.deviceName || dev.name || "").replace(/\s+/g, "").toUpperCase();
           const fleetVeh = vehicles.find(v => {
             const fp = (v.plate || "").replace(/\s+/g, "").toUpperCase();
             return fp && (fp === devPlate || devPlate.includes(fp) || fp.includes(devPlate));
@@ -5735,8 +5741,8 @@ function GpsTab({ vehicles, showToast }) {
         setGpsDevices(mapped);
         if (!selectedDevice && mapped.length > 0) setSelectedDevice(mapped[0].deviceId || mapped[0].id);
       }
-      if (posRes.data?.success && Array.isArray(posRes.data.data)) {
-        setGpsPositions(posRes.data.data);
+      if (posRes.data?.success && posArray.length > 0) {
+        setGpsPositions(posArray);
       }
     } catch(e) {
       console.error("[GPS] Error:", e);
@@ -5810,7 +5816,7 @@ function GpsTab({ vehicles, showToast }) {
               const devId = dev.deviceId || dev.id;
               const pos = getDevicePosition(devId);
               const isActive = devId === selectedDevice;
-              const plate = dev.plate || dev.name || `#${devId}`;
+              const plate = dev.plate || dev.deviceName || dev.name || `#${devId}`;
               const isOnline = pos && pos.timestamp && (Date.now() / 1000 - (typeof pos.timestamp === "number" ? pos.timestamp : new Date(pos.timestamp).getTime() / 1000)) < 600;
               return (
                 <button key={devId} onClick={() => { setSelectedDevice(devId); setSubTab("mapa"); }}
@@ -5861,7 +5867,7 @@ function GpsTab({ vehicles, showToast }) {
                     <span className="text-lg">🚛</span>
                   </div>
                   <div>
-                    <h3 className="font-bold text-gray-900">{selectedDev.plate || selectedDev.name || `Device #${selectedDevice}`}</h3>
+                    <h3 className="font-bold text-gray-900">{selectedDev.plate || selectedDev.deviceName || selectedDev.name || `Device #${selectedDevice}`}</h3>
                     <div className="flex items-center gap-3 text-xs text-gray-400">
                       {selectedDev.fleetVehicle && <span>{selectedDev.fleetVehicle.brand} {selectedDev.fleetVehicle.model}</span>}
                       <span>ID: {selectedDevice}</span>
@@ -5956,7 +5962,7 @@ function GpsMapSection({ device, position, allPositions, allDevices }) {
       if (!pLat || !pLng) return;
 
       const isSelected = devId === (device.deviceId || device.id);
-      const plate = dev.plate || dev.name || `#${devId}`;
+      const plate = dev.plate || dev.deviceName || dev.name || `#${devId}`;
       const speed = pos.speed != null ? Math.round(pos.speed) : "?";
       const isMoving = pos.speed && pos.speed > 3;
 
