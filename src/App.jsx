@@ -545,6 +545,20 @@ function computeTripStats(fracht, vehicle, driverEvents = [], fuelEntries = []) 
   };
 }
 
+// Atlas API dateTime helper: obiekt {year,month,day,hour,minute,seconds} lub unix → ms
+function atlasDateTimeToMs(dt) {
+  if (dt == null) return null;
+  if (typeof dt === "object" && dt.year) {
+    return new Date(
+      dt.year, (dt.month || 1) - 1, dt.day || 1,
+      dt.hour || 0, dt.minute || 0, dt.seconds || 0
+    ).getTime();
+  }
+  if (typeof dt === "number") return dt < 10_000_000_000 ? dt * 1000 : dt;
+  const d = new Date(dt);
+  return isNaN(d.getTime()) ? null : d.getTime();
+}
+
 // Formatter: minuty → "Xh Ymin" lub "Ymin"
 function fmtTripDuration(min) {
   if (min == null || !isFinite(min)) return "—";
@@ -6068,6 +6082,8 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], fuelEntries = [
   const [subTab, setSubTab] = useState("mapa");
   const [error, setError] = useState(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  // Wybrane zlecenie z listy pod mapą — nadpisuje domyślny "aktywny fracht"
+  const [selectedOrderId, setSelectedOrderId] = useState(null);
   const refreshRef = useRef(null);
 
   // ── Fetch devices + positions on mount ──
@@ -6259,17 +6275,30 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], fuelEntries = [
             </div>
 
             {/* Sub-tab content */}
-            {subTab === "mapa" && (
-              <>
-                <GpsMapSection device={selectedDev} position={selectedPos} allPositions={gpsPositions} allDevices={gpsDevices} frachtyList={frachtyList} vehicles={vehicles} />
-                <VehicleOrdersSection
-                  vehicle={selectedDev?.fleetVehicle}
-                  frachtyList={frachtyList}
-                  driverEvents={driverEvents}
-                  fuelEntries={fuelEntries}
-                />
-              </>
-            )}
+            {subTab === "mapa" && (() => {
+              const selectedFracht = selectedOrderId ? frachtyList.find(f => f.id === selectedOrderId) : null;
+              return (
+                <>
+                  <GpsMapSection
+                    device={selectedDev}
+                    position={selectedPos}
+                    allPositions={gpsPositions}
+                    allDevices={gpsDevices}
+                    frachtyList={frachtyList}
+                    vehicles={vehicles}
+                    selectedFracht={selectedFracht}
+                  />
+                  <VehicleOrdersSection
+                    vehicle={selectedDev?.fleetVehicle}
+                    frachtyList={frachtyList}
+                    driverEvents={driverEvents}
+                    fuelEntries={fuelEntries}
+                    expandedId={selectedOrderId}
+                    onSelect={(id) => setSelectedOrderId(id)}
+                  />
+                </>
+              );
+            })()}
             {subTab === "kilometry" && <GpsKilometrySection device={selectedDev} position={selectedPos} showToast={showToast} />}
             {subTab === "trasy" && <GpsTrasySection device={selectedDev} showToast={showToast} />}
             {subTab === "karta" && <GpsKartaSection device={selectedDev} showToast={showToast} />}
@@ -6287,8 +6316,11 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], fuelEntries = [
 }
 
 // ── Sekcja: LISTA ZLECEŃ POJAZDU (pod mapą) ──
-function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fuelEntries = [] }) {
-  const [expandedId, setExpandedId] = useState(null);
+function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fuelEntries = [], expandedId: expandedIdProp = null, onSelect }) {
+  const [internalExpanded, setInternalExpanded] = useState(null);
+  // Jeśli rodzic kontroluje — używamy z propsów; inaczej wewnętrzny state (tryb uncontrolled)
+  const expandedId = onSelect ? expandedIdProp : internalExpanded;
+  const setExpandedId = onSelect ? onSelect : setInternalExpanded;
   const [filter, setFilter] = useState("all"); // "all" | "active" | "done"
 
   if (!vehicle?.id) {
@@ -6538,14 +6570,14 @@ async function getRoute(waypoints) {
   return null;
 }
 
-function GpsMapSection({ device, position, allPositions, allDevices, frachtyList = [], vehicles = [] }) {
+function GpsMapSection({ device, position, allPositions, allDevices, frachtyList = [], vehicles = [], selectedFracht = null }) {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markersRef = useRef([]);
   const routeLayerRef = useRef(null);
   const initialViewSetRef = useRef(false);
   const lastSelectedDevRef = useRef(null);
-  const lastRouteFrachtIdRef = useRef(null); // cache — nie przeliczaj trasy jeśli ten sam fracht
+  const lastRouteKeyRef = useRef(null); // cache key: "<frachtId>_<planned|real>"
   const [routeInfo, setRouteInfo] = useState(null);
   const [routeLoading, setRouteLoading] = useState(false);
 
@@ -6644,7 +6676,7 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
     return () => {};
   }, [position, allPositions, allDevices, device]);
 
-  // ── Aktywny fracht → wyznacz trasę (tylko aktywne, cache wynik) ──
+  // ── Trasa na mapie: rzeczywista (z Atlas /history) dla zakończonych, planowana (OSRM) dla aktywnych ──
   useEffect(() => {
     if (!mapInstanceRef.current || !device) return;
     const L = window.L; if (!L) return;
@@ -6654,109 +6686,268 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
       // Brak mapowania na flotę — wyczyść trasę
       if (routeLayerRef.current) { routeLayerRef.current.forEach(l => l.remove()); routeLayerRef.current = null; }
       if (routeInfo) setRouteInfo(null);
-      lastRouteFrachtIdRef.current = null;
+      lastRouteKeyRef.current = null;
       return;
     }
 
-    // Znajdź AKTYWNY fracht (nie rozładowany) z adresami
-    const activeFracht = frachtyList
-      .filter(f => f.vehicleId === fleetVeh.id && f.statusRozladunku !== "rozladowano")
-      .sort((a, b) => (b.dataZaladunku || b.dataZlecenia || "").localeCompare(a.dataZaladunku || a.dataZlecenia || ""))
-      .find(f => {
-        const hasLoad = f.zaladunekGeo || f.zaladunekKod || f.zaladunekAdres;
-        const hasUnload = f.rozladunekGeo || f.dokod || f.rozladunekAdres;
-        return hasLoad && hasUnload;
-      });
+    // Wybierz fracht: (1) wybrany ręcznie z listy, (2) aktywny (domyślnie)
+    let targetFracht = null;
+    if (selectedFracht && selectedFracht.vehicleId === fleetVeh.id) {
+      targetFracht = selectedFracht;
+    } else {
+      targetFracht = frachtyList
+        .filter(f => f.vehicleId === fleetVeh.id && f.statusRozladunku !== "rozladowano")
+        .sort((a, b) => (b.dataZaladunku || b.dataZlecenia || "").localeCompare(a.dataZaladunku || a.dataZlecenia || ""))
+        .find(f => {
+          const hasLoad = f.zaladunekGeo || f.zaladunekKod || f.zaladunekAdres;
+          const hasUnload = f.rozladunekGeo || f.dokod || f.rozladunekAdres;
+          return hasLoad && hasUnload;
+        });
+    }
 
-    if (!activeFracht) {
-      // Brak aktywnego frachtu — wyczyść trasę
+    if (!targetFracht) {
       if (routeLayerRef.current) { routeLayerRef.current.forEach(l => l.remove()); routeLayerRef.current = null; }
       if (routeInfo) setRouteInfo(null);
-      lastRouteFrachtIdRef.current = null;
+      lastRouteKeyRef.current = null;
       return;
     }
 
-    // Jeśli ten sam fracht co poprzednio — NIE przeliczaj (trasa jest na mapie)
-    if (lastRouteFrachtIdRef.current === activeFracht.id) return;
+    const isDone = targetFracht.statusRozladunku === "rozladowano";
+    const routeKey = `${targetFracht.id}_${isDone ? "real" : "planned"}`;
+    // Jeśli klucz trasy się nie zmienił — nie przeliczaj
+    if (lastRouteKeyRef.current === routeKey) return;
 
-    // Nowy fracht lub zmiana pojazdu — buduj trasę
+    // ═══ Helper: zbuduj trasę planowaną (OSRM) ═══
+    const buildPlanned = async (f) => {
+      const loadPoints = [f.zaladunekGeo || f.zaladunekAdres || f.zaladunekKod];
+      if (f.zaladunekKod2?.trim()) loadPoints.push(f.zaladunekKod2);
+      if (f.zaladunekKod3?.trim()) loadPoints.push(f.zaladunekKod3);
+      const unloadPoints = [f.rozladunekGeo || f.rozladunekAdres || f.dokod];
+      if (f.dokod2?.trim()) unloadPoints.push(f.dokod2);
+      if (f.dokod3?.trim()) unloadPoints.push(f.dokod3);
+
+      const allPoints = [...loadPoints, ...unloadPoints];
+      const geocoded = await Promise.all(allPoints.map(p => geocode(p)));
+      const validPoints = geocoded.filter(p => p !== null);
+      if (validPoints.length < 2) {
+        console.warn("[GPS Route] Nie udało się geokodować:", allPoints);
+        return null;
+      }
+      const route = await getRoute(validPoints);
+      if (!route) return null;
+      return { route, geocoded, loadPoints, unloadPoints };
+    };
+
+    // ═══ Helper: pobierz rzeczywistą trasę z Atlas /history ═══
+    const buildReal = async (f) => {
+      const devId = String(device.deviceId || device.id);
+      const startMs = new Date(`${f.dataZaladunku}T${f.godzZaladunku || "00:00"}:00`).getTime() - 3600000; // -1h bufor
+      const endMs = new Date(`${f.dataRozladunku || f.dataZaladunku}T${f.godzRozladunku || "23:59"}:00`).getTime() + 7200000; // +2h bufor
+      if (!isFinite(startMs) || !isFinite(endMs) || endMs <= startMs) return null;
+
+      // Pobierz miesiące pokrywające zakres (zwykle 1, max 2)
+      const months = new Set();
+      const cursor = new Date(startMs);
+      const stopAt = new Date(endMs);
+      while (cursor <= stopAt) {
+        months.add(`${cursor.getFullYear()}-${cursor.getMonth() + 1}`);
+        cursor.setMonth(cursor.getMonth() + 1);
+        cursor.setDate(1);
+      }
+
+      const gpsProxy = httpsCallable(functions, "gpsProxy");
+      const allRaw = [];
+      for (const m of months) {
+        const [y, mo] = m.split("-").map(Number);
+        try {
+          const res = await gpsProxy({ endpoint: "history", params: { year: y, month: mo } });
+          const payload = res?.data?.data || res?.data || [];
+          // API może zwrócić tablicę bezpośrednio, pozycje per urządzenie, lub obiekt z listami
+          const items = Array.isArray(payload) ? payload
+            : Array.isArray(payload?.positionList) ? payload.positionList
+            : Array.isArray(payload?.historyList) ? payload.historyList
+            : [];
+          allRaw.push(...items);
+        } catch (e) {
+          console.warn("[Atlas history] błąd pobierania:", e?.message);
+        }
+      }
+
+      // Filtruj: po deviceId + oknie czasowym + mają współrzędne
+      const points = allRaw
+        .filter(p => {
+          const pid = String(p.deviceId || p.id || "");
+          if (pid && pid !== devId) return false;
+          return true;
+        })
+        .map(p => {
+          const lat = p.latitude || p.lat || p.coordinate?.latitude;
+          const lng = p.longitude || p.lng || p.lon || p.coordinate?.longitude;
+          const ts = atlasDateTimeToMs(p.dateTime || p.timestamp || p.date || p.time);
+          return { lat, lng, ts };
+        })
+        .filter(p => p.lat && p.lng && p.ts && p.ts >= startMs && p.ts <= endMs)
+        .sort((a, b) => a.ts - b.ts);
+
+      if (points.length < 2) return null;
+
+      // Oblicz dystans (suma segmentów)
+      const toRad = (v) => v * Math.PI / 180;
+      const haversine = (a, b) => {
+        const R = 6371; // km
+        const dLat = toRad(b.lat - a.lat);
+        const dLng = toRad(b.lng - a.lng);
+        const lat1 = toRad(a.lat);
+        const lat2 = toRad(b.lat);
+        const s = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLng/2)**2;
+        return 2 * R * Math.asin(Math.sqrt(s));
+      };
+      let totalKm = 0;
+      for (let i = 1; i < points.length; i++) totalKm += haversine(points[i-1], points[i]);
+      const durationMin = Math.round((points[points.length-1].ts - points[0].ts) / 60000);
+
+      return {
+        coordinates: points.map(p => [p.lat, p.lng]),
+        distance: totalKm,
+        duration: durationMin,
+        pointsCount: points.length,
+      };
+    };
+
+    // ═══ Główna logika ═══
     const buildRoute = async () => {
       setRouteLoading(true);
       try {
-        const loadPoints = [activeFracht.zaladunekGeo || activeFracht.zaladunekAdres || activeFracht.zaladunekKod];
-        if (activeFracht.zaladunekKod2?.trim()) loadPoints.push(activeFracht.zaladunekKod2);
-        if (activeFracht.zaladunekKod3?.trim()) loadPoints.push(activeFracht.zaladunekKod3);
-
-        const unloadPoints = [activeFracht.rozladunekGeo || activeFracht.rozladunekAdres || activeFracht.dokod];
-        if (activeFracht.dokod2?.trim()) unloadPoints.push(activeFracht.dokod2);
-        if (activeFracht.dokod3?.trim()) unloadPoints.push(activeFracht.dokod3);
-
-        const allPoints = [...loadPoints, ...unloadPoints];
-        const geocoded = await Promise.all(allPoints.map(p => geocode(p)));
-        const validPoints = geocoded.filter(p => p !== null);
-
-        if (validPoints.length < 2) {
-          console.warn("[GPS Route] Nie udało się geokodować:", allPoints);
-          setRouteLoading(false);
-          return;
-        }
-
-        const route = await getRoute(validPoints);
-
         // Wyczyść starą trasę
         if (routeLayerRef.current) routeLayerRef.current.forEach(l => l.remove());
         routeLayerRef.current = [];
 
-        if (route) {
-          // Rysuj trasę (niebieska przerywana linia)
-          const polyline = L.polyline(route.coordinates, {
-            color: "#3b82f6", weight: 5, opacity: 0.7, dashArray: "10 6",
-          }).addTo(mapInstanceRef.current);
-          routeLayerRef.current.push(polyline);
+        if (isDone) {
+          // ── RZECZYWISTA trasa z Atlas /history ──
+          const real = await buildReal(targetFracht);
+          if (real) {
+            // Zielona solidna linia = faktyczna trasa
+            const polyline = L.polyline(real.coordinates, {
+              color: "#16a34a", weight: 5, opacity: 0.9,
+            }).addTo(mapInstanceRef.current);
+            routeLayerRef.current.push(polyline);
 
-          // Markery załadunku — flaga startowa 🚩 (bez tła, bez tekstu kodu)
-          geocoded.slice(0, loadPoints.length).filter(Boolean).forEach((pt) => {
-            const m = L.marker(pt, {
+            // Marker start (🚩) i koniec (📦)
+            const startPt = real.coordinates[0];
+            const endPt = real.coordinates[real.coordinates.length - 1];
+            const mStart = L.marker(startPt, {
               icon: L.divIcon({
-                className: "route-marker-flag",
+                className: "route-marker-real-start",
                 html: `<div style="font-size:24px;line-height:1;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.4));transform:translate(-50%,-100%);">🚩</div>`,
                 iconSize: [0, 0], iconAnchor: [0, 0],
               })
             }).addTo(mapInstanceRef.current);
-            routeLayerRef.current.push(m);
-          });
-
-          // Markery rozładunku — paczka 📦 (bez tła, bez tekstu kodu)
-          geocoded.slice(loadPoints.length).filter(Boolean).forEach((pt) => {
-            const m = L.marker(pt, {
+            const mEnd = L.marker(endPt, {
               icon: L.divIcon({
-                className: "route-marker-pack",
+                className: "route-marker-real-end",
                 html: `<div style="font-size:24px;line-height:1;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.4));transform:translate(-50%,-100%);">📦</div>`,
                 iconSize: [0, 0], iconAnchor: [0, 0],
               })
             }).addTo(mapInstanceRef.current);
-            routeLayerRef.current.push(m);
-          });
+            routeLayerRef.current.push(mStart, mEnd);
 
-          // Zapamiętaj fracht ID — nie przeliczaj ponownie
-          lastRouteFrachtIdRef.current = activeFracht.id;
+            lastRouteKeyRef.current = routeKey;
+            setRouteInfo({
+              kind: "real",
+              distance: Math.round(real.distance),
+              duration: real.duration,
+              fracht: targetFracht,
+              loadLabel: targetFracht.zaladunekKod || "—",
+              unloadLabel: targetFracht.dokod || "—",
+              pointsCount: real.pointsCount,
+            });
+            mapInstanceRef.current.fitBounds(L.latLngBounds(real.coordinates).pad(0.08));
+          } else {
+            // Brak danych historycznych → fallback na planowaną, ale z adnotacją
+            const planned = await buildPlanned(targetFracht);
+            if (planned) {
+              const polyline = L.polyline(planned.route.coordinates, {
+                color: "#94a3b8", weight: 4, opacity: 0.6, dashArray: "4 4",
+              }).addTo(mapInstanceRef.current);
+              routeLayerRef.current.push(polyline);
 
-          setRouteInfo({
-            distance: Math.round(route.distance / 1000),
-            duration: Math.round(route.duration / 60),
-            fracht: activeFracht,
-            loadLabel: loadPoints.join(" → "),
-            unloadLabel: unloadPoints.join(" → "),
-          });
+              planned.geocoded.slice(0, planned.loadPoints.length).filter(Boolean).forEach((pt) => {
+                const m = L.marker(pt, {
+                  icon: L.divIcon({ className: "route-marker-flag",
+                    html: `<div style="font-size:22px;line-height:1;opacity:0.7;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.4));transform:translate(-50%,-100%);">🚩</div>`,
+                    iconSize: [0, 0], iconAnchor: [0, 0],
+                  })
+                }).addTo(mapInstanceRef.current);
+                routeLayerRef.current.push(m);
+              });
+              planned.geocoded.slice(planned.loadPoints.length).filter(Boolean).forEach((pt) => {
+                const m = L.marker(pt, {
+                  icon: L.divIcon({ className: "route-marker-pack",
+                    html: `<div style="font-size:22px;line-height:1;opacity:0.7;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.4));transform:translate(-50%,-100%);">📦</div>`,
+                    iconSize: [0, 0], iconAnchor: [0, 0],
+                  })
+                }).addTo(mapInstanceRef.current);
+                routeLayerRef.current.push(m);
+              });
 
-          // Dopasuj zoom — tylko za pierwszym razem
-          const allCoords = [...route.coordinates];
-          if (position) {
-            const vLat = position.coordinate?.latitude || position.latitude;
-            const vLng = position.coordinate?.longitude || position.longitude;
-            if (vLat && vLng) allCoords.push([vLat, vLng]);
+              lastRouteKeyRef.current = routeKey;
+              setRouteInfo({
+                kind: "real_missing",
+                distance: Math.round(planned.route.distance / 1000),
+                duration: Math.round(planned.route.duration / 60),
+                fracht: targetFracht,
+                loadLabel: planned.loadPoints.join(" → "),
+                unloadLabel: planned.unloadPoints.join(" → "),
+              });
+              mapInstanceRef.current.fitBounds(L.latLngBounds(planned.route.coordinates).pad(0.1));
+            }
           }
-          mapInstanceRef.current.fitBounds(L.latLngBounds(allCoords).pad(0.1));
+        } else {
+          // ── PLANOWANA trasa (OSRM) dla aktywnych zleceń ──
+          const planned = await buildPlanned(targetFracht);
+          if (planned) {
+            const polyline = L.polyline(planned.route.coordinates, {
+              color: "#3b82f6", weight: 5, opacity: 0.7, dashArray: "10 6",
+            }).addTo(mapInstanceRef.current);
+            routeLayerRef.current.push(polyline);
+
+            planned.geocoded.slice(0, planned.loadPoints.length).filter(Boolean).forEach((pt) => {
+              const m = L.marker(pt, {
+                icon: L.divIcon({ className: "route-marker-flag",
+                  html: `<div style="font-size:24px;line-height:1;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.4));transform:translate(-50%,-100%);">🚩</div>`,
+                  iconSize: [0, 0], iconAnchor: [0, 0],
+                })
+              }).addTo(mapInstanceRef.current);
+              routeLayerRef.current.push(m);
+            });
+            planned.geocoded.slice(planned.loadPoints.length).filter(Boolean).forEach((pt) => {
+              const m = L.marker(pt, {
+                icon: L.divIcon({ className: "route-marker-pack",
+                  html: `<div style="font-size:24px;line-height:1;filter:drop-shadow(0 2px 3px rgba(0,0,0,0.4));transform:translate(-50%,-100%);">📦</div>`,
+                  iconSize: [0, 0], iconAnchor: [0, 0],
+                })
+              }).addTo(mapInstanceRef.current);
+              routeLayerRef.current.push(m);
+            });
+
+            lastRouteKeyRef.current = routeKey;
+            setRouteInfo({
+              kind: "planned",
+              distance: Math.round(planned.route.distance / 1000),
+              duration: Math.round(planned.route.duration / 60),
+              fracht: targetFracht,
+              loadLabel: planned.loadPoints.join(" → "),
+              unloadLabel: planned.unloadPoints.join(" → "),
+            });
+
+            const allCoords = [...planned.route.coordinates];
+            if (position) {
+              const vLat = position.coordinate?.latitude || position.latitude;
+              const vLng = position.coordinate?.longitude || position.longitude;
+              if (vLat && vLng) allCoords.push([vLat, vLng]);
+            }
+            mapInstanceRef.current.fitBounds(L.latLngBounds(allCoords).pad(0.1));
+          }
         }
       } catch(e) {
         console.error("[GPS Route] error:", e);
@@ -6765,7 +6956,7 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
     };
 
     buildRoute();
-  }, [device, frachtyList]);
+  }, [device, frachtyList, selectedFracht?.id]);
 
   // Cleanup map on unmount
   useEffect(() => {
@@ -6786,30 +6977,38 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
       {routeLoading && (
         <div className="flex items-center gap-2 px-5 py-2 bg-blue-50 border-t border-blue-100">
           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-          <span className="text-xs text-blue-600">Wyznaczanie trasy zlecenia...</span>
+          <span className="text-xs text-blue-600">
+            {selectedFracht?.statusRozladunku === "rozladowano" ? "Pobieranie rzeczywistej trasy z Atlas..." : "Wyznaczanie trasy zlecenia..."}
+          </span>
         </div>
       )}
-      {routeInfo && (
-        <div className="px-5 py-3 bg-blue-50 border-t border-blue-100">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div className="flex items-center gap-3">
-              <span className="text-blue-600 font-bold text-sm">🗺️ Trasa zlecenia</span>
-              <span className="text-xs bg-white px-2 py-1 rounded-lg text-gray-600 font-medium">
-                📦 {routeInfo.loadLabel}
-              </span>
-              <span className="text-xs text-gray-400">→</span>
-              <span className="text-xs bg-white px-2 py-1 rounded-lg text-gray-600 font-medium">
-                🏁 {routeInfo.unloadLabel}
-              </span>
-            </div>
-            <div className="flex items-center gap-4 text-sm">
-              <span className="font-bold text-blue-700">{routeInfo.distance} km</span>
-              <span className="text-gray-500">{Math.floor(routeInfo.duration / 60)}h {routeInfo.duration % 60}min</span>
-              {routeInfo.fracht?.dataZaladunku && <span className="text-xs text-gray-400">Załadunek: {routeInfo.fracht.dataZaladunku}</span>}
+      {routeInfo && (() => {
+        const palette = routeInfo.kind === "real" ? { bg: "#f0fdf4", border: "#bbf7d0", text: "#15803d", label: "✅ Rzeczywista trasa", emoji: "🛣️" }
+                     : routeInfo.kind === "real_missing" ? { bg: "#f9fafb", border: "#e5e7eb", text: "#6b7280", label: "⚠️ Brak danych historycznych — pokazuję trasę planowaną", emoji: "🗺️" }
+                     : { bg: "#eff6ff", border: "#bfdbfe", text: "#1d4ed8", label: "🗺️ Trasa planowana", emoji: "🗺️" };
+        return (
+          <div style={{ padding: "12px 20px", background: palette.bg, borderTop: `1px solid ${palette.border}` }}>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-3 flex-wrap">
+                <span style={{ fontSize: 13, fontWeight: 700, color: palette.text }}>{palette.label}</span>
+                <span className="text-xs bg-white px-2 py-1 rounded-lg text-gray-600 font-medium">
+                  🚩 {routeInfo.loadLabel}
+                </span>
+                <span className="text-xs text-gray-400">→</span>
+                <span className="text-xs bg-white px-2 py-1 rounded-lg text-gray-600 font-medium">
+                  📦 {routeInfo.unloadLabel}
+                </span>
+              </div>
+              <div className="flex items-center gap-4 text-sm">
+                <span style={{ fontWeight: 700, color: palette.text }}>{routeInfo.distance} km</span>
+                <span className="text-gray-500">{Math.floor(routeInfo.duration / 60)}h {routeInfo.duration % 60}min</span>
+                {routeInfo.pointsCount != null && <span className="text-xs text-gray-400">{routeInfo.pointsCount} punktów</span>}
+                {routeInfo.fracht?.dataZaladunku && <span className="text-xs text-gray-400">Załadunek: {routeInfo.fracht.dataZaladunku}</span>}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
       {/* CAN data bar under map — dane mogą być w position.can.* lub position.* */}
       {position && (() => {
         const can = position.can || {};
