@@ -733,6 +733,317 @@ function TripSummaryPanel({ fracht, vehicle, driverEvents = [], fuelEntries = []
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// CZAS PRACY KIEROWCY — przepisy 561/2006 + Pakiet Mobilności
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Wszystkie limity w minutach
+const REGULATION = {
+  DAILY_DRIVE_REGULAR: 9 * 60,       // 9h dzienny regularny
+  DAILY_DRIVE_EXTENDED: 10 * 60,     // 10h — max 2× w tygodniu
+  EXTENDED_PER_WEEK: 2,
+  CONTINUOUS_DRIVE: 4.5 * 60,        // 4h 30min bez przerwy → przerwa 45min
+  BREAK_MIN: 45,                     // minimalna przerwa 45min
+  BREAK_SPLIT_FIRST: 15,             // pierwsza część podzielonej
+  BREAK_SPLIT_SECOND: 30,            // druga część
+  WEEKLY_DRIVE: 56 * 60,             // 56h tygodniowo
+  BIWEEKLY_DRIVE: 90 * 60,           // 90h w 2 kolejnych tygodniach
+  DAILY_REST_REGULAR: 11 * 60,       // 11h regularny odpoczynek
+  DAILY_REST_REDUCED: 9 * 60,        // 9h skrócony
+  DAILY_REST_REDUCED_PER_WEEK: 3,    // max 3× między tygodniowymi
+  DAILY_REST_SPLIT_FIRST: 3 * 60,    // 3h + 9h = podzielony
+  DAILY_REST_SPLIT_SECOND: 9 * 60,
+  WEEKLY_REST_REGULAR: 45 * 60,      // 45h regularny tygodniowy
+  WEEKLY_REST_REDUCED: 24 * 60,      // 24h skrócony tygodniowy
+  WEEKLY_REST_REDUCED_PER_2WEEKS: 2, // max 2× w 2 kolejne tygodnie
+  MIN_WEEKLY_REST: 35 * 60,          // min 35h w każdym tygodniu
+  WORK_TIME_WEEKLY_AVG: 48 * 60,     // średnio 48h/tydz w okresie rozlicz.
+  RETURN_TO_BASE_DAYS: 28,           // Pakiet Mobilności: powrót co 28 dni
+};
+
+// Typy aktywności
+const ACTIVITY_TYPES = {
+  drive: { label: "Jazda",          icon: "🚛", color: "#2563eb", bg: "#eff6ff" },
+  work:  { label: "Inna praca",     icon: "🔧", color: "#f59e0b", bg: "#fffbeb" },
+  avail: { label: "Dyspozycyjność", icon: "⏱",  color: "#64748b", bg: "#f8fafc" },
+  rest:  { label: "Odpoczynek",     icon: "🛏",  color: "#22c55e", bg: "#f0fdf4" },
+};
+
+// Helper: dodaj minuty do Date
+function addMin(d, min) { return new Date(d.getTime() + min * 60000); }
+function minBetween(a, b) { return Math.max(0, Math.round((b - a) / 60000)); }
+
+// Format liczby minut na "Xh Ymin" / "Ymin"
+function fmtMin(m) {
+  if (m == null || !isFinite(m)) return "—";
+  if (m < 0) m = 0;
+  const h = Math.floor(m / 60);
+  const mm = Math.round(m % 60);
+  if (h === 0) return `${mm} min`;
+  if (mm === 0) return `${h}h`;
+  return `${h}h ${mm}min`;
+}
+
+// Format zgodny z mockupem — "0h 43min"
+function fmtHM(m) {
+  if (m == null || !isFinite(m)) return "—";
+  if (m < 0) m = 0;
+  const h = Math.floor(m / 60);
+  const mm = Math.round(m % 60);
+  return `${h}h ${String(mm).padStart(2, "0")}min`;
+}
+
+// Konwertuj segment do obiektu z liczonymi polami
+function normalizeSegment(s, now) {
+  const startTs = s.startTs || s.start;
+  const endTs = s.endTs || s.end || (now ? now.toISOString() : null);
+  const startMs = new Date(startTs).getTime();
+  const endMs = new Date(endTs).getTime();
+  return {
+    ...s,
+    startMs,
+    endMs,
+    durMin: Math.max(0, Math.round((endMs - startMs) / 60000)),
+    type: s.type || "avail",
+    isOpen: !s.endTs && !s.end,
+  };
+}
+
+// Oblicz sumy aktywności w danym zakresie
+function sumByType(segments, fromMs, toMs) {
+  const sums = { drive: 0, work: 0, avail: 0, rest: 0 };
+  for (const s of segments) {
+    const sMs = Math.max(s.startMs, fromMs);
+    const eMs = Math.min(s.endMs, toMs);
+    if (eMs <= sMs) continue;
+    const min = Math.round((eMs - sMs) / 60000);
+    sums[s.type] = (sums[s.type] || 0) + min;
+  }
+  return sums;
+}
+
+// Czas od ostatniej przerwy (min 45min odpoczynku lub 30min ciągłego rest/avail)
+// Zwraca: minuty ciągłej jazdy od momentu ostatniej przerwy
+function continuousDriveSince(segments, now) {
+  const nowMs = now.getTime();
+  // Szukaj ostatniej przerwy — segment typu "rest" trwający >= 45 min
+  // (upraszczenie MVP: rest trwający >=45min traktujemy jako "reset" licznika 4.5h)
+  let cutoffMs = 0;
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const s = segments[i];
+    if (s.type === "rest" && s.durMin >= 45 && s.endMs <= nowMs) {
+      cutoffMs = s.endMs;
+      break;
+    }
+  }
+  // Sumuj tylko "drive" po cutoffMs
+  let total = 0;
+  for (const s of segments) {
+    if (s.type !== "drive") continue;
+    const sMs = Math.max(s.startMs, cutoffMs);
+    const eMs = Math.min(s.endMs, nowMs);
+    if (eMs > sMs) total += Math.round((eMs - sMs) / 60000);
+  }
+  return total;
+}
+
+// Granica "doby kierowcy" — 24h cofa się od punktu obecnego lub od ostatniego 11h+ odpoczynku
+function lastDailyRestEnd(segments, now) {
+  const nowMs = now.getTime();
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const s = segments[i];
+    if (s.type === "rest" && s.durMin >= REGULATION.DAILY_REST_REDUCED && s.endMs <= nowMs) {
+      return s.endMs;
+    }
+  }
+  // fallback: cofnij 24h
+  return nowMs - 24 * 3600000;
+}
+
+// Granica "tygodnia" — od ostatniego 24h+ odpoczynku lub poniedziałek
+function lastWeeklyRestEnd(segments, now) {
+  const nowMs = now.getTime();
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const s = segments[i];
+    if (s.type === "rest" && s.durMin >= REGULATION.WEEKLY_REST_REDUCED && s.endMs <= nowMs) {
+      return s.endMs;
+    }
+  }
+  // fallback: ostatni poniedziałek 00:00
+  const d = new Date(nowMs);
+  const day = d.getDay(); // 0=nd, 1=pn
+  const diffToMonday = day === 0 ? 6 : day - 1;
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - diffToMonday);
+  return d.getTime();
+}
+
+// ── GŁÓWNA FUNKCJA: compliance dla kierowcy ──
+// segments: tablica surowych segmentów {startTs, endTs, type, ...}
+// periodStart: ISO date stringu startu 28-dniowego okresu
+// now: Date (aktualny moment)
+// Zwraca obiekt z limitami + planem do przodu
+function computeDriverCompliance(rawSegments = [], periodStart = null, now = new Date()) {
+  const segments = rawSegments
+    .map(s => normalizeSegment(s, now))
+    .sort((a, b) => a.startMs - b.startMs);
+
+  const nowMs = now.getTime();
+  const current = segments[segments.length - 1] || null;
+
+  // Zakres "doby kierowcy" — od ostatniego odpoczynku dziennego
+  const dayStart = lastDailyRestEnd(segments, now);
+  const daySums = sumByType(segments, dayStart, nowMs);
+
+  // Zakres tygodniowy — od ostatniego odpoczynku tygodniowego
+  const weekStart = lastWeeklyRestEnd(segments, now);
+  const weekSums = sumByType(segments, weekStart, nowMs);
+
+  // Dwutygodniowy — 14 dni w tył
+  const biweekStart = nowMs - 14 * 24 * 3600000;
+  const biweekSums = sumByType(segments, biweekStart, nowMs);
+
+  // Jazda ciągła od ostatniej przerwy
+  const continuousDrive = continuousDriveSince(segments, now);
+
+  // 28-dniowy okres od periodStart
+  const period28 = (() => {
+    if (!periodStart) return null;
+    const startMs = new Date(periodStart).getTime();
+    if (!isFinite(startMs)) return null;
+    const deadlineMs = startMs + REGULATION.RETURN_TO_BASE_DAYS * 24 * 3600000;
+    const daysPassed = Math.floor((nowMs - startMs) / (24 * 3600000));
+    const daysLeft = Math.max(0, REGULATION.RETURN_TO_BASE_DAYS - daysPassed);
+    return { startMs, deadlineMs, daysPassed, daysLeft };
+  })();
+
+  // Liczba użytych 10h dni w bieżącym tygodniu (jazda >= 9h 01min)
+  let extendedDaysUsed = 0;
+  {
+    const dayMs = 24 * 3600000;
+    for (let t = weekStart; t < nowMs; t += dayMs) {
+      const dSums = sumByType(segments, t, Math.min(t + dayMs, nowMs));
+      if (dSums.drive > 9 * 60) extendedDaysUsed++;
+    }
+  }
+
+  // Czas pracy w tym tygodniu (drive + work) dla średniej 48h
+  const weekWorkTime = weekSums.drive + weekSums.work;
+
+  // Stan aktualny
+  const currentStateType = current?.isOpen ? current.type : null;
+
+  return {
+    now: nowMs,
+    segments,
+    current,
+    currentStateType,
+    continuousDrive,
+    daily: {
+      drive: daySums.drive,
+      work: daySums.work,
+      avail: daySums.avail,
+      rest: daySums.rest,
+      limit: REGULATION.DAILY_DRIVE_REGULAR,
+      limitExtended: REGULATION.DAILY_DRIVE_EXTENDED,
+      extendedDaysUsed,
+      extendedDaysAllowed: REGULATION.EXTENDED_PER_WEEK,
+      start: dayStart,
+    },
+    weekly: {
+      drive: weekSums.drive,
+      work: weekSums.work,
+      workTime: weekWorkTime,
+      limit: REGULATION.WEEKLY_DRIVE,
+      limitWorkTime: REGULATION.WORK_TIME_WEEKLY_AVG,
+      start: weekStart,
+    },
+    biweekly: {
+      drive: biweekSums.drive,
+      limit: REGULATION.BIWEEKLY_DRIVE,
+      start: biweekStart,
+    },
+    period28,
+  };
+}
+
+// ── PLAN DO PRZODU — co i kiedy powinno się wydarzyć ──
+function computeDriverPlan(compliance, now = new Date()) {
+  if (!compliance) return null;
+  const nowMs = now.getTime();
+
+  // 1. Następna obligatoryjna przerwa 45 min — gdy jazda ciągła osiągnie 4h 30min
+  const driveToBreak = Math.max(0, REGULATION.CONTINUOUS_DRIVE - compliance.continuousDrive);
+  const nextBreakMs = nowMs + driveToBreak * 60000;
+  const breakEndMs = nextBreakMs + REGULATION.BREAK_MIN * 60000;
+
+  // 2. Koniec jazdy dziennej — gdy osiągniemy limit 9h (lub 10h jeśli dozwolone)
+  const canExtend = compliance.daily.extendedDaysUsed < compliance.daily.extendedDaysAllowed;
+  const dailyLimit = canExtend ? compliance.daily.limitExtended : compliance.daily.limit;
+  const driveToDailyEnd = Math.max(0, dailyLimit - compliance.daily.drive);
+  // Uwzględnij pośrednią przerwę (jeśli jazda > 4.5h, dodaj 45min)
+  const willNeedBreak = driveToDailyEnd > driveToBreak;
+  const endOfDayMs = nowMs + driveToDailyEnd * 60000 + (willNeedBreak ? REGULATION.BREAK_MIN * 60000 : 0);
+
+  // 3. Odpoczynek dzienny 11h (lub 9h jeśli skrócony)
+  const dailyRestEndMs = endOfDayMs + REGULATION.DAILY_REST_REGULAR * 60000;
+
+  // 4. Odpoczynek tygodniowy — ile godzin zostało do końca bieżącego tygodnia (regularny)
+  //    Prosty model: aktualny tydzień kończy się 6 dni od weekStart, o 00:00 dnia 7.
+  const weekStartDate = new Date(compliance.weekly.start);
+  const weekEndDate = new Date(weekStartDate);
+  weekEndDate.setDate(weekStartDate.getDate() + 6);
+  weekEndDate.setHours(0, 0, 0, 0);
+  const weeklyRestStartMs = weekEndDate.getTime();
+  const weeklyRestEndMs = weeklyRestStartMs + REGULATION.WEEKLY_REST_REGULAR * 60000;
+
+  // 5. Powrót do bazy
+  const returnToBase = compliance.period28 ? {
+    deadlineMs: compliance.period28.deadlineMs,
+    daysLeft: compliance.period28.daysLeft,
+  } : null;
+
+  return {
+    nextBreak: {
+      driveMinToGo: driveToBreak,
+      atMs: nextBreakMs,
+      endMs: breakEndMs,
+      durationMin: REGULATION.BREAK_MIN,
+    },
+    endOfDay: {
+      driveMinToGo: driveToDailyEnd,
+      atMs: endOfDayMs,
+      extendedAllowed: canExtend,
+      dailyLimit,
+    },
+    dailyRest: {
+      startMs: endOfDayMs,
+      endMs: dailyRestEndMs,
+      durationMin: REGULATION.DAILY_REST_REGULAR,
+    },
+    weeklyRest: {
+      startMs: weeklyRestStartMs,
+      endMs: weeklyRestEndMs,
+      durationMin: REGULATION.WEEKLY_REST_REGULAR,
+    },
+    returnToBase,
+  };
+}
+
+// Format timestamp → "HH:MM" lub "dd.MM HH:MM"
+function fmtTimeShort(ms) {
+  if (!ms) return "—";
+  const d = new Date(ms);
+  const today = new Date();
+  const isToday = d.toDateString() === today.toDateString();
+  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+  const isTomorrow = d.toDateString() === tomorrow.toDateString();
+  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  if (isToday) return hm;
+  if (isTomorrow) return `jutro ${hm}`;
+  return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")} ${hm}`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1249,6 +1560,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   const [chatUnreadMsgCount, setChatUnreadMsgCount] = useState(0); // ile wiadomości łącznie nieprzeczytanych
   const [operacyjne, setOperacyjne] = useState([]);
   const [driverEvents, setDriverEvents] = useState([]);
+  const [driverActivities, setDriverActivities] = useState([]);
   const [fuelEntries, setFuelEntries] = useState([]);
   const [driverDocs, setDriverDocs] = useState([]);
   const [pauzy, setPauzy] = useState([]);
@@ -1363,6 +1675,14 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     const unsub = onSnapshot(collection(db, "operacyjne"), (snap) => {
       setOperacyjne(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }, (err) => console.error("operacyjne onSnapshot error", err));
+    return () => unsub();
+  }, []);
+
+  // ── DRIVER ACTIVITIES — segmenty czasu pracy (jazda / praca / dyspozycyjność / odpoczynek) ──
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "driverActivities"), (snap) => {
+      setDriverActivities(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error("driverActivities onSnapshot error", err));
     return () => unsub();
   }, []);
 
@@ -2428,6 +2748,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
         pauzy={pauzy.filter(p => myVehicle && p.vehicleId === myVehicle.id)}
         operacyjne={myOperacyjne}
         driverEvents={driverEvents}
+        driverActivities={driverActivities.filter(a => a.driverEmail === user.email)}
         fuelEntries={myFuelEntries}
         driverDocs={myDriverDocs}
         showToast={showToast}
@@ -3632,7 +3953,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             <div>
               <h2 className="text-xl font-bold text-gray-900 mb-1">GPS / Monitoring</h2>
               <p className="text-sm text-gray-400 mb-5">Atlas API · widziszwszystko.eu</p>
-              <GpsTab vehicles={vehicles} frachtyList={frachtyList} driverEvents={driverEvents} fuelEntries={fuelEntries} showToast={showToast} />
+              <GpsTab vehicles={vehicles} frachtyList={frachtyList} driverEvents={driverEvents} driverActivities={driverActivities} fuelEntries={fuelEntries} showToast={showToast} />
             </div>
           )}
 
@@ -6074,7 +6395,7 @@ function EmailStatusTab({ showToast }) {
 // Sekcje: Mapa online, Kilometry/CAN, Trasy, Karta kierowcy, Pliki DDD
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function GpsTab({ vehicles, frachtyList = [], driverEvents = [], fuelEntries = [], showToast }) {
+function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivities = [], fuelEntries = [], showToast }) {
   const [gpsDevices, setGpsDevices] = useState([]);
   const [gpsPositions, setGpsPositions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -6135,6 +6456,76 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], fuelEntries = [
     return () => { if (refreshRef.current) clearInterval(refreshRef.current); };
   }, [autoRefresh]);
 
+  // ── AUTO-DETECTION aktywności kierowców z GPS ──
+  // Dla każdego pojazdu z aktywnym kierowcą: prędkość > 3 km/h → drive, else rest
+  // Uruchamiane po każdym odświeżeniu pozycji (30s). Zamyka stare segmenty, otwiera nowe.
+  const autoDetectRef = useRef({ inProgress: false, lastRun: 0 });
+  useEffect(() => {
+    if (!gpsPositions || gpsPositions.length === 0) return;
+    if (!gpsDevices || gpsDevices.length === 0) return;
+    // Rate limit: max raz na 25s (pozwala pominąć szybkie re-rendery)
+    const nowMs = Date.now();
+    if (autoDetectRef.current.inProgress) return;
+    if (nowMs - autoDetectRef.current.lastRun < 25000) return;
+    autoDetectRef.current.inProgress = true;
+    autoDetectRef.current.lastRun = nowMs;
+
+    (async () => {
+      try {
+        for (const dev of gpsDevices) {
+          const vehicle = dev.fleetVehicle;
+          if (!vehicle) continue;
+          const activeDriver = (vehicle.driverHistory || []).find(d => !d.to);
+          const driverEmail = activeDriver?.email;
+          if (!driverEmail) continue; // brak aktywnego kierowcy = skip
+
+          const devId = String(dev.deviceId || dev.id);
+          const pos = gpsPositions.find(p => String(p.deviceId || p.id) === devId);
+          if (!pos) continue;
+
+          const speed = Number(pos.speed) || 0;
+          const detectedType = speed > 3 ? "drive" : "rest";
+
+          // Znajdź ostatni otwarty segment dla tego kierowcy
+          const driverSegs = driverActivities
+            .filter(a => a.driverEmail === driverEmail)
+            .sort((a, b) => (b.startTs || "").localeCompare(a.startTs || ""));
+          const openSeg = driverSegs.find(a => !a.endTs);
+
+          if (!openSeg) {
+            // Brak otwartego segmentu — otwórz nowy
+            await addDoc(collection(db, "driverActivities"), {
+              driverEmail,
+              vehicleId: vehicle.id,
+              type: detectedType,
+              startTs: new Date(nowMs).toISOString(),
+              endTs: null,
+              source: "auto_gps",
+            });
+          } else if (openSeg.type !== detectedType && openSeg.source === "auto_gps") {
+            // Typ się zmienił — zamknij stary, otwórz nowy (tylko dla auto_gps, nie nadpisuj ręcznych)
+            await updateDoc(doc(db, "driverActivities", openSeg.id), {
+              endTs: new Date(nowMs).toISOString(),
+            });
+            await addDoc(collection(db, "driverActivities"), {
+              driverEmail,
+              vehicleId: vehicle.id,
+              type: detectedType,
+              startTs: new Date(nowMs).toISOString(),
+              endTs: null,
+              source: "auto_gps",
+            });
+          }
+          // Jeśli typ się zgadza albo segment ręczny — nic nie rób
+        }
+      } catch (e) {
+        console.warn("[Auto-detect activity] error:", e?.message || e);
+      } finally {
+        autoDetectRef.current.inProgress = false;
+      }
+    })();
+  }, [gpsPositions, gpsDevices, driverActivities]);
+
   // ── Helpers ──
   const getDevicePosition = (deviceId) => gpsPositions.find(p => String(p.deviceId || p.id) === String(deviceId));
   const selectedDev = gpsDevices.find(d => (d.deviceId || d.id) === selectedDevice);
@@ -6156,6 +6547,7 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], fuelEntries = [
     { id: "trasy", label: "Trasy", icon: "🛣️" },
     { id: "karta", label: "Karta kierowcy", icon: "💳" },
     { id: "ddd", label: "Pliki DDD", icon: "💾" },
+    { id: "czas-pracy", label: "Czas pracy", icon: "⏱️" },
   ];
 
   if (loading) {
@@ -6303,6 +6695,7 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], fuelEntries = [
             {subTab === "trasy" && <GpsTrasySection device={selectedDev} showToast={showToast} />}
             {subTab === "karta" && <GpsKartaSection device={selectedDev} showToast={showToast} />}
             {subTab === "ddd" && <GpsDddSection device={selectedDev} showToast={showToast} />}
+            {subTab === "czas-pracy" && <GpsCzasPracySection device={selectedDev} position={selectedPos} driverActivities={driverActivities} showToast={showToast} />}
           </>
         ) : (
           <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center">
@@ -7252,6 +7645,308 @@ function GpsTrasySection({ device, showToast }) {
   );
 }
 
+// ── Sekcja: CZAS PRACY KIEROWCY (admin) ──
+function GpsCzasPracySection({ device, position, driverActivities = [], showToast }) {
+  const [, forceTick] = useState(0);
+  // Tick co 30s żeby liczniki live się odświeżały
+  useEffect(() => {
+    const t = setInterval(() => forceTick(x => x + 1), 30000);
+    return () => clearInterval(t);
+  }, []);
+
+  const vehicle = device?.fleetVehicle;
+  const activeDriver = (vehicle?.driverHistory || []).find(d => !d.to);
+  const driverEmail = activeDriver?.email;
+  const driverName = activeDriver?.name || driverEmail || "—";
+
+  if (!vehicle || !driverEmail) {
+    return (
+      <div className="bg-white rounded-2xl border border-gray-100 p-8 text-center">
+        <div className="text-4xl mb-3">👤</div>
+        <div className="text-sm text-gray-600">Brak aktywnego kierowcy przypisanego do tego pojazdu.</div>
+        <div className="text-xs text-gray-400 mt-2">Dodaj kierowcę w panelu edycji pojazdu (sekcja Historia kierowców).</div>
+      </div>
+    );
+  }
+
+  // Segmenty dla tego kierowcy
+  const mySegs = driverActivities.filter(a => a.driverEmail === driverEmail);
+
+  // periodStart — znajdź ostatni segment rozpoczynający 28-dniowy okres (uproszczenie MVP: najstarszy segment tego kierowcy w bazie)
+  const periodStart = (() => {
+    if (mySegs.length === 0) return null;
+    const sorted = [...mySegs].sort((a, b) => (a.startTs || "").localeCompare(b.startTs || ""));
+    return sorted[0]?.startTs;
+  })();
+
+  const compliance = computeDriverCompliance(mySegs, periodStart, new Date());
+  const plan = computeDriverPlan(compliance);
+
+  const currentMeta = ACTIVITY_TYPES[compliance.currentStateType] || null;
+  const speed = Number(position?.speed) || 0;
+
+  // Progress bar helper
+  const Bar = ({ val, max, color = "blue" }) => {
+    const pct = Math.min(100, Math.round((val / max) * 100));
+    const fills = { blue: "#3b82f6", yellow: "#f59e0b", red: "#ef4444", green: "#22c55e", violet: "#7c3aed" };
+    return (
+      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: fills[color] }}></div>
+      </div>
+    );
+  };
+
+  // Kolor dla paska jazdy ciągłej (ostrzeżenie im bliżej 4.5h)
+  const continuousColor = compliance.continuousDrive > REGULATION.CONTINUOUS_DRIVE ? "red"
+    : compliance.continuousDrive > REGULATION.CONTINUOUS_DRIVE * 0.85 ? "yellow"
+    : "blue";
+
+  return (
+    <div className="space-y-4">
+      {/* HEADER */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl" style={{ background: "#ede9fe", color: "#7c3aed" }}>🚛</div>
+            <div>
+              <div className="text-sm font-bold text-gray-900">{vehicle.plate} · {driverName}</div>
+              <div className="text-xs text-gray-400">{vehicle.brand} {vehicle.year} · Atlas device #{device?.deviceId || device?.id}</div>
+            </div>
+          </div>
+          {compliance.period28 && (
+            <div className="text-right">
+              <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Okres 28-dniowy</div>
+              <div className="text-xs text-gray-600 font-semibold">
+                Dzień {compliance.period28.daysPassed} / {REGULATION.RETURN_TO_BASE_DAYS}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ROW 1: 4 KPI LIVE */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {/* Status */}
+        <div className="bg-white rounded-2xl border border-gray-100 p-4">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Status</span>
+            {currentMeta && <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: currentMeta.color }}></span>}
+          </div>
+          <div className="text-xl font-extrabold text-gray-900 mb-0.5">
+            {currentMeta ? `${currentMeta.icon} ${currentMeta.label.toUpperCase()}` : "—"}
+          </div>
+          <div className="text-xs text-gray-500">
+            {compliance.current?.isOpen ? `od ${fmtTimeShort(compliance.current.startMs)}` : "brak aktywności"}
+            {speed > 0 && ` · ${Math.round(speed)} km/h`}
+          </div>
+        </div>
+
+        {/* Do przerwy */}
+        <div className="bg-white rounded-2xl border border-gray-100 p-4">
+          <div className="text-[10px] font-bold text-amber-700 uppercase tracking-wider mb-1">Do przerwy</div>
+          <div className="text-xl font-extrabold text-amber-900 tabular-nums mb-1">
+            {fmtHM(Math.max(0, REGULATION.CONTINUOUS_DRIVE - compliance.continuousDrive))}
+          </div>
+          <Bar val={compliance.continuousDrive} max={REGULATION.CONTINUOUS_DRIVE} color={continuousColor} />
+          <div className="text-[11px] text-gray-500 mt-1">
+            45 min o {plan ? fmtTimeShort(plan.nextBreak.atMs) : "—"}
+          </div>
+        </div>
+
+        {/* Jazda dzisiaj */}
+        <div className="bg-white rounded-2xl border border-gray-100 p-4">
+          <div className="text-[10px] font-bold text-blue-700 uppercase tracking-wider mb-1">Jazda dzisiaj</div>
+          <div className="text-xl font-extrabold text-gray-900 tabular-nums mb-1">
+            {fmtHM(compliance.daily.drive)} <span className="text-xs text-gray-400 font-normal">/ {fmtHM(compliance.daily.limit)}</span>
+          </div>
+          <Bar val={compliance.daily.drive} max={compliance.daily.limit} color="blue" />
+          <div className="text-[11px] text-gray-500 mt-1">
+            Koniec ok. {plan ? fmtTimeShort(plan.endOfDay.atMs) : "—"}
+          </div>
+        </div>
+
+        {/* Powrót do bazy */}
+        <div className="bg-white rounded-2xl border border-gray-100 p-4">
+          <div className="text-[10px] font-bold text-violet-700 uppercase tracking-wider mb-1">Powrót do bazy</div>
+          <div className="text-xl font-extrabold text-gray-900 tabular-nums mb-1">
+            {compliance.period28 ? compliance.period28.daysLeft : "—"} <span className="text-xs text-gray-400 font-normal">dni</span>
+          </div>
+          <Bar
+            val={compliance.period28 ? REGULATION.RETURN_TO_BASE_DAYS - compliance.period28.daysLeft : 0}
+            max={REGULATION.RETURN_TO_BASE_DAYS}
+            color="violet"
+          />
+          <div className="text-[11px] text-gray-500 mt-1">
+            Deadline: {compliance.period28 ? new Date(compliance.period28.deadlineMs).toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit" }) : "—"}
+          </div>
+        </div>
+      </div>
+
+      {/* ROW 2: Plan do przodu + sumy dnia */}
+      <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr] gap-4">
+        {/* Plan do przodu */}
+        <div className="bg-white rounded-2xl border border-gray-100 p-5">
+          <div className="text-sm font-bold text-gray-900 mb-3">📅 Plan do przodu (auto)</div>
+          {plan ? (
+            <div className="space-y-2">
+              <div className="flex items-start gap-2 p-2 rounded-lg" style={{ background: "#fffbeb", border: "1px solid #fde68a" }}>
+                <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#fef3c7" }}>⏸</div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-bold text-amber-900">Przerwa 45 min</div>
+                  <div className="text-[11px] text-amber-700">
+                    za {fmtHM(plan.nextBreak.driveMinToGo)} · {fmtTimeShort(plan.nextBreak.atMs)} → {fmtTimeShort(plan.nextBreak.endMs)}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-start gap-2 p-2 rounded-lg" style={{ background: "#eff6ff", border: "1px solid #bfdbfe" }}>
+                <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#dbeafe" }}>🛑</div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-bold text-blue-900">Koniec jazdy dziennej</div>
+                  <div className="text-[11px] text-blue-700">
+                    limit {fmtHM(plan.endOfDay.dailyLimit)} · {fmtTimeShort(plan.endOfDay.atMs)}
+                    {plan.endOfDay.extendedAllowed && compliance.daily.extendedDaysUsed === 0 && " (+10h dozwolone 2×/tydz)"}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-start gap-2 p-2 rounded-lg" style={{ background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
+                <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#dcfce7" }}>🛏</div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-bold text-green-900">Odpoczynek dzienny 11h</div>
+                  <div className="text-[11px] text-green-700">
+                    {fmtTimeShort(plan.dailyRest.startMs)} → {fmtTimeShort(plan.dailyRest.endMs)}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-start gap-2 p-2 rounded-lg" style={{ background: "#f5f3ff", border: "1px solid #c7d2fe" }}>
+                <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#ede9fe" }}>🛌</div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-bold text-violet-900">Odpoczynek tygodniowy 45h</div>
+                  <div className="text-[11px] text-violet-700">
+                    {fmtTimeShort(plan.weeklyRest.startMs)} → {fmtTimeShort(plan.weeklyRest.endMs)}
+                  </div>
+                </div>
+              </div>
+              {plan.returnToBase && (
+                <div className="flex items-start gap-2 p-2 rounded-lg" style={{ background: "#fef2f2", border: "1px solid #fecaca" }}>
+                  <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#fee2e2" }}>🏠</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-bold text-red-900">Powrót do bazy</div>
+                    <div className="text-[11px] text-red-700">
+                      do {new Date(plan.returnToBase.deadlineMs).toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit" })} · za {plan.returnToBase.daysLeft} dni
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-xs text-gray-400 italic">Brak danych do wyznaczenia planu</div>
+          )}
+        </div>
+
+        {/* Sumy dzisiejszego dnia */}
+        <div className="bg-white rounded-2xl border border-gray-100 p-5">
+          <div className="text-sm font-bold text-gray-900 mb-3">🗓️ Dzisiaj (od ostatniego odpoczynku)</div>
+          <div className="grid grid-cols-2 gap-2 mb-4">
+            {Object.entries(ACTIVITY_TYPES).map(([key, meta]) => (
+              <div key={key} className="p-3 rounded-lg" style={{ background: meta.bg }}>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="w-2 h-2 rounded-full" style={{ background: meta.color }}></span>
+                  <span className="text-[10px] font-semibold text-gray-500">{meta.label}</span>
+                </div>
+                <div className="text-base font-bold" style={{ color: meta.color }}>{fmtHM(compliance.daily[key])}</div>
+              </div>
+            ))}
+          </div>
+          <div className="text-[11px] text-gray-500">
+            Okres: {fmtTimeShort(compliance.daily.start)} → teraz
+          </div>
+        </div>
+      </div>
+
+      {/* ROW 3: Limity szczegółowe */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-5">
+        <div className="text-sm font-bold text-gray-900 mb-3">Limity compliance</div>
+        <div className="space-y-3">
+          <div>
+            <div className="flex items-center justify-between text-xs mb-1">
+              <span className="font-semibold text-gray-700">Jazda dzienna</span>
+              <span className="font-bold text-blue-700">{fmtHM(compliance.daily.drive)} / {fmtHM(compliance.daily.limit)} <span className="text-gray-400 font-normal">(10h wykorzystane {compliance.daily.extendedDaysUsed}/{compliance.daily.extendedDaysAllowed})</span></span>
+            </div>
+            <Bar val={compliance.daily.drive} max={compliance.daily.limit} color="blue" />
+          </div>
+          <div>
+            <div className="flex items-center justify-between text-xs mb-1">
+              <span className="font-semibold text-gray-700">Jazda ciągła (do przerwy 45min)</span>
+              <span className="font-bold" style={{ color: continuousColor === "red" ? "#b91c1c" : continuousColor === "yellow" ? "#a16207" : "#1d4ed8" }}>
+                {fmtHM(compliance.continuousDrive)} / {fmtHM(REGULATION.CONTINUOUS_DRIVE)}
+              </span>
+            </div>
+            <Bar val={compliance.continuousDrive} max={REGULATION.CONTINUOUS_DRIVE} color={continuousColor} />
+          </div>
+          <div>
+            <div className="flex items-center justify-between text-xs mb-1">
+              <span className="font-semibold text-gray-700">Jazda tygodniowa (bieżący tydzień)</span>
+              <span className="font-bold text-blue-700">{fmtHM(compliance.weekly.drive)} / {fmtHM(compliance.weekly.limit)}</span>
+            </div>
+            <Bar val={compliance.weekly.drive} max={compliance.weekly.limit} color="blue" />
+          </div>
+          <div>
+            <div className="flex items-center justify-between text-xs mb-1">
+              <span className="font-semibold text-gray-700">Jazda dwutygodniowa</span>
+              <span className="font-bold text-blue-700">{fmtHM(compliance.biweekly.drive)} / {fmtHM(compliance.biweekly.limit)}</span>
+            </div>
+            <Bar val={compliance.biweekly.drive} max={compliance.biweekly.limit} color="blue" />
+          </div>
+          <div>
+            <div className="flex items-center justify-between text-xs mb-1">
+              <span className="font-semibold text-gray-700">Czas pracy (48h/tydz śr., jazda + inna praca)</span>
+              <span className="font-bold text-amber-700">{fmtHM(compliance.weekly.workTime)} / {fmtHM(REGULATION.WORK_TIME_WEEKLY_AVG)}</span>
+            </div>
+            <Bar val={compliance.weekly.workTime} max={REGULATION.WORK_TIME_WEEKLY_AVG} color="yellow" />
+          </div>
+        </div>
+      </div>
+
+      {/* Historia aktywności */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-sm font-bold text-gray-900">Historia aktywności (ostatnie 24h)</div>
+          <div className="text-[11px] text-gray-400">Auto-wykrywanie z GPS + kliknięcia kierowcy</div>
+        </div>
+        {(() => {
+          const nowMs = Date.now();
+          const from = nowMs - 24 * 3600000;
+          const items = compliance.segments
+            .filter(s => s.endMs > from)
+            .sort((a, b) => b.startMs - a.startMs);
+          if (items.length === 0) {
+            return <div className="text-xs text-gray-400 italic text-center py-4">Brak aktywności w ostatnich 24h</div>;
+          }
+          return (
+            <div className="space-y-1">
+              {items.slice(0, 20).map(s => {
+                const meta = ACTIVITY_TYPES[s.type] || { label: s.type, color: "#6b7280" };
+                const srcLabel = s.source === "auto_gps" ? "auto GPS" : s.source === "manual" ? "kierowca ręcznie" : s.source === "fracht_event" ? "fracht event" : (s.source || "—");
+                return (
+                  <div key={s.id} className="flex items-center gap-3 text-xs py-1.5 border-b border-gray-50">
+                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: meta.color }}></span>
+                    <span className="font-mono text-gray-500 w-28 flex-shrink-0">
+                      {fmtTimeShort(s.startMs)} – {s.isOpen ? "teraz" : fmtTimeShort(s.endMs)}
+                    </span>
+                    <span className="font-semibold text-gray-700 flex-shrink-0">{meta.label}</span>
+                    <span className="text-gray-400 flex-shrink-0">{fmtHM(s.durMin)}</span>
+                    <span className="ml-auto text-[10px] text-gray-400 flex-shrink-0">{srcLabel}</span>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
+      </div>
+    </div>
+  );
+}
+
 // ── Sekcja: KARTA KIEROWCY ──
 function GpsKartaSection({ device, showToast }) {
   const [kartaData, setKartaData] = useState(null);
@@ -8145,9 +8840,225 @@ const STATUS_META = {
 };
 
 // ═══════════════════════════════════════════════════════════════════
+//  PANEL KIEROWCY — dashboard czasu pracy (MOBILE)
+// ═══════════════════════════════════════════════════════════════════
+function DriverCzasPracyDashboard({ user, vehicle, driverActivities = [], showToast }) {
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => forceTick(x => x + 1), 30000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Manualna zmiana stanu
+  const setActivity = async (type) => {
+    try {
+      // Zamknij ostatni otwarty segment tego kierowcy
+      const mine = driverActivities
+        .filter(a => a.driverEmail === user.email)
+        .sort((a, b) => (b.startTs || "").localeCompare(a.startTs || ""));
+      const openSeg = mine.find(a => !a.endTs);
+      const nowIso = new Date().toISOString();
+      if (openSeg) {
+        if (openSeg.type === type) { showToast("⚙ Stan bez zmian"); return; }
+        await updateDoc(doc(db, "driverActivities", openSeg.id), { endTs: nowIso });
+      }
+      await addDoc(collection(db, "driverActivities"), {
+        driverEmail: user.email,
+        vehicleId: vehicle?.id || null,
+        type,
+        startTs: nowIso,
+        endTs: null,
+        source: "manual",
+      });
+      showToast(`✅ ${ACTIVITY_TYPES[type]?.label || type}`);
+    } catch (e) {
+      console.error("setActivity error", e);
+      showToast("❌ Błąd zapisu");
+    }
+  };
+
+  const mySegs = driverActivities.filter(a => a.driverEmail === user.email);
+  const periodStart = (() => {
+    if (mySegs.length === 0) return null;
+    const sorted = [...mySegs].sort((a, b) => (a.startTs || "").localeCompare(b.startTs || ""));
+    return sorted[0]?.startTs;
+  })();
+
+  const compliance = computeDriverCompliance(mySegs, periodStart, new Date());
+  const plan = computeDriverPlan(compliance);
+  const currentMeta = ACTIVITY_TYPES[compliance.currentStateType] || null;
+
+  // Status color dla licznika do przerwy
+  const breakLeft = Math.max(0, REGULATION.CONTINUOUS_DRIVE - compliance.continuousDrive);
+  const breakStatus = breakLeft < 30 ? "alarm" : breakLeft < 60 ? "warn" : "ok";
+  const breakPalette = {
+    ok:    { bg: "#fffbeb", border: "#fde68a", text: "#92400e", fill: "#f59e0b" },
+    warn:  { bg: "#fef2f2", border: "#fecaca", text: "#b91c1c", fill: "#ef4444" },
+    alarm: { bg: "#fef2f2", border: "#fca5a5", text: "#991b1b", fill: "#dc2626" },
+  }[breakStatus];
+
+  return (
+    <div style={{ padding: 0 }}>
+      {/* STATUS AKTUALNY */}
+      <div style={{ background: "#fff", borderRadius: 16, padding: 16, marginBottom: 12, border: `2px solid ${currentMeta?.color || "#e5e7eb"}` }}>
+        <div className="flex items-center gap-3">
+          <div style={{ width: 12, height: 12, borderRadius: 6, background: currentMeta?.color || "#9ca3af", animation: "pulse 2s infinite" }}></div>
+          <div className="flex-1">
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>Status aktualny</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#111827" }}>
+              {currentMeta ? `${currentMeta.icon} ${currentMeta.label.toUpperCase()}` : "— BRAK STANU"}
+            </div>
+            <div style={{ fontSize: 11, color: "#6b7280" }}>
+              {compliance.current?.isOpen ? `od ${fmtTimeShort(compliance.current.startMs)} (${fmtHM(compliance.current.durMin)})` : "Kliknij przycisk poniżej żeby rozpocząć"}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* LICZNIK DO PRZERWY */}
+      <div style={{ background: breakPalette.bg, border: `2px solid ${breakPalette.border}`, borderRadius: 16, padding: 16, marginBottom: 12 }}>
+        <div className="flex items-center justify-between" style={{ marginBottom: 6 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: breakPalette.text, textTransform: "uppercase", letterSpacing: 0.5 }}>⏰ Do obowiązkowej przerwy 45 min</div>
+        </div>
+        <div style={{ fontSize: 32, fontWeight: 800, color: breakPalette.text, lineHeight: 1.1, marginBottom: 8, fontVariantNumeric: "tabular-nums" }}>
+          {fmtHM(breakLeft)}
+        </div>
+        <div style={{ height: 8, background: "rgba(0,0,0,0.05)", borderRadius: 4, overflow: "hidden", marginBottom: 8 }}>
+          <div style={{
+            height: "100%", borderRadius: 4, background: breakPalette.fill,
+            width: `${Math.min(100, Math.round((compliance.continuousDrive / REGULATION.CONTINUOUS_DRIVE) * 100))}%`,
+          }}></div>
+        </div>
+        <div className="flex items-center justify-between" style={{ fontSize: 11, color: breakPalette.text }}>
+          <span>Jazda ciągła: {fmtHM(compliance.continuousDrive)} / {fmtHM(REGULATION.CONTINUOUS_DRIVE)}</span>
+          <span style={{ fontWeight: 700 }}>Przerwa ok. {plan ? fmtTimeShort(plan.nextBreak.atMs) : "—"}</span>
+        </div>
+      </div>
+
+      {/* DZISIAJ - 4 KPI */}
+      <div style={{ background: "#fff", borderRadius: 16, padding: 14, marginBottom: 12, border: "1px solid #e5e7eb" }}>
+        <div className="flex items-center justify-between" style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>🗓️ Dzisiaj</div>
+          <div style={{ fontSize: 10, color: "#9ca3af" }}>od {fmtTimeShort(compliance.daily.start)}</div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6, marginBottom: 10 }}>
+          {Object.entries(ACTIVITY_TYPES).map(([key, meta]) => (
+            <div key={key} style={{ textAlign: "center", padding: 6, borderRadius: 8, background: meta.bg }}>
+              <div style={{ width: 6, height: 6, borderRadius: 3, background: meta.color, margin: "0 auto 4px" }}></div>
+              <div style={{ fontSize: 9, color: "#6b7280" }}>{meta.label}</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: meta.color }}>{fmtHM(compliance.daily[key])}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize: 11, marginBottom: 4 }}>
+          <div className="flex items-center justify-between" style={{ marginBottom: 2 }}>
+            <span style={{ color: "#6b7280" }}>Limit jazdy dziennej</span>
+            <span style={{ fontWeight: 700, color: "#374151" }}>{fmtHM(compliance.daily.drive)} / {fmtHM(compliance.daily.limit)}</span>
+          </div>
+          <div style={{ height: 4, background: "#f3f4f6", borderRadius: 2, overflow: "hidden" }}>
+            <div style={{ height: "100%", background: "#3b82f6", width: `${Math.min(100, Math.round((compliance.daily.drive / compliance.daily.limit) * 100))}%` }}></div>
+          </div>
+        </div>
+      </div>
+
+      {/* PLAN DO PRZODU */}
+      {plan && (
+        <div style={{ background: "linear-gradient(135deg, #f5f3ff, #ede9fe)", border: "1px solid #c7d2fe", borderRadius: 16, padding: 14, marginBottom: 12 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "#6d28d9", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>📅 Plan do przodu</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <PlanRow emoji="⏸" bg="#fffbeb" border="#fde68a" color="#92400e" title="Przerwa 45 min"
+              sub={`za ${fmtHM(plan.nextBreak.driveMinToGo)} · ${fmtTimeShort(plan.nextBreak.atMs)} → ${fmtTimeShort(plan.nextBreak.endMs)}`} />
+            <PlanRow emoji="🛑" bg="#eff6ff" border="#bfdbfe" color="#1e3a8a" title="Koniec jazdy dziennej"
+              sub={`limit ${fmtHM(plan.endOfDay.dailyLimit)} · ${fmtTimeShort(plan.endOfDay.atMs)}`} />
+            <PlanRow emoji="🛏" bg="#f0fdf4" border="#bbf7d0" color="#14532d" title="Odpoczynek dzienny 11h"
+              sub={`${fmtTimeShort(plan.dailyRest.startMs)} → ${fmtTimeShort(plan.dailyRest.endMs)}`} />
+            <PlanRow emoji="🛌" bg="#f5f3ff" border="#c7d2fe" color="#4c1d95" title="Odpoczynek tygodniowy 45h"
+              sub={`${fmtTimeShort(plan.weeklyRest.startMs)} → ${fmtTimeShort(plan.weeklyRest.endMs)}`} />
+            {plan.returnToBase && (
+              <PlanRow emoji="🏠" bg="#fef2f2" border="#fecaca" color="#7f1d1d" title="Powrót do bazy"
+                sub={`za ${plan.returnToBase.daysLeft} dni · deadline ${new Date(plan.returnToBase.deadlineMs).toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit" })}`} />
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 28-dniowy okres */}
+      {compliance.period28 && (
+        <div style={{ background: "#fff", borderRadius: 16, padding: 14, marginBottom: 12, border: "1px solid #e5e7eb" }}>
+          <div className="flex items-center justify-between" style={{ marginBottom: 6 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>🛣️ Okres 28-dniowy</div>
+            <div style={{ fontSize: 10, color: "#9ca3af" }}>start: {new Date(compliance.period28.startMs).toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit" })}</div>
+          </div>
+          <div className="flex items-center justify-between" style={{ fontSize: 12, marginBottom: 4 }}>
+            <span style={{ color: "#6b7280" }}>Dzień {compliance.period28.daysPassed} / {REGULATION.RETURN_TO_BASE_DAYS}</span>
+            <span style={{ fontWeight: 700, color: "#7c3aed" }}>{compliance.period28.daysLeft} dni do powrotu</span>
+          </div>
+          <div style={{ height: 8, background: "#f3f4f6", borderRadius: 4, overflow: "hidden", marginBottom: 10 }}>
+            <div style={{ height: "100%", background: "linear-gradient(90deg, #7c3aed, #a855f7)", borderRadius: 4, width: `${Math.min(100, Math.round(((REGULATION.RETURN_TO_BASE_DAYS - compliance.period28.daysLeft) / REGULATION.RETURN_TO_BASE_DAYS) * 100))}%` }}></div>
+          </div>
+          {/* Mini sublimity */}
+          {[
+            { label: "Jazda tygodniowa", val: compliance.weekly.drive, max: compliance.weekly.limit, color: "#3b82f6" },
+            { label: "Jazda dwutygodniowa", val: compliance.biweekly.drive, max: compliance.biweekly.limit, color: "#3b82f6" },
+            { label: "Czas pracy (48h/tydz śr.)", val: compliance.weekly.workTime, max: REGULATION.WORK_TIME_WEEKLY_AVG, color: "#f59e0b" },
+          ].map(l => (
+            <div key={l.label} style={{ marginBottom: 4 }}>
+              <div className="flex items-center justify-between" style={{ fontSize: 11, marginBottom: 2 }}>
+                <span style={{ color: "#6b7280" }}>{l.label}</span>
+                <span style={{ fontWeight: 600, color: "#374151" }}>{fmtHM(l.val)} / {fmtHM(l.max)}</span>
+              </div>
+              <div style={{ height: 3, background: "#f3f4f6", borderRadius: 2, overflow: "hidden" }}>
+                <div style={{ height: "100%", background: l.color, width: `${Math.min(100, Math.round((l.val / l.max) * 100))}%` }}></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* PRZYCISKI AKCJI */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+        <button onClick={() => setActivity("drive")}
+          style={{ padding: "14px 12px", borderRadius: 12, border: "none", background: ACTIVITY_TYPES.drive.color, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+          🚛 Jazda
+        </button>
+        <button onClick={() => setActivity("work")}
+          style={{ padding: "14px 12px", borderRadius: 12, border: "none", background: ACTIVITY_TYPES.work.color, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+          🔧 Inna praca
+        </button>
+        <button onClick={() => setActivity("avail")}
+          style={{ padding: "14px 12px", borderRadius: 12, border: "none", background: ACTIVITY_TYPES.avail.color, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+          ⏱ Dyspozycyjność
+        </button>
+        <button onClick={() => setActivity("rest")}
+          style={{ padding: "14px 12px", borderRadius: 12, border: "none", background: ACTIVITY_TYPES.rest.color, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+          🛏 Odpoczynek
+        </button>
+      </div>
+
+      <div style={{ fontSize: 10, color: "#9ca3af", textAlign: "center", marginBottom: 8 }}>
+        Auto-wykrywanie z GPS działa w tle. Kliknięcia tutaj nadpisują automat.
+      </div>
+    </div>
+  );
+}
+
+// Pomocniczy wiersz planu
+function PlanRow({ emoji, bg, border, color, title, sub }) {
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: 8, borderRadius: 10, background: "#fff", border: `1px solid ${border}` }}>
+      <div style={{ width: 24, height: 24, borderRadius: 12, background: bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{emoji}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color }}>{title}</div>
+        <div style={{ fontSize: 11, color: "#6b7280" }}>{sub}</div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
 //  PANEL KIEROWCY — mobile-first, osobny layout
 // ═══════════════════════════════════════════════════════════════════
-function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEvents = [], fuelEntries = [], driverDocs = [], showToast }) {
+function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEvents = [], driverActivities = [], fuelEntries = [], driverDocs = [], showToast }) {
   const [selectedFracht, setSelectedFracht] = useState(null);
   const [driverTab, setDriverTab] = useState("home"); // "home" | "zlecenia" | "pojazd" | "serwis" | "spalanie" | "czas" | "dokumenty" | "mapa"
   const [fuelView, setFuelView] = useState("list"); // "list" | "form" | "stats"
@@ -9343,6 +10254,15 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
 
             return (
               <div>
+                {/* ── Nowy inteligentny dashboard czasu pracy (na bazie driverActivities) ── */}
+                <DriverCzasPracyDashboard
+                  user={user}
+                  vehicle={vehicle}
+                  driverActivities={driverActivities}
+                  showToast={showToast}
+                />
+
+                {/* ── Stare: kalendarz pauz ręcznych + tacho ── */}
                 {/* Tacho */}
                 {tachoData && (
                   <div style={{
