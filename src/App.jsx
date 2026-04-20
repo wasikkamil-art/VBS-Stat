@@ -3258,7 +3258,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             <div>
               <h2 className="text-xl font-bold text-gray-900 mb-1">GPS / Monitoring</h2>
               <p className="text-sm text-gray-400 mb-5">Atlas API · widziszwszystko.eu</p>
-              <GpsTab vehicles={vehicles} showToast={showToast} />
+              <GpsTab vehicles={vehicles} frachtyList={frachtyList} showToast={showToast} />
             </div>
           )}
 
@@ -5699,7 +5699,7 @@ function EmailStatusTab({ showToast }) {
 // Sekcje: Mapa online, Kilometry/CAN, Trasy, Karta kierowcy, Pliki DDD
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function GpsTab({ vehicles, showToast }) {
+function GpsTab({ vehicles, frachtyList = [], showToast }) {
   const [gpsDevices, setGpsDevices] = useState([]);
   const [gpsPositions, setGpsPositions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -5902,7 +5902,7 @@ function GpsTab({ vehicles, showToast }) {
             </div>
 
             {/* Sub-tab content */}
-            {subTab === "mapa" && <GpsMapSection device={selectedDev} position={selectedPos} allPositions={gpsPositions} allDevices={gpsDevices} />}
+            {subTab === "mapa" && <GpsMapSection device={selectedDev} position={selectedPos} allPositions={gpsPositions} allDevices={gpsDevices} frachtyList={frachtyList} vehicles={vehicles} />}
             {subTab === "kilometry" && <GpsKilometrySection device={selectedDev} position={selectedPos} showToast={showToast} />}
             {subTab === "trasy" && <GpsTrasySection device={selectedDev} showToast={showToast} />}
             {subTab === "karta" && <GpsKartaSection device={selectedDev} showToast={showToast} />}
@@ -5920,10 +5920,46 @@ function GpsTab({ vehicles, showToast }) {
 }
 
 // ── Sekcja: MAPA ONLINE ──
-function GpsMapSection({ device, position, allPositions, allDevices }) {
+// ── Geokodowanie adresu/kodu pocztowego → [lat, lng] ──
+async function geocode(query) {
+  if (!query || !query.trim()) return null;
+  // Jeśli to już geo "lat,lng" — parsuj bezpośrednio
+  const geoMatch = query.match(/^(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)$/);
+  if (geoMatch) return [parseFloat(geoMatch[1]), parseFloat(geoMatch[2])];
+  try {
+    const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`);
+    const data = await resp.json();
+    if (data?.[0]) return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+  } catch(e) { console.warn("[Geocode] error:", e); }
+  return null;
+}
+
+// ── OSRM routing (darmowy, dla ciężarówek profil driving) ──
+async function getRoute(waypoints) {
+  if (!waypoints || waypoints.length < 2) return null;
+  const coords = waypoints.map(p => `${p[1]},${p[0]}`).join(";");
+  try {
+    const resp = await fetch(`https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`);
+    const data = await resp.json();
+    if (data?.routes?.[0]) {
+      const route = data.routes[0];
+      return {
+        coordinates: route.geometry.coordinates.map(c => [c[1], c[0]]), // [lat,lng]
+        distance: route.distance, // meters
+        duration: route.duration, // seconds
+      };
+    }
+  } catch(e) { console.warn("[OSRM] error:", e); }
+  return null;
+}
+
+function GpsMapSection({ device, position, allPositions, allDevices, frachtyList = [], vehicles = [] }) {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markersRef = useRef([]);
+  const routeLayerRef = useRef(null);
+  const [routeInfo, setRouteInfo] = useState(null);
+  const [routeLoading, setRouteLoading] = useState(false);
 
   useEffect(() => {
     // Dynamically load Leaflet CSS
@@ -6014,6 +6050,129 @@ function GpsMapSection({ device, position, allPositions, allDevices }) {
     return () => {};
   }, [position, allPositions, allDevices, device]);
 
+  // ── Aktywny fracht → wyznacz trasę ──
+  useEffect(() => {
+    if (!mapInstanceRef.current || !device) return;
+    const L = window.L; if (!L) return;
+
+    // Znajdź pojazd floty powiązany z GPS device
+    const fleetVeh = device.fleetVehicle;
+    if (!fleetVeh) return;
+
+    // Znajdź aktywne/ostatnie frachty dla tego pojazdu
+    const vehFrachty = frachtyList
+      .filter(f => f.vehicleId === fleetVeh.id)
+      .sort((a, b) => (b.dataZaladunku || b.dataZlecenia || "").localeCompare(a.dataZaladunku || a.dataZlecenia || ""));
+
+    // Weź najnowszy fracht z kodami/adresami
+    const activeFracht = vehFrachty.find(f => {
+      const hasLoad = f.zaladunekGeo || f.zaladunekKod || f.zaladunekAdres;
+      const hasUnload = f.rozladunekGeo || f.dokod || f.rozladunekAdres;
+      return hasLoad && hasUnload;
+    });
+
+    if (!activeFracht) {
+      if (routeLayerRef.current) { routeLayerRef.current.forEach(l => l.remove()); routeLayerRef.current = null; }
+      setRouteInfo(null);
+      return;
+    }
+
+    // Geokoduj i wyznacz trasę
+    const buildRoute = async () => {
+      setRouteLoading(true);
+      try {
+        // Zbierz wszystkie punkty trasy (załadunki + rozładunki)
+        const loadPoints = [activeFracht.zaladunekGeo || activeFracht.zaladunekAdres || activeFracht.zaladunekKod];
+        if (activeFracht.zaladunekKod2?.trim()) loadPoints.push(activeFracht.zaladunekKod2);
+        if (activeFracht.zaladunekKod3?.trim()) loadPoints.push(activeFracht.zaladunekKod3);
+
+        const unloadPoints = [activeFracht.rozladunekGeo || activeFracht.rozladunekAdres || activeFracht.dokod];
+        if (activeFracht.dokod2?.trim()) unloadPoints.push(activeFracht.dokod2);
+        if (activeFracht.dokod3?.trim()) unloadPoints.push(activeFracht.dokod3);
+
+        const allPoints = [...loadPoints, ...unloadPoints];
+        const geocoded = await Promise.all(allPoints.map(p => geocode(p)));
+        const validPoints = geocoded.filter(p => p !== null);
+
+        if (validPoints.length < 2) {
+          console.warn("[GPS Route] Nie udało się geokodować punktów:", allPoints);
+          setRouteLoading(false);
+          return;
+        }
+
+        // Wyznacz trasę OSRM
+        const route = await getRoute(validPoints);
+
+        // Wyczyść starą trasę
+        if (routeLayerRef.current) routeLayerRef.current.forEach(l => l.remove());
+        routeLayerRef.current = [];
+
+        if (route) {
+          // Rysuj trasę
+          const polyline = L.polyline(route.coordinates, {
+            color: "#3b82f6", weight: 5, opacity: 0.7, dashArray: "10 6",
+          }).addTo(mapInstanceRef.current);
+          routeLayerRef.current.push(polyline);
+
+          // Markery załadunku (zielone)
+          const loadGeo = geocoded.slice(0, loadPoints.length).filter(Boolean);
+          loadGeo.forEach((pt, i) => {
+            const label = loadPoints[i] || `Załadunek ${i + 1}`;
+            const m = L.marker(pt, {
+              icon: L.divIcon({
+                className: "route-marker",
+                html: `<div style="background:#16a34a;color:white;font-size:10px;font-weight:700;padding:4px 8px;border-radius:8px;white-space:nowrap;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3);transform:translate(-50%,-100%);">
+                  📦 ${label.length > 25 ? label.slice(0, 25) + "…" : label}
+                </div>`,
+                iconSize: [0, 0], iconAnchor: [0, 0],
+              })
+            }).addTo(mapInstanceRef.current);
+            routeLayerRef.current.push(m);
+          });
+
+          // Markery rozładunku (czerwone)
+          const unloadGeo = geocoded.slice(loadPoints.length).filter(Boolean);
+          unloadGeo.forEach((pt, i) => {
+            const label = unloadPoints[i] || `Rozładunek ${i + 1}`;
+            const m = L.marker(pt, {
+              icon: L.divIcon({
+                className: "route-marker",
+                html: `<div style="background:#dc2626;color:white;font-size:10px;font-weight:700;padding:4px 8px;border-radius:8px;white-space:nowrap;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3);transform:translate(-50%,-100%);">
+                  🏁 ${label.length > 25 ? label.slice(0, 25) + "…" : label}
+                </div>`,
+                iconSize: [0, 0], iconAnchor: [0, 0],
+              })
+            }).addTo(mapInstanceRef.current);
+            routeLayerRef.current.push(m);
+          });
+
+          // Info o trasie
+          setRouteInfo({
+            distance: Math.round(route.distance / 1000),
+            duration: Math.round(route.duration / 60),
+            fracht: activeFracht,
+            loadLabel: loadPoints.join(" → "),
+            unloadLabel: unloadPoints.join(" → "),
+          });
+
+          // Dopasuj zoom do trasy + pozycja pojazdu
+          const allCoords = [...route.coordinates];
+          if (position) {
+            const vLat = position.coordinate?.latitude || position.latitude;
+            const vLng = position.coordinate?.longitude || position.longitude;
+            if (vLat && vLng) allCoords.push([vLat, vLng]);
+          }
+          mapInstanceRef.current.fitBounds(L.latLngBounds(allCoords).pad(0.1));
+        }
+      } catch(e) {
+        console.error("[GPS Route] error:", e);
+      }
+      setRouteLoading(false);
+    };
+
+    buildRoute();
+  }, [device, frachtyList, position]);
+
   // Cleanup map on unmount
   useEffect(() => {
     return () => {
@@ -6027,6 +6186,34 @@ function GpsMapSection({ device, position, allPositions, allDevices }) {
   return (
     <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
       <div ref={mapRef} style={{ height: "500px", width: "100%" }}></div>
+      {/* Trasa zlecenia — info panel */}
+      {routeLoading && (
+        <div className="flex items-center gap-2 px-5 py-2 bg-blue-50 border-t border-blue-100">
+          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+          <span className="text-xs text-blue-600">Wyznaczanie trasy zlecenia...</span>
+        </div>
+      )}
+      {routeInfo && (
+        <div className="px-5 py-3 bg-blue-50 border-t border-blue-100">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-3">
+              <span className="text-blue-600 font-bold text-sm">🗺️ Trasa zlecenia</span>
+              <span className="text-xs bg-white px-2 py-1 rounded-lg text-gray-600 font-medium">
+                📦 {routeInfo.loadLabel}
+              </span>
+              <span className="text-xs text-gray-400">→</span>
+              <span className="text-xs bg-white px-2 py-1 rounded-lg text-gray-600 font-medium">
+                🏁 {routeInfo.unloadLabel}
+              </span>
+            </div>
+            <div className="flex items-center gap-4 text-sm">
+              <span className="font-bold text-blue-700">{routeInfo.distance} km</span>
+              <span className="text-gray-500">{Math.floor(routeInfo.duration / 60)}h {routeInfo.duration % 60}min</span>
+              {routeInfo.fracht?.dataZaladunku && <span className="text-xs text-gray-400">Załadunek: {routeInfo.fracht.dataZaladunku}</span>}
+            </div>
+          </div>
+        </div>
+      )}
       {/* CAN data bar under map — dane mogą być w position.can.* lub position.* */}
       {position && (() => {
         const can = position.can || {};
