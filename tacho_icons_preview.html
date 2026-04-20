@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ikony Tachografu - FleetStat</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f3f4f6; margin: 0; padding: 40px; }
+  h1 { color: #1f2937; font-size: 24px; margin-bottom: 8px; }
+  p.sub { color: #6b7280; margin-bottom: 40px; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; max-width: 800px; }
+  .card { background: #fff; border-radius: 16px; padding: 32px 24px; text-align: center; border: 1px solid #e5e7eb; }
+  .card h3 { margin: 16px 0 4px; font-size: 16px; color: #1f2937; }
+  .card .en { font-size: 12px; color: #9ca3af; margin-bottom: 12px; }
+  .card .desc { font-size: 13px; color: #6b7280; line-height: 1.5; }
+  .icon-wrap { width: 80px; height: 80px; border-radius: 20px; display: flex; align-items: center; justify-content: center; margin: 0 auto; }
+
+  /* Timeline preview */
+  .timeline-section { margin-top: 60px; max-width: 800px; }
+  .timeline-bar { display: flex; height: 48px; border-radius: 12px; overflow: hidden; border: 1px solid #e5e7eb; margin: 16px 0; }
+  .timeline-bar .seg { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 11px; font-weight: 600; color: #fff; }
+  .time-labels { display: flex; justify-content: space-between; font-size: 11px; color: #9ca3af; margin-bottom: 4px; }
+
+  /* Kafelek dnia */
+  .day-card { background: #fff; border-radius: 16px; padding: 20px; border: 1px solid #e5e7eb; max-width: 220px; margin-top: 40px; }
+  .day-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .day-header .date { font-weight: 700; color: #1f2937; font-size: 14px; }
+  .day-header .cycle { font-size: 11px; color: #6b7280; background: #f3f4f6; padding: 2px 8px; border-radius: 6px; }
+  .day-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; color: #374151; }
+  .day-row svg { flex-shrink: 0; }
+  .day-row .val { margin-left: auto; font-weight: 600; }
+  .check { color: #059669; }
+</style>
+</head>
+<body>
+
+<h1>Ikony Tachografu — FleetStat</h1>
+<p class="sub">Oficjalne piktogramy wg Rozporządzenia (WE) 561/2006</p>
+
+<div class="grid">
+
+  <!-- JAZDA -->
+  <div class="card">
+    <div class="icon-wrap" style="background: #DBEAFE;">
+      <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+        <circle cx="24" cy="24" r="18" stroke="#2563EB" stroke-width="3" fill="none"/>
+        <circle cx="24" cy="24" r="4" fill="#2563EB"/>
+        <line x1="24" y1="6" x2="24" y2="12" stroke="#2563EB" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="24" y1="36" x2="24" y2="42" stroke="#2563EB" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="6" y1="24" x2="12" y2="24" stroke="#2563EB" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="36" y1="24" x2="42" y2="24" stroke="#2563EB" stroke-width="2.5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <h3>Jazda</h3>
+    <div class="en">Driving</div>
+    <div class="desc">Kierownica — prowadzenie pojazdu. Rejestrowane automatycznie.</div>
+  </div>
+
+  <!-- INNA PRACA -->
+  <div class="card">
+    <div class="icon-wrap" style="background: #FEF3C7;">
+      <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+        <!-- Crossed hammers / tools -->
+        <line x1="12" y1="36" x2="36" y2="12" stroke="#D97706" stroke-width="3.5" stroke-linecap="round"/>
+        <line x1="36" y1="36" x2="12" y2="12" stroke="#D97706" stroke-width="3.5" stroke-linecap="round"/>
+        <rect x="8" y="8" width="10" height="6" rx="2" fill="#D97706" transform="rotate(-45 13 11)"/>
+        <rect x="30" y="8" width="10" height="6" rx="2" fill="#D97706" transform="rotate(45 35 11)"/>
+      </svg>
+    </div>
+    <h3>Inna praca</h3>
+    <div class="en">Other Work</div>
+    <div class="desc">Skrzyżowane narzędzia — załadunek, rozładunek, dokumenty, tankowanie.</div>
+  </div>
+
+  <!-- DYSPOZYCYJNOŚĆ -->
+  <div class="card">
+    <div class="icon-wrap" style="background: #F3F4F6;">
+      <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+        <rect x="10" y="10" width="28" height="28" rx="4" stroke="#6B7280" stroke-width="3" fill="none"/>
+        <line x1="10" y1="38" x2="38" y2="10" stroke="#6B7280" stroke-width="3" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <h3>Dyspozycyjność</h3>
+    <div class="en">Availability</div>
+    <div class="desc">Kwadrat z przekątną — oczekiwanie, prom, jazda jako pasażer w załodze.</div>
+  </div>
+
+  <!-- ODPOCZYNEK -->
+  <div class="card">
+    <div class="icon-wrap" style="background: #ECFDF5;">
+      <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+        <!-- Bed / rest symbol -->
+        <rect x="8" y="28" width="32" height="4" rx="2" fill="#059669"/>
+        <rect x="8" y="18" width="4" height="14" rx="2" fill="#059669"/>
+        <rect x="36" y="18" width="4" height="14" rx="2" fill="#059669"/>
+        <rect x="12" y="14" width="14" height="14" rx="7" fill="none" stroke="#059669" stroke-width="2.5"/>
+        <line x1="26" y1="22" x2="36" y2="22" stroke="#059669" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="26" y1="28" x2="36" y2="22" stroke="#059669" stroke-width="2.5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <h3>Odpoczynek</h3>
+    <div class="en">Rest / Break</div>
+    <div class="desc">Łóżko — przerwy (15/30/45 min) i odpoczynki dzienne (9h/11h) oraz tygodniowe (24h/45h).</div>
+  </div>
+
+</div>
+
+<!-- TIMELINE PREVIEW -->
+<div class="timeline-section">
+  <h1>Timeline dnia — podgląd</h1>
+  <p class="sub">Przykład dnia pracy kierowcy (kliknięcie w kafelek kalendarza)</p>
+
+  <div class="time-labels">
+    <span>00:00</span><span>02:00</span><span>04:00</span><span>06:00</span><span>08:00</span><span>10:00</span><span>12:00</span><span>14:00</span><span>16:00</span><span>18:00</span><span>20:00</span><span>22:00</span><span>24:00</span>
+  </div>
+  <div class="timeline-bar">
+    <div class="seg" style="flex: 6; background: #059669;">
+      <svg width="14" height="14" viewBox="0 0 48 48"><rect x="8" y="28" width="32" height="4" rx="2" fill="#fff"/><rect x="8" y="18" width="4" height="14" rx="2" fill="#fff"/><rect x="12" y="14" width="14" height="14" rx="7" fill="none" stroke="#fff" stroke-width="3"/></svg>
+      Odp. 6h
+    </div>
+    <div class="seg" style="flex: 3; background: #2563EB;">
+      <svg width="14" height="14" viewBox="0 0 48 48"><circle cx="24" cy="24" r="16" stroke="#fff" stroke-width="3" fill="none"/><circle cx="24" cy="24" r="3" fill="#fff"/></svg>
+      Jazda 3h
+    </div>
+    <div class="seg" style="flex: 0.5; background: #059669; font-size:9px;">15'</div>
+    <div class="seg" style="flex: 1.5; background: #2563EB;">1.5h</div>
+    <div class="seg" style="flex: 0.75; background: #059669; font-size:9px;">30'</div>
+    <div class="seg" style="flex: 0.5; background: #D97706;">
+      <svg width="12" height="12" viewBox="0 0 48 48"><line x1="14" y1="34" x2="34" y2="14" stroke="#fff" stroke-width="4" stroke-linecap="round"/><line x1="34" y1="34" x2="14" y2="14" stroke="#fff" stroke-width="4" stroke-linecap="round"/></svg>
+    </div>
+    <div class="seg" style="flex: 4; background: #2563EB;">
+      <svg width="14" height="14" viewBox="0 0 48 48"><circle cx="24" cy="24" r="16" stroke="#fff" stroke-width="3" fill="none"/><circle cx="24" cy="24" r="3" fill="#fff"/></svg>
+      Jazda 4h
+    </div>
+    <div class="seg" style="flex: 7.75; background: #059669;">
+      <svg width="14" height="14" viewBox="0 0 48 48"><rect x="8" y="28" width="32" height="4" rx="2" fill="#fff"/><rect x="8" y="18" width="4" height="14" rx="2" fill="#fff"/><rect x="12" y="14" width="14" height="14" rx="7" fill="none" stroke="#fff" stroke-width="3"/></svg>
+      Odpoczynek 11h
+    </div>
+  </div>
+
+  <div style="display:flex; gap:24px; margin-top:12px; font-size:13px; color:#374151;">
+    <div style="display:flex;align-items:center;gap:6px;"><div style="width:14px;height:14px;border-radius:4px;background:#2563EB;"></div><b>Jazda</b> 8.5h / 9h</div>
+    <div style="display:flex;align-items:center;gap:6px;"><div style="width:14px;height:14px;border-radius:4px;background:#D97706;"></div><b>Inna praca</b> 0.5h</div>
+    <div style="display:flex;align-items:center;gap:6px;"><div style="width:14px;height:14px;border-radius:4px;background:#059669;"></div><b>Odpoczynek</b> 15h</div>
+    <div style="display:flex;align-items:center;gap:6px;">✅ Przerwa 45min (15+30)</div>
+    <div style="display:flex;align-items:center;gap:6px;">✅ Odpoczynek 11h</div>
+  </div>
+</div>
+
+<!-- KAFELEK DNIA -->
+<div class="timeline-section">
+  <h1>Kafelek dnia w kalendarzu</h1>
+  <p class="sub">Tak będzie wyglądał pojedynczy dzień w widoku kalendarza cyklu</p>
+
+  <div style="display:flex; gap:16px;">
+    <div class="day-card">
+      <div class="day-header">
+        <span class="date">17 kwi</span>
+        <span class="cycle">4/28</span>
+      </div>
+      <!-- Mini timeline -->
+      <div style="display:flex; height:8px; border-radius:4px; overflow:hidden; margin-bottom:12px;">
+        <div style="flex:6; background:#059669;"></div>
+        <div style="flex:3; background:#2563EB;"></div>
+        <div style="flex:0.5; background:#059669;"></div>
+        <div style="flex:1.5; background:#2563EB;"></div>
+        <div style="flex:0.5; background:#059669;"></div>
+        <div style="flex:0.5; background:#D97706;"></div>
+        <div style="flex:4; background:#2563EB;"></div>
+        <div style="flex:8; background:#059669;"></div>
+      </div>
+      <div class="day-row">
+        <svg width="16" height="16" viewBox="0 0 48 48"><circle cx="24" cy="24" r="16" stroke="#2563EB" stroke-width="3" fill="none"/><circle cx="24" cy="24" r="3" fill="#2563EB"/></svg>
+        Jazda <span class="val">8.5h</span>
+      </div>
+      <div class="day-row">
+        <svg width="16" height="16" viewBox="0 0 48 48"><line x1="14" y1="34" x2="34" y2="14" stroke="#D97706" stroke-width="4" stroke-linecap="round"/><line x1="34" y1="34" x2="14" y2="14" stroke="#D97706" stroke-width="4" stroke-linecap="round"/></svg>
+        Inna praca <span class="val">0.5h</span>
+      </div>
+      <div class="day-row">
+        <svg width="16" height="16" viewBox="0 0 48 48"><rect x="8" y="28" width="32" height="4" rx="2" fill="#059669"/><rect x="8" y="18" width="4" height="14" rx="2" fill="#059669"/></svg>
+        Odpoczynek <span class="val">15h <span class="check">✓</span></span>
+      </div>
+      <div style="margin-top:8px; padding-top:8px; border-top:1px solid #f3f4f6; font-size:11px; color:#059669; font-weight:600;">
+        ✓ Przerwa 45min &nbsp; ✓ Odpoczynek 11h
+      </div>
+    </div>
+
+    <div class="day-card" style="border-color:#fca5a5; background:#fef2f2;">
+      <div class="day-header">
+        <span class="date">18 kwi</span>
+        <span class="cycle" style="background:#fef2f2; color:#dc2626;">5/28 ⚠</span>
+      </div>
+      <div style="display:flex; height:8px; border-radius:4px; overflow:hidden; margin-bottom:12px;">
+        <div style="flex:5; background:#059669;"></div>
+        <div style="flex:4.5; background:#2563EB;"></div>
+        <div style="flex:0.5; background:#059669;"></div>
+        <div style="flex:5; background:#2563EB;"></div>
+        <div style="flex:1; background:#D97706;"></div>
+        <div style="flex:8; background:#059669;"></div>
+      </div>
+      <div class="day-row">
+        <svg width="16" height="16" viewBox="0 0 48 48"><circle cx="24" cy="24" r="16" stroke="#2563EB" stroke-width="3" fill="none"/><circle cx="24" cy="24" r="3" fill="#2563EB"/></svg>
+        Jazda <span class="val" style="color:#dc2626;">9.5h</span>
+      </div>
+      <div class="day-row">
+        <svg width="16" height="16" viewBox="0 0 48 48"><line x1="14" y1="34" x2="34" y2="14" stroke="#D97706" stroke-width="4" stroke-linecap="round"/><line x1="34" y1="34" x2="14" y2="14" stroke="#D97706" stroke-width="4" stroke-linecap="round"/></svg>
+        Inna praca <span class="val">1h</span>
+      </div>
+      <div class="day-row">
+        <svg width="16" height="16" viewBox="0 0 48 48"><rect x="8" y="28" width="32" height="4" rx="2" fill="#059669"/><rect x="8" y="18" width="4" height="14" rx="2" fill="#059669"/></svg>
+        Odpoczynek <span class="val">13.5h <span class="check">✓</span></span>
+      </div>
+      <div style="margin-top:8px; padding-top:8px; border-top:1px solid #fecaca; font-size:11px;">
+        <span style="color:#dc2626; font-weight:600;">⚠ Brak przerwy 45min po 4.5h</span>
+      </div>
+    </div>
+
+    <div class="day-card" style="border-color:#a7f3d0; background:#f0fdf4;">
+      <div class="day-header">
+        <span class="date">19 kwi</span>
+        <span class="cycle" style="background:#ecfdf5; color:#059669;">Baza</span>
+      </div>
+      <div style="display:flex; height:8px; border-radius:4px; overflow:hidden; margin-bottom:12px;">
+        <div style="flex:24; background:#059669;"></div>
+      </div>
+      <div class="day-row">
+        <svg width="16" height="16" viewBox="0 0 48 48"><rect x="8" y="28" width="32" height="4" rx="2" fill="#059669"/><rect x="8" y="18" width="4" height="14" rx="2" fill="#059669"/></svg>
+        Odpoczynek <span class="val" style="color:#059669;">24h</span>
+      </div>
+      <div style="margin-top:8px; padding-top:8px; border-top:1px solid #a7f3d0; font-size:11px; color:#059669; font-weight:600;">
+        ✓ Odpoczynek tygodniowy (skrócony 24h)
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

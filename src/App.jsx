@@ -334,8 +334,29 @@ const DOC_TYPES = [
   { id: "tachlegalizacja", label: "Legalizacja tachografu", icon: "⏱️", color: "#ef4444", group: "Badania" },
   { id: "prawo_jazdy",label: "Prawo jazdy",     icon: "🪪",  color: "#0ea5e9", group: "Kierowca" },
   { id: "karta_kierowcy",label: "Karta kierowcy",icon: "💳", color: "#64748b", group: "Kierowca" },
+  { id: "umowa_leasing", label: "Umowa leasing",   icon: "📝",  color: "#0d9488", group: "Umowy" },
+  { id: "umowa_gps",     label: "Umowa GPS/monitoring", icon: "📡", color: "#7c3aed", group: "Umowy" },
+  { id: "umowa_serwis",  label: "Umowa serwisowa", icon: "🔧",  color: "#ea580c", group: "Umowy" },
+  { id: "umowa_inna",    label: "Inna umowa",      icon: "📄",  color: "#64748b", group: "Umowy" },
   { id: "inne",      label: "Inne",             icon: "📋",  color: "#9ca3af", group: "Inne" },
 ];
+
+// ─── COVERAGE OPTIONS (zakres ubezpieczenia) ─────────────────────────────────
+const COVERAGE_OPTIONS = [
+  { id: "autoszyba",       label: "Autoszyba",         icon: "🪟" },
+  { id: "opony",           label: "Opony",             icon: "🔄" },
+  { id: "holowanie",       label: "Holowanie",         icon: "🚛" },
+  { id: "pojazd_zastepczy",label: "Pojazd zastępczy",  icon: "🚗" },
+  { id: "kradziez",        label: "Kradzież",          icon: "🔒" },
+  { id: "zywioly",         label: "Żywioły",           icon: "🌊" },
+  { id: "nnw_pasazerowie", label: "NNW pasażerów",     icon: "🧑‍🤝‍🧑" },
+  { id: "szyby_lampy",     label: "Szyby i lampy",     icon: "💡" },
+  { id: "wandalizm",       label: "Wandalizm",         icon: "🚨" },
+  { id: "stluczka_parkingowa", label: "Stłuczka parkingowa", icon: "🅿️" },
+];
+
+const INSURANCE_TYPES = ["oc","ac","gap","nnw","assistance","cargo"];
+const CONTRACT_TYPES  = ["umowa_leasing","umowa_gps","umowa_serwis","umowa_inna"];
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN APP
@@ -10254,6 +10275,37 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
             {doc.policyNumber&& <span className="text-xs text-gray-400" style={{fontFamily:"'DM Mono',monospace"}}>#{doc.policyNumber}</span>}
             {doc.cost        && <span className="text-xs text-gray-400">💰 {Number(doc.cost).toLocaleString("pl-PL")} zł</span>}
           </div>
+          {/* Coverage tags */}
+          {((doc.coverage && doc.coverage.length > 0) || (doc.customCoverage && doc.customCoverage.length > 0)) && (
+            <div className="flex flex-wrap gap-1 mt-1">
+              {(doc.coverage||[]).map(covId => {
+                const cov = COVERAGE_OPTIONS.find(c => c.id === covId);
+                return cov ? (
+                  <span key={covId} className="px-1.5 py-0.5 rounded text-xs font-medium"
+                    style={{ background:"#dbeafe", color:"#1e40af", fontSize:"10px" }}>
+                    {cov.icon} {cov.label}
+                  </span>
+                ) : null;
+              })}
+              {(doc.customCoverage||[]).map(tag => (
+                <span key={tag} className="px-1.5 py-0.5 rounded text-xs font-medium"
+                  style={{ background:"#f0fdf4", color:"#166534", fontSize:"10px" }}>
+                  🏷️ {tag}
+                </span>
+              ))}
+            </div>
+          )}
+          {/* Contract info */}
+          {(doc.kontrahent || doc.kwotaMiesieczna || doc.nrUmowy) && (
+            <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
+              {doc.kontrahent && <span className="text-xs text-gray-400">🤝 {doc.kontrahent}</span>}
+              {doc.nrUmowy && <span className="text-xs text-gray-400" style={{fontFamily:"'DM Mono',monospace"}}>📝 {doc.nrUmowy}</span>}
+              {doc.kwotaMiesieczna && <span className="text-xs text-gray-500 font-medium">💳 {Number(doc.kwotaMiesieczna).toLocaleString("pl-PL")} zł/mies.</span>}
+              {doc.minOkres && <span className="text-xs text-gray-400">⏳ min. {doc.minOkres} mies.</span>}
+              {doc.okresWypowiedzenia && <span className="text-xs text-gray-400">📅 wypow. {doc.okresWypowiedzenia} mies.</span>}
+            </div>
+          )}
+          {doc.warunki && <div className="text-xs text-gray-400 mt-0.5 truncate">📋 {doc.warunki}</div>}
           {doc.notes && <div className="text-xs text-gray-400 mt-0.5 truncate italic">{doc.notes}</div>}
           {/* reminders */}
           {doc.reminders?.length > 0 && (
@@ -10468,23 +10520,34 @@ function BulkUploadModal({ vehicles, onSave, onClose }) {
       const mediaType = item.fileType;
       const base64 = item.fileData.split(",")[1];
 
-      const systemPrompt = `Jesteś asystentem do rozpoznawania dokumentów transportowych i ubezpieczeniowych.
+      const systemPrompt = `Jestes asystentem do rozpoznawania dokumentow transportowych, ubezpieczeniowych i umow.
 Analizujesz obrazy/PDF i zwracasz JSON z polami dokumentu.
-Zawsze odpowiadaj TYLKO czystym JSON bez żadnego tekstu przed ani po.
-Typy dokumentów (pole "type"): oc, ac, gap, nnw, assistance, cargo, licencja, zezwolenie, przeglad, tachlegalizacja, prawo_jazdy, karta_kierowcy, inne
-Format daty: YYYY-MM-DD`;
+Zawsze odpowiadaj TYLKO czystym JSON bez zadnego tekstu przed ani po.
+Typy dokumentow (pole "type"): oc, ac, gap, nnw, assistance, cargo, licencja, zezwolenie, przeglad, tachlegalizacja, prawo_jazdy, karta_kierowcy, umowa_leasing, umowa_gps, umowa_serwis, umowa_inna, inne
+Format daty: YYYY-MM-DD
+Dla ubezpieczen (oc,ac,gap,nnw,assistance,cargo) - wyodrebnij zakres pokrycia.
+Dla umow (umowa_*) - wyodrebnij dane kontrahenta, nr umowy, kwoty, okresy.
+Szukaj numerow rejestracyjnych pojazdow w dokumencie.`;
 
-      const userPrompt = `Przeanalizuj ten dokument i zwróć JSON z następującymi polami (jeśli nieznane, użyj null):
+      const userPrompt = `Przeanalizuj ten dokument i zwroc JSON z nastepujacymi polami (jesli nieznane, uzyj null):
 {
   "type": "typ dokumentu z listy",
-  "label": "krótki opis np. OC Warta 2025",
+  "label": "krotki opis np. OC Warta 2025 lub Umowa GPS widziszwszystko",
   "issueDate": "data wystawienia YYYY-MM-DD lub null",
-  "expiryDate": "data ważności YYYY-MM-DD lub null",
-  "insurer": "nazwa ubezpieczyciela / organu lub null",
-  "policyNumber": "numer polisy/dokumentu lub null",
-  "cost": "kwota w PLN jako liczba lub null",
-  "notes": "krótka notatka lub null",
-  "confidence": "high/medium/low"
+  "expiryDate": "data waznosci / konca umowy YYYY-MM-DD lub null",
+  "insurer": "nazwa ubezpieczyciela / organu / kontrahenta lub null",
+  "policyNumber": "numer polisy / dokumentu / umowy lub null",
+  "cost": "kwota jednorazowa w PLN jako liczba lub null",
+  "notes": "krotka notatka lub null",
+  "confidence": "high/medium/low",
+  "vehiclePlate": "numer rejestracyjny pojazdu znaleziony w dokumencie lub null",
+  "coverage": ["tablica zakresow ubezpieczenia z listy: autoszyba, opony, holowanie, pojazd_zastepczy, kradziez, zywioly, nnw_pasazerowie, szyby_lampy, wandalizm, stluczka_parkingowa - tylko jesli to polisa"],
+  "kontrahent": "nazwa firmy kontrahenta lub null (dla umow)",
+  "nrUmowy": "numer umowy lub null",
+  "kwotaMiesieczna": "kwota miesieczna netto PLN jako liczba lub null",
+  "minOkres": "minimalny okres umowy w miesiacach jako liczba lub null",
+  "okresWypowiedzenia": "okres wypowiedzenia w miesiacach jako liczba lub null",
+  "warunki": "krotki opis warunkow/uslug lub null"
 }`;
 
       const contentParts = isPdf
@@ -10516,8 +10579,20 @@ Format daty: YYYY-MM-DD`;
       let parsed;
       try { parsed = JSON.parse(clean); } catch(e) { throw new Error("JSON parse error: " + clean.slice(0,100)); }
 
+      // Auto-match vehicle by plate number
+      let matchedVehicleId = vehicles[0]?.id || "";
+      if (parsed.vehiclePlate) {
+        const plate = parsed.vehiclePlate.replace(/[\s-]/g, "").toUpperCase();
+        const found = vehicles.find(v => {
+          const p1 = (v.plate||"").replace(/[\s-]/g, "").toUpperCase();
+          const p2 = (v.plate2||"").replace(/[\s-]/g, "").toUpperCase();
+          return p1 === plate || p2 === plate;
+        });
+        if (found) matchedVehicleId = found.id;
+      }
+
       const extracted = {
-        vehicleId:    vehicles[0]?.id || "",
+        vehicleId:    matchedVehicleId,
         type:         parsed.type         || "inne",
         label:        parsed.label        || "",
         issueDate:    parsed.issueDate     || "",
@@ -10531,6 +10606,17 @@ Format daty: YYYY-MM-DD`;
         fileData:     item.fileData,
         fileName:     item.fileName,
         fileType:     item.fileType,
+        // Insurance coverage
+        coverage:       Array.isArray(parsed.coverage) ? parsed.coverage.filter(c => typeof c === "string") : [],
+        customCoverage: [],
+        // Contract fields
+        kontrahent:         parsed.kontrahent         || "",
+        nrUmowy:            parsed.nrUmowy            || "",
+        kwotaMiesieczna:    parsed.kwotaMiesieczna ? String(parsed.kwotaMiesieczna) : "",
+        minOkres:           parsed.minOkres ? String(parsed.minOkres) : "",
+        okresWypowiedzenia: parsed.okresWypowiedzenia ? String(parsed.okresWypowiedzenia) : "",
+        warunki:            parsed.warunki            || "",
+        vehiclePlate:       parsed.vehiclePlate       || "",
       };
       setQueue(q => q.map(x => x.id===item.id ? {...x, status:"done", extracted, edited:{...extracted}} : x));
     } catch(e) {
@@ -10639,8 +10725,51 @@ Format daty: YYYY-MM-DD`;
                     <MF label="Ubezpieczyciel"><MInput value={item.edited.insurer} onChange={v=>updateEdited(item.id,"insurer",v)} placeholder="np. PZU" /></MF>
                     <MF label="Wystawiony"><MInput type="date" value={item.edited.issueDate} onChange={v=>updateEdited(item.id,"issueDate",v)} /></MF>
                     <MF label="Ważny do"><MInput type="date" value={item.edited.expiryDate} onChange={v=>updateEdited(item.id,"expiryDate",v)} /></MF>
-                    <MF label="Nr polisy"><MInput value={item.edited.policyNumber} onChange={v=>updateEdited(item.id,"policyNumber",v)} placeholder="POL/..." /></MF>
+                    <MF label="Nr polisy / umowy"><MInput value={item.edited.policyNumber} onChange={v=>updateEdited(item.id,"policyNumber",v)} placeholder="POL/..." /></MF>
                     <MF label="Koszt (zł)"><MInput type="number" value={item.edited.cost} onChange={v=>updateEdited(item.id,"cost",v)} /></MF>
+
+                    {/* Vehicle plate auto-match info */}
+                    {item.edited.vehiclePlate && (
+                      <div className="col-span-2 text-xs px-2 py-1.5 rounded-lg" style={{background:"#eff6ff",color:"#1e40af"}}>
+                        🔍 Znaleziono nr rej.: <strong>{item.edited.vehiclePlate}</strong>
+                      </div>
+                    )}
+
+                    {/* Coverage checkboxes for insurance types */}
+                    {INSURANCE_TYPES.includes(item.edited.type) && (
+                      <div className="col-span-2">
+                        <div className="text-xs font-semibold text-gray-500 mb-1.5">Zakres ubezpieczenia</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {COVERAGE_OPTIONS.map(cov => {
+                            const active = (item.edited.coverage||[]).includes(cov.id);
+                            return (
+                              <button key={cov.id} onClick={() => {
+                                const cur = item.edited.coverage||[];
+                                updateEdited(item.id, "coverage", active ? cur.filter(c=>c!==cov.id) : [...cur, cov.id]);
+                              }}
+                                className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all"
+                                style={{
+                                  background: active ? "#dbeafe" : "#f9fafb",
+                                  border: `1px solid ${active ? "#3b82f6" : "#e5e7eb"}`,
+                                  color: active ? "#1d4ed8" : "#9ca3af",
+                                }}>
+                                <span style={{fontSize:"10px"}}>{cov.icon}</span>{cov.label}{active && <span className="text-blue-500">✓</span>}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Contract fields for umowa types */}
+                    {CONTRACT_TYPES.includes(item.edited.type) && (<>
+                      <MF label="Kontrahent"><MInput value={item.edited.kontrahent||""} onChange={v=>updateEdited(item.id,"kontrahent",v)} placeholder="Firma..." /></MF>
+                      <MF label="Nr umowy"><MInput value={item.edited.nrUmowy||""} onChange={v=>updateEdited(item.id,"nrUmowy",v)} placeholder="Nr..." /></MF>
+                      <MF label="Kwota mies. (zł)"><MInput type="number" value={item.edited.kwotaMiesieczna||""} onChange={v=>updateEdited(item.id,"kwotaMiesieczna",v)} /></MF>
+                      <MF label="Min. okres (mies.)"><MInput type="number" value={item.edited.minOkres||""} onChange={v=>updateEdited(item.id,"minOkres",v)} /></MF>
+                      <MF label="Wypowiedzenie (mies.)"><MInput type="number" value={item.edited.okresWypowiedzenia||""} onChange={v=>updateEdited(item.id,"okresWypowiedzenia",v)} /></MF>
+                      <div className="col-span-2"><MF label="Warunki"><MInput value={item.edited.warunki||""} onChange={v=>updateEdited(item.id,"warunki",v)} placeholder="Usługi, strefy..." /></MF></div>
+                    </>)}
                   </div>
                 )}
 
@@ -10694,13 +10823,39 @@ function AddDocModal({ vehicles, doc, onSave, onClose }) {
     fileName:     doc?.fileName     || "",
     fileType:     doc?.fileType     || "",
     reminders:    doc?.reminders    || [],
+    // ── Insurance coverage scope ──
+    coverage:     doc?.coverage     || [],
+    customCoverage: doc?.customCoverage || [],
+    // ── Contract fields ──
+    kontrahent:        doc?.kontrahent        || "",
+    nrUmowy:           doc?.nrUmowy           || "",
+    okresWypowiedzenia:doc?.okresWypowiedzenia|| "",
+    kwotaMiesieczna:   doc?.kwotaMiesieczna   || "",
+    minOkres:          doc?.minOkres          || "",
+    warunki:           doc?.warunki           || "",
   });
   const [uploading, setUploading]   = useState(false);
   const [newRemDays, setNewRemDays] = useState("30");
   const [newRemNote, setNewRemNote] = useState("");
+  const [newCoverageTag, setNewCoverageTag] = useState("");
   const fileRef = useRef();
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
   const groups = [...new Set(DOC_TYPES.map(t => t.group))];
+
+  const isInsurance = INSURANCE_TYPES.includes(form.type);
+  const isContract  = CONTRACT_TYPES.includes(form.type);
+
+  const toggleCoverage = (covId) => {
+    const cur = form.coverage || [];
+    set("coverage", cur.includes(covId) ? cur.filter(c => c !== covId) : [...cur, covId]);
+  };
+  const addCustomCoverage = () => {
+    const tag = newCoverageTag.trim();
+    if (!tag) return;
+    if (!(form.customCoverage||[]).includes(tag)) set("customCoverage", [...(form.customCoverage||[]), tag]);
+    setNewCoverageTag("");
+  };
+  const removeCustomCoverage = (tag) => set("customCoverage", (form.customCoverage||[]).filter(t => t !== tag));
 
   const handleFile = (e) => {
     const file = e.target.files?.[0];
@@ -10787,6 +10942,72 @@ function AddDocModal({ vehicles, doc, onSave, onClose }) {
           </div>
           <MF label="Koszt (zł)"><MInput type="number" placeholder="np. 1200" value={form.cost} onChange={v => set("cost", v)} /></MF>
           <MF label="Notatki"><MInput placeholder="dodatkowe informacje..." value={form.notes} onChange={v => set("notes", v)} /></MF>
+
+          {/* ── ZAKRES UBEZPIECZENIA (tylko dla polis) ── */}
+          {isInsurance && (
+            <div className="border-t border-gray-100 pt-4">
+              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">🛡️ Zakres ubezpieczenia</div>
+              <div className="flex flex-wrap gap-2 mb-3">
+                {COVERAGE_OPTIONS.map(cov => {
+                  const active = (form.coverage||[]).includes(cov.id);
+                  return (
+                    <button key={cov.id} onClick={() => toggleCoverage(cov.id)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+                      style={{
+                        background: active ? "#dbeafe" : "#f9fafb",
+                        border: `1.5px solid ${active ? "#3b82f6" : "#e5e7eb"}`,
+                        color: active ? "#1d4ed8" : "#6b7280",
+                      }}>
+                      <span>{cov.icon}</span>{cov.label}
+                      {active && <span className="ml-0.5 text-blue-500">✓</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              {/* Custom coverage tags */}
+              {(form.customCoverage||[]).length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {form.customCoverage.map(tag => (
+                    <span key={tag} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium"
+                      style={{ background:"#f0fdf4", border:"1.5px solid #86efac", color:"#166534" }}>
+                      🏷️ {tag}
+                      <button onClick={() => removeCustomCoverage(tag)} className="text-green-400 hover:text-red-400 ml-0.5">✕</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <MInput placeholder="Dodaj własny zakres..." value={newCoverageTag}
+                    onChange={v => setNewCoverageTag(v)} />
+                </div>
+                <button onClick={addCustomCoverage}
+                  className="px-3 py-2 rounded-xl text-xs font-bold text-white flex-shrink-0"
+                  style={{ background:"#3b82f6" }}>
+                  + Tag
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── DANE UMOWY (tylko dla kontraktów) ── */}
+          {isContract && (
+            <div className="border-t border-gray-100 pt-4">
+              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">📝 Dane umowy</div>
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <MF label="Kontrahent"><MInput placeholder="np. widziszwszystko sp. z o.o." value={form.kontrahent} onChange={v => set("kontrahent", v)} /></MF>
+                  <MF label="Nr umowy"><MInput placeholder="np. 166/03/2026" value={form.nrUmowy} onChange={v => set("nrUmowy", v)} /></MF>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <MF label="Kwota mies. (zł)"><MInput type="number" placeholder="np. 50" value={form.kwotaMiesieczna} onChange={v => set("kwotaMiesieczna", v)} /></MF>
+                  <MF label="Min. okres (mies.)"><MInput type="number" placeholder="np. 36" value={form.minOkres} onChange={v => set("minOkres", v)} /></MF>
+                  <MF label="Okres wypow. (mies.)"><MInput type="number" placeholder="np. 3" value={form.okresWypowiedzenia} onChange={v => set("okresWypowiedzenia", v)} /></MF>
+                </div>
+                <MF label="Warunki / uwagi"><MInput placeholder="np. blokada zapłonu, strefy, trasa Kraj+Europa..." value={form.warunki} onChange={v => set("warunki", v)} /></MF>
+              </div>
+            </div>
+          )}
 
           {/* PLIK */}
           <div className="border-t border-gray-100 pt-4">
