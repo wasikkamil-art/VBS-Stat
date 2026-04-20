@@ -608,6 +608,16 @@ exports.onNewChatMessage = onDocumentCreated(
 // ═══════════════════════════════════════════════════════════════
 const ATLAS_BASE = "https://widziszwszystko.eu/atlas";
 const ATLAS_ALLOWED = ["devices", "positions", "positionsWithDistance", "positionsWithCanDistance", "positionsWithCanDetails", "history"];
+// Endpointy do diagnostyki tachografu — dozwolone tylko dla admina w trybie mode="diagnostic"
+const ATLAS_DIAGNOSTIC = [
+  "tachograph", "tachographs", "tacho", "tachographData",
+  "driverCard", "driverCards", "cards", "card",
+  "ddd", "dddFiles", "files",
+  "drivers", "driver",
+  "driverActivity", "activity", "activities",
+  "workTime", "workTimes",
+  "events", "status",
+];
 
 exports.gpsProxy = onCall(
   { region: "europe-west1", timeoutSeconds: 30 },
@@ -621,9 +631,11 @@ exports.gpsProxy = onCall(
       throw new HttpsError("permission-denied", "Brak dostepu do GPS.");
     }
 
-    const { endpoint, params } = request.data || {};
-    if (!endpoint || !ATLAS_ALLOWED.includes(endpoint)) {
-      throw new HttpsError("invalid-argument", `Nieprawidlowy endpoint. Dozwolone: ${ATLAS_ALLOWED.join(", ")}`);
+    const { endpoint, params, mode } = request.data || {};
+    const isDiagnostic = mode === "diagnostic" && callerRole === "admin";
+    const allowedList = isDiagnostic ? [...ATLAS_ALLOWED, ...ATLAS_DIAGNOSTIC] : ATLAS_ALLOWED;
+    if (!endpoint || !allowedList.includes(endpoint)) {
+      throw new HttpsError("invalid-argument", `Nieprawidlowy endpoint "${endpoint}". Dozwolone${isDiagnostic ? " (diagnostyka)" : ""}: ${allowedList.join(", ")}`);
     }
 
     // Get GPS credentials from Firestore config (or fallback defaults)

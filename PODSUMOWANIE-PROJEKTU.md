@@ -174,23 +174,137 @@
 
 **Priorytet geokodowania**: geo (najdokładniejsze) → adres → kod pocztowy
 
-## 7. Deployment
+## 7. Jak pracujemy — pełny flow techniczny
 
-### Produkcja (fleetstat.pl)
-1. `npm run build` (Vite → dist/)
-2. `git add . && git commit && git push`
-3. Vercel automatycznie buduje i deployuje z `main`
-4. **NIE używać `firebase deploy`** — to trafia na vbs-stats.web.app
+### Co gdzie siedzi (infrastruktura)
 
-### Cloud Functions
+```
+GitHub (wasikkamil-art/VBS-Stat)
+  └── branch: main
+        ├── src/App.jsx        ← cały frontend (monolityczny plik ~17k linii)
+        ├── functions/index.js ← Cloud Functions (gpsProxy, email, auth...)
+        ├── public/sw.js       ← Service Worker
+        ├── package.json       ← zależności frontend
+        └── firebase.json      ← konfiguracja Firebase
+
+Vercel (auto-deploy z GitHub)
+  └── fleetstat.pl             ← PRODUKCJA, domena użytkowników
+      - Vercel sam robi npm run build po każdym push na main
+      - Vercel sam serwuje dist/ jako static site
+
+Firebase (osobna platforma)
+  ├── Firestore               ← baza danych (pojazdy, frachty, koszty, dokumenty...)
+  ├── Auth                    ← logowanie użytkowników (email/password)
+  ├── Storage                 ← pliki (dokumenty, zdjęcia, DDD, zlecenia)
+  ├── Cloud Functions          ← backend logic (gpsProxy, email scheduler, chat push)
+  └── Hosting                 ← vbs-stats.web.app (NIE produkcja! osobne)
+
+Atlas API (widziszwszystko.eu)
+  └── GPS tracking             ← pozycje pojazdów, dane CAN, historia tras
+      - Dostęp przez Cloud Function gpsProxy (klucz API w Firestore)
+
+Nominatim (darmowy, publiczny)
+  └── Geokodowanie             ← adres/kod pocztowy → współrzędne [lat, lng]
+
+OSRM (darmowy, publiczny)
+  └── Routing                  ← wyznaczanie trasy, dystans, czas przejazdu
+```
+
+### Jak edytujemy kod (krok po kroku)
+
+1. **Claude edytuje plik** — głównie `src/App.jsx`, czasem `functions/index.js`
+   - Używam narzędzia Edit (find & replace fragmentu kodu)
+   - Wszystko dzieje się na kopii repozytorium w sesji Cowork
+
+2. **Build** — sprawdzam czy się kompiluje:
+   ```bash
+   cd /sessions/.../mnt/VBS-Stat.nosync && npm run build
+   ```
+   - Vite buduje `dist/` z hashowanymi plikami (np. `index-CrdhNzKF.js`)
+   - Jeśli błąd → naprawiam i buduję ponownie
+
+3. **Commit** — zapisuję zmiany do Git:
+   ```bash
+   git add src/App.jsx
+   git commit -m "opis zmian"
+   ```
+   - Commituję TYLKO zmienione pliki (nie `git add .`)
+   - NIE commituję `dist/` — Vercel sam builduje
+
+4. **Push** — wysyłam na GitHub:
+   ```bash
+   git push
+   ```
+   - Push na branch `main` → GitHub → Vercel webhook
+
+5. **Vercel auto-deploy** — automatycznie:
+   - Vercel wykrywa nowy push
+   - Sam uruchamia `npm install` + `npm run build`
+   - Deployuje nowy `dist/` na fleetstat.pl
+   - Czas: ~1-2 minuty
+   - Status: zielony "Ready" = OK
+
+### Deploy Cloud Functions (osobno!)
+
+Cloud Functions żyją na Firebase, NIE na Vercel. Deploy osobno:
 ```bash
 firebase deploy --only functions
 ```
+To jest potrzebne TYLKO gdy zmieniamy `functions/index.js` (np. nowy endpoint API, zmiana gpsProxy, email scheduler). Zmiany w App.jsx NIE wymagają deploy functions.
 
-### Service Worker
-- `public/sw.js` cache name: `fleetstat-v3`
-- Wyklucza Vite hashed files: `assets/index-*.js|css`
-- Przy problemach z cache: bump version, użytkownik musi wyczyścić dane witryny
+### WAŻNE PUŁAPKI
+
+| Błąd | Dlaczego | Rozwiązanie |
+|------|----------|-------------|
+| `firebase deploy --only hosting` | Deployuje na vbs-stats.web.app, NIE na fleetstat.pl! | Użyj `git push` → Vercel |
+| Stara wersja po deployu | Service Worker cache trzyma stary JS | Użytkownik: Wyczyść dane witryny |
+| Vercel build failed (ERESOLVE) | react-leaflet wymaga React 19 | `.npmrc` z `legacy-peer-deps=true` |
+| `require('leaflet')` nie działa | Vite ESM nie wspiera CommonJS require | Użyj `window.L` (CDN) |
+| Plik > 1MB do Firestore | Firestore limit dokumentu | Upload do Firebase Storage, URL w Firestore |
+
+### Dane — co gdzie w Firestore
+
+```
+fleet/data                    ← główny dokument z ustawieniami
+fleet/gpsConfig               ← klucz API Atlas (atlasApiKey)
+
+Kolekcje (przez SK object):
+  fleetv2_vehicles            ← pojazdy (plate, plate2, marka, model...)
+  fleetv2_costs               ← koszty (paliwo, serwis, autostrady...)
+  fleetv2_categories          ← kategorie kosztów
+  fleetv2_docs                ← dokumenty (ubezpieczenia, umowy, przeglądy)
+  fleetv2_imi                 ← deklaracje IMI
+  fleetv2_rent                ← rentowność (dane miesięczne per pojazd)
+  fleetv2_frachty             ← frachty/zlecenia transportowe
+
+Inne kolekcje:
+  chatRooms/                  ← pokoje czatu
+  chatRooms/{id}/messages/    ← wiadomości
+  auditLog/                   ← logi aktywności
+  sprawy/                     ← sprawy/zgłoszenia
+  payments/                   ← płatności
+  driverEvents/               ← zdarzenia kierowców
+  fuelEntries/                ← tankowania
+```
+
+### Firebase Storage — struktura folderów
+
+```
+docs/{docId}/                 ← pliki dokumentów (ubezpieczenia, umowy)
+zlecenia/{frachtId}/          ← skany zleceń transportowych
+driver-cards/{filename}       ← pliki kart kierowców (.ddd, .esm)
+ddd-files/{filename}          ← pliki tachografu DDD
+sprawy/{sprawaId}/{sub}/      ← załączniki do spraw
+```
+
+### Service Worker (public/sw.js)
+
+- Cache name: `fleetstat-v3` — bump numeru wymusza odświeżenie
+- Strategia: **Network First** — najpierw sieć, cache tylko offline
+- **Wykluczone z cache**: pliki z hashem Vite (`assets/index-*.js|css`), Firebase API, googleapis
+- Przy aktualizacji: `skipWaiting()` + `clients.claim()` — nowy SW przejmuje natychmiast
+- Problem: stary SW może cachować stary `index.html` → użytkownik widzi starą wersję
+- Fix: użytkownik musi wyczyścić dane witryny (Chrome → DevTools → Application → Clear storage)
 
 ## 8. Konwencje kodu
 
@@ -203,6 +317,8 @@ firebase deploy --only functions
 - **Toast**: `showToast(message)` — wyświetla notyfikację
 - **Firestore collections**: through SK object (`SK.vehicles`, `SK.costs`, `SK.frachty`...)
 - **Role**: `admin`, `dyspozytor`, `kierowca`
+- **Język UI**: polski
+- **Commit message**: po polsku lub angielsku, z `Co-Authored-By: Claude`
 - **Commit message**: po polsku lub angielsku, z `Co-Authored-By: Claude`
 
 ## 9. Co zostało zrobione (chronologicznie)

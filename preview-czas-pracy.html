@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FleetStat — Czas pracy kierowcy (mockup)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'DM Sans', sans-serif; background: #f1f5f9; color: #111827; }
+  .kpi-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+  .pulse-dot { animation: pulse 2s infinite; }
+  @keyframes pulse {
+    0%,100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(1.15); }
+  }
+  .progress-gradient-green { background: linear-gradient(90deg, #16a34a 0%, #22c55e 100%); }
+  .progress-gradient-yellow { background: linear-gradient(90deg, #d97706 0%, #f59e0b 100%); }
+  .progress-gradient-red { background: linear-gradient(90deg, #dc2626 0%, #ef4444 100%); }
+  .progress-gradient-blue { background: linear-gradient(90deg, #2563eb 0%, #3b82f6 100%); }
+  .progress-gradient-violet { background: linear-gradient(90deg, #7c3aed 0%, #a855f7 100%); }
+
+  /* Tryby aktywności - kolory */
+  .act-drive { background: #2563eb; }     /* jazda - niebieski */
+  .act-work  { background: #f59e0b; }     /* inna praca - żółty */
+  .act-avail { background: #94a3b8; }     /* dyspozycyjność - szary */
+  .act-rest  { background: #22c55e; }     /* odpoczynek - zielony */
+
+  /* iPhone ramka */
+  .phone-frame {
+    width: 380px; background: #000; border-radius: 44px; padding: 10px;
+    box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
+  }
+  .phone-screen {
+    background: #f8f9fb; border-radius: 36px; overflow: hidden;
+    min-height: 780px; position: relative;
+  }
+  .phone-notch {
+    position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+    width: 120px; height: 28px; background: #000; border-radius: 0 0 18px 18px; z-index: 10;
+  }
+</style>
+</head>
+<body class="p-8">
+
+<div class="max-w-[1600px] mx-auto">
+
+  <!-- Header -->
+  <div class="mb-8 text-center">
+    <div class="inline-flex items-center gap-3 bg-white rounded-2xl px-6 py-3 shadow-sm border border-gray-100">
+      <div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background: linear-gradient(135deg, #7c3aed, #a855f7); color: white; font-weight: 800;">FS</div>
+      <div class="text-left">
+        <div class="text-sm font-bold text-gray-900">FleetStat — Czas pracy kierowcy</div>
+        <div class="text-xs text-gray-500">Mockup widoku do zatwierdzenia · zgodny z 561/2006 + Pakiet Mobilności</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 xl:grid-cols-[380px_1fr] gap-8">
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- WIDOK 1: PANEL KIEROWCY (MOBILE — iPhone-style)                 -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <div>
+      <div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Widok kierowcy (telefon)</div>
+      <div class="phone-frame">
+        <div class="phone-screen p-4 pt-12 pb-6 space-y-3 overflow-hidden">
+          <div class="phone-notch"></div>
+
+          <!-- Header: kierowca + pojazd -->
+          <div style="background: linear-gradient(135deg, #1e293b, #334155); border-radius: 16px; padding: 16px;">
+            <div class="flex items-center justify-between mb-2">
+              <div>
+                <div class="text-xs text-gray-300">Kierowca</div>
+                <div class="text-sm font-bold text-white">Jan Kowalski</div>
+              </div>
+              <div class="text-right">
+                <div class="text-xs text-gray-300">Pojazd</div>
+                <div class="text-sm font-bold text-white">WGM 0475M</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- STATUS AKTUALNY -->
+          <div style="background: #fff; border-radius: 16px; padding: 16px; border: 2px solid #22c55e;">
+            <div class="flex items-center gap-3">
+              <div class="w-3 h-3 rounded-full bg-green-500 pulse-dot"></div>
+              <div class="flex-1">
+                <div class="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Status aktualny</div>
+                <div class="text-base font-bold text-gray-900">🚛 JAZDA</div>
+                <div class="text-xs text-gray-500">od 06:00 (3h 47min)</div>
+              </div>
+              <div class="text-right">
+                <div class="text-[10px] text-gray-400">Prędkość z CAN</div>
+                <div class="text-sm font-bold text-gray-700">87 km/h</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- LICZNIK GŁÓWNY — DO PRZERWY -->
+          <div style="background: linear-gradient(135deg, #fffbeb, #fef3c7); border: 2px solid #fde68a; border-radius: 16px; padding: 16px;">
+            <div class="flex items-center justify-between mb-2">
+              <div class="text-[10px] font-bold text-amber-800 uppercase tracking-wider">⏰ Do obowiązkowej przerwy 45 min</div>
+              <span class="text-[10px] font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full">W NORMIE</span>
+            </div>
+            <div class="text-4xl font-extrabold text-amber-900 mb-2 tabular-nums">0h 43min</div>
+            <div class="h-2 bg-amber-100 rounded-full overflow-hidden mb-2">
+              <div class="progress-gradient-yellow h-full rounded-full" style="width: 84%;"></div>
+            </div>
+            <div class="flex items-center justify-between text-[11px] text-amber-700">
+              <span>Jazda ciągła: 3h 47min / 4h 30min</span>
+              <span class="font-semibold">Przerwa ok. 10:30</span>
+            </div>
+          </div>
+
+          <!-- KPI DZISIAJ -->
+          <div style="background: #fff; border-radius: 16px; padding: 14px; border: 1px solid #e5e7eb;">
+            <div class="flex items-center justify-between mb-3">
+              <div class="text-[10px] font-bold text-gray-500 uppercase tracking-wider">🗓️ Dzisiaj · pon. 20.04</div>
+              <div class="text-[10px] text-gray-400">od 06:00</div>
+            </div>
+            <div class="grid grid-cols-4 gap-2 mb-3">
+              <div class="text-center p-2 rounded-lg" style="background: #eff6ff;">
+                <div class="w-2 h-2 rounded-full act-drive mx-auto mb-1"></div>
+                <div class="text-[9px] text-gray-500">Jazda</div>
+                <div class="text-xs font-bold text-blue-700">3h 47</div>
+              </div>
+              <div class="text-center p-2 rounded-lg" style="background: #fffbeb;">
+                <div class="w-2 h-2 rounded-full act-work mx-auto mb-1"></div>
+                <div class="text-[9px] text-gray-500">Praca</div>
+                <div class="text-xs font-bold text-amber-700">0h 25</div>
+              </div>
+              <div class="text-center p-2 rounded-lg" style="background: #f8fafc;">
+                <div class="w-2 h-2 rounded-full act-avail mx-auto mb-1"></div>
+                <div class="text-[9px] text-gray-500">Dyspoz.</div>
+                <div class="text-xs font-bold text-slate-600">0h 00</div>
+              </div>
+              <div class="text-center p-2 rounded-lg" style="background: #f0fdf4;">
+                <div class="w-2 h-2 rounded-full act-rest mx-auto mb-1"></div>
+                <div class="text-[9px] text-gray-500">Odp.</div>
+                <div class="text-xs font-bold text-green-700">0h 00</div>
+              </div>
+            </div>
+            <!-- Pasek limitu dziennego -->
+            <div class="mb-1">
+              <div class="flex items-center justify-between text-[11px] mb-1">
+                <span class="text-gray-600">Limit jazdy dziennej</span>
+                <span class="font-bold text-gray-700">3h 47min / 9h</span>
+              </div>
+              <div class="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                <div class="progress-gradient-blue h-full rounded-full" style="width: 42%;"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- PLAN DO PRZODU - sercem panelu -->
+          <div style="background: linear-gradient(135deg, #f5f3ff, #ede9fe); border: 1px solid #c7d2fe; border-radius: 16px; padding: 14px;">
+            <div class="flex items-center gap-2 mb-3">
+              <span class="text-sm">📅</span>
+              <div class="text-[10px] font-bold text-violet-800 uppercase tracking-wider">Plan do przodu (auto)</div>
+            </div>
+            <div class="space-y-2">
+              <!-- Następna przerwa -->
+              <div class="flex items-start gap-2 p-2 rounded-lg bg-white border border-amber-200">
+                <div class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style="background: #fef3c7;">⏸</div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-xs font-bold text-gray-900">Przerwa 45 min</div>
+                  <div class="text-[11px] text-gray-500">za 0h 43min · ok. 10:30 → 11:15</div>
+                </div>
+              </div>
+              <!-- Koniec dnia -->
+              <div class="flex items-start gap-2 p-2 rounded-lg bg-white border border-blue-200">
+                <div class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style="background: #dbeafe;">🛑</div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-xs font-bold text-gray-900">Koniec jazdy dziennej</div>
+                  <div class="text-[11px] text-gray-500">limit 9h · ok. 16:15 (+45min przerwy)</div>
+                </div>
+              </div>
+              <!-- Odpoczynek dzienny -->
+              <div class="flex items-start gap-2 p-2 rounded-lg bg-white border border-green-200">
+                <div class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style="background: #dcfce7;">🛏</div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-xs font-bold text-gray-900">Odpoczynek dzienny 11h</div>
+                  <div class="text-[11px] text-gray-500">16:15 → jutro 03:15 · start pracy 03:15</div>
+                </div>
+              </div>
+              <!-- Odpoczynek tygodniowy -->
+              <div class="flex items-start gap-2 p-2 rounded-lg bg-white border border-purple-200">
+                <div class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style="background: #f3e8ff;">🛌</div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-xs font-bold text-gray-900">Odpoczynek tygodniowy 45h</div>
+                  <div class="text-[11px] text-gray-500">piątek 18:00 → niedz. 15:00 · start sob. 15:00</div>
+                </div>
+              </div>
+              <!-- Powrót do bazy -->
+              <div class="flex items-start gap-2 p-2 rounded-lg bg-white border border-violet-200">
+                <div class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style="background: #ede9fe;">🏠</div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-xs font-bold text-gray-900">Powrót do bazy</div>
+                  <div class="text-[11px] text-gray-500">za 5 dni · deadline 25.04.2026 (28 dni)</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- KOMPENSATY -->
+          <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 16px; padding: 14px;">
+            <div class="flex items-center gap-2 mb-2">
+              <span>⚠️</span>
+              <div class="text-[10px] font-bold text-red-800 uppercase tracking-wider">Do odrobienia (kompensaty)</div>
+            </div>
+            <div class="text-sm font-bold text-red-900">2h z odpoczynku tygodniowego</div>
+            <div class="text-[11px] text-red-700 mt-1">W zeszłym tygodniu skrócony 43h zamiast 45h. Dolicz do najbliższego odpoczynku regularnego (do niedz. 26.04).</div>
+          </div>
+
+          <!-- 28-DNIOWY OKRES -->
+          <div style="background: #fff; border-radius: 16px; padding: 14px; border: 1px solid #e5e7eb;">
+            <div class="flex items-center justify-between mb-2">
+              <div class="text-[10px] font-bold text-gray-500 uppercase tracking-wider">🛣️ Okres 28-dniowy</div>
+              <div class="text-[10px] text-gray-400">start: 23.03</div>
+            </div>
+            <div class="flex items-center justify-between text-xs mb-1">
+              <span class="text-gray-600">Dzień 23 / 28</span>
+              <span class="font-bold text-violet-700">5 dni do powrotu do bazy</span>
+            </div>
+            <div class="h-2 bg-gray-100 rounded-full overflow-hidden mb-3">
+              <div class="progress-gradient-violet h-full rounded-full" style="width: 82%;"></div>
+            </div>
+            <!-- Limity okresowe -->
+            <div class="space-y-2 text-[11px]">
+              <div>
+                <div class="flex items-center justify-between mb-0.5">
+                  <span class="text-gray-600">Jazda tygodniowa (bieżący)</span>
+                  <span class="font-semibold text-gray-700">28h / 56h</span>
+                </div>
+                <div class="h-1 bg-gray-100 rounded-full"><div class="progress-gradient-blue h-full rounded-full" style="width: 50%;"></div></div>
+              </div>
+              <div>
+                <div class="flex items-center justify-between mb-0.5">
+                  <span class="text-gray-600">Jazda dwutygodniowa</span>
+                  <span class="font-semibold text-gray-700">54h / 90h</span>
+                </div>
+                <div class="h-1 bg-gray-100 rounded-full"><div class="progress-gradient-blue h-full rounded-full" style="width: 60%;"></div></div>
+              </div>
+              <div>
+                <div class="flex items-center justify-between mb-0.5">
+                  <span class="text-gray-600">Czas pracy (48h/tydz śr.)</span>
+                  <span class="font-semibold text-gray-700">41h / 48h</span>
+                </div>
+                <div class="h-1 bg-gray-100 rounded-full"><div class="progress-gradient-yellow h-full rounded-full" style="width: 85%;"></div></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- PRZYCISKI AKCJI -->
+          <div class="grid grid-cols-2 gap-2 pt-2">
+            <button class="py-3 rounded-xl text-xs font-bold text-white" style="background: #f59e0b;">⏸ Przerwa</button>
+            <button class="py-3 rounded-xl text-xs font-bold text-white" style="background: #22c55e;">🛏 Odpoczynek</button>
+            <button class="py-3 rounded-xl text-xs font-bold text-white" style="background: #64748b;">🔧 Inna praca</button>
+            <button class="py-3 rounded-xl text-xs font-bold text-white" style="background: #2563eb;">🚛 Jazda</button>
+          </div>
+
+        </div>
+      </div>
+      <div class="mt-3 text-[11px] text-gray-500 text-center">📱 Kierowca widzi to w panelu swojego pojazdu (nowa zakładka "Czas pracy")</div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- WIDOK 2: PANEL ADMINA (GPS/Monitoring — obok mapa/km/trasy/...)-->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <div>
+      <div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Widok admina (GPS/Monitoring → nowa sub-zakładka "Czas pracy")</div>
+
+      <!-- Nagłówek zakładki + sub-tabs -->
+      <div class="bg-white rounded-t-2xl border border-gray-100 border-b-0 px-5 py-4">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background: #ede9fe; color: #7c3aed; font-size: 20px;">🚛</div>
+            <div>
+              <div class="text-sm font-bold text-gray-900">WGM 0475M · Jan Kowalski</div>
+              <div class="text-xs text-gray-400">Iveco 2021 · Atlas device #4471</div>
+            </div>
+          </div>
+          <div class="text-right">
+            <div class="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Okres 28-dniowy</div>
+            <div class="text-xs text-gray-600 font-semibold">23.03 – 20.04.2026</div>
+          </div>
+        </div>
+        <!-- Sub-tabs (istniejące + nowy Czas pracy) -->
+        <div class="flex gap-1 bg-gray-50 rounded-xl p-1 text-xs font-semibold">
+          <div class="flex-1 py-2 px-3 rounded-lg text-gray-500 text-center">🗺️ Mapa online</div>
+          <div class="flex-1 py-2 px-3 rounded-lg text-gray-500 text-center">📊 Kilometry</div>
+          <div class="flex-1 py-2 px-3 rounded-lg text-gray-500 text-center">🛣️ Trasy</div>
+          <div class="flex-1 py-2 px-3 rounded-lg text-gray-500 text-center">💳 Karta kierowcy</div>
+          <div class="flex-1 py-2 px-3 rounded-lg text-gray-500 text-center">💾 Pliki DDD</div>
+          <div class="flex-1 py-2 px-3 rounded-lg text-white text-center" style="background: #7c3aed;">⏱️ Czas pracy</div>
+        </div>
+      </div>
+
+      <!-- Content -->
+      <div class="bg-slate-50 rounded-b-2xl border border-gray-100 border-t-0 p-5 space-y-4">
+
+        <!-- ROW 1: 4 duże KPI live -->
+        <div class="grid grid-cols-4 gap-4">
+          <div class="bg-white rounded-2xl border border-gray-100 p-4">
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Status</span>
+              <span class="w-2 h-2 rounded-full bg-green-500 pulse-dot"></span>
+            </div>
+            <div class="text-2xl font-extrabold text-gray-900 mb-0.5">🚛 JAZDA</div>
+            <div class="text-xs text-gray-500">od 06:00 · 87 km/h</div>
+          </div>
+          <div class="bg-white rounded-2xl border border-gray-100 p-4">
+            <div class="kpi-label text-amber-700 mb-1">Do przerwy</div>
+            <div class="text-2xl font-extrabold text-amber-900 tabular-nums mb-0.5">0h 43min</div>
+            <div class="h-1 bg-gray-100 rounded-full overflow-hidden"><div class="progress-gradient-yellow h-full" style="width:84%"></div></div>
+            <div class="text-[11px] text-gray-500 mt-1">45 min o 10:30</div>
+          </div>
+          <div class="bg-white rounded-2xl border border-gray-100 p-4">
+            <div class="kpi-label text-blue-700 mb-1">Jazda dzisiaj</div>
+            <div class="text-2xl font-extrabold text-gray-900 tabular-nums mb-0.5">3h 47 <span class="text-sm text-gray-400 font-normal">/ 9h</span></div>
+            <div class="h-1 bg-gray-100 rounded-full overflow-hidden"><div class="progress-gradient-blue h-full" style="width:42%"></div></div>
+            <div class="text-[11px] text-gray-500 mt-1">Koniec jazdy ok. 16:15</div>
+          </div>
+          <div class="bg-white rounded-2xl border border-gray-100 p-4">
+            <div class="kpi-label text-violet-700 mb-1">Powrót do bazy</div>
+            <div class="text-2xl font-extrabold text-gray-900 tabular-nums mb-0.5">5 <span class="text-sm text-gray-400 font-normal">dni</span></div>
+            <div class="h-1 bg-gray-100 rounded-full overflow-hidden"><div class="progress-gradient-violet h-full" style="width:82%"></div></div>
+            <div class="text-[11px] text-gray-500 mt-1">Deadline 25.04.2026</div>
+          </div>
+        </div>
+
+        <!-- ROW 2: Timeline 7 dni + Plan do przodu -->
+        <div class="grid grid-cols-[2fr_1fr] gap-4">
+          <!-- Timeline 7 dni -->
+          <div class="bg-white rounded-2xl border border-gray-100 p-5">
+            <div class="flex items-center justify-between mb-4">
+              <div class="text-sm font-bold text-gray-900">Aktywność ostatnich 7 dni</div>
+              <div class="flex items-center gap-3 text-[10px]">
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full act-drive"></span>Jazda</span>
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full act-work"></span>Praca</span>
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full act-avail"></span>Dyspoz.</span>
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full act-rest"></span>Odpoczynek</span>
+              </div>
+            </div>
+            <!-- 7 dni, każdy jako pasek z segmentami -->
+            <div class="space-y-3">
+              <!-- Dzień = pasek 24h podzielony na segmenty -->
+              <script>
+                // (opisowo — pasek ma 24 mini-segmenty reprezentujące godziny)
+              </script>
+              <!-- Pon 20.04 - dzisiaj -->
+              <div>
+                <div class="flex items-center justify-between text-[11px] mb-1">
+                  <span class="font-semibold text-gray-900">Pon 20.04 (dziś)</span>
+                  <span class="text-gray-400">Jazda 3h 47 · Praca 0h 25 · Dysp. 0h · Odp. 6h</span>
+                </div>
+                <div class="h-5 rounded-md overflow-hidden flex">
+                  <div class="act-rest" style="width: 25%;"></div>
+                  <div class="act-work" style="width: 1.7%;"></div>
+                  <div class="act-drive" style="width: 15.8%;"></div>
+                  <div class="act-rest" style="width: 2%;" title="pauza 10 min"></div>
+                  <div class="act-drive" style="width: 5%;"></div>
+                  <div class="act-avail" style="width: 50.5%; opacity:0.3;"></div>
+                </div>
+              </div>
+              <!-- Nd 19.04 -->
+              <div>
+                <div class="flex items-center justify-between text-[11px] mb-1">
+                  <span class="font-semibold text-gray-700">Nd 19.04</span>
+                  <span class="text-gray-400">Odpoczynek tygodniowy (43h — skrócony)</span>
+                </div>
+                <div class="h-5 rounded-md overflow-hidden flex">
+                  <div class="act-rest" style="width: 100%;"></div>
+                </div>
+              </div>
+              <!-- Sob 18.04 -->
+              <div>
+                <div class="flex items-center justify-between text-[11px] mb-1">
+                  <span class="font-semibold text-gray-700">Sob 18.04</span>
+                  <span class="text-gray-400">Jazda 4h 12 · Praca 0h 40 · Odp. 19h</span>
+                </div>
+                <div class="h-5 rounded-md overflow-hidden flex">
+                  <div class="act-rest" style="width: 20%;"></div>
+                  <div class="act-drive" style="width: 9%;"></div>
+                  <div class="act-rest" style="width: 3%;"></div>
+                  <div class="act-drive" style="width: 8.5%;"></div>
+                  <div class="act-work" style="width: 2.8%;"></div>
+                  <div class="act-rest" style="width: 56.7%;"></div>
+                </div>
+              </div>
+              <!-- Pt 17.04 -->
+              <div>
+                <div class="flex items-center justify-between text-[11px] mb-1">
+                  <span class="font-semibold text-gray-700">Pt 17.04</span>
+                  <span class="text-gray-400">Jazda 9h · Praca 1h 20 · Odp. 11h</span>
+                </div>
+                <div class="h-5 rounded-md overflow-hidden flex">
+                  <div class="act-rest" style="width: 15%;"></div>
+                  <div class="act-work" style="width: 3%;"></div>
+                  <div class="act-drive" style="width: 18.7%;"></div>
+                  <div class="act-rest" style="width: 3%;"></div>
+                  <div class="act-drive" style="width: 18.8%;"></div>
+                  <div class="act-work" style="width: 2.5%;"></div>
+                  <div class="act-rest" style="width: 39%;"></div>
+                </div>
+              </div>
+              <!-- Cz 16.04 -->
+              <div>
+                <div class="flex items-center justify-between text-[11px] mb-1">
+                  <span class="font-semibold text-gray-700">Cz 16.04</span>
+                  <span class="text-gray-400">Jazda 8h 15 · Praca 1h · Odp. 11h</span>
+                </div>
+                <div class="h-5 rounded-md overflow-hidden flex">
+                  <div class="act-rest" style="width: 20%;"></div>
+                  <div class="act-drive" style="width: 17%;"></div>
+                  <div class="act-rest" style="width: 3.5%;"></div>
+                  <div class="act-drive" style="width: 17.5%;"></div>
+                  <div class="act-work" style="width: 4%;"></div>
+                  <div class="act-rest" style="width: 38%;"></div>
+                </div>
+              </div>
+              <!-- Śr 15.04 -->
+              <div>
+                <div class="flex items-center justify-between text-[11px] mb-1">
+                  <span class="font-semibold text-gray-700">Śr 15.04</span>
+                  <span class="text-gray-400">Jazda 9h (10h 2x/tydz) · Praca 1h 30 · Odp. 9h (skrócony)</span>
+                </div>
+                <div class="h-5 rounded-md overflow-hidden flex">
+                  <div class="act-rest" style="width: 15%;"></div>
+                  <div class="act-drive" style="width: 20.8%;"></div>
+                  <div class="act-rest" style="width: 3%;"></div>
+                  <div class="act-drive" style="width: 20.8%;"></div>
+                  <div class="act-work" style="width: 6%;"></div>
+                  <div class="act-rest" style="width: 34.4%;"></div>
+                </div>
+              </div>
+              <!-- Wt 14.04 -->
+              <div>
+                <div class="flex items-center justify-between text-[11px] mb-1">
+                  <span class="font-semibold text-gray-700">Wt 14.04</span>
+                  <span class="text-gray-400">Jazda 7h 40 · Praca 2h · Odp. 11h</span>
+                </div>
+                <div class="h-5 rounded-md overflow-hidden flex">
+                  <div class="act-rest" style="width: 12%;"></div>
+                  <div class="act-drive" style="width: 16%;"></div>
+                  <div class="act-rest" style="width: 3%;"></div>
+                  <div class="act-drive" style="width: 16%;"></div>
+                  <div class="act-work" style="width: 8%;"></div>
+                  <div class="act-rest" style="width: 45%;"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Plan do przodu (kolumna prawa) -->
+          <div class="bg-white rounded-2xl border border-gray-100 p-5">
+            <div class="text-sm font-bold text-gray-900 mb-3">📅 Plan do przodu</div>
+            <div class="space-y-2">
+              <div class="flex items-start gap-2 p-2 rounded-lg" style="background: #fffbeb; border: 1px solid #fde68a;">
+                <div class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style="background: #fef3c7;">⏸</div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-xs font-bold text-amber-900">Przerwa 45 min</div>
+                  <div class="text-[11px] text-amber-700">za 0h 43min · 10:30</div>
+                </div>
+              </div>
+              <div class="flex items-start gap-2 p-2 rounded-lg" style="background: #eff6ff; border: 1px solid #bfdbfe;">
+                <div class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style="background: #dbeafe;">🛑</div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-xs font-bold text-blue-900">Koniec jazdy dziennej</div>
+                  <div class="text-[11px] text-blue-700">16:15 · limit 9h</div>
+                </div>
+              </div>
+              <div class="flex items-start gap-2 p-2 rounded-lg" style="background: #f0fdf4; border: 1px solid #bbf7d0;">
+                <div class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style="background: #dcfce7;">🛏</div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-xs font-bold text-green-900">Odpoczynek dzienny 11h</div>
+                  <div class="text-[11px] text-green-700">16:15 → jutro 03:15</div>
+                </div>
+              </div>
+              <div class="flex items-start gap-2 p-2 rounded-lg" style="background: #f5f3ff; border: 1px solid #c7d2fe;">
+                <div class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style="background: #ede9fe;">🛌</div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-xs font-bold text-violet-900">Odpoczynek tygodniowy 45h</div>
+                  <div class="text-[11px] text-violet-700">Pt 17:00 → Nd 15:00</div>
+                </div>
+              </div>
+              <div class="flex items-start gap-2 p-2 rounded-lg" style="background: #fef2f2; border: 1px solid #fecaca;">
+                <div class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style="background: #fee2e2;">🏠</div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-xs font-bold text-red-900">Powrót do bazy</div>
+                  <div class="text-[11px] text-red-700">do 25.04 · za 5 dni</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ROW 3: Limity szczegółowe + Kompensaty -->
+        <div class="grid grid-cols-[2fr_1fr] gap-4">
+          <!-- Limity -->
+          <div class="bg-white rounded-2xl border border-gray-100 p-5">
+            <div class="text-sm font-bold text-gray-900 mb-3">Limity compliance — stan bieżący</div>
+            <div class="space-y-3">
+              <!-- Jazda dzienna -->
+              <div>
+                <div class="flex items-center justify-between text-xs mb-1">
+                  <span class="font-semibold text-gray-700">Jazda dzienna</span>
+                  <span class="font-bold text-blue-700">3h 47 / 9h <span class="text-gray-400 font-normal">(10h 2×/tydz — użyte 1×)</span></span>
+                </div>
+                <div class="h-2 bg-gray-100 rounded-full overflow-hidden"><div class="progress-gradient-blue h-full" style="width:42%"></div></div>
+              </div>
+              <!-- Jazda ciągła -->
+              <div>
+                <div class="flex items-center justify-between text-xs mb-1">
+                  <span class="font-semibold text-gray-700">Jazda ciągła (do przerwy 45 min)</span>
+                  <span class="font-bold text-amber-700">3h 47 / 4h 30</span>
+                </div>
+                <div class="h-2 bg-gray-100 rounded-full overflow-hidden"><div class="progress-gradient-yellow h-full" style="width:84%"></div></div>
+              </div>
+              <!-- Jazda tygodniowa -->
+              <div>
+                <div class="flex items-center justify-between text-xs mb-1">
+                  <span class="font-semibold text-gray-700">Jazda tygodniowa</span>
+                  <span class="font-bold text-blue-700">28h / 56h</span>
+                </div>
+                <div class="h-2 bg-gray-100 rounded-full overflow-hidden"><div class="progress-gradient-blue h-full" style="width:50%"></div></div>
+              </div>
+              <!-- Jazda dwutygodniowa -->
+              <div>
+                <div class="flex items-center justify-between text-xs mb-1">
+                  <span class="font-semibold text-gray-700">Jazda dwutygodniowa (bieżący + poprzedni)</span>
+                  <span class="font-bold text-blue-700">54h / 90h</span>
+                </div>
+                <div class="h-2 bg-gray-100 rounded-full overflow-hidden"><div class="progress-gradient-blue h-full" style="width:60%"></div></div>
+              </div>
+              <!-- Czas pracy -->
+              <div>
+                <div class="flex items-center justify-between text-xs mb-1">
+                  <span class="font-semibold text-gray-700">Czas pracy 48h/tydz średnio (okres rozlicz. 4 mies.)</span>
+                  <span class="font-bold text-amber-700">41h / 48h śr.</span>
+                </div>
+                <div class="h-2 bg-gray-100 rounded-full overflow-hidden"><div class="progress-gradient-yellow h-full" style="width:85%"></div></div>
+              </div>
+              <!-- Skrócony dzienny -->
+              <div>
+                <div class="flex items-center justify-between text-xs mb-1">
+                  <span class="font-semibold text-gray-700">Odpoczynki dzienne skrócone (max 3 między tygodniowymi)</span>
+                  <span class="font-bold text-gray-700">1 / 3 wykorzystane</span>
+                </div>
+                <div class="h-2 bg-gray-100 rounded-full overflow-hidden"><div class="progress-gradient-green h-full" style="width:33%"></div></div>
+              </div>
+              <!-- Skrócony tygodniowy -->
+              <div>
+                <div class="flex items-center justify-between text-xs mb-1">
+                  <span class="font-semibold text-gray-700">Odpoczynki tygodniowe skrócone (max 2 / 2 kol. tyg.)</span>
+                  <span class="font-bold text-red-700">1 / 2 wykorzystany (do odrobienia 2h)</span>
+                </div>
+                <div class="h-2 bg-gray-100 rounded-full overflow-hidden"><div class="progress-gradient-red h-full" style="width:50%"></div></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Kompensaty -->
+          <div class="space-y-4">
+            <div class="bg-white rounded-2xl border-2 p-5" style="border-color: #fecaca;">
+              <div class="flex items-center gap-2 mb-2">
+                <span>⚠️</span>
+                <div class="text-sm font-bold text-red-900">Do odrobienia</div>
+              </div>
+              <div class="p-3 rounded-xl mb-2" style="background: #fef2f2; border: 1px solid #fecaca;">
+                <div class="text-xs font-bold text-red-900">−2h · odpoczynek tygodniowy</div>
+                <div class="text-[11px] text-red-700 mt-0.5">Ze skróconego 43h zamiast 45h (19.04.2026)</div>
+                <div class="text-[11px] text-red-700">Deadline: do najbliższego regularnego (26.04)</div>
+              </div>
+              <div class="text-[11px] text-gray-500">Łącznie: <span class="font-bold text-red-700">2h 0min</span></div>
+            </div>
+
+            <div class="bg-white rounded-2xl border border-gray-100 p-5">
+              <div class="text-sm font-bold text-gray-900 mb-2">Źródła danych</div>
+              <div class="space-y-2 text-xs">
+                <div class="flex items-center justify-between p-2 rounded-lg bg-green-50">
+                  <div class="flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                    <span class="font-semibold text-gray-700">GPS Atlas (live)</span>
+                  </div>
+                  <span class="text-[11px] text-green-700 font-semibold">Połączone</span>
+                </div>
+                <div class="flex items-center justify-between p-2 rounded-lg bg-green-50">
+                  <div class="flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-green-500"></span>
+                    <span class="font-semibold text-gray-700">Kliknięcia kierowcy</span>
+                  </div>
+                  <span class="text-[11px] text-green-700 font-semibold">Aktywne</span>
+                </div>
+                <div class="flex items-center justify-between p-2 rounded-lg bg-amber-50">
+                  <div class="flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+                    <span class="font-semibold text-gray-700">Karta kierowcy DDD</span>
+                  </div>
+                  <span class="text-[11px] text-amber-700 font-semibold">Faza B (wkrótce)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ROW 4: Historia aktywności ostatnich 24h -->
+        <div class="bg-white rounded-2xl border border-gray-100 p-5">
+          <div class="flex items-center justify-between mb-3">
+            <div class="text-sm font-bold text-gray-900">Historia aktywności (ostatnie 24h)</div>
+            <div class="text-[11px] text-gray-400">Auto-wykrywanie z GPS + kliknięcia kierowcy</div>
+          </div>
+          <div class="space-y-1">
+            <div class="flex items-center gap-3 text-xs py-1.5 border-b border-gray-50">
+              <span class="w-2 h-2 rounded-full act-drive"></span>
+              <span class="font-mono text-gray-500 w-24">06:00 – 09:47</span>
+              <span class="font-semibold text-gray-700">Jazda</span>
+              <span class="text-gray-400">3h 47min · 312 km</span>
+              <span class="ml-auto text-[10px] text-gray-400">auto GPS</span>
+            </div>
+            <div class="flex items-center gap-3 text-xs py-1.5 border-b border-gray-50 bg-amber-50/40">
+              <span class="w-2 h-2 rounded-full act-work"></span>
+              <span class="font-mono text-gray-500 w-24">05:35 – 06:00</span>
+              <span class="font-semibold text-gray-700">Inna praca (załadunek DE74906)</span>
+              <span class="text-gray-400">0h 25min</span>
+              <span class="ml-auto text-[10px] text-violet-600 font-semibold">fracht event</span>
+            </div>
+            <div class="flex items-center gap-3 text-xs py-1.5 border-b border-gray-50 bg-green-50/40">
+              <span class="w-2 h-2 rounded-full act-rest"></span>
+              <span class="font-mono text-gray-500 w-24">Nd 20:00 – 05:35</span>
+              <span class="font-semibold text-gray-700">Odpoczynek (9h 35min)</span>
+              <span class="text-gray-400">skrócony · 3/3 w tyg</span>
+              <span class="ml-auto text-[10px] text-gray-400">auto silnik OFF</span>
+            </div>
+            <div class="flex items-center gap-3 text-xs py-1.5 border-b border-gray-50 bg-green-50/40">
+              <span class="w-2 h-2 rounded-full act-rest"></span>
+              <span class="font-mono text-gray-500 w-24">Sob 19:15 – Nd 14:10</span>
+              <span class="font-semibold text-gray-700">Odpoczynek tygodniowy (43h · skrócony)</span>
+              <span class="text-gray-400">−2h do nadrobienia</span>
+              <span class="ml-auto text-[10px] text-red-600 font-semibold">⚠ kompensata</span>
+            </div>
+            <div class="flex items-center gap-3 text-xs py-1.5">
+              <span class="w-2 h-2 rounded-full act-drive"></span>
+              <span class="font-mono text-gray-500 w-24">Sob 15:03 – 19:15</span>
+              <span class="font-semibold text-gray-700">Jazda</span>
+              <span class="text-gray-400">4h 12min · 364 km</span>
+              <span class="ml-auto text-[10px] text-gray-400">auto GPS</span>
+            </div>
+          </div>
+          <button class="mt-3 w-full py-2 rounded-lg text-xs font-semibold text-gray-600 bg-gray-50 hover:bg-gray-100">Pokaż więcej (ostatnie 28 dni) →</button>
+        </div>
+
+      </div>
+      <div class="mt-3 text-[11px] text-gray-500 text-center">💻 Admin/dyspozytor widzi to w GPS/Monitoring → nowa sub-zakładka "Czas pracy" (obok Mapa, Kilometry, Trasy, Karta, DDD)</div>
+    </div>
+
+  </div>
+
+  <!-- Notki pod mockupem -->
+  <div class="mt-8 bg-white rounded-2xl border border-gray-100 p-6">
+    <div class="text-sm font-bold text-gray-900 mb-3">🧠 Inteligencja narzędzia — jak działa</div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-gray-600">
+      <div>
+        <div class="font-bold text-gray-800 mb-1">1. Auto-wykrywanie aktywności</div>
+        <ul class="space-y-1 list-disc list-inside">
+          <li>GPS Atlas CAN · prędkość &gt; 3 km/h przez &gt; 2 min → <strong>jazda</strong></li>
+          <li>Prędkość = 0, silnik ON, przez &gt; 15 min → <strong>dyspozycyjność</strong> (sugestia)</li>
+          <li>Silnik OFF przez &gt; 45 min → <strong>odpoczynek</strong></li>
+          <li>Kierowca ręcznie: 4 przyciski w telefonie (override)</li>
+          <li>Eventy frachtu (dotarcie_zaladunek, rozladunek) → <strong>inna praca</strong> (25–40 min szacunkowo)</li>
+        </ul>
+      </div>
+      <div>
+        <div class="font-bold text-gray-800 mb-1">2. Planowanie do przodu</div>
+        <ul class="space-y-1 list-disc list-inside">
+          <li>Po każdej zmianie stanu: przeliczanie kiedy musi być przerwa / odpoczynek</li>
+          <li>Uwzględnia 9h dzienny + 10h 2× w tygodniu</li>
+          <li>Kompensaty za skrócone odpoczynki (2h, 4h itp.) — deadline do kolejnego regularnego</li>
+          <li>28-dniowy licznik od pierwszego kliku "start" po zjeździe z bazy</li>
+        </ul>
+      </div>
+      <div>
+        <div class="font-bold text-gray-800 mb-1">3. Inteligentne alerty</div>
+        <ul class="space-y-1 list-disc list-inside">
+          <li>🟡 30 min przed wymagalną przerwą → push na telefon</li>
+          <li>🟠 Zbliża się limit dzienny (1h zostało)</li>
+          <li>🔴 Przekroczenie → czerwony baner</li>
+          <li>🏠 3 dni przed deadline 28 dni → powrót do bazy</li>
+        </ul>
+      </div>
+      <div>
+        <div class="font-bold text-gray-800 mb-1">4. Zapis w Firestore</div>
+        <ul class="space-y-1 list-disc list-inside">
+          <li>Kolekcja <code>driverActivities</code> — segmenty aktywności (start, end, type, source)</li>
+          <li>Agregaty dzienne/tygodniowe cachowane w <code>driverComplianceCache</code></li>
+          <li>Oś dni 28-dniowych od <code>periodStart</code> dla każdego kierowcy</li>
+          <li>Pliki DDD (faza B) → parsing server-side, wypełnienie driverActivities z dokładnością do sekundy</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>
