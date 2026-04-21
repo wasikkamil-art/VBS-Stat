@@ -877,15 +877,41 @@ function lastWeeklyRestEnd(segments, now) {
   return d.getTime();
 }
 
+// ── Priorytet źródeł: DDD > manual > auto_gps ──
+// Gdy dla kierowcy są segmenty z DDD w danym zakresie czasu, filtrujemy
+// pozostałe źródła z tego zakresu (traktujemy je jako zastąpione).
+function preferDddSegments(segments) {
+  const dddSegs = segments.filter(s => s.source === "ddd");
+  if (dddSegs.length === 0) return segments;
+
+  // Zbuduj listę przedziałów pokrytych przez DDD
+  const covered = dddSegs.map(s => [s.startMs, s.endMs]).sort((a, b) => a[0] - b[0]);
+  const isCovered = (ms) => {
+    for (const [a, b] of covered) {
+      if (ms >= a && ms < b) return true;
+    }
+    return false;
+  };
+
+  // Segmenty DDD zachowujemy + te nie-DDD które leżą poza zakresem DDD
+  return segments.filter(s => {
+    if (s.source === "ddd") return true;
+    const midMs = (s.startMs + s.endMs) / 2;
+    return !isCovered(midMs);
+  });
+}
+
 // ── GŁÓWNA FUNKCJA: compliance dla kierowcy ──
 // segments: tablica surowych segmentów {startTs, endTs, type, ...}
 // periodStart: ISO date stringu startu 28-dniowego okresu
 // now: Date (aktualny moment)
 // Zwraca obiekt z limitami + planem do przodu
 function computeDriverCompliance(rawSegments = [], periodStart = null, now = new Date()) {
-  const segments = rawSegments
+  const allSegments = rawSegments
     .map(s => normalizeSegment(s, now))
     .sort((a, b) => a.startMs - b.startMs);
+  // Priorytet DDD — odfiltrowujemy GPS/manual tam gdzie mamy tachograf
+  const segments = preferDddSegments(allSegments);
 
   const nowMs = now.getTime();
   const current = segments[segments.length - 1] || null;
@@ -932,6 +958,13 @@ function computeDriverCompliance(rawSegments = [], periodStart = null, now = new
   // Stan aktualny
   const currentStateType = current?.isOpen ? current.type : null;
 
+  // Statystyki źródeł danych
+  const sourceStats = allSegments.reduce((acc, s) => {
+    acc[s.source || "unknown"] = (acc[s.source || "unknown"] || 0) + 1;
+    return acc;
+  }, {});
+  const hasDdd = (sourceStats.ddd || 0) > 0;
+
   return {
     now: nowMs,
     segments,
@@ -963,6 +996,8 @@ function computeDriverCompliance(rawSegments = [], periodStart = null, now = new
       start: biweekStart,
     },
     period28,
+    sources: sourceStats,
+    hasDdd,
   };
 }
 
@@ -7714,14 +7749,25 @@ function GpsCzasPracySection({ device, position, driverActivities = [], showToas
               <div className="text-xs text-gray-400">{vehicle.brand} {vehicle.year} · Atlas device #{device?.deviceId || device?.id}</div>
             </div>
           </div>
-          {compliance.period28 && (
-            <div className="text-right">
-              <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Okres 28-dniowy</div>
-              <div className="text-xs text-gray-600 font-semibold">
-                Dzień {compliance.period28.daysPassed} / {REGULATION.RETURN_TO_BASE_DAYS}
+          <div className="flex items-center gap-3">
+            {compliance.hasDdd ? (
+              <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold" style={{ background: "#f0fdf4", color: "#15803d", border: "1px solid #bbf7d0" }}>
+                ✓ Dane z tachografu (DDD)
+              </span>
+            ) : (
+              <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold" style={{ background: "#fffbeb", color: "#92400e", border: "1px solid #fde68a" }}>
+                Auto-wykrywanie GPS
+              </span>
+            )}
+            {compliance.period28 && (
+              <div className="text-right">
+                <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Okres 28-dniowy</div>
+                <div className="text-xs text-gray-600 font-semibold">
+                  Dzień {compliance.period28.daysPassed} / {REGULATION.RETURN_TO_BASE_DAYS}
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
 
@@ -8015,33 +8061,58 @@ function GpsKartaSection({ device, showToast }) {
 function GpsDddSection({ device, showToast }) {
   const [dddFiles, setDddFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
+  const [parsingId, setParsingId] = useState(null);
+
+  // Listener na Firestore — pliki DDD tego pojazdu (po VRN lub wszystkie jeśli brak dopasowania)
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "dddFiles"), (snap) => {
+      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (b.uploadedAt || "").localeCompare(a.uploadedAt || ""));
+      setDddFiles(all);
+    }, (err) => console.error("dddFiles onSnapshot error", err));
+    return () => unsub();
+  }, []);
 
   const uploadDdd = async (file) => {
     if (!file) return;
     setUploading(true);
     try {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const entry = {
-          id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-          name: file.name,
-          size: file.size,
-          date: new Date().toISOString(),
-          deviceId: device.deviceId || device.id,
-          plate: device.plate || device.name,
-          status: "uploaded",
-          // Raw binary data for future parsing
-          dataUrl: reader.result,
-        };
-        setDddFiles(prev => [entry, ...prev]);
-        showToast(`Plik DDD wgrany: ${file.name}`);
-        setUploading(false);
-      };
-      reader.readAsDataURL(file);
+      // 1. Upload do Firebase Storage
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const storagePath = `driverDdd/${Date.now()}_${safeName}`;
+      const sRef = storageRef(storage, storagePath);
+      await uploadBytes(sRef, file);
+      showToast(`📤 Plik wgrany, parsuję...`);
+
+      // 2. Wywołanie Cloud Function parseDddFile
+      setParsingId(storagePath);
+      const parseDddFile = httpsCallable(functions, "parseDddFile");
+      const res = await parseDddFile({ storagePath, originalFileName: file.name });
+      const data = res?.data;
+      if (data?.success) {
+        const m = data.metadata || {};
+        const driverLabel = m.driverName || m.cardNumber || "—";
+        showToast(`✅ DDD sparsowany: ${driverLabel} · ${data.activitiesCount} aktywności`);
+      } else {
+        showToast(`⚠️ Parsowanie zwróciło nietypowy wynik`);
+      }
     } catch(e) {
-      showToast("Błąd uploadu: " + (e.message || ""));
-      setUploading(false);
+      console.error("uploadDdd error", e);
+      showToast("❌ Błąd: " + (e?.message || "upload nieudany").slice(0, 80));
     }
+    setUploading(false);
+    setParsingId(null);
+  };
+
+  const fmtTs = (ts) => {
+    if (!ts) return "—";
+    try { return new Date(ts).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }); }
+    catch { return ts; }
+  };
+  const fmtDate = (ts) => {
+    if (!ts) return "—";
+    try { return new Date(ts).toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit", year: "2-digit" }); }
+    catch { return ts; }
   };
 
   return (
@@ -8051,45 +8122,85 @@ function GpsDddSection({ device, showToast }) {
         <h4 className="text-sm font-semibold text-gray-800 mb-4">Pliki DDD — odczyt tachografu</h4>
         <div className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center">
           <span className="text-3xl mb-3 block">💾</span>
-          <p className="text-sm text-gray-500 mb-2">Wgraj plik DDD z tachografu cyfrowego</p>
-          <p className="text-xs text-gray-400 mb-4">Format binarny TLV · rozporządzenie EU 2016/799 · Gen1/Gen2</p>
+          <p className="text-sm text-gray-500 mb-2">Wgraj plik DDD z tachografu cyfrowego lub karty kierowcy</p>
+          <p className="text-xs text-gray-400 mb-4">Format binarny TLV · rozporządzenie EU 2016/799 · Gen1/Gen2 · parser readesm-js</p>
           <label className={`inline-block px-4 py-2 rounded-xl text-sm font-bold text-white cursor-pointer transition-all ${uploading ? "bg-gray-400" : "bg-violet-600 hover:bg-violet-700"}`}>
-            {uploading ? "Wgrywanie..." : "Wybierz plik DDD"}
-            <input type="file" accept=".ddd,.DDD" className="hidden" disabled={uploading}
-              onChange={e => uploadDdd(e.target.files?.[0])} />
+            {uploading ? (parsingId ? "Parsuję..." : "Wgrywanie...") : "Wybierz plik DDD / ESM"}
+            <input type="file" accept=".ddd,.DDD,.esm,.ESM,.tgd,.v1b" className="hidden" disabled={uploading}
+              onChange={e => { const f = e.target.files?.[0]; if (f) uploadDdd(f); e.target.value = ""; }} />
           </label>
+        </div>
+        <div className="mt-4 text-[11px] text-gray-500">
+          <strong>Źródło pliku:</strong> widziszwszystko → Premium → Harmonogramy DDD → Pliki .ddd → Pokaż pliki → Pobierz.
+          Następnie wrzuć pobrany plik powyżej — parser wyciągnie kierowcę, aktywności (jazda/praca/dyspozycyjność/odpoczynek) z dokładnością do sekundy i uzupełni nimi moduł Czas pracy.
         </div>
       </div>
 
       {/* Uploaded files list */}
-      {dddFiles.length > 0 && (
-        <div className="bg-white rounded-2xl border border-gray-100 p-5">
-          <h4 className="text-sm font-semibold text-gray-800 mb-3">Wgrane pliki</h4>
+      <div className="bg-white rounded-2xl border border-gray-100 p-5">
+        <h4 className="text-sm font-semibold text-gray-800 mb-3">Pliki wgrane ({dddFiles.length})</h4>
+        {dddFiles.length === 0 ? (
+          <div className="text-xs text-gray-400 italic text-center py-6">
+            Brak wgranych plików DDD. Pierwszy odczyt karty kierowcy dla WGM 0475M oczekiwany za ~28 dni od startu trasy.
+          </div>
+        ) : (
           <div className="space-y-2">
-            {dddFiles.map(f => (
-              <div key={f.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
-                <div className="flex items-center gap-3">
-                  <span className="text-lg">💾</span>
-                  <div>
-                    <div className="text-sm font-medium text-gray-800">{f.name}</div>
-                    <div className="text-xs text-gray-400">
-                      {(f.size / 1024).toFixed(1)} KB · {f.plate} · {new Date(f.date).toLocaleString("pl-PL")}
+            {dddFiles.slice(0, 20).map(f => {
+              const typeLabel = f.fileType === "card" ? "💳 Karta kierowcy"
+                : f.fileType === "vu" ? "🚛 Pamięć tachografu"
+                : "📄 Plik DDD";
+              const typeBg = f.fileType === "card" ? "#eff6ff" : f.fileType === "vu" ? "#f5f3ff" : "#f9fafb";
+              const typeColor = f.fileType === "card" ? "#1d4ed8" : f.fileType === "vu" ? "#7c3aed" : "#6b7280";
+              return (
+                <div key={f.id} className="p-3 rounded-xl" style={{ background: "#fafafa", border: "1px solid #f3f4f6" }}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                      <div style={{ padding: "4px 8px", borderRadius: 6, background: typeBg, color: typeColor, fontSize: 10, fontWeight: 700, flexShrink: 0 }}>
+                        {typeLabel}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-semibold text-gray-800 truncate">{f.originalFileName || f.storagePath?.split("/").pop()}</div>
+                        <div className="text-[11px] text-gray-500 mt-0.5">
+                          {f.driverName && <span>👤 {f.driverName} · </span>}
+                          {f.cardNumber && <span className="font-mono">#{f.cardNumber} · </span>}
+                          {f.vehicleVrn && <span>🚛 {f.vehicleVrn} · </span>}
+                          {f.periodStart && f.periodEnd && <span>📅 {fmtDate(f.periodStart)} → {fmtDate(f.periodEnd)} · </span>}
+                          <span>{Math.round((f.fileSize || 0) / 1024)} KB</span>
+                        </div>
+                        <div className="text-[10px] text-gray-400 mt-1">
+                          Wgrany: {fmtTs(f.uploadedAt)} przez {f.uploadedBy || "—"}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        f.parseStatus === "success" ? "bg-green-100 text-green-700" :
+                        f.parseStatus === "error" ? "bg-red-100 text-red-700" :
+                        "bg-amber-100 text-amber-700"
+                      }`}>
+                        {f.parseStatus === "success" ? "✓ Sparsowany" :
+                         f.parseStatus === "error" ? "✕ Błąd" : "⏳ Przetwarzanie"}
+                      </span>
+                      {f.activitiesCount != null && (
+                        <span className="text-[10px] text-gray-500">{f.activitiesCount} aktywności</span>
+                      )}
                     </div>
                   </div>
                 </div>
-                <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                  f.status === "parsed" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
-                }`}>
-                  {f.status === "parsed" ? "Sparsowany" : "Do analizy"}
-                </span>
+              );
+            })}
+            {dddFiles.length > 20 && (
+              <div className="text-[11px] text-gray-400 italic text-center pt-2">
+                + {dddFiles.length - 20} starszych plików
               </div>
-            ))}
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      <div className="mt-4 p-4 bg-amber-50 rounded-xl text-xs text-amber-700">
-        <strong>W przygotowaniu:</strong> Automatyczne parsowanie plików DDD — aktywności kierowcy z timestampami, zdarzenia, anomalie, weryfikacja podpisów RSA. Integracja z kalendarzem czasu pracy 561/2006.
+      <div className="mt-4 p-4 bg-blue-50 rounded-xl text-xs text-blue-700">
+        <strong>🔗 Integracja:</strong> Sparsowane aktywności z DDD automatycznie trafiają do modułu <code className="bg-blue-100 px-1 rounded">Czas pracy</code> z priorytetem nad auto-wykrywaniem GPS.
+        Dane z tachografu są <strong>prawnie wiążące</strong> — zastępują szacowania z prędkości GPS.
       </div>
     </div>
   );

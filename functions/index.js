@@ -15,6 +15,7 @@ const { initializeApp }       = require("firebase-admin/app");
 const { getAuth }             = require("firebase-admin/auth");
 const { getFirestore }        = require("firebase-admin/firestore");
 const { getMessaging }        = require("firebase-admin/messaging");
+const { getStorage }          = require("firebase-admin/storage");
 
 // Inicjalizacja Firebase Admin
 initializeApp();
@@ -717,5 +718,236 @@ exports.setGpsConfig = onCall(
 
     console.log(`GPS config updated by ${request.auth.uid}`);
     return { success: true };
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════
+// PARSER DDD — odczyt plików .ddd z tachografu / karty kierowcy
+//   Trigger: onCall (client wywołuje po uploadzie do Storage)
+//   Flow: client → Storage → wywołuje parseDddFile → Cloud Function
+//         → pobiera plik → readesm-js.convertToJson → Firestore
+// ═══════════════════════════════════════════════════════════════
+
+// Helper: znajduje blok po nazwie klasy lub wybranych polach
+function findBlock(blocks, predicate) {
+  if (!Array.isArray(blocks)) return null;
+  for (const b of blocks) {
+    try { if (predicate(b)) return b; } catch {}
+  }
+  return null;
+}
+
+// Helper: konwertuje TimeReal / BcdDate z readesm-js na ISO string
+function timeRealToIso(tr) {
+  if (!tr) return null;
+  // Różne formaty jakie zwraca readesm-js
+  if (typeof tr === "string") return tr;
+  if (typeof tr === "number") return new Date(tr * 1000).toISOString();
+  if (tr.timestamp) return new Date(tr.timestamp * 1000).toISOString();
+  if (tr.date && tr.date instanceof Date) return tr.date.toISOString();
+  if (tr.year && tr.month) {
+    try {
+      return new Date(tr.year, (tr.month || 1) - 1, tr.day || 1).toISOString();
+    } catch {}
+  }
+  return null;
+}
+
+// Helper: wyciąga metadane ze sparsowanego DDD
+function extractDddMetadata(parsed) {
+  const meta = {
+    fileType: "unknown",
+    cardNumber: null,
+    driverFirstName: null,
+    driverSurname: null,
+    driverName: null,
+    vehicleVrn: null,
+    cardValidityBegin: null,
+    cardExpiryDate: null,
+    periodStart: null,
+    periodEnd: null,
+  };
+  if (!parsed) return meta;
+
+  const blocks = parsed.blocks || [];
+
+  // Identification — plik karty kierowcy
+  const ident = findBlock(blocks, b =>
+    (b.className && /Identification/i.test(b.className)) ||
+    (b.cardNumber && b.cardHolderName));
+  if (ident) {
+    meta.fileType = "card";
+    meta.cardNumber = ident.cardNumber || null;
+    if (ident.cardHolderName) {
+      meta.driverFirstName = ident.cardHolderName.firstName || ident.cardHolderName.holderFirstNames || null;
+      meta.driverSurname = ident.cardHolderName.surname || ident.cardHolderName.holderSurname || null;
+      meta.driverName = [meta.driverFirstName, meta.driverSurname].filter(Boolean).join(" ") || null;
+    }
+    meta.cardValidityBegin = timeRealToIso(ident.cardValidityBegin);
+    meta.cardExpiryDate = timeRealToIso(ident.cardExpiryDate);
+  }
+
+  // VuOverview — plik pamięci tachografu (vehicle unit)
+  const vu = findBlock(blocks, b =>
+    (b.className && /VuOverview/i.test(b.className)) ||
+    b.vehicleRegistrationNumber || b.vehicleIdentificationNumber);
+  if (vu) {
+    if (meta.fileType === "unknown") meta.fileType = "vu";
+    meta.vehicleVrn = vu.vehicleRegistrationNumber?.vehicleRegistrationNumber ||
+                      vu.vehicleRegistrationNumber || null;
+    if (typeof meta.vehicleVrn === "object") meta.vehicleVrn = null;
+  }
+
+  // Zakres dat — z CardDriverActivity lub VuActivities
+  const activity = findBlock(blocks, b =>
+    (b.className && /DriverActivity|VuActivities/i.test(b.className)));
+  if (activity) {
+    meta.periodStart = timeRealToIso(activity.activityPointerOldestDayRecord) ||
+                       timeRealToIso(activity.oldestDayRecord);
+    meta.periodEnd = timeRealToIso(activity.activityPointerNewestDayRecord) ||
+                     timeRealToIso(activity.newestDayRecord);
+  }
+
+  return meta;
+}
+
+// Helper: wyciąga segmenty aktywności ze sparsowanego DDD
+// Mapowanie typów tachografu → naszych:
+//   0 = rest       → "rest"
+//   1 = available  → "avail"
+//   2 = work       → "work"
+//   3 = driving    → "drive"
+function extractDddActivities(parsed, context = {}) {
+  const activities = [];
+  if (!parsed) return activities;
+  const blocks = parsed.blocks || [];
+
+  const typeMap = { 0: "rest", 1: "avail", 2: "work", 3: "drive" };
+
+  // Szukamy CardDriverActivity → cardActivityDailyRecords → changeInfo[]
+  const cardActivity = findBlock(blocks, b =>
+    b.cardActivityDailyRecords || (b.className && /CardDriverActivity/i.test(b.className)));
+  if (cardActivity?.cardActivityDailyRecords) {
+    const records = cardActivity.cardActivityDailyRecords.subblocks ||
+                    cardActivity.cardActivityDailyRecords.items ||
+                    cardActivity.cardActivityDailyRecords || [];
+    for (const rec of Array.isArray(records) ? records : []) {
+      const dayDate = timeRealToIso(rec.activityRecordDate || rec.dayDate);
+      const changes = rec.activityChangeInfos || rec.changes || rec.changeInfo || [];
+      if (!Array.isArray(changes) || changes.length === 0) continue;
+      // Zamień listę zmian stanu → segmenty
+      for (let i = 0; i < changes.length; i++) {
+        const ch = changes[i];
+        const nextCh = changes[i + 1];
+        const type = typeMap[ch.activity ?? ch.type] || "avail";
+        const startMinutes = ch.timeOfChange ?? ch.minute ?? 0;
+        const endMinutes = nextCh ? (nextCh.timeOfChange ?? nextCh.minute ?? 1440) : 1440;
+        if (dayDate && endMinutes > startMinutes) {
+          const startTs = new Date(new Date(dayDate).getTime() + startMinutes * 60000).toISOString();
+          const endTs = new Date(new Date(dayDate).getTime() + endMinutes * 60000).toISOString();
+          activities.push({
+            driverCardNumber: context.cardNumber || null,
+            driverName: context.driverName || null,
+            type,
+            startTs,
+            endTs,
+            source: "ddd",
+            dddFileId: context.dddFileId || null,
+          });
+        }
+      }
+    }
+  }
+
+  // TODO: Dla plików VU (pamięć tachografu) też możemy wyciągać aktywności,
+  // ale struktura jest inna — dodamy gdy zobaczymy pierwszy prawdziwy plik
+
+  return activities;
+}
+
+exports.parseDddFile = onCall(
+  { region: "europe-west1", memory: "512MiB", timeoutSeconds: 120 },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Musisz byc zalogowany.");
+    }
+    const callerRole = request.auth.token.role;
+    if (!["admin", "dyspozytor"].includes(callerRole)) {
+      throw new HttpsError("permission-denied", "Brak dostepu do parsera DDD.");
+    }
+
+    const { storagePath, originalFileName } = request.data || {};
+    if (!storagePath) {
+      throw new HttpsError("invalid-argument", "Wymagany: storagePath");
+    }
+
+    console.log(`[DDD parse] Starting for ${storagePath}`);
+
+    // Pobierz plik ze Storage
+    const bucket = getStorage().bucket();
+    const file = bucket.file(storagePath);
+    const [exists] = await file.exists();
+    if (!exists) {
+      throw new HttpsError("not-found", `Plik nie istnieje: ${storagePath}`);
+    }
+
+    const [buffer] = await file.download();
+    const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+
+    // Parsuj przez readesm-js
+    let parsed;
+    try {
+      const { convertToJson } = require("readesm-js");
+      parsed = convertToJson(arrayBuffer);
+    } catch (e) {
+      console.error("[DDD parse] readesm-js error:", e);
+      throw new HttpsError("internal", `Blad parsowania DDD: ${e.message}`);
+    }
+
+    // Wyciągnij metadane i aktywności
+    const metadata = extractDddMetadata(parsed);
+    const db = getFirestore();
+
+    // Zapisz dokument pliku
+    const dddDoc = {
+      storagePath,
+      originalFileName: originalFileName || storagePath.split("/").pop(),
+      uploadedBy: request.auth.token.email || request.auth.uid,
+      uploadedAt: new Date().toISOString(),
+      fileSize: buffer.length,
+      ...metadata,
+      blockCount: (parsed?.blocks || []).length,
+      parseStatus: "success",
+    };
+    const dddRef = await db.collection("dddFiles").add(dddDoc);
+
+    const activities = extractDddActivities(parsed, {
+      cardNumber: metadata.cardNumber,
+      driverName: metadata.driverName,
+      dddFileId: dddRef.id,
+    });
+
+    // Zapisz aktywności w batchach (max 500 per batch)
+    const batchSize = 400;
+    for (let i = 0; i < activities.length; i += batchSize) {
+      const batch = db.batch();
+      for (const act of activities.slice(i, i + batchSize)) {
+        const ref = db.collection("driverActivities").doc();
+        batch.set(ref, { ...act, createdAt: new Date().toISOString() });
+      }
+      await batch.commit();
+    }
+
+    // Uaktualnij dokument o liczbę aktywności
+    await dddRef.update({ activitiesCount: activities.length });
+
+    console.log(`[DDD parse] Saved ${activities.length} activities, fileId=${dddRef.id}, type=${metadata.fileType}`);
+
+    return {
+      success: true,
+      fileId: dddRef.id,
+      metadata,
+      activitiesCount: activities.length,
+    };
   }
 );
