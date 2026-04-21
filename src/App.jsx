@@ -474,8 +474,12 @@ function computeTripStats(fracht, vehicle, driverEvents = [], fuelEntries = []) 
   const zaladowano = effective("zaladowano");
   const rozladowano = effective("rozladowano");
 
-  const zalTs = dotarcieZal?.value || dotarcieZal?.ts || zaladowano?.value || zaladowano?.ts || null;
-  const rozTs = dotarcieRoz?.value || dotarcieRoz?.ts || rozladowano?.value || rozladowano?.ts || null;
+  // Punktualnosc liczymy TYLKO z eventow `dotarcie_*` (realny moment dotarcia,
+  // klikniety przez kierowce w terenie albo recznie wpisany przez admina/dyspozytora).
+  // Legacy eventy `zaladowano`/`rozladowano` maja `ts` = moment rejestracji statusu w panelu,
+  // co dla retroaktywnych oznaczen nie odpowiada rzeczywistemu dotarciu → fałszywe spóźnienia.
+  const zalTs = dotarcieZal?.value || dotarcieZal?.ts || null;
+  const rozTs = dotarcieRoz?.value || dotarcieRoz?.ts || null;
 
   // Punktualność — liczona z dotarć (kierowca klika "dotarłem")
   const punktZal = calcTripPunctuality(f.dataZaladunku, f.godzZaladunku, zalTs);
@@ -4022,6 +4026,8 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               vehicles={vehicles}
               driverEvents={driverEvents}
               fuelEntries={fuelEntries}
+              canEdit={canEdit}
+              currentUser={user}
               onAdd={(r) => { const fid = uid(); setFrachtyList(p => [{ ...r, id: fid }, ...p]); logAction("add", "frachty", { id: fid, vehicleId: r.vehicleId, dokod: r.dokod }); }}
               onDelete={(id) => { setFrachtyList(p => p.filter(r => r.id !== id)); logAction("delete", "frachty", { id }); }}
               onUpdate={(id, data) => { setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r)); logAction("update", "frachty", { id }); }}
@@ -17802,7 +17808,7 @@ function KomentarzBaner({ frachtyList, vehicleId, onUpdate }) {
   );
 }
 
-function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = [], onAdd, onDelete, onUpdate, onBulkAdd }) {
+function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = [], onAdd, onDelete, onUpdate, onBulkAdd, canEdit = false, currentUser = null }) {
   // Index driverEvents by frachtId for quick lookup
   const eventsByFracht = useMemo(() => {
     const map = {};
@@ -17817,6 +17823,75 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
   const [driverStatusId, setDriverStatusId] = useState(null); // rozwinięty panel statusów kierowcy
+  // Inline editor dla recznego ustawienia czasu dotarcia (admin/dyspozytor)
+  // { frachtId, type: "dotarcie_zaladunek"|"dotarcie_rozladunek", localDt: "YYYY-MM-DDTHH:MM", eventId?: string }
+  const [manualEv, setManualEv] = useState(null);
+
+  // Helper: ISO -> lokalny datetime-local ("YYYY-MM-DDTHH:MM")
+  const toLocalDt = (iso) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const openManualEv = (fracht, type, existingEv) => {
+    // Domyslna wartosc: istniejacy event -> jego value/ts, inaczej planowana data+godz
+    let defaultIso = null;
+    if (existingEv) {
+      defaultIso = existingEv.value || existingEv.ts;
+    } else {
+      const plannedDate = type === "dotarcie_zaladunek" ? fracht.dataZaladunku : fracht.dataRozladunku;
+      const plannedTime = type === "dotarcie_zaladunek" ? fracht.godzZaladunku : fracht.godzRozladunku;
+      if (plannedDate) {
+        const t = (plannedTime && /^\d{1,2}:\d{2}$/.test(plannedTime)) ? plannedTime : "12:00";
+        defaultIso = new Date(`${plannedDate}T${t.length === 4 ? "0"+t : t}:00`).toISOString();
+      }
+    }
+    setManualEv({
+      frachtId: fracht.id,
+      type,
+      localDt: toLocalDt(defaultIso) || toLocalDt(new Date().toISOString()),
+      eventId: existingEv?.id || null,
+      vehicleId: fracht.vehicleId,
+    });
+  };
+
+  const saveManualEv = async () => {
+    if (!manualEv?.localDt) return;
+    const iso = new Date(manualEv.localDt).toISOString();
+    if (isNaN(new Date(iso).getTime())) { showToast("❌ Nieprawidlowa data"); return; }
+    try {
+      if (manualEv.eventId) {
+        // Aktualizuj istniejacy event (tylko value, zachowujemy oryginalny ts jako moment wprowadzenia)
+        await updateDoc(doc(db, "driverEvents", manualEv.eventId), {
+          value: iso,
+          source: "manual_admin",
+          editedBy: currentUser?.email || null,
+          editedAt: new Date().toISOString(),
+        });
+      } else {
+        await addDoc(collection(db, "driverEvents"), {
+          type: manualEv.type,
+          frachtId: manualEv.frachtId,
+          vehicleId: manualEv.vehicleId,
+          value: iso,
+          ts: new Date().toISOString(),
+          source: "manual_admin",
+          enteredBy: currentUser?.email || null,
+          driverEmail: currentUser?.email || null,
+          driverName: currentUser?.displayName || currentUser?.email || "admin",
+        });
+      }
+      logAction("manual_arrival", "driverEvents", { frachtId: manualEv.frachtId, type: manualEv.type, value: iso });
+      showToast("✅ Czas dotarcia zapisany");
+      setManualEv(null);
+    } catch (e) {
+      console.error("manualEv save error:", e);
+      showToast("❌ Blad zapisu");
+    }
+  };
   const [showImport, setShowImport] = useState(false);
   const [overviewYear, setOverviewYear] = useState(String(new Date().getFullYear()));
   const [overviewMonth, setOverviewMonth] = useState(String(new Date().getMonth() + 1).padStart(2, "0"));
@@ -18203,6 +18278,8 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                               const dotColor = diffMin === null ? "#6b7280" : diffMin <= 0 ? "#15803d" : diffMin <= 30 ? "#d97706" : "#dc2626";
                               const dotStr = dotTime ? dotTime.toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : null;
                               const srStr = srEv ? new Date(srEv.value||srEv.ts).toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : null;
+                              const isManual = dotEv?.source === "manual_admin";
+                              const isEditingThis = manualEv?.frachtId === r.id && manualEv?.type === "dotarcie_zaladunek";
                               return (
                                 <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
                                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 20, flexShrink: 0 }}>
@@ -18214,7 +18291,24 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                                       <span style={{ fontSize: 12, color: "#6b7280" }}>Plan: {r.dataZaladunku?.slice(5)}{r.godzZaladunku ? ` · ${r.godzZaladunku}` : ""}</span>
                                       {dotStr && <span style={{ fontSize: 12, fontWeight: 700, color: dotColor }}>→ Dotarł: {dotStr}</span>}
+                                      {isManual && <span title="Wpisane recznie przez admina/dyspozytora" style={{ fontSize: 10, color: "#92400e", background: "#fef3c7", padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>ręcznie</span>}
+                                      {canEdit && !isEditingThis && (
+                                        <button onClick={() => openManualEv(r, "dotarcie_zaladunek", dotEv)}
+                                          style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, background: "#eff6ff", color: "#1d4ed8", border: "1px solid #bfdbfe", cursor: "pointer" }}
+                                          title={dotEv ? "Edytuj czas dotarcia" : "Ustaw czas dotarcia ręcznie"}>
+                                          ✏️ {dotEv ? "Edytuj" : "Ustaw ręcznie"}
+                                        </button>
+                                      )}
                                     </div>
+                                    {isEditingThis && (
+                                      <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                        <input type="datetime-local" value={manualEv.localDt}
+                                          onChange={(ev) => setManualEv(p => ({ ...p, localDt: ev.target.value }))}
+                                          style={{ fontSize: 12, padding: "4px 8px", borderRadius: 6, border: "1px solid #bfdbfe" }} />
+                                        <button onClick={saveManualEv} style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, background: "#2563eb", color: "#fff", border: "none", cursor: "pointer", fontWeight: 600 }}>Zapisz</button>
+                                        <button onClick={() => setManualEv(null)} style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, background: "#f3f4f6", color: "#374151", border: "none", cursor: "pointer" }}>Anuluj</button>
+                                      </div>
+                                    )}
                                     {srStr && <div style={{ fontSize: 12, color: "#0891b2", fontWeight: 600, marginTop: 2 }}>🚛 Ruszył: {srStr}</div>}
                                   </div>
                                 </div>
@@ -18228,6 +18322,8 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                               const diffMin = dotTime ? Math.round((dotTime - planned) / 60000) : null;
                               const dotColor = diffMin === null ? "#6b7280" : diffMin <= 0 ? "#15803d" : diffMin <= 30 ? "#d97706" : "#dc2626";
                               const dotStr = dotTime ? dotTime.toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : null;
+                              const isManual = dotEv?.source === "manual_admin";
+                              const isEditingThis = manualEv?.frachtId === r.id && manualEv?.type === "dotarcie_rozladunek";
                               return (
                                 <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
                                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 20, flexShrink: 0 }}>
@@ -18239,7 +18335,24 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                                       <span style={{ fontSize: 12, color: "#6b7280" }}>Plan: {r.dataRozladunku?.slice(5)}{r.godzRozladunku ? ` · ${r.godzRozladunku}` : ""}</span>
                                       {dotStr && <span style={{ fontSize: 12, fontWeight: 700, color: dotColor }}>→ Dotarł: {dotStr}</span>}
+                                      {isManual && <span title="Wpisane recznie przez admina/dyspozytora" style={{ fontSize: 10, color: "#92400e", background: "#fef3c7", padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>ręcznie</span>}
+                                      {canEdit && !isEditingThis && (
+                                        <button onClick={() => openManualEv(r, "dotarcie_rozladunek", dotEv)}
+                                          style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, background: "#ecfdf5", color: "#047857", border: "1px solid #a7f3d0", cursor: "pointer" }}
+                                          title={dotEv ? "Edytuj czas dotarcia" : "Ustaw czas dotarcia ręcznie"}>
+                                          ✏️ {dotEv ? "Edytuj" : "Ustaw ręcznie"}
+                                        </button>
+                                      )}
                                     </div>
+                                    {isEditingThis && (
+                                      <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                        <input type="datetime-local" value={manualEv.localDt}
+                                          onChange={(ev) => setManualEv(p => ({ ...p, localDt: ev.target.value }))}
+                                          style={{ fontSize: 12, padding: "4px 8px", borderRadius: 6, border: "1px solid #a7f3d0" }} />
+                                        <button onClick={saveManualEv} style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, background: "#059669", color: "#fff", border: "none", cursor: "pointer", fontWeight: 600 }}>Zapisz</button>
+                                        <button onClick={() => setManualEv(null)} style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, background: "#f3f4f6", color: "#374151", border: "none", cursor: "pointer" }}>Anuluj</button>
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
                               );
