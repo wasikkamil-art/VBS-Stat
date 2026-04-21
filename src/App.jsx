@@ -9150,6 +9150,104 @@ function DriverCzasPracyDashboard({ user, vehicle, driverActivities = [], showTo
       <div style={{ fontSize: 10, color: "#9ca3af", textAlign: "center", marginBottom: 8 }}>
         Auto-wykrywanie z GPS działa w tle. Kliknięcia tutaj nadpisują automat.
       </div>
+
+      {/* ═══ Upload DDD z karty kierowcy ═══ */}
+      <DriverDddUploadCard user={user} vehicle={vehicle} showToast={showToast} />
+    </div>
+  );
+}
+
+// Komponent uploadu DDD w panelu kierowcy (mobile)
+function DriverDddUploadCard({ user, vehicle, showToast }) {
+  const [uploading, setUploading] = useState(false);
+  const [lastResult, setLastResult] = useState(null);
+
+  const handleUpload = async (file) => {
+    if (!file) return;
+    setUploading(true);
+    setLastResult(null);
+    try {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const storagePath = `driverDdd/${Date.now()}_${safeName}`;
+      const sRef = storageRef(storage, storagePath);
+      await uploadBytes(sRef, file);
+      showToast("📤 Plik wgrany, parsuję...");
+
+      const parseDddFile = httpsCallable(functions, "parseDddFile");
+      const res = await parseDddFile({ storagePath, originalFileName: file.name });
+      const data = res?.data;
+      if (data?.success) {
+        const m = data.metadata || {};
+        setLastResult({
+          ok: true,
+          driverName: m.driverName || "—",
+          cardNumber: m.cardNumber || null,
+          activitiesCount: data.activitiesCount || 0,
+          periodStart: m.periodStart,
+          periodEnd: m.periodEnd,
+          fileType: m.fileType,
+        });
+        showToast(`✅ Sparsowano: ${data.activitiesCount} aktywności`);
+      }
+    } catch (e) {
+      console.error("upload DDD error", e);
+      setLastResult({ ok: false, error: e?.message || "Błąd uploadu" });
+      showToast("❌ " + (e?.message || "błąd uploadu").slice(0, 60));
+    }
+    setUploading(false);
+  };
+
+  const fmtDate = (ts) => {
+    if (!ts) return "—";
+    try { return new Date(ts).toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit", year: "2-digit" }); }
+    catch { return ts; }
+  };
+
+  return (
+    <div style={{ background: "#fff", borderRadius: 16, padding: 14, marginTop: 12, border: "1px solid #e5e7eb" }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
+        💾 Wgraj plik DDD z karty
+      </div>
+      <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 10, lineHeight: 1.5 }}>
+        Masz plik <code style={{ background: "#f3f4f6", padding: "1px 4px", borderRadius: 3, fontSize: 10 }}>.ddd</code> z karty kierowcy? (np. z aplikacji czytnika kart, Bluetooth czytnika albo emailem z biura)
+        Wrzuć go tutaj — system wyciągnie wszystkie Twoje aktywności z dokładnością do sekundy.
+      </div>
+      <label style={{
+        display: "block", padding: "12px", borderRadius: 12, border: "2px dashed #c7d2fe",
+        background: uploading ? "#f3f4f6" : "#f5f3ff", textAlign: "center", cursor: uploading ? "wait" : "pointer",
+      }}>
+        <div style={{ fontSize: 22, marginBottom: 2 }}>{uploading ? "⏳" : "📎"}</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#6d28d9" }}>
+          {uploading ? "Wgrywam i parsuję..." : "Wybierz plik DDD z telefonu"}
+        </div>
+        <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>
+          Obsługiwane: .ddd · .esm · .tgd · .v1b
+        </div>
+        <input type="file" accept=".ddd,.DDD,.esm,.ESM,.tgd,.v1b" disabled={uploading}
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = ""; }}
+          style={{ display: "none" }} />
+      </label>
+
+      {lastResult && lastResult.ok && (
+        <div style={{ marginTop: 10, padding: 10, borderRadius: 10, background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#15803d", marginBottom: 4 }}>
+            ✅ Plik sparsowany
+          </div>
+          <div style={{ fontSize: 11, color: "#166534", lineHeight: 1.6 }}>
+            <div>👤 {lastResult.driverName}{lastResult.cardNumber && ` · #${lastResult.cardNumber}`}</div>
+            {lastResult.periodStart && <div>📅 {fmtDate(lastResult.periodStart)} → {fmtDate(lastResult.periodEnd)}</div>}
+            <div>📊 {lastResult.activitiesCount} aktywności dodanych do Twojego compliance</div>
+          </div>
+        </div>
+      )}
+      {lastResult && !lastResult.ok && (
+        <div style={{ marginTop: 10, padding: 10, borderRadius: 10, background: "#fef2f2", border: "1px solid #fecaca" }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#b91c1c", marginBottom: 2 }}>
+            ❌ Błąd parsowania
+          </div>
+          <div style={{ fontSize: 11, color: "#991b1b" }}>{lastResult.error}</div>
+        </div>
+      )}
     </div>
   );
 }
