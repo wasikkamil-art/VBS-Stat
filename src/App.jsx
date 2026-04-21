@@ -7739,6 +7739,7 @@ function GpsTrasySection({ device, showToast }) {
 // ── Sekcja: CZAS PRACY KIEROWCY (admin) ──
 function GpsCzasPracySection({ device, position, driverActivities = [], showToast }) {
   const [, forceTick] = useState(0);
+  const [showWeek, setShowWeek] = useState(false); // rozwiniety timeline 7-dniowy
   // Tick co 30s żeby liczniki live się odświeżały
   useEffect(() => {
     const t = setInterval(() => forceTick(x => x + 1), 30000);
@@ -7964,6 +7965,134 @@ function GpsCzasPracySection({ device, position, driverActivities = [], showToas
           </div>
         </div>
       </div>
+
+      {/* ROW 2.5: Timeline dzienny + rozwijany 7-dniowy */}
+      {(() => {
+        // Helper: suma segmentow przycietych do okna [dayStart, dayEnd]
+        const sumDay = (dayStart, dayEnd) => {
+          const sums = { drive: 0, work: 0, avail: 0, rest: 0 };
+          compliance.segments.forEach(s => {
+            const start = Math.max(s.startMs, dayStart);
+            const end = Math.min(s.endMs, dayEnd);
+            if (end > start) {
+              const mins = Math.round((end - start) / 60000);
+              if (s.type in sums) sums[s.type] += mins;
+            }
+          });
+          return sums;
+        };
+
+        // Pasek 24h z kolorowymi segmentami
+        const DayBar = ({ dayStart, dayEnd, height = 22 }) => {
+          const dayDur = dayEnd - dayStart;
+          const clips = compliance.segments
+            .filter(s => s.endMs > dayStart && s.startMs < dayEnd)
+            .map(s => ({
+              type: s.type,
+              startMs: Math.max(s.startMs, dayStart),
+              endMs: Math.min(s.endMs, dayEnd),
+              isOpen: s.isOpen,
+            }))
+            .sort((a, b) => a.startMs - b.startMs);
+          return (
+            <div style={{ height, position: "relative", background: "#f3f4f6", borderRadius: 6, overflow: "hidden" }}>
+              {clips.map((c, i) => {
+                const meta = ACTIVITY_TYPES[c.type] || { label: c.type, color: "#9ca3af" };
+                const left = ((c.startMs - dayStart) / dayDur) * 100;
+                const width = ((c.endMs - c.startMs) / dayDur) * 100;
+                return (
+                  <div key={i}
+                    style={{
+                      position: "absolute", top: 0, bottom: 0,
+                      left: `${left}%`, width: `${width}%`,
+                      background: meta.color,
+                    }}
+                    title={`${meta.label} · ${fmtTimeShort(c.startMs)}${c.isOpen ? " → teraz" : ` → ${fmtTimeShort(c.endMs)}`}`}
+                  />
+                );
+              })}
+            </div>
+          );
+        };
+
+        // Dzisiaj (od 00:00 do 24:00)
+        const todayStart = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); })();
+        const todayEnd = todayStart + 86400000;
+        const todaySums = sumDay(todayStart, todayEnd);
+
+        // 7 dni wstecz (bez dzisiejszego)
+        const past7Days = (() => {
+          const days = [];
+          const names = ["Nd","Pon","Wt","Śr","Cz","Pt","Sob"];
+          for (let i = 1; i <= 7; i++) {
+            const d = new Date(todayStart);
+            d.setDate(d.getDate() - i);
+            const s = d.getTime();
+            const e = s + 86400000;
+            const label = `${names[d.getDay()]} ${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}`;
+            days.push({ start: s, end: e, label, sums: sumDay(s, e) });
+          }
+          return days;
+        })();
+
+        return (
+          <div className="bg-white rounded-2xl border border-gray-100 p-5">
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <div className="text-sm font-bold text-gray-900">📊 Timeline aktywności — dziś</div>
+              <div className="flex gap-3 text-[10px] text-gray-500">
+                {Object.entries(ACTIVITY_TYPES).map(([k, m]) => (
+                  <span key={k} className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full" style={{ background: m.color }} />
+                    {m.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Pasek dzisiejszego dnia */}
+            <DayBar dayStart={todayStart} dayEnd={todayEnd} height={24} />
+
+            {/* Os godzin */}
+            <div className="flex justify-between text-[10px] text-gray-400 mt-1 font-mono">
+              <span>00</span><span>03</span><span>06</span><span>09</span><span>12</span>
+              <span>15</span><span>18</span><span>21</span><span>24</span>
+            </div>
+
+            {/* Sumy dzisiejszego dnia */}
+            <div className="mt-3 flex gap-4 text-[11px] text-gray-600 flex-wrap">
+              <span>🚛 Jazda <strong>{fmtHM(todaySums.drive)}</strong></span>
+              <span>🔧 Praca <strong>{fmtHM(todaySums.work)}</strong></span>
+              <span>⏱ Dysp. <strong>{fmtHM(todaySums.avail)}</strong></span>
+              <span>🛏 Odp. <strong>{fmtHM(todaySums.rest)}</strong></span>
+            </div>
+
+            {/* Toggle 7 dni wstecz */}
+            <button onClick={() => setShowWeek(s => !s)}
+              className="mt-3 text-xs font-semibold text-blue-600 hover:text-blue-700 transition-colors">
+              {showWeek ? "▲ Zwiń historię 7 dni" : "▼ Pokaż 7 dni wstecz"}
+            </button>
+
+            {showWeek && (
+              <div className="mt-3 pt-3 border-t border-gray-100 space-y-3">
+                {past7Days.map(day => (
+                  <div key={day.start}>
+                    <div className="flex items-center justify-between text-[11px] mb-1 flex-wrap gap-2">
+                      <span className="font-semibold text-gray-700">{day.label}</span>
+                      <span className="text-gray-400 tabular-nums">
+                        Jazda {fmtHM(day.sums.drive)} · Praca {fmtHM(day.sums.work)} · Dysp. {fmtHM(day.sums.avail)} · Odp. {fmtHM(day.sums.rest)}
+                      </span>
+                    </div>
+                    <DayBar dayStart={day.start} dayEnd={day.end} height={18} />
+                  </div>
+                ))}
+                <div className="flex justify-between text-[10px] text-gray-400 mt-1 font-mono pt-1">
+                  <span>00</span><span>06</span><span>12</span><span>18</span><span>24</span>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ROW 3: Limity szczegółowe */}
       <div className="bg-white rounded-2xl border border-gray-100 p-5">
