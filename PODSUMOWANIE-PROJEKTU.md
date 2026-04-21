@@ -25,6 +25,7 @@
 - **Moduł Czas pracy — iteracja 2**: kompensaty za skrócone odpoczynki, alerty w banerze, timeline 7-dniowy, push notifications
 - **Parser DDD — test end-to-end**: za ~28 dni gdy pierwszy plik DDD dla WGM 0475M pojawi się w panelu widziszwszystko
 - **Code splitting**: App.jsx = 1.77 MB (gzip 441 KB) — dla mobile mocno
+- **Integracja chat ↔ WhatsApp** (pomysł) — model Slickshift: dyspozytor pisze u nas, kierowca dostaje na WhatsApp. Szczegóły w sekcji 14.E.
 
 ---
 
@@ -533,6 +534,32 @@ driverActivities (z source="ddd", priorytet nad GPS)
 - Rate limiting na /api/claude
 - Weryfikacja kosztów sty–maj 2025 (netto/brutto)
 - Migracja Firestore Timestamp w czatach (fix chronologii wiadomości)
+
+### E. Integracja czatu z WhatsApp (pomysł — model Slickshift)
+**Cel**: Dyspozytor pisze w FleetStat chat → kierowca dostaje wiadomość na WhatsApp; odpowiedź kierowcy z WhatsApp wraca do FleetStat chat. Identyczny model jak obecnie używany Slickshift.
+
+**Stack**: WhatsApp Business Cloud API (Meta, oficjalne) — bezpośrednio lub przez BSP (Twilio/360dialog).
+
+**Architektura**:
+- Cloud Function `whatsappWebhook` (HTTPS, publiczna) — odbiera wiadomości od Meta, mapuje `from` (numer telefonu) → kierowca (`users` / `vehicles.driverHistory`) → zapis do odpowiedniego `chatRooms`
+- Cloud Function `sendWhatsappMessage` (onCall) — dyspozytor wysyła wiadomość → CF woła Meta Graph API → dostarczenie na telefon kierowcy
+- Rozszerzenie schematu wiadomości w `chatRooms` o `channel: "whatsapp" | "app"` + `deliveryStatus`
+- Templatki do wiadomości inicjujących (np. "Nowe zlecenie #{{1}}, załadunek {{2}} o {{3}}") — wymaga aprobaty Meta
+
+**Koszty** (dla floty 6 pojazdów):
+- Cloud API: 1000 service conversations/mies darmo, potem ~0,02 EUR/rozmowa → praktycznie 0
+- Twilio (jeśli wybierzemy): +~0,005 USD/msg + opłaty Meta — droższe ale prostszy setup
+
+**Blokery/setup** (główny tradeoff — to nie jest "1 dzień pracy"):
+- Weryfikacja Meta Business Account (dni–tygodnie)
+- Aprobata templatek (każda nowa templatka osobno, zwykle 24-48h)
+- Numer telefonu firmy dedykowany do Cloud API — **po podpięciu przestaje działać w zwykłym WhatsApp Business App** (decyzja: nowy numer czy port obecnego?)
+- 24h "service window" — po odpowiedzi kierowcy masz 24h na wolne wiadomości, potem znów templatka
+
+**Decyzje do podjęcia przed startem**:
+1. Cloud API bezpośrednio czy przez Twilio/BSP?
+2. Który numer firmowy przeznaczyć?
+3. Lista template'ów (nowe zlecenie, zmiana godziny, pytanie dyspozytora, potwierdzenie rozładunku...)
 
 ## 15. Znane problemy / uwagi
 
