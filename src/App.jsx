@@ -6759,6 +6759,7 @@ function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fu
   const expandedId = onSelect ? expandedIdProp : internalExpanded;
   const setExpandedId = onSelect ? onSelect : setInternalExpanded;
   const [filter, setFilter] = useState("all"); // "all" | "active" | "done"
+  const [monthFilter, setMonthFilter] = useState(null); // null = auto (biezacy lub najnowszy)
 
   if (!vehicle?.id) {
     return (
@@ -6773,7 +6774,36 @@ function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fu
     .filter(f => f.vehicleId === vehicle.id)
     .sort((a, b) => (b.dataZaladunku || "").localeCompare(a.dataZaladunku || ""));
 
-  const filtered = orders.filter(f => {
+  // Dostepne miesiace (YYYY-MM) — z dat zaladunku, malejaco
+  const availableMonths = useMemo(() => {
+    const set = new Set();
+    orders.forEach(f => {
+      const m = (f.dataZaladunku || "").slice(0, 7);
+      if (m && /^\d{4}-\d{2}$/.test(m)) set.add(m);
+    });
+    return [...set].sort((a, b) => b.localeCompare(a));
+  }, [orders]);
+
+  // Default: biezacy miesiac jesli ma frachty, inaczej najnowszy dostepny
+  const effectiveMonth = monthFilter ?? (() => {
+    const currentYM = new Date().toISOString().slice(0, 7);
+    if (availableMonths.includes(currentYM)) return currentYM;
+    return availableMonths[0] || "all";
+  })();
+
+  const MONTH_NAMES = ["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paz","Lis","Gru"];
+  const fmtMonth = (ym) => {
+    if (ym === "all") return "Wszystkie miesiące";
+    const [y, m] = ym.split("-");
+    return `${MONTH_NAMES[parseInt(m, 10) - 1]} ${y}`;
+  };
+
+  // Filtr miesieczny pierwszy — dla licznikow statusu
+  const ordersInMonth = effectiveMonth === "all"
+    ? orders
+    : orders.filter(f => (f.dataZaladunku || "").slice(0, 7) === effectiveMonth);
+
+  const filtered = ordersInMonth.filter(f => {
     if (filter === "active") return f.statusRozladunku !== "rozladowano";
     if (filter === "done") return f.statusRozladunku === "rozladowano";
     return true;
@@ -6821,19 +6851,36 @@ function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fu
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div>
           <h3 className="text-sm font-bold text-gray-900">Zlecenia pojazdu {vehicle.plate}</h3>
-          <div className="text-xs text-gray-400 mt-0.5">Łącznie: {orders.length}</div>
+          <div className="text-xs text-gray-400 mt-0.5">
+            {effectiveMonth === "all" ? `Łącznie: ${orders.length}` : `${fmtMonth(effectiveMonth)}: ${ordersInMonth.length} z ${orders.length}`}
+          </div>
         </div>
-        <div className="flex gap-1 bg-gray-50 rounded-xl p-1">
-          {[
-            { id: "all", label: "Wszystkie", count: orders.length },
-            { id: "active", label: "Aktywne", count: orders.filter(f => f.statusRozladunku !== "rozladowano").length },
-            { id: "done", label: "Zakończone", count: orders.filter(f => f.statusRozladunku === "rozladowano").length },
-          ].map(b => (
-            <button key={b.id} onClick={() => setFilter(b.id)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${filter === b.id ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"}`}>
-              {b.label} <span className="text-[10px] text-gray-400 ml-1">{b.count}</span>
-            </button>
-          ))}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Selektor miesiaca */}
+          {availableMonths.length > 0 && (
+            <select value={effectiveMonth}
+              onChange={(e) => setMonthFilter(e.target.value)}
+              className="text-xs font-semibold rounded-lg px-3 py-1.5 bg-gray-50 border border-gray-200 text-gray-700 cursor-pointer outline-none hover:bg-gray-100 transition-all"
+              style={{ minWidth: 140 }}>
+              <option value="all">Wszystkie miesiące</option>
+              {availableMonths.map(ym => (
+                <option key={ym} value={ym}>{fmtMonth(ym)}</option>
+              ))}
+            </select>
+          )}
+          {/* Chipy statusu */}
+          <div className="flex gap-1 bg-gray-50 rounded-xl p-1">
+            {[
+              { id: "all", label: "Wszystkie", count: ordersInMonth.length },
+              { id: "active", label: "Aktywne", count: ordersInMonth.filter(f => f.statusRozladunku !== "rozladowano").length },
+              { id: "done", label: "Zakończone", count: ordersInMonth.filter(f => f.statusRozladunku === "rozladowano").length },
+            ].map(b => (
+              <button key={b.id} onClick={() => setFilter(b.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${filter === b.id ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"}`}>
+                {b.label} <span className="text-[10px] text-gray-400 ml-1">{b.count}</span>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
