@@ -8,6 +8,7 @@ sa.json
 .DS_Store
 node_modules/
 dist/
+dist-*/
 
 # Temporary scripts — utility/one-shot tools, not part of the app
 *.bak
