@@ -268,6 +268,61 @@ function fmtPLN(n) { return Number(n).toLocaleString("pl-PL", { minimumFractionD
 function fmtEUR(n) { return Number(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €"; }
 function fmtDate(d) { try { return new Date(d).toLocaleDateString("pl-PL"); } catch { return d; } }
 
+// ─── WHATSAPP — format zlecenia dla kierowcy (filtr widoczności: bez cen/marży) ───
+function parseGeoString(geo) {
+  if (!geo || typeof geo !== "string") return null;
+  const [latStr, lngStr] = geo.split(",").map(s => s.trim());
+  const lat = Number(latStr), lng = Number(lngStr);
+  if (isNaN(lat) || isNaN(lng)) return null;
+  return { lat, lng };
+}
+function formatOrderForWhatsapp(fracht) {
+  if (!fracht) return { body: "", pickup: null, delivery: null };
+  const fmtD = (d) => d ? d.split("-").reverse().join(".") : "—";
+  const fmtT = (t) => t || "—";
+  const addrZal = (fracht.zaladunekAdres || [fracht.zaladunekKod, fracht.zaladunekKod2, fracht.zaladunekKod3].filter(Boolean).join(" / ") || "").trim();
+  const addrRoz = (fracht.rozladunekAdres || [fracht.dokod, fracht.dokod2, fracht.dokod3].filter(Boolean).join(" / ") || "").trim();
+  const pickupGeo = parseGeoString(fracht.zaladunekGeo);
+  const deliveryGeo = parseGeoString(fracht.rozladunekGeo);
+
+  const lines = [];
+  lines.push(`🚛 Nowe zlecenie${fracht.nrRef ? ` #${fracht.nrRef}` : ""}`);
+  lines.push("");
+  lines.push(`📍 ZAŁADUNEK — ${fmtD(fracht.dataZaladunku)} ${fmtT(fracht.godzZaladunku)}`);
+  if (addrZal) lines.push(addrZal);
+  if (pickupGeo) lines.push(`GPS: ${pickupGeo.lat.toFixed(5)}, ${pickupGeo.lng.toFixed(5)}`);
+  if (fracht.zaladunekTelefon) lines.push(`Tel: ${fracht.zaladunekTelefon}`);
+  lines.push("");
+  lines.push(`📍 ROZŁADUNEK — ${fmtD(fracht.dataRozladunku)} ${fmtT(fracht.godzRozladunku)}`);
+  if (addrRoz) lines.push(addrRoz);
+  if (deliveryGeo) lines.push(`GPS: ${deliveryGeo.lat.toFixed(5)}, ${deliveryGeo.lng.toFixed(5)}`);
+  if (fracht.rozladunekTelefon) lines.push(`Tel: ${fracht.rozladunekTelefon}`);
+  lines.push("");
+
+  const towarParts = [];
+  if (fracht.towarIloscPalet) towarParts.push(`${fracht.towarIloscPalet} ${fracht.towarOpis || "palet"}`);
+  else if (fracht.towarOpis) towarParts.push(fracht.towarOpis);
+  if (fracht.towarPalety) towarParts.push(fracht.towarPalety);
+  if (towarParts.length) lines.push(`📦 ${towarParts.join(", ")}`);
+  if (fracht.zaladunekTyp) lines.push(`Załadunek: ${fracht.zaladunekTyp}`);
+  if (fracht.wagaLadunku) lines.push(`Waga: ${fracht.wagaLadunku} kg`);
+  if (fracht.uwagi) { lines.push(""); lines.push(`ℹ️ ${fracht.uwagi}`); }
+
+  return {
+    body: lines.join("\n").trim(),
+    pickup: pickupGeo ? { ...pickupGeo, name: "Załadunek", address: addrZal || null } : null,
+    delivery: deliveryGeo ? { ...deliveryGeo, name: "Rozładunek", address: addrRoz || null } : null,
+  };
+}
+
+const WA_SYSTEM_REMINDER = [
+  "ℹ️ *FleetStat — przypomnienie:*",
+  "• Zlecenie masz też w aplikacji FleetStat",
+  "• Po dojechaniu na załadunek → kliknij *\"Dotarcie na załadunek\"* w apce",
+  "• Zrób zdjęcia CMR i towaru",
+  "• Po rozładunku → kliknij *\"Dotarcie na rozładunek\"* + zdjęcie CMR",
+].join("\n");
+
 // ─── SERVICE HELPERS ────────────────────────────────────────────────────────
 function serviceStatus(daysLeft) {
   if (daysLeft === null) return null;
@@ -4028,6 +4083,8 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               fuelEntries={fuelEntries}
               canEdit={canEdit}
               currentUser={user}
+              appUsers={appUsers}
+              showToast={showToast}
               onAdd={(r) => { const fid = uid(); setFrachtyList(p => [{ ...r, id: fid }, ...p]); logAction("add", "frachty", { id: fid, vehicleId: r.vehicleId, dokod: r.dokod }); }}
               onDelete={(id) => { setFrachtyList(p => p.filter(r => r.id !== id)); logAction("delete", "frachty", { id }); }}
               onUpdate={(id, data) => { setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r)); logAction("update", "frachty", { id }); }}
@@ -8701,6 +8758,33 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
     showToast("✅ Kierowca odpisany od pojazdu");
   }
 
+  // ── Normalizacja numeru WhatsApp do formatu E.164 bez "+" (np. "48501234567") ──
+  function normalizeWhatsappNumber(raw) {
+    if (!raw) return "";
+    let n = String(raw).replace(/[^\d+]/g, "");
+    if (n.startsWith("+")) n = n.slice(1);
+    if (n.startsWith("00")) n = n.slice(2);
+    if (n.startsWith("0") && n.length === 10) n = "48" + n.slice(1); // polski bez prefiksu
+    return n;
+  }
+
+  async function saveDriverWhatsapp(uid, raw) {
+    const normalized = normalizeWhatsappNumber(raw);
+    if (normalized && !/^\d{9,15}$/.test(normalized)) {
+      showToast("❌ Nieprawidłowy numer (format E.164, 9-15 cyfr)");
+      return;
+    }
+    try {
+      await setDoc(doc(db, "users", uid), { whatsappNumber: normalized }, { merge: true });
+      logAction("update", "users", { targetUid: uid, whatsappNumber: normalized });
+      setUsers(p => p.map(u => u.uid === uid ? { ...u, whatsappNumber: normalized } : u));
+      showToast(normalized ? "✅ Numer WhatsApp zapisany" : "✅ Numer usunięty");
+    } catch(e) {
+      console.error("Błąd zapisu whatsappNumber:", e);
+      showToast("❌ Błąd zapisu numeru");
+    }
+  }
+
   const ROLES_BIURO = [
     { id: "admin",      label: "Admin",      icon: "👑", desc: "Pełny dostęp",                      color: "#92400e", bg: "#fef3c7" },
     { id: "dyspozytor", label: "Dyspozytor", icon: "🚚", desc: "Edycja frachtów i kosztów",          color: "#1d4ed8", bg: "#eff6ff" },
@@ -8975,9 +9059,25 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
                       style={{ background: "#ecfdf5", color: "#059669" }}>
                       {(u.email||"?")[0].toUpperCase()}
                     </div>
-                    <div>
+                    <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium text-gray-800">{u.displayName || u.email?.split("@")[0] || "—"}</div>
-                      <div className="text-xs text-gray-400 truncate max-w-48">{u.email}</div>
+                      <div className="text-xs text-gray-400 truncate">{u.email}</div>
+                      <div className="flex items-center gap-1 mt-1">
+                        <span className="text-xs">📱</span>
+                        <input
+                          type="tel"
+                          placeholder="+48 501 234 567"
+                          defaultValue={u.whatsappNumber ? `+${u.whatsappNumber}` : ""}
+                          onBlur={(e) => {
+                            const val = e.target.value.trim();
+                            const current = u.whatsappNumber || "";
+                            const normalized = normalizeWhatsappNumber(val);
+                            if (normalized !== current) saveDriverWhatsapp(u.uid, val);
+                          }}
+                          className="text-xs px-2 py-1 rounded-md border border-gray-200 bg-gray-50 focus:bg-white focus:border-emerald-300 focus:outline-none flex-1 min-w-0"
+                          title="Numer WhatsApp kierowcy (E.164)"
+                        />
+                      </div>
                     </div>
                   </div>
 
@@ -17984,7 +18084,7 @@ function KomentarzBaner({ frachtyList, vehicleId, onUpdate }) {
   );
 }
 
-function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = [], onAdd, onDelete, onUpdate, onBulkAdd, canEdit = false, currentUser = null }) {
+function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = [], onAdd, onDelete, onUpdate, onBulkAdd, canEdit = false, currentUser = null, appUsers = [], showToast = () => {} }) {
   // Index driverEvents by frachtId for quick lookup
   const eventsByFracht = useMemo(() => {
     const map = {};
@@ -18610,7 +18710,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
           </tbody>
         </table>
       </div>
-      {showForm && <FrachtyModal record={editRecord} vehicles={vehicles} driverEvents={driverEvents} fuelEntries={fuelEntries} defaultVehicleId={selectedVehicle} onSave={(data) => { if(editId) onUpdate(editId,data); else onAdd(data); setShowForm(false); setEditId(null); }} onClose={() => { setShowForm(false); setEditId(null); }} />}
+      {showForm && <FrachtyModal record={editRecord} vehicles={vehicles} driverEvents={driverEvents} fuelEntries={fuelEntries} defaultVehicleId={selectedVehicle} appUsers={appUsers} currentUser={currentUser} showToast={showToast} onSave={(data) => { if(editId) onUpdate(editId,data); else onAdd(data); setShowForm(false); setEditId(null); }} onClose={() => { setShowForm(false); setEditId(null); }} />}
     </div>
   );
 }
@@ -19116,15 +19216,211 @@ function GeoPickerModal({ initialGeo, address, onSave, onClose }) {
   );
 }
 
-function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], onSave, onClose, defaultVehicleId="" }) {
+// ═══════════════════════════════════════════════════════════════════════════
+// WhatsappSendPreviewModal — podgląd treści przed wysłaniem zlecenia
+//   Wysyła 4 wiadomości: tekst podpisany dyspozytorem + info systemowe
+//   + pinezka GPS załadunku + pinezka GPS rozładunku
+// ═══════════════════════════════════════════════════════════════════════════
+function WhatsappSendPreviewModal({ fracht, driver, dispatcherName, onClose, onSent, showToast }) {
+  const order = useMemo(() => formatOrderForWhatsapp(fracht), [fracht]);
+  const [body, setBody] = useState(order.body);
+  const [sending, setSending] = useState(false);
+  const [sendReminder, setSendReminder] = useState(true);
+
+  const signedPreview = `*${dispatcherName}:*\n${body}`;
+
+  async function send() {
+    if (!driver?.uid) { showToast("❌ Brak kierowcy"); return; }
+    if (!driver.whatsappNumber) { showToast("❌ Kierowca nie ma numeru WhatsApp"); return; }
+    if (!body.trim()) { showToast("❌ Pusta treść"); return; }
+
+    setSending(true);
+    try {
+      const sendFn = httpsCallable(functions, "sendWhatsappMessage");
+
+      // 1) Tekst zlecenia (podpisany dyspozytorem)
+      await sendFn({
+        driverUid: driver.uid,
+        type: "text",
+        content: { body },
+        frachtId: fracht?.id || null,
+      });
+
+      // 2) Info systemowe (bez podpisu dyspozytora)
+      if (sendReminder) {
+        await sendFn({
+          driverUid: driver.uid,
+          type: "text",
+          content: { body: WA_SYSTEM_REMINDER, signature: false },
+          frachtId: fracht?.id || null,
+        });
+      }
+
+      // 3) Pinezka załadunku
+      if (order.pickup) {
+        await sendFn({
+          driverUid: driver.uid,
+          type: "location",
+          content: {
+            latitude: order.pickup.lat,
+            longitude: order.pickup.lng,
+            name: order.pickup.name,
+            address: order.pickup.address,
+          },
+          frachtId: fracht?.id || null,
+        });
+      }
+
+      // 4) Pinezka rozładunku
+      if (order.delivery) {
+        await sendFn({
+          driverUid: driver.uid,
+          type: "location",
+          content: {
+            latitude: order.delivery.lat,
+            longitude: order.delivery.lng,
+            name: order.delivery.name,
+            address: order.delivery.address,
+          },
+          frachtId: fracht?.id || null,
+        });
+      }
+
+      showToast("✅ Zlecenie wysłane na WhatsApp");
+      if (onSent) onSent();
+      onClose();
+    } catch (e) {
+      console.error("WhatsApp send error:", e);
+      const msg = e?.message || "Nieznany błąd";
+      if (msg.includes("24 hours") || msg.includes("re-engagement") || msg.includes("outside")) {
+        showToast("⚠️ Okno 24h zamknięte — użyj template albo poproś kierowcę o wiadomość");
+      } else if (msg.includes("failed-precondition")) {
+        showToast("❌ Kierowca nie ma numeru WhatsApp");
+      } else {
+        showToast(`❌ Błąd wysyłki: ${msg.slice(0, 80)}`);
+      }
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const totalMsgs = 1 + (sendReminder ? 1 : 0) + (order.pickup ? 1 : 0) + (order.delivery ? 1 : 0);
+
+  return (
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{background:"rgba(0,0,0,0.6)", zIndex: 10000}}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col" style={{maxHeight:"90vh"}}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <div>
+            <h3 className="text-base font-bold text-gray-900">📱 Wyślij zlecenie na WhatsApp</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Do: <strong>{driver?.displayName || driver?.email || "?"}</strong>
+              {driver?.whatsappNumber && <span className="text-gray-400"> · +{driver.whatsappNumber}</span>}
+              {" · "}Wiadomości: <strong>{totalMsgs}</strong>
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+        </div>
+
+        <div className="px-5 py-4 overflow-y-auto" style={{flex:"1 1 auto"}}>
+          {/* Treść zlecenia (edytowalna) */}
+          <div className="mb-4">
+            <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider">
+              1️⃣ Treść zlecenia (podpisana: {dispatcherName})
+            </label>
+            <textarea
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              rows={12}
+              className="w-full mt-2 px-3 py-2 rounded-lg border border-gray-200 text-sm font-mono"
+              style={{resize:"vertical"}}
+            />
+            <div className="mt-2 text-xs text-gray-500">
+              Kierowca zobaczy: <span className="font-mono bg-gray-50 px-1">*{dispatcherName}:*</span> + treść (jak wyżej).
+            </div>
+          </div>
+
+          {/* Info systemowe toggle */}
+          <div className="mb-4">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={sendReminder}
+                onChange={(e) => setSendReminder(e.target.checked)}
+                className="mt-0.5"
+              />
+              <div>
+                <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                  2️⃣ Info systemowe (przypomnienie o aplikacji)
+                </div>
+                <pre className="mt-1 p-2 bg-gray-50 rounded-lg text-xs text-gray-700 whitespace-pre-wrap font-sans border border-gray-100">
+{WA_SYSTEM_REMINDER}
+                </pre>
+              </div>
+            </label>
+          </div>
+
+          {/* Pinezki GPS */}
+          <div className="space-y-2">
+            {order.pickup && (
+              <div className="flex items-center gap-2 p-2 bg-emerald-50 rounded-lg border border-emerald-100">
+                <span className="text-base">📍</span>
+                <div className="flex-1 text-xs">
+                  <div className="font-semibold text-emerald-800">3️⃣ Pinezka załadunku</div>
+                  <div className="text-emerald-600">{order.pickup.lat.toFixed(5)}, {order.pickup.lng.toFixed(5)}</div>
+                </div>
+              </div>
+            )}
+            {order.delivery && (
+              <div className="flex items-center gap-2 p-2 bg-blue-50 rounded-lg border border-blue-100">
+                <span className="text-base">📍</span>
+                <div className="flex-1 text-xs">
+                  <div className="font-semibold text-blue-800">4️⃣ Pinezka rozładunku</div>
+                  <div className="text-blue-600">{order.delivery.lat.toFixed(5)}, {order.delivery.lng.toFixed(5)}</div>
+                </div>
+              </div>
+            )}
+            {(!order.pickup || !order.delivery) && (
+              <div className="text-xs text-amber-600 bg-amber-50 border border-amber-100 p-2 rounded-lg">
+                ⚠️ {!order.pickup && "Brak GPS załadunku. "}{!order.delivery && "Brak GPS rozładunku. "}
+                Ustaw lokalizację w formularzu żeby wysłać pinezkę.
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-end gap-2">
+          <button onClick={onClose} disabled={sending}
+            className="px-4 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-100">Anuluj</button>
+          <button onClick={send} disabled={sending || !driver?.whatsappNumber}
+            className="px-5 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-2"
+            style={{background: sending ? "#9ca3af" : "#25D366"}}>
+            {sending ? "Wysyłanie..." : `📱 Wyślij (${totalMsgs})`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], onSave, onClose, defaultVehicleId="", appUsers = [], currentUser = null, showToast = () => {} }) {
   const empty = {dataZlecenia:"",dataZaladunku:"",dataRozladunku:"",godzZaladunku:"",godzRozladunku:"",skad:"",zaladunekKod:"",zaladunekKod2:"",zaladunekKod3:"",zaladunekAdres:"",zaladunekTelefon:"",zaladunekGeo:"",dokod:"",dokod2:"",dokod3:"",rozladunekAdres:"",rozladunekTelefon:"",rozladunekGeo:"",klient:"",cenaEur:"",kmPodjazd:"",kmLadowne:"",kmWszystkie:"",wagaLadunku:"",dyspozytor:"",nrFV:"",dataWyslania:"",terminPlatnosci:"",uwagi:"",urlZlecenie:"",nrZlecenia:"",nrRef:"",towarOpis:"",towarPalety:"",towarIloscPalet:"",zaladunekTyp:"",vehicleId:defaultVehicleId};
   const [f, setF] = useState(record ? {...empty,...record} : empty);
   const set = (k,v) => setF(prev => { const next={...prev,[k]:v}; const pod=parseInt(next.kmPodjazd)||0; const lad=parseInt(next.kmLadowne)||0; next.kmWszystkie=pod+lad>0?String(pod+lad):""; return next; });
   const eurKmLad = f.kmLadowne && f.cenaEur ? (parseFloat(f.cenaEur)/parseInt(f.kmLadowne)).toFixed(2) : null;
   const eurKmWsz = f.kmWszystkie && f.cenaEur ? (parseFloat(f.cenaEur)/parseInt(f.kmWszystkie)).toFixed(2) : null;
   const [geoPickerFor, setGeoPickerFor] = useState(null); // "zaladunek" | "rozladunek" | null
+  const [showWhatsappPreview, setShowWhatsappPreview] = useState(false);
   const inp = "w-full text-sm px-3 py-2 rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-gray-400";
   const lbl = "text-xs font-semibold text-gray-500 mb-1 block";
+
+  // Wyliczony kierowca przypisany do pojazdu (dla WhatsApp)
+  const waDriver = (() => {
+    const veh = vehicles.find(v => v.id === f.vehicleId);
+    if (!veh?.assignedDriver) return null;
+    return appUsers.find(u => u.email === veh.assignedDriver && u.role === "kierowca") || null;
+  })();
+  const dispatcherName = (currentUser?.displayName || currentUser?.name || (currentUser?.email || "").split("@")[0] || "Dyspozytor");
+  const canSendWhatsapp = !!(record?.id && waDriver?.whatsappNumber);
   return (
     <>
     {geoPickerFor && (
@@ -19331,10 +19627,30 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
         </div>
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0">
           <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-100">Anuluj</button>
+          {canSendWhatsapp && (
+            <button
+              onClick={() => setShowWhatsappPreview(true)}
+              className="px-4 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-2"
+              style={{background:"#25D366"}}
+              title={`Wyślij zlecenie na WhatsApp do: ${waDriver.displayName || waDriver.email}`}
+            >
+              📱 Wyślij na WhatsApp
+            </button>
+          )}
           <button onClick={() => { if(!f.vehicleId){alert("Wybierz pojazd");return;} if(!f.cenaEur){alert("Wpisz cene EUR");return;} onSave(f); }} className="px-5 py-2 rounded-lg text-sm font-semibold text-white" style={{background:"#111827"}}>{record ? "Zapisz zmiany" : "Dodaj fracht"}</button>
         </div>
       </div>
     </div>
+    {showWhatsappPreview && canSendWhatsapp && (
+      <WhatsappSendPreviewModal
+        fracht={{...f, id: record?.id}}
+        driver={waDriver}
+        dispatcherName={dispatcherName}
+        onClose={() => setShowWhatsappPreview(false)}
+        onSent={() => { setShowWhatsappPreview(false); showToast && showToast("Wysłano na WhatsApp", "success"); }}
+        showToast={showToast}
+      />
+    )}
     </>
   );
 }
