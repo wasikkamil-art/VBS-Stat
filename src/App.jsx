@@ -4138,7 +4138,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             if (isMob) return null;
             return (
               <div style={{ height: "calc(100vh - 2rem)" }}>
-                <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} onActiveRoomChange={setChatHasActiveRoom} />
+                <ChatTab currentUser={user} appUsers={appUsers} vehicles={vehicles} showToast={showToast} onActiveRoomChange={setChatHasActiveRoom} />
               </div>
             );
           })()}
@@ -4421,7 +4421,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             </div>
             {/* ChatTab */}
             <div className="flex-1 overflow-hidden">
-              <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} />
+              <ChatTab currentUser={user} appUsers={appUsers} vehicles={vehicles} showToast={showToast} />
             </div>
           </div>
         </div>
@@ -4496,7 +4496,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
       {/* ── MOBILE FULLSCREEN CHAT OVERLAY ── */}
       {tab === "chat" && typeof window !== 'undefined' && window.innerWidth < 768 && (
         <MobileChatOverlay hasActiveRoom={chatHasActiveRoom}>
-          <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} onActiveRoomChange={setChatHasActiveRoom} />
+          <ChatTab currentUser={user} appUsers={appUsers} vehicles={vehicles} showToast={showToast} onActiveRoomChange={setChatHasActiveRoom} />
         </MobileChatOverlay>
       )}
     </div>
@@ -4570,7 +4570,7 @@ function MobileChatOverlay({ children, hasActiveRoom }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // CHAT TAB — pełna wersja z edycją, usuwaniem, reply, reakcjami, zarządzaniem pokojami
 // ═══════════════════════════════════════════════════════════════════════════════
-function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) {
+function ChatTab({ currentUser, appUsers = [], vehicles = [], showToast, onActiveRoomChange }) {
   const [rooms, setRooms] = useState([]);
   const [activeRoom, setActiveRoom] = useState(null);
 
@@ -4703,7 +4703,16 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
         }
         return data;
       });
-      const myRooms = all.filter(r => r.type === "channel" || (r.members || []).includes(currentUser.uid))
+      // Admin + dyspozytor widzą także pokoje WhatsApp (nawet jeśli nie są w members)
+      // — współdzielony pokój per kierowca (wszyscy dyspozytorzy w jednym wątku)
+      const myUserRole = appUsers.find(u => u.uid === currentUser.uid)?.role;
+      const canSeeWhatsapp = myUserRole === "admin" || myUserRole === "dyspozytor";
+      const myRooms = all.filter(r => {
+        if (r.type === "channel") return true;
+        if ((r.members || []).includes(currentUser.uid)) return true;
+        if (r.type === "whatsapp" && canSeeWhatsapp) return true;
+        return false;
+      })
         .sort((a, b) => tsToMs(b.lastMessageAt) - tsToMs(a.lastMessageAt)); // desc — najnowsze na górze
       myRooms.forEach(r => {
         const prev = lastRoomTimestamps.current[r.id];
@@ -4836,6 +4845,45 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
   const sendMessage = async (text, fileUrl, fileName) => {
     if (!activeRoom) return;
     if (!text?.trim() && !fileUrl) return;
+
+    // ── Pokój WhatsApp: wyślij przez Cloud Function (Graph API + auto-podpis dyspozytora) ──
+    if (activeRoom.type === "whatsapp") {
+      if (fileUrl) {
+        showToast("Załączniki dla WhatsApp w PHASE 2 — teraz tylko tekst");
+        return;
+      }
+      if (!activeRoom.driverUid) {
+        showToast("❌ Pokój WA bez driverUid");
+        return;
+      }
+      try {
+        const sendFn = httpsCallable(functions, "sendWhatsappMessage");
+        await sendFn({
+          driverUid: activeRoom.driverUid,
+          type: "text",
+          content: { body: text.trim() },
+          // frachtId: brak (chat niezwiązany z konkretnym frachtem)
+        });
+        clearTimeout(typingTimeoutRef.current);
+        await updateDoc(doc(db, "chatRooms", activeRoom.id), {
+          [`typing.${currentUser.uid}`]: null,
+        });
+        setMsgText(""); setReplyTo(null);
+      } catch (e) {
+        console.error("WhatsApp send error:", e);
+        const msg = e?.message || "Nieznany błąd";
+        if (msg.includes("24 hours") || msg.includes("re-engagement") || msg.includes("131047")) {
+          showToast("⚠️ Okno 24h zamknięte — kierowca musi pierwszy napisać");
+        } else if (msg.includes("failed-precondition")) {
+          showToast("❌ Kierowca bez numeru WhatsApp");
+        } else {
+          showToast(`❌ ${msg.slice(0, 100)}`);
+        }
+      }
+      return;
+    }
+
+    // ── Zwykły pokój wewnętrzny: zapis bezpośrednio do Firestore ──
     const msg = {
       text: text?.trim() || "",
       senderId: currentUser.uid,
@@ -5021,10 +5069,22 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
     return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
   };
 
+  // Znajdź pojazd przypisany do kierowcy (po emailu) — dla pokojów WhatsApp
+  const findDriverVehicle = (driverEmail) => {
+    if (!driverEmail) return null;
+    return vehicles.find(v => v.assignedDriver === driverEmail) || null;
+  };
+
   const roomDisplayName = (r) => {
     if (r.type === "dm" && r.members) {
       const other = r.members.find(uid => uid !== currentUser.uid);
       return appUsers.find(u => u.uid === other)?.email?.split("@")[0] || r.name;
+    }
+    if (r.type === "whatsapp") {
+      // Format: "{plate} · {driver name}" — jak Slickshift
+      const veh = findDriverVehicle(r.driverEmail);
+      const driverName = r.name || r.driverEmail?.split("@")[0] || "Kierowca";
+      return veh?.plate ? `${veh.plate} · ${driverName}` : driverName;
     }
     return r.name;
   };
@@ -5091,27 +5151,36 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
             // Aktywny pokój = czytany (nie czekamy na serverTimestamp round-trip)
             const hasUnread = r.id !== activeRoom?.id && r.lastMessageAt && r.lastSender !== currentUser.email && (!myRead || tsToMs(r.lastMessageAt) - tsToMs(myRead) > 5000);
             const isActive = activeRoom?.id === r.id;
+            const isWhatsapp = r.type === "whatsapp";
             const avatarColors = ['linear-gradient(135deg, #3b82f6, #6366f1)', 'linear-gradient(135deg, #22c55e, #14b8a6)', 'linear-gradient(135deg, #f59e0b, #ef4444)', 'linear-gradient(135deg, #8b5cf6, #ec4899)'];
-            const avatarBg = avatarColors[ri % avatarColors.length];
+            // WhatsApp: zawsze zielony gradient (spójne z brandingiem WA)
+            const avatarBg = isWhatsapp ? 'linear-gradient(135deg, #25D366, #128C7E)' : avatarColors[ri % avatarColors.length];
             const initials = roomDisplayName(r).slice(0, 2).toUpperCase();
+            // Preview dla WA: lastMessagePreview (inbound) albo lastMessage (outbound local)
+            const lastPreview = r.lastMessagePreview || r.lastMessage;
             return (
               <button key={r.id} onClick={() => { setActiveRoom(r); setShowSearch(false); setSearchQuery(""); setContextMenu(null); }}
                 className="w-full text-left px-4 py-3 flex items-center gap-3 transition-colors hover:bg-gray-100/60"
-                style={{ background: isActive ? '#eff6ff' : 'transparent', borderLeft: isActive ? '3px solid #3b82f6' : '3px solid transparent' }}>
+                style={{ background: isActive ? (isWhatsapp ? '#f0fdf4' : '#eff6ff') : 'transparent', borderLeft: isActive ? `3px solid ${isWhatsapp ? '#25D366' : '#3b82f6'}` : '3px solid transparent' }}>
                 {/* Avatar */}
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm flex-shrink-0" style={{ background: avatarBg }}>{initials}</div>
+                <div className="relative w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm flex-shrink-0" style={{ background: avatarBg }}>
+                  {initials}
+                  {isWhatsapp && (
+                    <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center text-[9px]" style={{ background: '#fff', border: '1.5px solid #25D366' }} title="WhatsApp">📱</span>
+                  )}
+                </div>
                 {/* Info */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between">
                     <span className={`text-sm truncate ${hasUnread ? "font-bold text-gray-900" : "font-semibold text-gray-700"}`}>{roomDisplayName(r)}</span>
                     <span className="text-xs flex-shrink-0 ml-2 text-gray-400">{fmtTime(r.lastMessageAt)}</span>
                   </div>
-                  {r.lastMessage && (
+                  {lastPreview && (
                     <div className="mt-0.5 flex items-center gap-1">
                       <span className={`text-xs truncate max-w-[160px] ${hasUnread ? "text-gray-600 font-medium" : "text-gray-400"}`}>
-                        {r.lastSender ? `${r.lastSender.split("@")[0]}: ` : ""}{r.lastMessage}
+                        {r.lastSender && !isWhatsapp ? `${r.lastSender.split("@")[0]}: ` : ""}{lastPreview}
                       </span>
-                      {hasUnread && <span className="ml-auto px-1.5 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0" style={{ background: '#3b82f6', color: '#fff' }}>1</span>}
+                      {hasUnread && <span className="ml-auto px-1.5 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0" style={{ background: isWhatsapp ? '#25D366' : '#3b82f6', color: '#fff' }}>1</span>}
                     </div>
                   )}
                 </div>
@@ -5130,11 +5199,25 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
               <button onClick={() => setActiveRoom(null)} className="md:hidden p-1" style={{ color: '#64748b' }}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
               </button>
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-xs flex-shrink-0" style={{ background: 'linear-gradient(135deg, #22c55e, #14b8a6)' }}>{roomDisplayName(activeRoom).slice(0, 2).toUpperCase()}</div>
+              <div className="relative w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-xs flex-shrink-0"
+                style={{ background: activeRoom.type === "whatsapp" ? 'linear-gradient(135deg, #25D366, #128C7E)' : 'linear-gradient(135deg, #22c55e, #14b8a6)' }}>
+                {roomDisplayName(activeRoom).slice(0, 2).toUpperCase()}
+                {activeRoom.type === "whatsapp" && (
+                  <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center text-[9px]" style={{ background: '#fff', border: '1.5px solid #25D366' }}>📱</span>
+                )}
+              </div>
               <div>
-                <h3 className="font-semibold" style={{ fontSize: '15px', color: '#1e293b' }}>{roomDisplayName(activeRoom)}</h3>
-                <div className="flex items-center gap-1" style={{ fontSize: '12px', color: '#22c55e' }}>
-                  <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: '#22c55e' }}/> online
+                <h3 className="font-semibold flex items-center gap-2" style={{ fontSize: '15px', color: '#1e293b' }}>
+                  {roomDisplayName(activeRoom)}
+                  {activeRoom.type === "whatsapp" && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold" style={{ background: '#dcfce7', color: '#166534' }}>WhatsApp</span>
+                  )}
+                </h3>
+                <div className="flex items-center gap-1" style={{ fontSize: '12px', color: activeRoom.type === "whatsapp" ? '#25D366' : '#22c55e' }}>
+                  <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: activeRoom.type === "whatsapp" ? '#25D366' : '#22c55e' }}/>
+                  {activeRoom.type === "whatsapp"
+                    ? (activeRoom.whatsappNumber ? `+${activeRoom.whatsappNumber}` : 'WhatsApp')
+                    : 'online'}
                 </div>
               </div>
               <div className="ml-auto flex items-center gap-1.5">
@@ -5222,16 +5305,27 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
                 const showSender = !isMine && (i === 0 || filteredMessages[i - 1]?.senderId !== m.senderId);
                 const showAvatar = i === 0 || filteredMessages[i - 1]?.senderId !== m.senderId;
                 const isDeleted = m.deleted;
+                // WhatsApp: rozróżnij kierowcę (direction="inbound") od innego dyspozytora (direction="outbound" + senderId != me)
+                const isWaChannel = activeRoom.type === "whatsapp";
+                const isDriverMsg = isWaChannel && m.direction === "inbound";
+                const avatarBg = isMine
+                  ? 'linear-gradient(135deg, #3b82f6, #6366f1)'
+                  : isDriverMsg
+                    ? 'linear-gradient(135deg, #25D366, #128C7E)'
+                    : 'linear-gradient(135deg, #22c55e, #14b8a6)';
                 return (
                   <div key={m.id} className={`flex items-end gap-1 sm:gap-1.5 ${isMine ? "flex-row-reverse" : ""} group`}>
                     {/* Small avatar — hidden on very small screens */}
                     {showAvatar ? (
-                      <div className="hidden sm:flex w-6 h-6 rounded-md items-center justify-center text-white text-[9px] font-bold flex-shrink-0" style={{ background: isMine ? 'linear-gradient(135deg, #3b82f6, #6366f1)' : 'linear-gradient(135deg, #22c55e, #14b8a6)' }}>
+                      <div className="hidden sm:flex w-6 h-6 rounded-md items-center justify-center text-white text-[9px] font-bold flex-shrink-0" style={{ background: avatarBg }}>
                         {(m.senderName || m.senderEmail?.split("@")[0] || "?").slice(0, 2).toUpperCase()}
                       </div>
                     ) : <div className="hidden sm:block w-6 flex-shrink-0"/>}
                     <div className="max-w-[85%] sm:max-w-[70%] relative">
-                      {showSender && <div className="text-xs mb-0.5 ml-2" style={{ fontSize: '11px', fontWeight: 600, color: '#64748b' }}>{m.senderName || m.senderEmail?.split("@")[0]}</div>}
+                      {showSender && <div className="text-xs mb-0.5 ml-2 flex items-center gap-1" style={{ fontSize: '11px', fontWeight: 600, color: isDriverMsg ? '#128C7E' : '#64748b' }}>
+                        {m.senderName || m.senderEmail?.split("@")[0]}
+                        {isDriverMsg && <span className="text-[9px] font-normal" style={{ color: '#64748b' }}>· kierowca</span>}
+                      </div>}
 
                       {/* Reply quote */}
                       {m.replyTo && !isDeleted && (
@@ -5244,6 +5338,7 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
                         borderRadius: '18px',
                         ...(isDeleted ? { background: '#f1f5f9', color: '#94a3b8', fontStyle: 'italic' } :
                           isMine ? { background: 'linear-gradient(135deg, #3b82f6, #2563eb)', color: '#fff', borderBottomRightRadius: '6px' } :
+                          isDriverMsg ? { background: '#dcfce7', color: '#14532d', borderBottomLeftRadius: '6px', border: '1px solid #bbf7d0' } :
                           { background: '#f1f5f9', color: '#1e293b', borderBottomLeftRadius: '6px' }),
                         lineHeight: '1.5',
                       }}
@@ -5282,7 +5377,20 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
 
                       <div className={`text-xs mt-1 flex items-center gap-1 ${isMine ? "justify-end mr-2" : "ml-2"}`} style={{ color: '#94a3b8', fontSize: '10px' }}>
                         <span>{fmtTime(m.timestamp)}</span>
-                        {isMine && !isDeleted && (() => {
+                        {/* Delivery status dla WhatsApp (outbound moja) — z webhooka */}
+                        {isMine && !isDeleted && isWaChannel && m.channel === "whatsapp" && (() => {
+                          const ds = m.deliveryStatus;
+                          if (ds === "failed") {
+                            const err = m.deliveryError?.title || "Błąd dostarczenia";
+                            return <span title={err} className="cursor-help text-red-500">⚠️ failed</span>;
+                          }
+                          if (ds === "read") return <span title="Przeczytano" className="cursor-default"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 6 7 17 2 12"/><polyline points="22 6 11 17"/></svg></span>;
+                          if (ds === "delivered") return <span title="Dostarczono" className="cursor-default"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 6 7 17 2 12"/><polyline points="22 6 11 17"/></svg></span>;
+                          if (ds === "sent") return <span title="Wysłano" className="cursor-default"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>;
+                          return <span title="W trakcie" className="cursor-default">⏳</span>;
+                        })()}
+                        {/* Delivery status dla zwykłych chatów (lastRead map) */}
+                        {isMine && !isDeleted && !isWaChannel && (() => {
                           const msgMs = tsToMs(m.timestamp);
                           const readers = Object.entries(lastReadMap).filter(([uid, ts]) => uid !== currentUser.uid && tsToMs(ts) >= msgMs).map(([uid]) => uid);
                           if (readers.length === 0) return <span title="Wysłano"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>;
