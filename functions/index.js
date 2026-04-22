@@ -985,7 +985,22 @@ async function callWhatsappApi(phoneId, token, payload) {
   if (!resp.ok) {
     const errMsg = data?.error?.message || `HTTP ${resp.status}`;
     const errCode = data?.error?.code || resp.status;
-    throw new HttpsError("internal", `WhatsApp API: ${errMsg}`, { code: errCode, data });
+    const errType = data?.error?.type || "";
+    const errDetails = data?.error?.error_data?.details || "";
+    const fbtrace = data?.error?.fbtrace_id || "";
+    // Log błąd Mety do GCP Logging — bez dump'owania całego HTML jeśli dostaliśmy stronę
+    const rawPreview = typeof data?.raw === "string" ? data.raw.slice(0, 200) + "..." : null;
+    console.error("[WA send] Meta API error", {
+      status: resp.status,
+      code: errCode,
+      type: errType,
+      message: errMsg,
+      details: errDetails,
+      fbtrace,
+      ...(rawPreview ? { rawPreview } : {}),
+    });
+    const fullMsg = errDetails ? `${errMsg} — ${errDetails}` : errMsg;
+    throw new HttpsError("internal", `WhatsApp API (${errCode}): ${fullMsg}`, { code: errCode, type: errType });
   }
   return data;
 }
