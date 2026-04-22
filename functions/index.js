@@ -1275,8 +1275,23 @@ exports.whatsappWebhook = onRequest(
             const status = st.status; // sent | delivered | read | failed
             const ts = st.timestamp ? new Date(Number(st.timestamp) * 1000).toISOString() : new Date().toISOString();
 
-            // Znajdź wiadomość po wamid — skanujemy ostatnie pokoje WhatsApp
+            // Log KAŻDY status — szczególnie błędy dostarczenia od Mety
+            console.log("[WA webhook] status update", {
+              wamid: wamid?.slice(-20),
+              status,
+              recipient: st.recipient_id,
+              ts,
+              ...(st.errors?.[0] ? {
+                errorCode: st.errors[0].code,
+                errorTitle: st.errors[0].title,
+                errorMessage: st.errors[0].message,
+                errorDetails: st.errors[0].error_data?.details,
+              } : {}),
+            });
+
+            // Znajdź wiadomość po wamid — skanujemy pokoje WhatsApp
             const roomsSnap = await db.collection("chatRooms").where("channel", "==", "whatsapp").get();
+            let found = false;
             for (const roomDoc of roomsSnap.docs) {
               const msgsSnap = await roomDoc.ref.collection("messages")
                 .where("waMessageId", "==", wamid)
@@ -1288,8 +1303,12 @@ exports.whatsappWebhook = onRequest(
                   [`deliveryTimes.${status}`]: ts,
                   ...(status === "failed" && st.errors?.[0] ? { deliveryError: st.errors[0] } : {}),
                 });
+                found = true;
                 break;
               }
+            }
+            if (!found) {
+              console.warn("[WA webhook] status: wamid nie znaleziony w bazie", { wamid: wamid?.slice(-20), status, roomsScanned: roomsSnap.size });
             }
           }
         }
