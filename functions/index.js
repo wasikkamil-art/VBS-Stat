@@ -11,11 +11,13 @@
 
 const { onDocumentWritten, onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { onCall, HttpsError }  = require("firebase-functions/v2/https");
+const { defineSecret }        = require("firebase-functions/params");
 const { initializeApp }       = require("firebase-admin/app");
 const { getAuth }             = require("firebase-admin/auth");
 const { getFirestore }        = require("firebase-admin/firestore");
 const { getMessaging }        = require("firebase-admin/messaging");
 const { getStorage }          = require("firebase-admin/storage");
+const crypto                  = require("crypto");
 
 // Inicjalizacja Firebase Admin
 initializeApp();
@@ -949,5 +951,340 @@ exports.parseDddFile = onCall(
       metadata,
       activitiesCount: activities.length,
     };
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════
+// WHATSAPP BUSINESS CLOUD API — wysyłka i odbiór wiadomości
+//   sendWhatsappMessage — onCall, admin/dyspozytor wysyła do kierowcy
+//   whatsappWebhook     — onRequest, Meta push (incoming + delivery status)
+// ═══════════════════════════════════════════════════════════════
+
+const WHATSAPP_TOKEN          = defineSecret("WHATSAPP_TOKEN");
+const WHATSAPP_PHONE_ID       = defineSecret("WHATSAPP_PHONE_ID");
+const WHATSAPP_APP_SECRET     = defineSecret("WHATSAPP_APP_SECRET");
+const WHATSAPP_VERIFY_TOKEN   = defineSecret("WHATSAPP_VERIFY_TOKEN");
+
+const WA_API_VERSION = "v25.0";
+const WA_ROOM_PREFIX = "whatsapp_"; // chatRooms/whatsapp_{driverUid}
+
+// Helper — wywołanie Graph API z payloadem
+async function callWhatsappApi(phoneId, token, payload) {
+  const url = `https://graph.facebook.com/${WA_API_VERSION}/${phoneId}/messages`;
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  const body = await resp.text();
+  let data;
+  try { data = JSON.parse(body); } catch { data = { raw: body }; }
+  if (!resp.ok) {
+    const errMsg = data?.error?.message || `HTTP ${resp.status}`;
+    const errCode = data?.error?.code || resp.status;
+    throw new HttpsError("internal", `WhatsApp API: ${errMsg}`, { code: errCode, data });
+  }
+  return data;
+}
+
+// Helper — zapewnia że pokój kierowcy istnieje (shared dla wszystkich dyspozytorów)
+async function ensureWhatsappRoom(driverUid, driverData) {
+  const db = getFirestore();
+  const roomId = `${WA_ROOM_PREFIX}${driverUid}`;
+  const roomRef = db.doc(`chatRooms/${roomId}`);
+  const snap = await roomRef.get();
+  if (!snap.exists) {
+    await roomRef.set({
+      id: roomId,
+      type: "whatsapp",
+      channel: "whatsapp",
+      name: driverData?.displayName || driverData?.email || "Kierowca",
+      driverUid,
+      driverEmail: driverData?.email || null,
+      whatsappNumber: driverData?.whatsappNumber || null,
+      members: [driverUid], // dyspozytorzy widzą przez type==="whatsapp"
+      createdAt: new Date().toISOString(),
+      lastMessageAt: new Date().toISOString(),
+      lastMessagePreview: "",
+    });
+  }
+  return roomRef;
+}
+
+// ── sendWhatsappMessage — onCall ──
+// Request data:
+//   { driverUid, type: "text"|"location"|"template", content: {...}, frachtId? }
+// type="text":     content = { body: "...", signature?: "Agnieszka Wrona" }
+// type="location": content = { latitude, longitude, name?, address? }
+// type="template": content = { templateName, languageCode, components: [...] }
+exports.sendWhatsappMessage = onCall(
+  {
+    region: "europe-west1",
+    timeoutSeconds: 30,
+    secrets: [WHATSAPP_TOKEN, WHATSAPP_PHONE_ID],
+  },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musisz być zalogowany.");
+    const callerRole = request.auth.token.role;
+    if (!["admin", "dyspozytor"].includes(callerRole)) {
+      throw new HttpsError("permission-denied", "Tylko admin/dyspozytor może wysyłać wiadomości.");
+    }
+
+    const { driverUid, type, content, frachtId } = request.data || {};
+    if (!driverUid || !type || !content) {
+      throw new HttpsError("invalid-argument", "Wymagane: driverUid, type, content.");
+    }
+    if (!["text", "location", "template"].includes(type)) {
+      throw new HttpsError("invalid-argument", `Nieprawidłowy typ: ${type}`);
+    }
+
+    const db = getFirestore();
+    const driverSnap = await db.doc(`users/${driverUid}`).get();
+    if (!driverSnap.exists) throw new HttpsError("not-found", "Kierowca nie istnieje.");
+    const driver = driverSnap.data();
+    const toNumber = driver.whatsappNumber;
+    if (!toNumber) throw new HttpsError("failed-precondition", "Kierowca nie ma przypisanego numeru WhatsApp.");
+
+    // Pobierz nadawcę
+    const senderSnap = await db.doc(`users/${request.auth.uid}`).get();
+    const sender = senderSnap.exists ? senderSnap.data() : {};
+    const senderName = sender.displayName || sender.name || (sender.email || "").split("@")[0] || "Dyspozytor";
+
+    // Zbuduj payload Meta
+    let payload;
+    let previewText = "";
+    if (type === "text") {
+      // Dyspozytor podpisuje treść na początku: *Imię Nazwisko:*\n{body}
+      const rawBody = content.body || "";
+      const useSignature = content.signature !== false; // default true
+      const finalBody = useSignature ? `*${senderName}:*\n${rawBody}` : rawBody;
+      payload = {
+        messaging_product: "whatsapp",
+        to: toNumber,
+        type: "text",
+        text: { body: finalBody, preview_url: true },
+      };
+      previewText = rawBody.slice(0, 80);
+    } else if (type === "location") {
+      const lat = Number(content.latitude);
+      const lng = Number(content.longitude);
+      if (isNaN(lat) || isNaN(lng)) throw new HttpsError("invalid-argument", "latitude/longitude muszą być liczbami.");
+      payload = {
+        messaging_product: "whatsapp",
+        to: toNumber,
+        type: "location",
+        location: {
+          latitude: lat,
+          longitude: lng,
+          ...(content.name ? { name: content.name } : {}),
+          ...(content.address ? { address: content.address } : {}),
+        },
+      };
+      previewText = `📍 ${content.name || "Lokalizacja"}`;
+    } else if (type === "template") {
+      if (!content.templateName) throw new HttpsError("invalid-argument", "templateName wymagane.");
+      payload = {
+        messaging_product: "whatsapp",
+        to: toNumber,
+        type: "template",
+        template: {
+          name: content.templateName,
+          language: { code: content.languageCode || "pl" },
+          ...(content.components ? { components: content.components } : {}),
+        },
+      };
+      previewText = `📋 ${content.templateName}`;
+    }
+
+    // Wyślij przez Graph API
+    const apiResp = await callWhatsappApi(
+      WHATSAPP_PHONE_ID.value(),
+      WHATSAPP_TOKEN.value(),
+      payload
+    );
+    const wamid = apiResp?.messages?.[0]?.id || null;
+
+    // Zapewnij pokój i zapisz wiadomość
+    const roomRef = await ensureWhatsappRoom(driverUid, { ...driver, uid: driverSnap.id });
+    const now = new Date().toISOString();
+    const msgRef = roomRef.collection("messages").doc();
+    const msgDoc = {
+      id: msgRef.id,
+      channel: "whatsapp",
+      direction: "outbound",
+      type,
+      senderId: request.auth.uid,
+      senderName,
+      senderEmail: sender.email || null,
+      timestamp: now,
+      waMessageId: wamid,
+      deliveryStatus: "sent",
+      ...(type === "text" ? { text: content.body || "", signed: true } : {}),
+      ...(type === "location" ? { location: { latitude: Number(content.latitude), longitude: Number(content.longitude), name: content.name || null, address: content.address || null } } : {}),
+      ...(type === "template" ? { template: { name: content.templateName, language: content.languageCode || "pl" } } : {}),
+      ...(frachtId ? { frachtId } : {}),
+    };
+    await msgRef.set(msgDoc);
+    await roomRef.update({
+      lastMessageAt: now,
+      lastMessagePreview: previewText,
+      lastSender: sender.email || request.auth.uid,
+    });
+
+    return { success: true, wamid, messageId: msgRef.id, roomId: roomRef.id };
+  }
+);
+
+// ── whatsappWebhook — onRequest (HTTPS) ──
+// GET  → weryfikacja Meta (hub.challenge)
+// POST → przychodzące wiadomości + statusy dostawy
+exports.whatsappWebhook = onRequest(
+  {
+    region: "europe-west1",
+    timeoutSeconds: 30,
+    secrets: [WHATSAPP_TOKEN, WHATSAPP_APP_SECRET, WHATSAPP_VERIFY_TOKEN],
+    cors: false,
+  },
+  async (req, res) => {
+    try {
+      // ── GET: weryfikacja webhooka przez Metę ──
+      if (req.method === "GET") {
+        const mode = req.query["hub.mode"];
+        const token = req.query["hub.verify_token"];
+        const challenge = req.query["hub.challenge"];
+        if (mode === "subscribe" && token === WHATSAPP_VERIFY_TOKEN.value()) {
+          console.log("[WA webhook] verified");
+          return res.status(200).send(challenge);
+        }
+        console.warn("[WA webhook] verify failed", { mode, token: token ? "***" : null });
+        return res.status(403).send("Forbidden");
+      }
+
+      if (req.method !== "POST") {
+        return res.status(405).send("Method not allowed");
+      }
+
+      // ── Weryfikacja HMAC X-Hub-Signature-256 ──
+      const signature = req.get("x-hub-signature-256") || "";
+      const rawBody = req.rawBody ? req.rawBody.toString("utf8") : JSON.stringify(req.body || {});
+      const expected = "sha256=" + crypto
+        .createHmac("sha256", WHATSAPP_APP_SECRET.value())
+        .update(rawBody)
+        .digest("hex");
+      if (signature !== expected) {
+        console.warn("[WA webhook] signature mismatch");
+        return res.status(401).send("Invalid signature");
+      }
+
+      const body = req.body || {};
+      const db = getFirestore();
+
+      // Meta webhook struktura: entry[0].changes[0].value
+      for (const entry of body.entry || []) {
+        for (const change of entry.changes || []) {
+          const value = change.value || {};
+
+          // ── messages[]: przychodzące od kierowcy ──
+          for (const msg of value.messages || []) {
+            const from = msg.from; // numer WhatsApp bez +
+            const wamid = msg.id;
+            const ts = msg.timestamp ? new Date(Number(msg.timestamp) * 1000).toISOString() : new Date().toISOString();
+
+            // Znajdź kierowcę po numerze
+            const driversSnap = await db.collection("users")
+              .where("whatsappNumber", "==", from)
+              .limit(1)
+              .get();
+            if (driversSnap.empty) {
+              console.warn(`[WA webhook] nieznany numer ${from}`);
+              continue;
+            }
+            const driverDoc = driversSnap.docs[0];
+            const driver = { uid: driverDoc.id, ...driverDoc.data() };
+            const roomRef = await ensureWhatsappRoom(driver.uid, driver);
+
+            // Dedup po wamid
+            const existing = await roomRef.collection("messages").where("waMessageId", "==", wamid).limit(1).get();
+            if (!existing.empty) continue;
+
+            const msgRef = roomRef.collection("messages").doc();
+            const base = {
+              id: msgRef.id,
+              channel: "whatsapp",
+              direction: "inbound",
+              senderId: driver.uid,
+              senderName: driver.displayName || driver.email || from,
+              timestamp: ts,
+              waMessageId: wamid,
+              deliveryStatus: "delivered",
+            };
+            let previewText = "";
+
+            if (msg.type === "text") {
+              await msgRef.set({ ...base, type: "text", text: msg.text?.body || "" });
+              previewText = (msg.text?.body || "").slice(0, 80);
+            } else if (msg.type === "location") {
+              await msgRef.set({
+                ...base, type: "location",
+                location: { latitude: msg.location?.latitude, longitude: msg.location?.longitude, name: msg.location?.name || null, address: msg.location?.address || null },
+              });
+              previewText = "📍 Lokalizacja";
+            } else if (["image", "document", "audio", "video", "voice"].includes(msg.type)) {
+              const media = msg[msg.type] || {};
+              await msgRef.set({
+                ...base, type: msg.type,
+                media: { mediaId: media.id, mimeType: media.mime_type, caption: media.caption || null, filename: media.filename || null },
+              });
+              previewText = msg.type === "image" ? "🖼️ Zdjęcie" :
+                           msg.type === "document" ? `📄 ${media.filename || "Dokument"}` :
+                           msg.type === "audio" || msg.type === "voice" ? "🎤 Głosówka" :
+                           msg.type === "video" ? "🎥 Film" : `📎 ${msg.type}`;
+            } else {
+              await msgRef.set({ ...base, type: msg.type, raw: msg });
+              previewText = `📎 ${msg.type}`;
+            }
+
+            await roomRef.update({
+              lastMessageAt: ts,
+              lastMessagePreview: previewText,
+              lastSender: driver.email || driver.uid,
+            });
+          }
+
+          // ── statuses[]: delivery status updates ──
+          for (const st of value.statuses || []) {
+            const wamid = st.id;
+            const status = st.status; // sent | delivered | read | failed
+            const ts = st.timestamp ? new Date(Number(st.timestamp) * 1000).toISOString() : new Date().toISOString();
+
+            // Znajdź wiadomość po wamid — skanujemy ostatnie pokoje WhatsApp
+            const roomsSnap = await db.collection("chatRooms").where("channel", "==", "whatsapp").get();
+            for (const roomDoc of roomsSnap.docs) {
+              const msgsSnap = await roomDoc.ref.collection("messages")
+                .where("waMessageId", "==", wamid)
+                .limit(1)
+                .get();
+              if (!msgsSnap.empty) {
+                await msgsSnap.docs[0].ref.update({
+                  deliveryStatus: status,
+                  [`deliveryTimes.${status}`]: ts,
+                  ...(status === "failed" && st.errors?.[0] ? { deliveryError: st.errors[0] } : {}),
+                });
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      return res.status(200).send("OK");
+    } catch (e) {
+      console.error("[WA webhook] error:", e);
+      // 200 mimo błędu — Meta nie retryuje bez sensu
+      return res.status(200).send("ERR");
+    }
   }
 );
