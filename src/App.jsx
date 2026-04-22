@@ -9568,18 +9568,27 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
   const todayStr = new Date().toISOString().slice(0, 10);
   const today = new Date();
 
+  // Helper: czy fracht jest rozładowany (status na fracht LUB driverEvent bez nowszego cofnięcia)
+  const isFrachtRozladowano = (f) => {
+    if (f.statusRozladunku === "rozladowano") return true;
+    const evts = driverEvents.filter(e => e.frachtId === f.id);
+    const rozEv = evts.filter(e => e.type === "rozladowano").sort((a,b) => (b.ts||"").localeCompare(a.ts||""))[0];
+    const undoEv = evts.filter(e => e.type === "cofnij_rozladowano").sort((a,b) => (b.ts||"").localeCompare(a.ts||""))[0];
+    return !!rozEv && (!undoEv || rozEv.ts > undoEv.ts);
+  };
+
   // Podział na aktywne / przyszłe / historia
   const active = frachty.filter(f => {
-    if (f.statusRozladunku === "rozladowano") return false;
+    if (isFrachtRozladowano(f)) return false;
     if (!f.dataZaladunku) return false;
     return f.dataZaladunku <= todayStr && (!f.dataRozladunku || f.dataRozladunku >= todayStr);
   });
   const upcoming = frachty.filter(f => {
-    if (f.statusRozladunku === "rozladowano") return false;
+    if (isFrachtRozladowano(f)) return false;
     return f.dataZaladunku && f.dataZaladunku > todayStr;
   });
   const history = frachty.filter(f =>
-    f.statusRozladunku === "rozladowano" || (f.dataRozladunku && f.dataRozladunku < todayStr)
+    isFrachtRozladowano(f) || (f.dataRozladunku && f.dataRozladunku < todayStr)
   );
 
   const formatKody = (f) => {
@@ -9676,6 +9685,19 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
         ts: new Date().toISOString(),
       });
       logAction(field, "driverEvents", { frachtId: fracht.id, vehicleId: vehicle?.id });
+      // Propaguj status na fracht — żeby admin+home tile+filtry widziały poprawnie
+      // (event zostaje w driverEvents jako log, statusRozladunku = single source of truth dla filtrów)
+      const frachtStatusMap = {
+        rozladowano: "rozladowano",
+        cofnij_rozladowano: "", // cofnij czyści status
+      };
+      if (field in frachtStatusMap) {
+        try {
+          await updateDoc(doc(db, "frachty", fracht.id), { statusRozladunku: frachtStatusMap[field] });
+        } catch (e) {
+          console.warn("statusRozladunku propagation failed:", e?.message || e);
+        }
+      }
       const toastMap = {
         zaladowano: "✅ Załadunek potwierdzony",
         rozladowano: "✅ Rozładunek potwierdzony",
@@ -19292,12 +19314,15 @@ function WhatsappSendPreviewModal({ fracht, driver, dispatcherName, onClose, onS
     } catch (e) {
       console.error("WhatsApp send error:", e);
       const msg = e?.message || "Nieznany błąd";
-      if (msg.includes("24 hours") || msg.includes("re-engagement") || msg.includes("outside")) {
-        showToast("⚠️ Okno 24h zamknięte — użyj template albo poproś kierowcę o wiadomość");
+      const details = e?.details ? ` [${JSON.stringify(e.details).slice(0, 120)}]` : "";
+      if (msg.includes("24 hours") || msg.includes("re-engagement") || msg.includes("outside") || msg.includes("131047")) {
+        showToast("⚠️ Okno 24h zamknięte — poproś kierowcę o napisanie do nas WhatsApp albo użyj szablonu");
       } else if (msg.includes("failed-precondition")) {
         showToast("❌ Kierowca nie ma numeru WhatsApp");
+      } else if (msg.includes("131030") || msg.includes("not in allowed")) {
+        showToast("⚠️ Numer kierowcy nie jest na liście test recipients w Meta");
       } else {
-        showToast(`❌ Błąd wysyłki: ${msg.slice(0, 80)}`);
+        showToast(`❌ Błąd wysyłki: ${msg.slice(0, 140)}${details}`);
       }
     } finally {
       setSending(false);
