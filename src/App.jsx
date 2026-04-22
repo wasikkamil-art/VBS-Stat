@@ -9577,18 +9577,38 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     return !!rozEv && (!undoEv || rozEv.ts > undoEv.ts);
   };
 
-  // Podział na aktywne / przyszłe / historia
-  const active = frachty.filter(f => {
-    if (isFrachtRozladowano(f)) return false;
+  // Auto-archive: fracht starszy niż 7 dni bez dataRozladunku/statusu traktuj jak zamknięty
+  // (zabezpieczenie przed legacy frachtami które nigdy nie zostały oznaczone jako rozładowane)
+  const STALE_DAYS = 7;
+  const staleThreshold = new Date(Date.now() - STALE_DAYS * 86400000).toISOString().slice(0, 10);
+  const isStaleUnfinished = (f) => {
     if (!f.dataZaladunku) return false;
-    return f.dataZaladunku <= todayStr && (!f.dataRozladunku || f.dataRozladunku >= todayStr);
-  });
-  const upcoming = frachty.filter(f => {
-    if (isFrachtRozladowano(f)) return false;
-    return f.dataZaladunku && f.dataZaladunku > todayStr;
-  });
+    if (f.dataZaladunku >= staleThreshold) return false; // młody fracht — nie archiwizuj
+    // Stary + nie ma dataRozladunku w przyszłości = assume porzucony/dostarczony
+    if (!f.dataRozladunku) return true;
+    if (f.dataRozladunku < todayStr) return true;
+    return false;
+  };
+
+  // Podział na aktywne / przyszłe / historia
+  const active = frachty
+    .filter(f => {
+      if (isFrachtRozladowano(f)) return false;
+      if (!f.dataZaladunku) return false;
+      if (isStaleUnfinished(f)) return false; // auto-archive stare frachty bez statusu
+      return f.dataZaladunku <= todayStr && (!f.dataRozladunku || f.dataRozladunku >= todayStr);
+    })
+    // Sort DESC po dataZaladunku — najnowszy aktywny na pierwszym miejscu (mobile tile)
+    .sort((a, b) => (b.dataZaladunku || "").localeCompare(a.dataZaladunku || ""));
+  const upcoming = frachty
+    .filter(f => {
+      if (isFrachtRozladowano(f)) return false;
+      return f.dataZaladunku && f.dataZaladunku > todayStr;
+    })
+    // Sort ASC po dataZaladunku — najbliższy nadchodzący pierwszy
+    .sort((a, b) => (a.dataZaladunku || "").localeCompare(b.dataZaladunku || ""));
   const history = frachty.filter(f =>
-    isFrachtRozladowano(f) || (f.dataRozladunku && f.dataRozladunku < todayStr)
+    isFrachtRozladowano(f) || isStaleUnfinished(f) || (f.dataRozladunku && f.dataRozladunku < todayStr)
   );
 
   const formatKody = (f) => {
