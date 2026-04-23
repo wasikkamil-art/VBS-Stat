@@ -7262,17 +7262,41 @@ async function getRoute(waypoints) {
 // { coordinates: [[lat,lng]...], distance: meters } lub null.
 async function mapMatchRoute(points) {
   if (!points || points.length < 2) return null;
-  let pts = points;
-  // OSRM match limit 100 koord/request — redukuj przez próbkowanie co Nty
+
+  // 1) Dedup punktów stacjonarnych (gdy auto stoi — sąsiednie punkty w tym samym miejscu
+  //    mylą OSRM; zostawiamy tylko punkty ruchome, > ~15m od poprzedniego ruchomego)
+  const haversineM = (a, b) => {
+    const R = 6371000;
+    const toR = v => v * Math.PI / 180;
+    const dLat = toR(b.lat - a.lat), dLng = toR(b.lng - a.lng);
+    const s = Math.sin(dLat/2)**2 + Math.cos(toR(a.lat))*Math.cos(toR(b.lat))*Math.sin(dLng/2)**2;
+    return 2 * R * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+  };
+  let pts = [points[0]];
+  for (let i = 1; i < points.length; i++) {
+    if (haversineM(pts[pts.length - 1], points[i]) >= 15) pts.push(points[i]);
+  }
+  // Zawsze dopinamy ostatni, żeby koniec trasy był prawdziwy
+  if (pts[pts.length - 1] !== points[points.length - 1]) pts.push(points[points.length - 1]);
+  if (pts.length < 2) return null;
+
+  // 2) OSRM match limit 100 koord — próbkowanie równomierne jeśli więcej
   if (pts.length > 100) {
     const step = Math.ceil(pts.length / 100);
-    pts = pts.filter((_, i) => i % step === 0 || i === points.length - 1);
+    const sampled = pts.filter((_, i) => i % step === 0);
+    if (sampled[sampled.length - 1] !== pts[pts.length - 1]) sampled.push(pts[pts.length - 1]);
+    pts = sampled;
   }
+
   const coords = pts.map(p => `${p.lng},${p.lat}`).join(";");
-  const radiuses = pts.map(() => 50).join(";"); // 50m tolerancja GPS
+  // radiuses 200m — tolerancja dla breadcrumbów zbieranych co 2 min (punkty mogą być
+  // nieco od drogi, gdy auto zatrzymało się na poboczu / parkingu przy drodze)
+  const radiuses = pts.map(() => 200).join(";");
   const timestamps = pts.map(p => Math.floor((p.ts || Date.now()) / 1000)).join(";");
   try {
-    const url = `https://router.project-osrm.org/match/v1/driving/${coords}?overview=full&geometries=geojson&radiuses=${radiuses}&timestamps=${timestamps}`;
+    // gaps=ignore — nie dziel trasy na chunki przy długich przerwach czasowych
+    // tidy=true — OSRM filtruje outliery (skoki GPS)
+    const url = `https://router.project-osrm.org/match/v1/driving/${coords}?overview=full&geometries=geojson&radiuses=${radiuses}&timestamps=${timestamps}&gaps=ignore&tidy=true`;
     const resp = await fetch(url);
     const data = await resp.json();
     if (data?.code === "Ok" && Array.isArray(data.matchings) && data.matchings.length > 0) {
@@ -7284,7 +7308,10 @@ async function mapMatchRoute(points) {
         }
         totalDist += m.distance || 0;
       });
+      console.log(`[OSRM match] OK — ${allCoords.length} koord, ${(totalDist/1000).toFixed(1)} km z ${pts.length} punktów`);
       if (allCoords.length > 0) return { coordinates: allCoords, distance: totalDist };
+    } else {
+      console.warn("[OSRM match] code:", data?.code, "message:", data?.message);
     }
   } catch (e) { console.warn("[OSRM match] error:", e?.message); }
   return null;
