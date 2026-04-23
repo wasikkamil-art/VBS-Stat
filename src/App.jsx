@@ -7924,40 +7924,61 @@ function GpsTrasySection({ device, showToast }) {
       const d = new Date(selectedDate + "T00:00:00");
       const dayStart = d.getTime();
       const dayEnd = dayStart + 24 * 3600 * 1000;
-      const devId = String(device?.deviceId || device?.id || "");
+      const vehicleId = device?.fleetVehicle?.id;
+      if (!vehicleId) {
+        showToast("Brak przypisanego pojazdu");
+        setPoints([]); setStats(null);
+        return;
+      }
 
-      const gpsProxy = httpsCallable(functions, "gpsProxy");
-      // UWAGA: nie przekazujemy `device` — Atlas /history oczekuje deviceName (nie numeric deviceId);
-      // filtrowanie robimy client-side po każdym znanym polu identyfikatora.
-      const res = await gpsProxy({ endpoint: "history", params: { year: d.getFullYear(), month: d.getMonth() + 1 } });
-      // Atlas może zwrócić: array bezpośrednio / obiekt z positionList / historyList
-      const payload = res?.data?.data || res?.data || [];
-      const items = Array.isArray(payload) ? payload
-        : Array.isArray(payload?.positionList) ? payload.positionList
-        : Array.isArray(payload?.historyList) ? payload.historyList
-        : [];
-
-      const devName = String(device?.deviceName || "");
-      console.log("[GpsTrasy] raw payload:", payload, "items count:", items.length, "first sample:", items[0], "filter by devId:", devId, "devName:", devName);
-
-      const parsed = items
-        .filter(p => {
-          // Filter po deviceId / deviceName (zagnieżdżone lub flat). Brak pola = akceptuj.
-          const pidDev = String(p?.dev?.deviceId || p?.device?.deviceId || p?.deviceId || p?.id || "");
-          const pNameDev = String(p?.dev?.deviceName || p?.device?.deviceName || p?.deviceName || "");
-          if (!pidDev && !pNameDev) return true;
-          if (pidDev && pidDev === devId) return true;
-          if (pNameDev && devName && pNameDev === devName) return true;
-          return false;
-        })
-        .map(p => {
-          const lat = p?.coordinate?.latitude ?? p?.latitude ?? p?.lat;
-          const lng = p?.coordinate?.longitude ?? p?.longitude ?? p?.lng ?? p?.lon;
-          const ts = atlasDateTimeToMs(p?.dateTime || p?.datetime || p?.timestamp || p?.date || p?.time);
-          return { lat, lng, ts };
-        })
-        .filter(p => p.lat && p.lng && p.ts && p.ts >= dayStart && p.ts < dayEnd)
+      // ── PRIMARY: nasze breadcrumby (gpsBreadcrumbs) — zbierane przez Cloud Function scheduledGpsPoll co 5 min ──
+      const q = query(
+        collection(db, "gpsBreadcrumbs", vehicleId, "points"),
+        where("ts", ">=", dayStart),
+        where("ts", "<", dayEnd),
+        orderBy("ts", "asc")
+      );
+      const snap = await getDocs(q);
+      let parsed = snap.docs
+        .map(dd => dd.data())
+        .filter(p => typeof p?.lat === "number" && typeof p?.lng === "number" && p?.ts)
         .sort((a, b) => a.ts - b.ts);
+
+      console.log(`[GpsTrasy] breadcrumbs ${parsed.length} dla ${vehicleId} ${selectedDate}`);
+
+      // ── FALLBACK: Atlas /history (jeśli w naszych nic nie ma — np. data starsza niż 7 dni retention) ──
+      if (parsed.length === 0) {
+        try {
+          const gpsProxy = httpsCallable(functions, "gpsProxy");
+          const res = await gpsProxy({ endpoint: "history", params: { year: d.getFullYear(), month: d.getMonth() + 1 } });
+          const payload = res?.data?.data || res?.data || [];
+          const items = Array.isArray(payload) ? payload
+            : Array.isArray(payload?.positionList) ? payload.positionList
+            : Array.isArray(payload?.historyList) ? payload.historyList
+            : [];
+          const devId = String(device?.deviceId || device?.id || "");
+          const devName = String(device?.deviceName || "");
+          parsed = items
+            .filter(p => {
+              const pidDev = String(p?.dev?.deviceId || p?.device?.deviceId || p?.deviceId || p?.id || "");
+              const pNameDev = String(p?.dev?.deviceName || p?.device?.deviceName || p?.deviceName || "");
+              if (!pidDev && !pNameDev) return true;
+              if (pidDev && pidDev === devId) return true;
+              if (pNameDev && devName && pNameDev === devName) return true;
+              return false;
+            })
+            .map(p => ({
+              lat: p?.coordinate?.latitude ?? p?.latitude ?? p?.lat,
+              lng: p?.coordinate?.longitude ?? p?.longitude ?? p?.lng ?? p?.lon,
+              ts: atlasDateTimeToMs(p?.dateTime || p?.datetime || p?.timestamp || p?.date || p?.time),
+            }))
+            .filter(p => p.lat && p.lng && p.ts && p.ts >= dayStart && p.ts < dayEnd)
+            .sort((a, b) => a.ts - b.ts);
+          console.log(`[GpsTrasy] fallback Atlas /history ${parsed.length}`);
+        } catch (e) {
+          console.warn("[GpsTrasy] Atlas fallback error:", e?.message);
+        }
+      }
 
       if (parsed.length < 2) {
         setPoints([]);
