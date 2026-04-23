@@ -19203,29 +19203,36 @@ function ZlecenieUploadBtn({ frachtId, onUploaded, label = "+ Dodaj zlecenie", f
 Odpowiedz TYLKO w formacie JSON (bez markdown):
 {
   "nrZlecenia": "numer zlecenia lub null",
-  "nrRef": "numer referencyjny lub skrócony identyfikator zlecenia",
+  "nrRef": "numer referencyjny lub skrócony identyfikator lub null",
+  "zaladunekKodPocztowy": "sam kod pocztowy załadunku (np. ES 46720) lub null",
+  "zaladunekMiasto": "samo miasto załadunku (np. Villalonga) lub null",
+  "zaladunekAdres": "ulica i numer budynku załadunku lub null",
+  "zaladunekTelefon": "telefon kontaktowy na załadunku lub null",
   "dataZaladunku": "YYYY-MM-DD lub null",
   "godzZaladunku": "HH:MM lub null",
+  "dokodPocztowy": "sam kod pocztowy 1. rozładunku (np. IT 34151) lub null",
+  "dokodMiasto": "samo miasto 1. rozładunku (np. Trieste) lub null",
+  "rozladunekAdres": "ulica i numer 1. rozładunku lub null",
+  "rozladunekTelefon": "telefon kontaktowy na 1. rozładunku lub null",
   "dataRozladunku": "YYYY-MM-DD lub null",
   "godzRozladunku": "HH:MM lub null",
-  "zaladunekKod": "kod pocztowy + miasto załadunku (np. ES 46720 Villalonga)",
-  "zaladunekAdres": "pełny adres ulicy załadunku",
-  "zaladunekTelefon": "telefon kontaktowy na załadunku lub null",
-  "dokod": "kod pocztowy + miasto 1. rozładunku (np. IT 34151 Trieste)",
-  "rozladunekAdres": "pełny adres ulicy 1. rozładunku",
-  "rozladunekTelefon": "telefon kontaktowy na 1. rozładunku lub null",
-  "dokod2": "kod pocztowy + miasto 2. rozładunku lub null",
-  "rozladunekAdres2": "pełny adres ulicy 2. rozładunku lub null",
-  "rozladunekTelefon2": "telefon kontaktowy na 2. rozładunku lub null",
-  "dataRozladunku2": "YYYY-MM-DD data 2. rozładunku lub null",
-  "godzRozladunku2": "HH:MM godzina 2. rozładunku lub null",
-  "klient": "nazwa zleceniodawcy/klienta",
+  "dokodPocztowy2": "kod pocztowy 2. rozładunku lub null",
+  "dokodMiasto2": "miasto 2. rozładunku lub null",
+  "rozladunekAdres2": "ulica 2. rozładunku lub null",
+  "rozladunekTelefon2": "telefon 2. rozładunku lub null",
+  "dataRozladunku2": "YYYY-MM-DD 2. rozładunku lub null",
+  "godzRozladunku2": "HH:MM 2. rozładunku lub null",
+  "zleceniodawcaFirma": "nazwa firmy zleceniodawcy lub null",
+  "zleceniodawcaOsoba": "imię i nazwisko osoby kontaktowej zleceniodawcy lub null",
+  "zleceniodawcaTelefon": "telefon zleceniodawcy lub null",
+  "zleceniodawcaEmail": "email zleceniodawcy lub null",
+  "klient": "nazwa klienta/zleceniodawcy (skrócona)",
   "towarOpis": "krótki opis towaru (np. Palety, Kartony)",
-  "towarIloscPalet": "ilość palet/sztuk (cyfra)",
-  "towarPalety": "wymiary towaru, każda pozycja w nowej linii (np. 2× 240x120x240\\n1× 120x120xH240)",
-  "wagaLadunku": "waga w kg (sama cyfra)",
+  "towarIloscPalet": "ilość palet/sztuk (cyfra) lub null",
+  "towarPalety": "wymiary towaru, każda pozycja w nowej linii (np. 2× 240x120x240\\n1× 120x120xH240) lub null",
+  "wagaLadunku": "waga w kg (sama cyfra) lub null",
   "zaladunekTyp": "typ załadunku (bok, tył, góra) lub null",
-  "uwagi": "uwagi operacyjne istotne dla kierowcy (BEZ cen, BEZ warunków płatności, BEZ danych zleceniodawcy)"
+  "uwagi": "uwagi operacyjne istotne dla kierowcy (BEZ cen, BEZ warunków płatności) lub null"
 }
 NIE podawaj cen frachtu, warunków płatności, NIP, danych spedytora ani warunków umowy.` }
           ]
@@ -19561,17 +19568,105 @@ function WhatsappSendPreviewModal({ fracht, driver, dispatcherName, onClose, onS
 }
 
 function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], onSave, onClose, defaultVehicleId="", appUsers = [], currentUser = null, showToast = () => {} }) {
-  const empty = {dataZlecenia:"",dataZaladunku:"",dataRozladunku:"",godzZaladunku:"",godzRozladunku:"",skad:"",zaladunekKod:"",zaladunekKod2:"",zaladunekKod3:"",zaladunekAdres:"",zaladunekTelefon:"",zaladunekGeo:"",dokod:"",dokod2:"",dokod3:"",rozladunekAdres:"",rozladunekTelefon:"",rozladunekGeo:"",rozladunekAdres2:"",rozladunekTelefon2:"",rozladunekGeo2:"",dataRozladunku2:"",godzRozladunku2:"",klient:"",cenaEur:"",kmPodjazd:"",kmLadowne:"",kmWszystkie:"",wagaLadunku:"",dyspozytor:"",nrFV:"",dataWyslania:"",terminPlatnosci:"",uwagi:"",urlZlecenie:"",nrZlecenia:"",nrRef:"",towarOpis:"",towarPalety:"",towarIloscPalet:"",zaladunekTyp:"",vehicleId:defaultVehicleId};
-  const [f, setF] = useState(record ? {...empty,...record} : empty);
-  const set = (k,v) => setF(prev => { const next={...prev,[k]:v}; const pod=parseInt(next.kmPodjazd)||0; const lad=parseInt(next.kmLadowne)||0; next.kmWszystkie=pod+lad>0?String(pod+lad):""; return next; });
+  // ── pomocnik: rozbij "PL 44-100 Gliwice" → ["PL 44-100", "Gliwice"] ──
+  function splitKM(s) {
+    if (!s?.trim()) return ['',''];
+    const t = s.trim();
+    const m = t.match(/^([A-Z]{2}[\s-]?[\d][\S]*)\s+(.+)$/i);
+    if (m) return [m[1].trim(), m[2].trim()];
+    const p = t.split(/\s+/);
+    return p.length >= 2 ? [p[0], p.slice(1).join(' ')] : [t, ''];
+  }
+  const initF = (rec) => {
+    const base = {
+      dataZlecenia:"", vehicleId: defaultVehicleId, skad:"",
+      zaladunekKodPocztowy:"", zaladunekMiasto:"", zaladunekKod:"",
+      zaladunekAdres:"", zaladunekTelefon:"", zaladunekGeo:"",
+      dataZaladunku:"", godzZaladunku:"",
+      zaladunekKodPocztowy2:"", zaladunekMiasto2:"", zaladunekKod2:"",
+      zaladunekAdres2:"", zaladunekTelefon2:"", zaladunekGeo2:"",
+      dataZaladunku2:"", godzZaladunku2:"",
+      dokodPocztowy:"", dokodMiasto:"", dokod:"",
+      rozladunekAdres:"", rozladunekTelefon:"", rozladunekGeo:"",
+      dataRozladunku:"", godzRozladunku:"",
+      dokodPocztowy2:"", dokodMiasto2:"", dokod2:"",
+      rozladunekAdres2:"", rozladunekTelefon2:"", rozladunekGeo2:"",
+      dataRozladunku2:"", godzRozladunku2:"",
+      dokodPocztowy3:"", dokodMiasto3:"", dokod3:"",
+      rozladunekAdres3:"", rozladunekTelefon3:"", rozladunekGeo3:"",
+      dataRozladunku3:"", godzRozladunku3:"",
+      dokodPocztowy4:"", dokodMiasto4:"", dokod4:"",
+      rozladunekAdres4:"", rozladunekTelefon4:"", rozladunekGeo4:"",
+      dataRozladunku4:"", godzRozladunku4:"",
+      dokodPocztowy5:"", dokodMiasto5:"", dokod5:"",
+      rozladunekAdres5:"", rozladunekTelefon5:"", rozladunekGeo5:"",
+      dataRozladunku5:"", godzRozladunku5:"",
+      zleceniodawcaFirma:"", zleceniodawcaOsoba:"", zleceniodawcaTelefon:"", zleceniodawcaEmail:"",
+      nrZlecenia:"", nrRef:"", towarOpis:"", towarIloscPalet:"", towarPalety:"", zaladunekTyp:"",
+      wagaLadunku:"", uwagi:"",
+      klient:"", cenaEur:"", kmPodjazd:"", kmLadowne:"", kmWszystkie:"",
+      dyspozytor:"", nrFV:"", dataWyslania:"", terminPlatnosci:"", urlZlecenie:"",
+    };
+    if (!rec) return base;
+    const mg = {...base, ...rec};
+    if (!mg.zaladunekKodPocztowy && !mg.zaladunekMiasto && mg.zaladunekKod) { const [k,m] = splitKM(mg.zaladunekKod); mg.zaladunekKodPocztowy=k; mg.zaladunekMiasto=m; }
+    if (!mg.zaladunekKodPocztowy2 && !mg.zaladunekMiasto2 && mg.zaladunekKod2?.trim()) { const [k,m] = splitKM(mg.zaladunekKod2); mg.zaladunekKodPocztowy2=k; mg.zaladunekMiasto2=m; }
+    if (!mg.dokodPocztowy && !mg.dokodMiasto && mg.dokod) { const [k,m] = splitKM(mg.dokod); mg.dokodPocztowy=k; mg.dokodMiasto=m; }
+    if (!mg.dokodPocztowy2 && !mg.dokodMiasto2 && mg.dokod2?.trim()) { const [k,m] = splitKM(mg.dokod2); mg.dokodPocztowy2=k; mg.dokodMiasto2=m; }
+    if (!mg.dokodPocztowy3 && !mg.dokodMiasto3 && mg.dokod3?.trim()) { const [k,m] = splitKM(mg.dokod3); mg.dokodPocztowy3=k; mg.dokodMiasto3=m; }
+    return mg;
+  };
+  const [f, setF] = useState(() => initF(record));
+  const set = (k, v) => setF(prev => {
+    const n = {...prev, [k]: v};
+    if (k==='zaladunekKodPocztowy'||k==='zaladunekMiasto') n.zaladunekKod=[n.zaladunekKodPocztowy,n.zaladunekMiasto].filter(Boolean).join(' ');
+    if (k==='zaladunekKodPocztowy2'||k==='zaladunekMiasto2') n.zaladunekKod2=[n.zaladunekKodPocztowy2,n.zaladunekMiasto2].filter(Boolean).join(' ');
+    if (k==='dokodPocztowy'||k==='dokodMiasto') n.dokod=[n.dokodPocztowy,n.dokodMiasto].filter(Boolean).join(' ');
+    if (k==='dokodPocztowy2'||k==='dokodMiasto2') n.dokod2=[n.dokodPocztowy2,n.dokodMiasto2].filter(Boolean).join(' ');
+    if (k==='dokodPocztowy3'||k==='dokodMiasto3') n.dokod3=[n.dokodPocztowy3,n.dokodMiasto3].filter(Boolean).join(' ');
+    if (k==='dokodPocztowy4'||k==='dokodMiasto4') n.dokod4=[n.dokodPocztowy4,n.dokodMiasto4].filter(Boolean).join(' ');
+    if (k==='dokodPocztowy5'||k==='dokodMiasto5') n.dokod5=[n.dokodPocztowy5,n.dokodMiasto5].filter(Boolean).join(' ');
+    const pod=parseInt(n.kmPodjazd)||0; const lad=parseInt(n.kmLadowne)||0;
+    n.kmWszystkie = pod+lad>0 ? String(pod+lad) : "";
+    return n;
+  });
   const eurKmLad = f.kmLadowne && f.cenaEur ? (parseFloat(f.cenaEur)/parseInt(f.kmLadowne)).toFixed(2) : null;
   const eurKmWsz = f.kmWszystkie && f.cenaEur ? (parseFloat(f.cenaEur)/parseInt(f.kmWszystkie)).toFixed(2) : null;
-  const [geoPickerFor, setGeoPickerFor] = useState(null); // "zaladunek" | "rozladunek" | "rozladunek2" | null
+  const [geoPickerFor, setGeoPickerFor] = useState(null); // "z1"|"z2"|"r1"|"r2"|"r3"|"r4"|"r5"
   const [showWhatsappPreview, setShowWhatsappPreview] = useState(false);
+  const [showZ2, setShowZ2] = useState(!!(record?.zaladunekKodPocztowy2 || record?.zaladunekKod2?.trim()));
+  const [showR2, setShowR2] = useState(!!(record?.dokodPocztowy2 || record?.dokod2?.trim()));
+  const [showR3, setShowR3] = useState(!!(record?.dokodPocztowy3 || record?.dokod3?.trim()));
+  const [showR4, setShowR4] = useState(!!(record?.dokodPocztowy4));
+  const [showR5, setShowR5] = useState(!!(record?.dokodPocztowy5));
   const inp = "w-full text-sm px-3 py-2 rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-gray-400";
   const lbl = "text-xs font-semibold text-gray-500 mb-1 block";
 
-  // Wyliczony kierowca przypisany do pojazdu (dla WhatsApp)
+  // geo config per punkt
+  const geoConf = {
+    z1: { key:"zaladunekGeo", addr:()=>[f.zaladunekAdres,f.zaladunekKodPocztowy,f.zaladunekMiasto].filter(Boolean).join(', ') },
+    z2: { key:"zaladunekGeo2", addr:()=>[f.zaladunekAdres2,f.zaladunekKodPocztowy2,f.zaladunekMiasto2].filter(Boolean).join(', ') },
+    r1: { key:"rozladunekGeo", addr:()=>[f.rozladunekAdres,f.dokodPocztowy,f.dokodMiasto].filter(Boolean).join(', ') },
+    r2: { key:"rozladunekGeo2", addr:()=>[f.rozladunekAdres2,f.dokodPocztowy2,f.dokodMiasto2].filter(Boolean).join(', ') },
+    r3: { key:"rozladunekGeo3", addr:()=>[f.rozladunekAdres3,f.dokodPocztowy3,f.dokodMiasto3].filter(Boolean).join(', ') },
+    r4: { key:"rozladunekGeo4", addr:()=>[f.rozladunekAdres4,f.dokodPocztowy4,f.dokodMiasto4].filter(Boolean).join(', ') },
+    r5: { key:"rozladunekGeo5", addr:()=>[f.rozladunekAdres5,f.dokodPocztowy5,f.dokodMiasto5].filter(Boolean).join(', ') },
+  };
+  const geoBtn = (fk) => {
+    const gc = geoConf[fk]; if (!gc) return null;
+    const val = f[gc.key];
+    return (
+      <div className="flex items-center gap-2 mt-1">
+        <button type="button" onClick={() => setGeoPickerFor(fk)}
+          className="text-xs font-medium px-2 py-1 rounded-lg transition-all hover:bg-blue-50"
+          style={{ color: val ? "#15803d" : "#3b82f6", background: val ? "#f0fdf4" : "transparent" }}>
+          {val ? `✅ ${val}` : "📍 Ustaw lokalizację"}
+        </button>
+        {val && <button type="button" onClick={() => set(gc.key,"")} className="text-xs text-gray-400 hover:text-red-400">✕</button>}
+      </div>
+    );
+  };
+
   const waDriver = (() => {
     const veh = vehicles.find(v => v.id === f.vehicleId);
     if (!veh?.assignedDriver) return null;
@@ -19579,31 +19674,32 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
   })();
   const dispatcherName = (currentUser?.displayName || currentUser?.name || (currentUser?.email || "").split("@")[0] || "Dyspozytor");
   const canSendWhatsapp = !!(record?.id && waDriver?.whatsappNumber);
+
+  const onUploadedParsed = (url, parsed) => {
+    set("urlZlecenie", url);
+    if (!parsed) return;
+    Object.entries(parsed).forEach(([k, v]) => {
+      if (v == null || v === "") return;
+      const sv = String(v);
+      if (k === "zaladunekKod" && !f.zaladunekKodPocztowy) {
+        const [kp, km] = splitKM(sv); set("zaladunekKodPocztowy", kp); set("zaladunekMiasto", km);
+      } else if (k === "dokod" && !f.dokodPocztowy) {
+        const [kp, km] = splitKM(sv); set("dokodPocztowy", kp); set("dokodMiasto", km);
+      } else if (k === "dokod2" && !f.dokodPocztowy2) {
+        const [kp, km] = splitKM(sv); set("dokodPocztowy2", kp); set("dokodMiasto2", km); setShowR2(true);
+      } else if (!f[k]) {
+        set(k, sv);
+      }
+    });
+  };
+
   return (
     <>
-    {geoPickerFor && (
+    {geoPickerFor && geoConf[geoPickerFor] && (
       <GeoPickerModal
-        initialGeo={
-          geoPickerFor === "zaladunek"   ? f.zaladunekGeo :
-          geoPickerFor === "rozladunek2" ? (f.rozladunekGeo2 || "") :
-          f.rozladunekGeo
-        }
-        address={
-          geoPickerFor === "zaladunek"
-            ? [f.zaladunekAdres, f.zaladunekKod].filter(Boolean).join(", ")
-            : geoPickerFor === "rozladunek2"
-              ? [f.rozladunekAdres2, f.dokod2].filter(Boolean).join(", ")
-              : [f.rozladunekAdres, f.dokod].filter(Boolean).join(", ")
-        }
-        onSave={(geo) => {
-          set(
-            geoPickerFor === "zaladunek"   ? "zaladunekGeo" :
-            geoPickerFor === "rozladunek2" ? "rozladunekGeo2" :
-            "rozladunekGeo",
-            geo
-          );
-          setGeoPickerFor(null);
-        }}
+        initialGeo={f[geoConf[geoPickerFor].key] || ""}
+        address={geoConf[geoPickerFor].addr()}
+        onSave={(geo) => { set(geoConf[geoPickerFor].key, geo); setGeoPickerFor(null); }}
         onClose={() => setGeoPickerFor(null)}
       />
     )}
@@ -19611,188 +19707,220 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col" style={{maxHeight:"92vh"}}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
           <h3 className="text-base font-bold text-gray-900">{record ? "Edytuj fracht" : "Nowy fracht"}</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">x</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
         </div>
-        <div className="overflow-y-auto flex-1 px-6 py-4 space-y-4">
-          {/* Legenda */}
-          <div className="flex items-center gap-4 text-xs">
-            <span className="flex items-center gap-1"><span style={{width:10,height:10,borderRadius:3,background:"#ecfdf5",border:"1px solid #a7f3d0",display:"inline-block"}}></span> Widoczne dla kierowcy</span>
-            <span className="flex items-center gap-1"><span style={{width:10,height:10,borderRadius:3,background:"#fff",border:"1px solid #e5e7eb",display:"inline-block"}}></span> Tylko biuro</span>
+        <div className="overflow-y-auto flex-1 px-6 py-4 space-y-3">
+
+          {/* POJAZD + DATA */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-2"><label className={lbl}>Pojazd</label><select value={f.vehicleId} onChange={e => set("vehicleId",e.target.value)} className={inp}><option value="">wybierz pojazd</option>{vehicles.map(v => <option key={v.id} value={v.id}>{v.plate} {v.brand}</option>)}</select></div>
+            <div><label className={lbl}>Data zlecenia</label><input type="date" value={f.dataZlecenia||""} onChange={e => set("dataZlecenia",e.target.value)} className={inp} /></div>
           </div>
 
-          <div><label className={lbl}>Pojazd</label><select value={f.vehicleId} onChange={e => set("vehicleId",e.target.value)} className={inp}><option value="">wybierz pojazd</option>{vehicles.map(v => <option key={v.id} value={v.id}>{v.plate} {v.brand}</option>)}</select></div>
+          {/* ══ ZAŁADUNEK ══ */}
+          <div className="text-xs font-bold text-emerald-700 uppercase tracking-widest pt-1">Załadunek</div>
 
-          {/* ── SEKCJA KIEROWCY (zielona ramka) ── */}
-          <div style={{border:"2px solid #a7f3d0", borderRadius:12, padding:"12px", background:"#fafffe"}}>
-            <div className="text-xs font-semibold text-emerald-600 uppercase tracking-wider mb-3">🧑‍✈️ Dane widoczne dla kierowcy</div>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <div><label className={lbl}>Data zlecenia</label><input type="date" value={f.dataZlecenia} onChange={e => set("dataZlecenia",e.target.value)} className={inp} /></div>
-            <div><label className={lbl}>Data zaladunku</label><input type="date" value={f.dataZaladunku} onChange={e => set("dataZaladunku",e.target.value)} className={inp} /></div>
-            <div><label className={lbl}>Data rozladunku</label><input type="date" value={f.dataRozladunku} onChange={e => set("dataRozladunku",e.target.value)} className={inp} /></div>
-            <div><label className={lbl}>Godz. zaladunku</label><input type="time" value={f.godzZaladunku} onChange={e => set("godzZaladunku",e.target.value)} className={inp} /></div>
-            <div><label className={lbl}>Godz. rozladunku</label><input type="time" value={f.godzRozladunku} onChange={e => set("godzRozladunku",e.target.value)} className={inp} /></div>
-          </div>
-          {/* ZAŁADUNEK — dynamiczne kody */}
-          <div className="space-y-2">
-            <label className={lbl}>Załadunek (kody)</label>
-            <div className="flex gap-2 items-center">
-              <input placeholder="np. PL44-100" value={f.zaladunekKod} onChange={e => set("zaladunekKod",e.target.value)} className={inp+" flex-1"} />
+          {/* Z1 */}
+          <div style={{border:"2px solid #a7f3d0",borderRadius:12,padding:"14px",background:"#f0fdf4"}}>
+            <div className="text-xs font-semibold text-emerald-700 uppercase tracking-wider mb-3">📦 Z1 — Miejsce załadunku</div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className={lbl}>Kod pocztowy</label><input placeholder="np. PL-44100" value={f.zaladunekKodPocztowy||""} onChange={e => set("zaladunekKodPocztowy",e.target.value)} className={inp} /></div>
+              <div><label className={lbl}>Miasto</label><input placeholder="np. Gliwice" value={f.zaladunekMiasto||""} onChange={e => set("zaladunekMiasto",e.target.value)} className={inp} /></div>
+              <div className="col-span-2"><label className={lbl}>Adres (ulica, nr)</label><input placeholder="ul. Przykładowa 1" value={f.zaladunekAdres||""} onChange={e => set("zaladunekAdres",e.target.value)} className={inp} />{geoBtn("z1")}</div>
+              <div><label className={lbl}>Telefon kontaktowy</label><input placeholder="+48..." value={f.zaladunekTelefon||""} onChange={e => set("zaladunekTelefon",e.target.value)} className={inp} /></div>
+              <div className="grid grid-cols-2 gap-2">
+                <div><label className={lbl}>Data załadunku</label><input type="date" value={f.dataZaladunku||""} onChange={e => set("dataZaladunku",e.target.value)} className={inp} /></div>
+                <div><label className={lbl}>Godz.</label><input type="time" value={f.godzZaladunku||""} onChange={e => set("godzZaladunku",e.target.value)} className={inp} /></div>
+              </div>
             </div>
-            {(f.zaladunekKod2 !== undefined || f.zaladunekKod) && f.zaladunekKod && (
-              <div className="flex gap-2 items-center">
-                <input placeholder="kod 2" value={f.zaladunekKod2||""} onChange={e => set("zaladunekKod2",e.target.value)} className={inp+" flex-1"} />
-                {!f.zaladunekKod2 && <button type="button" onClick={() => set("zaladunekKod2","")} className="text-xs text-blue-500 hover:text-blue-700 whitespace-nowrap">+ dodaj</button>}
-                {f.zaladunekKod2 && (
-                  <button type="button" onClick={() => set("zaladunekKod2","")} className="text-gray-400 hover:text-red-400 text-sm">✕</button>
-                )}
-              </div>
-            )}
-            {f.zaladunekKod2 && (
-              <div className="flex gap-2 items-center">
-                <input placeholder="kod 3" value={f.zaladunekKod3||""} onChange={e => set("zaladunekKod3",e.target.value)} className={inp+" flex-1"} />
-                {f.zaladunekKod3 && (
-                  <button type="button" onClick={() => set("zaladunekKod3","")} className="text-gray-400 hover:text-red-400 text-sm">✕</button>
-                )}
-              </div>
-            )}
-            {f.zaladunekKod && !f.zaladunekKod2 && (
-              <button type="button" onClick={() => set("zaladunekKod2"," ")}
-                className="text-xs text-blue-500 hover:text-blue-700 flex items-center gap-1">
-                <span>＋</span> dodaj miejsce załadunku
-              </button>
-            )}
           </div>
 
-          {/* ROZŁADUNEK — dynamiczne kody */}
-          <div className="space-y-2">
-            <label className={lbl}>Rozładunek (kody)</label>
-            <div className="flex gap-2 items-center">
-              <input placeholder="np. FR 93000" value={f.dokod} onChange={e => set("dokod",e.target.value)} className={inp+" flex-1"} />
-            </div>
-            {f.dokod && (
-              <div className="flex gap-2 items-center">
-                <input placeholder="kod 2" value={f.dokod2||""} onChange={e => set("dokod2",e.target.value)} className={inp+" flex-1"} />
-                {f.dokod2 && (
-                  <button type="button" onClick={() => set("dokod2","")} className="text-gray-400 hover:text-red-400 text-sm">✕</button>
-                )}
+          {/* Z2 */}
+          {showZ2 ? (
+            <div style={{border:"2px solid #6ee7b7",borderRadius:12,padding:"14px",background:"#f0fdf4"}}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-xs font-semibold text-emerald-700 uppercase tracking-wider">📦 Z2 — Załadunek dodatkowy</div>
+                <button type="button" onClick={() => { setShowZ2(false); ["zaladunekKodPocztowy2","zaladunekMiasto2","zaladunekKod2","zaladunekAdres2","zaladunekTelefon2","zaladunekGeo2","dataZaladunku2","godzZaladunku2"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-600">✕ usuń Z2</button>
               </div>
-            )}
-            {f.dokod2 && (
-              <div className="flex gap-2 items-center">
-                <input placeholder="kod 3" value={f.dokod3||""} onChange={e => set("dokod3",e.target.value)} className={inp+" flex-1"} />
-                {f.dokod3 && (
-                  <button type="button" onClick={() => set("dokod3","")} className="text-gray-400 hover:text-red-400 text-sm">✕</button>
-                )}
-              </div>
-            )}
-            {f.dokod && !f.dokod2 && (
-              <button type="button" onClick={() => set("dokod2"," ")}
-                className="text-xs text-blue-500 hover:text-blue-700 flex items-center gap-1">
-                <span>＋</span> dodaj miejsce rozładunku
-              </button>
-            )}
-          </div>
-          {/* ADRESY + TELEFONY + GEO */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label className={lbl}>Adres załadunku (pełny)</label>
-              <input placeholder="ulica, miasto" value={f.zaladunekAdres||""} onChange={e => set("zaladunekAdres",e.target.value)} className={inp} />
-              <div className="flex items-center gap-2 mt-1">
-                <button type="button" onClick={() => setGeoPickerFor("zaladunek")}
-                  className="text-xs font-medium px-2 py-1 rounded-lg transition-all hover:bg-blue-50"
-                  style={{ color: f.zaladunekGeo ? "#15803d" : "#3b82f6", background: f.zaladunekGeo ? "#f0fdf4" : "transparent" }}>
-                  {f.zaladunekGeo ? `✅ ${f.zaladunekGeo}` : "📍 Ustaw lokalizację"}
-                </button>
-                {f.zaladunekGeo && <button type="button" onClick={() => set("zaladunekGeo","")} className="text-xs text-gray-400 hover:text-red-400">✕</button>}
-              </div>
-            </div>
-            <div><label className={lbl}>Telefon na załadunku</label><input placeholder="+48..." value={f.zaladunekTelefon||""} onChange={e => set("zaladunekTelefon",e.target.value)} className={inp} /></div>
-            <div>
-              <label className={lbl}>Adres rozładunku (pełny)</label>
-              <input placeholder="ulica, miasto" value={f.rozladunekAdres||""} onChange={e => set("rozladunekAdres",e.target.value)} className={inp} />
-              <div className="flex items-center gap-2 mt-1">
-                <button type="button" onClick={() => setGeoPickerFor("rozladunek")}
-                  className="text-xs font-medium px-2 py-1 rounded-lg transition-all hover:bg-blue-50"
-                  style={{ color: f.rozladunekGeo ? "#15803d" : "#3b82f6", background: f.rozladunekGeo ? "#f0fdf4" : "transparent" }}>
-                  {f.rozladunekGeo ? `✅ ${f.rozladunekGeo}` : "📍 Ustaw lokalizację"}
-                </button>
-                {f.rozladunekGeo && <button type="button" onClick={() => set("rozladunekGeo","")} className="text-xs text-gray-400 hover:text-red-400">✕</button>}
-              </div>
-            </div>
-            <div><label className={lbl}>Telefon na rozładunku</label><input placeholder="+39..." value={f.rozladunekTelefon||""} onChange={e => set("rozladunekTelefon",e.target.value)} className={inp} /></div>
-
-            {/* ROZŁADUNEK 2 — widoczny gdy dokod2 jest ustawiony */}
-            {f.dokod2?.trim() && (<>
-              <div className="col-span-1 md:col-span-2" style={{borderTop:"1px dashed #e5e7eb", paddingTop:10, marginTop:2}}>
-                <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">📦 Rozładunek 2 — {f.dokod2.trim()}</div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div><label className={lbl}>Data rozładunku 2</label><input type="date" value={f.dataRozladunku2||""} onChange={e => set("dataRozladunku2",e.target.value)} className={inp} /></div>
-                  <div><label className={lbl}>Godz. rozładunku 2</label><input type="time" value={f.godzRozladunku2||""} onChange={e => set("godzRozladunku2",e.target.value)} className={inp} /></div>
-                  <div>
-                    <label className={lbl}>Adres rozładunku 2</label>
-                    <input placeholder="ulica, miasto" value={f.rozladunekAdres2||""} onChange={e => set("rozladunekAdres2",e.target.value)} className={inp} />
-                    <div className="flex items-center gap-2 mt-1">
-                      <button type="button" onClick={() => setGeoPickerFor("rozladunek2")}
-                        className="text-xs font-medium px-2 py-1 rounded-lg transition-all hover:bg-blue-50"
-                        style={{ color: f.rozladunekGeo2 ? "#15803d" : "#3b82f6", background: f.rozladunekGeo2 ? "#f0fdf4" : "transparent" }}>
-                        {f.rozladunekGeo2 ? `✅ ${f.rozladunekGeo2}` : "📍 Ustaw lokalizację"}
-                      </button>
-                      {f.rozladunekGeo2 && <button type="button" onClick={() => set("rozladunekGeo2","")} className="text-xs text-gray-400 hover:text-red-400">✕</button>}
-                    </div>
-                  </div>
-                  <div><label className={lbl}>Telefon na rozładunku 2</label><input placeholder="+39..." value={f.rozladunekTelefon2||""} onChange={e => set("rozladunekTelefon2",e.target.value)} className={inp} /></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className={lbl}>Kod pocztowy</label><input placeholder="np. DE 40210" value={f.zaladunekKodPocztowy2||""} onChange={e => set("zaladunekKodPocztowy2",e.target.value)} className={inp} /></div>
+                <div><label className={lbl}>Miasto</label><input placeholder="np. Düsseldorf" value={f.zaladunekMiasto2||""} onChange={e => set("zaladunekMiasto2",e.target.value)} className={inp} /></div>
+                <div className="col-span-2"><label className={lbl}>Adres (ulica, nr)</label><input placeholder="ul. Przykładowa 2" value={f.zaladunekAdres2||""} onChange={e => set("zaladunekAdres2",e.target.value)} className={inp} />{geoBtn("z2")}</div>
+                <div><label className={lbl}>Telefon kontaktowy</label><input placeholder="+49..." value={f.zaladunekTelefon2||""} onChange={e => set("zaladunekTelefon2",e.target.value)} className={inp} /></div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className={lbl}>Data załadunku</label><input type="date" value={f.dataZaladunku2||""} onChange={e => set("dataZaladunku2",e.target.value)} className={inp} /></div>
+                  <div><label className={lbl}>Godz.</label><input type="time" value={f.godzZaladunku2||""} onChange={e => set("godzZaladunku2",e.target.value)} className={inp} /></div>
                 </div>
               </div>
-            </>)}
-          </div>
-          {/* TOWAR */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div><label className={lbl}>Nr referencyjny</label><input placeholder="np. ESTE-0097" value={f.nrRef||""} onChange={e => set("nrRef",e.target.value)} className={inp} /></div>
-            <div><label className={lbl}>Towar (opis)</label><input placeholder="Palety, kartony..." value={f.towarOpis||""} onChange={e => set("towarOpis",e.target.value)} className={inp} /></div>
-            <div><label className={lbl}>Ilość palet/szt</label><input placeholder="4" value={f.towarIloscPalet||""} onChange={e => set("towarIloscPalet",e.target.value)} className={inp} /></div>
-            <div><label className={lbl}>Typ załadunku</label><input placeholder="Bok, tył, góra" value={f.zaladunekTyp||""} onChange={e => set("zaladunekTyp",e.target.value)} className={inp} /></div>
-          </div>
-          <div><label className={lbl}>Wymiary palet / szczegóły towaru</label><textarea rows={2} placeholder="2× 240x120x240, 1× 240x120xH200..." value={f.towarPalety||""} onChange={e => set("towarPalety",e.target.value)} className={inp+" resize-none"} /></div>
-          <div><label className={lbl}>Uwagi dla kierowcy</label><textarea rows={2} placeholder="dodatkowe informacje..." value={f.uwagi} onChange={e => set("uwagi",e.target.value)} className={inp+" resize-none"} /></div>
-          </div>{/* zamknięcie zielonej sekcji kierowcy */}
+            </div>
+          ) : (
+            <button type="button" onClick={() => setShowZ2(true)} className="text-xs text-emerald-600 hover:text-emerald-800 font-semibold flex items-center gap-1 pl-1">＋ dodaj drugi punkt załadunku</button>
+          )}
 
-          {/* ── SEKCJA BIUROWA (szara) ── */}
-          <div style={{border:"1px solid #e5e7eb", borderRadius:12, padding:"12px", background:"#fafafa"}}>
-            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">🏢 Dane biurowe (kierowca nie widzi)</div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div><label className={lbl}>Klient</label><input placeholder="nazwa klienta" value={f.klient} onChange={e => set("klient",e.target.value)} className={inp} /></div>
-            <div><label className={lbl}>Dyspozytor</label><input placeholder="imie dyspozytora" value={f.dyspozytor} onChange={e => set("dyspozytor",e.target.value)} className={inp} /></div>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
-            <div><label className={lbl}>Cena EUR</label><input type="number" placeholder="0.00" value={f.cenaEur} onChange={e => set("cenaEur",e.target.value)} className={inp} /></div>
-            <div><label className={lbl}>KM podjazd</label><input type="number" placeholder="0" value={f.kmPodjazd} onChange={e => set("kmPodjazd",e.target.value)} className={inp} /></div>
-            <div><label className={lbl}>KM ladowne</label><input type="number" placeholder="0" value={f.kmLadowne} onChange={e => set("kmLadowne",e.target.value)} className={inp} /></div>
-            <div><label className={lbl}>KM wszystkie (auto)</label><input readOnly value={f.kmWszystkie} className={inp+" bg-gray-50 text-gray-400"} /></div>
-          </div>
-          {(eurKmLad||eurKmWsz) && <div className="flex gap-4 text-sm">{eurKmLad && <span className="px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 font-semibold">EUR/km lad: {eurKmLad}</span>}{eurKmWsz && <span className="px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 font-semibold">EUR/km wsz: {eurKmWsz}</span>}</div>}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div><label className={lbl}>Waga (kg)</label><input type="number" placeholder="0" value={f.wagaLadunku} onChange={e => set("wagaLadunku",e.target.value)} className={inp} /></div>
-            <div><label className={lbl}>Nr FV</label><input placeholder="F/01/2026" value={f.nrFV} onChange={e => set("nrFV",e.target.value)} className={inp} /></div>
-            <div><label className={lbl}>Data wyslania FV</label><input type="date" value={f.dataWyslania} onChange={e => set("dataWyslania",e.target.value)} className={inp} /></div>
-            <div><label className={lbl}>Termin platnosci</label><input type="date" value={f.terminPlatnosci} onChange={e => set("terminPlatnosci",e.target.value)} className={inp} /></div>
-          </div>
-          </div>{/* zamknięcie szarej sekcji biurowej */}
+          {/* ══ ROZŁADUNEK ══ */}
+          <div className="text-xs font-bold text-blue-700 uppercase tracking-widest pt-2">Rozładunek</div>
 
-          {/* ── PODSUMOWANIE TRASY (tylko dla zakończonych zleceń) ── */}
+          {/* R1 */}
+          <div style={{border:"2px solid #bfdbfe",borderRadius:12,padding:"14px",background:"#eff6ff"}}>
+            <div className="text-xs font-semibold text-blue-700 uppercase tracking-wider mb-3">🏁 R1 — Miejsce rozładunku</div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className={lbl}>Kod pocztowy</label><input placeholder="np. FR 93000" value={f.dokodPocztowy||""} onChange={e => set("dokodPocztowy",e.target.value)} className={inp} /></div>
+              <div><label className={lbl}>Miasto</label><input placeholder="np. Bobigny" value={f.dokodMiasto||""} onChange={e => set("dokodMiasto",e.target.value)} className={inp} /></div>
+              <div className="col-span-2"><label className={lbl}>Adres (ulica, nr)</label><input placeholder="ul. Rozładunkowa 1" value={f.rozladunekAdres||""} onChange={e => set("rozladunekAdres",e.target.value)} className={inp} />{geoBtn("r1")}</div>
+              <div><label className={lbl}>Telefon kontaktowy</label><input placeholder="+33..." value={f.rozladunekTelefon||""} onChange={e => set("rozladunekTelefon",e.target.value)} className={inp} /></div>
+              <div className="grid grid-cols-2 gap-2">
+                <div><label className={lbl}>Data rozładunku</label><input type="date" value={f.dataRozladunku||""} onChange={e => set("dataRozladunku",e.target.value)} className={inp} /></div>
+                <div><label className={lbl}>Godz.</label><input type="time" value={f.godzRozladunku||""} onChange={e => set("godzRozladunku",e.target.value)} className={inp} /></div>
+              </div>
+            </div>
+          </div>
+
+          {/* R2 */}
+          {showR2 ? (
+            <div style={{border:"2px solid #93c5fd",borderRadius:12,padding:"14px",background:"#eff6ff"}}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-xs font-semibold text-blue-700 uppercase tracking-wider">🏁 R2 — Rozładunek 2</div>
+                <button type="button" onClick={() => { setShowR2(false); setShowR3(false); setShowR4(false); setShowR5(false); ["dokodPocztowy2","dokodMiasto2","dokod2","rozladunekAdres2","rozladunekTelefon2","rozladunekGeo2","dataRozladunku2","godzRozladunku2"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-600">✕ usuń R2</button>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className={lbl}>Kod pocztowy</label><input placeholder="np. BE 1000" value={f.dokodPocztowy2||""} onChange={e => set("dokodPocztowy2",e.target.value)} className={inp} /></div>
+                <div><label className={lbl}>Miasto</label><input placeholder="np. Bruxelles" value={f.dokodMiasto2||""} onChange={e => set("dokodMiasto2",e.target.value)} className={inp} /></div>
+                <div className="col-span-2"><label className={lbl}>Adres (ulica, nr)</label><input value={f.rozladunekAdres2||""} onChange={e => set("rozladunekAdres2",e.target.value)} className={inp} />{geoBtn("r2")}</div>
+                <div><label className={lbl}>Telefon kontaktowy</label><input placeholder="+32..." value={f.rozladunekTelefon2||""} onChange={e => set("rozladunekTelefon2",e.target.value)} className={inp} /></div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className={lbl}>Data rozładunku</label><input type="date" value={f.dataRozladunku2||""} onChange={e => set("dataRozladunku2",e.target.value)} className={inp} /></div>
+                  <div><label className={lbl}>Godz.</label><input type="time" value={f.godzRozladunku2||""} onChange={e => set("godzRozladunku2",e.target.value)} className={inp} /></div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <button type="button" onClick={() => setShowR2(true)} className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 pl-1">＋ dodaj drugi punkt rozładunku</button>
+          )}
+
+          {/* R3 */}
+          {showR2 && (showR3 ? (
+            <div style={{border:"2px solid #93c5fd",borderRadius:12,padding:"14px",background:"#eff6ff"}}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-xs font-semibold text-blue-700 uppercase tracking-wider">🏁 R3 — Rozładunek 3</div>
+                <button type="button" onClick={() => { setShowR3(false); setShowR4(false); setShowR5(false); ["dokodPocztowy3","dokodMiasto3","dokod3","rozladunekAdres3","rozladunekTelefon3","rozladunekGeo3","dataRozladunku3","godzRozladunku3"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-600">✕ usuń R3</button>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className={lbl}>Kod pocztowy</label><input value={f.dokodPocztowy3||""} onChange={e => set("dokodPocztowy3",e.target.value)} className={inp} /></div>
+                <div><label className={lbl}>Miasto</label><input value={f.dokodMiasto3||""} onChange={e => set("dokodMiasto3",e.target.value)} className={inp} /></div>
+                <div className="col-span-2"><label className={lbl}>Adres</label><input value={f.rozladunekAdres3||""} onChange={e => set("rozladunekAdres3",e.target.value)} className={inp} />{geoBtn("r3")}</div>
+                <div><label className={lbl}>Telefon</label><input value={f.rozladunekTelefon3||""} onChange={e => set("rozladunekTelefon3",e.target.value)} className={inp} /></div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className={lbl}>Data rozładunku</label><input type="date" value={f.dataRozladunku3||""} onChange={e => set("dataRozladunku3",e.target.value)} className={inp} /></div>
+                  <div><label className={lbl}>Godz.</label><input type="time" value={f.godzRozladunku3||""} onChange={e => set("godzRozladunku3",e.target.value)} className={inp} /></div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <button type="button" onClick={() => setShowR3(true)} className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 pl-1">＋ dodaj trzeci punkt rozładunku</button>
+          ))}
+
+          {/* R4 */}
+          {showR3 && (showR4 ? (
+            <div style={{border:"2px solid #93c5fd",borderRadius:12,padding:"14px",background:"#eff6ff"}}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-xs font-semibold text-blue-700 uppercase tracking-wider">🏁 R4 — Rozładunek 4</div>
+                <button type="button" onClick={() => { setShowR4(false); setShowR5(false); ["dokodPocztowy4","dokodMiasto4","dokod4","rozladunekAdres4","rozladunekTelefon4","rozladunekGeo4","dataRozladunku4","godzRozladunku4"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-600">✕ usuń R4</button>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className={lbl}>Kod pocztowy</label><input value={f.dokodPocztowy4||""} onChange={e => set("dokodPocztowy4",e.target.value)} className={inp} /></div>
+                <div><label className={lbl}>Miasto</label><input value={f.dokodMiasto4||""} onChange={e => set("dokodMiasto4",e.target.value)} className={inp} /></div>
+                <div className="col-span-2"><label className={lbl}>Adres</label><input value={f.rozladunekAdres4||""} onChange={e => set("rozladunekAdres4",e.target.value)} className={inp} />{geoBtn("r4")}</div>
+                <div><label className={lbl}>Telefon</label><input value={f.rozladunekTelefon4||""} onChange={e => set("rozladunekTelefon4",e.target.value)} className={inp} /></div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className={lbl}>Data rozładunku</label><input type="date" value={f.dataRozladunku4||""} onChange={e => set("dataRozladunku4",e.target.value)} className={inp} /></div>
+                  <div><label className={lbl}>Godz.</label><input type="time" value={f.godzRozladunku4||""} onChange={e => set("godzRozladunku4",e.target.value)} className={inp} /></div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <button type="button" onClick={() => setShowR4(true)} className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 pl-1">＋ dodaj czwarty punkt rozładunku</button>
+          ))}
+
+          {/* R5 */}
+          {showR4 && (showR5 ? (
+            <div style={{border:"2px solid #93c5fd",borderRadius:12,padding:"14px",background:"#eff6ff"}}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-xs font-semibold text-blue-700 uppercase tracking-wider">🏁 R5 — Rozładunek 5</div>
+                <button type="button" onClick={() => { setShowR5(false); ["dokodPocztowy5","dokodMiasto5","dokod5","rozladunekAdres5","rozladunekTelefon5","rozladunekGeo5","dataRozladunku5","godzRozladunku5"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-600">✕ usuń R5</button>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className={lbl}>Kod pocztowy</label><input value={f.dokodPocztowy5||""} onChange={e => set("dokodPocztowy5",e.target.value)} className={inp} /></div>
+                <div><label className={lbl}>Miasto</label><input value={f.dokodMiasto5||""} onChange={e => set("dokodMiasto5",e.target.value)} className={inp} /></div>
+                <div className="col-span-2"><label className={lbl}>Adres</label><input value={f.rozladunekAdres5||""} onChange={e => set("rozladunekAdres5",e.target.value)} className={inp} />{geoBtn("r5")}</div>
+                <div><label className={lbl}>Telefon</label><input value={f.rozladunekTelefon5||""} onChange={e => set("rozladunekTelefon5",e.target.value)} className={inp} /></div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className={lbl}>Data rozładunku</label><input type="date" value={f.dataRozladunku5||""} onChange={e => set("dataRozladunku5",e.target.value)} className={inp} /></div>
+                  <div><label className={lbl}>Godz.</label><input type="time" value={f.godzRozladunku5||""} onChange={e => set("godzRozladunku5",e.target.value)} className={inp} /></div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <button type="button" onClick={() => setShowR5(true)} className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 pl-1">＋ dodaj piąty punkt rozładunku</button>
+          ))}
+
+          {/* ══ TOWAR ══ */}
+          <div className="text-xs font-bold text-gray-600 uppercase tracking-widest pt-2">Towar i uwagi</div>
+          <div style={{border:"1px solid #e5e7eb",borderRadius:12,padding:"14px",background:"#fafafa"}}>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div><label className={lbl}>Nr zlecenia</label><input placeholder="ZL/2026/001" value={f.nrZlecenia||""} onChange={e => set("nrZlecenia",e.target.value)} className={inp} /></div>
+              <div><label className={lbl}>Nr referencyjny</label><input placeholder="ESTE-0097" value={f.nrRef||""} onChange={e => set("nrRef",e.target.value)} className={inp} /></div>
+              <div><label className={lbl}>Towar (opis)</label><input placeholder="Palety, kartony..." value={f.towarOpis||""} onChange={e => set("towarOpis",e.target.value)} className={inp} /></div>
+              <div><label className={lbl}>Ilość palet/szt</label><input placeholder="4" value={f.towarIloscPalet||""} onChange={e => set("towarIloscPalet",e.target.value)} className={inp} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              <div><label className={lbl}>Typ załadunku</label><input placeholder="Bok, tył, góra" value={f.zaladunekTyp||""} onChange={e => set("zaladunekTyp",e.target.value)} className={inp} /></div>
+              <div><label className={lbl}>Waga ładunku (kg)</label><input type="number" placeholder="0" value={f.wagaLadunku||""} onChange={e => set("wagaLadunku",e.target.value)} className={inp} /></div>
+            </div>
+            <div className="mt-3"><label className={lbl}>Wymiary palet / szczegóły</label><textarea rows={2} placeholder="2× 240x120x240, 1× 120x120xH240..." value={f.towarPalety||""} onChange={e => set("towarPalety",e.target.value)} className={inp+" resize-none"} /></div>
+            <div className="mt-3"><label className={lbl}>Uwagi dla kierowcy</label><textarea rows={2} placeholder="dodatkowe informacje..." value={f.uwagi||""} onChange={e => set("uwagi",e.target.value)} className={inp+" resize-none"} /></div>
+          </div>
+
+          {/* ══ ZLECENIODAWCA ══ */}
+          <div className="text-xs font-bold text-orange-600 uppercase tracking-widest pt-2">Zleceniodawca</div>
+          <div style={{border:"1px solid #fed7aa",borderRadius:12,padding:"14px",background:"#fff7ed"}}>
+            <div className="text-xs text-orange-500 mb-3">Dane do wysyłki trackera i kontaktu ze zleceniodawcą</div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className={lbl}>Firma</label><input placeholder="nazwa firmy" value={f.zleceniodawcaFirma||""} onChange={e => set("zleceniodawcaFirma",e.target.value)} className={inp} /></div>
+              <div><label className={lbl}>Osoba kontaktowa</label><input placeholder="Jan Kowalski" value={f.zleceniodawcaOsoba||""} onChange={e => set("zleceniodawcaOsoba",e.target.value)} className={inp} /></div>
+              <div><label className={lbl}>Telefon</label><input placeholder="+48..." value={f.zleceniodawcaTelefon||""} onChange={e => set("zleceniodawcaTelefon",e.target.value)} className={inp} /></div>
+              <div><label className={lbl}>Email</label><input type="email" placeholder="kontakt@firma.pl" value={f.zleceniodawcaEmail||""} onChange={e => set("zleceniodawcaEmail",e.target.value)} className={inp} /></div>
+            </div>
+          </div>
+
+          {/* ══ BIURO ══ */}
+          <div className="text-xs font-bold text-gray-500 uppercase tracking-widest pt-2">Dane biurowe</div>
+          <div style={{border:"1px solid #e5e7eb",borderRadius:12,padding:"14px",background:"#fafafa"}}>
+            <div className="text-xs text-gray-400 mb-3">🔒 Kierowca nie widzi tych danych</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div><label className={lbl}>Klient</label><input placeholder="nazwa klienta" value={f.klient||""} onChange={e => set("klient",e.target.value)} className={inp} /></div>
+              <div><label className={lbl}>Dyspozytor</label><input placeholder="imię dyspozytora" value={f.dyspozytor||""} onChange={e => set("dyspozytor",e.target.value)} className={inp} /></div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+              <div><label className={lbl}>Cena EUR</label><input type="number" placeholder="0.00" value={f.cenaEur||""} onChange={e => set("cenaEur",e.target.value)} className={inp} /></div>
+              <div><label className={lbl}>KM podjazd</label><input type="number" placeholder="0" value={f.kmPodjazd||""} onChange={e => set("kmPodjazd",e.target.value)} className={inp} /></div>
+              <div><label className={lbl}>KM ładowne</label><input type="number" placeholder="0" value={f.kmLadowne||""} onChange={e => set("kmLadowne",e.target.value)} className={inp} /></div>
+              <div><label className={lbl}>KM wszystkie (auto)</label><input readOnly value={f.kmWszystkie||""} className={inp+" bg-gray-50 text-gray-400"} /></div>
+            </div>
+            {(eurKmLad||eurKmWsz) && <div className="flex gap-4 text-sm mt-2">{eurKmLad && <span className="px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 font-semibold">EUR/km lad: {eurKmLad}</span>}{eurKmWsz && <span className="px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 font-semibold">EUR/km wsz: {eurKmWsz}</span>}</div>}
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3">
+              <div><label className={lbl}>Nr FV</label><input placeholder="F/01/2026" value={f.nrFV||""} onChange={e => set("nrFV",e.target.value)} className={inp} /></div>
+              <div><label className={lbl}>Data wysłania FV</label><input type="date" value={f.dataWyslania||""} onChange={e => set("dataWyslania",e.target.value)} className={inp} /></div>
+              <div><label className={lbl}>Termin płatności</label><input type="date" value={f.terminPlatnosci||""} onChange={e => set("terminPlatnosci",e.target.value)} className={inp} /></div>
+            </div>
+          </div>
+
+          {/* PODSUMOWANIE TRASY */}
           {record?.statusRozladunku === "rozladowano" && (() => {
             const vehForSummary = vehicles.find(vv => vv.id === (record.vehicleId || f.vehicleId));
-            return (
-              <TripSummaryPanel
-                fracht={record}
-                vehicle={vehForSummary}
-                driverEvents={driverEvents}
-                fuelEntries={fuelEntries}
-                variant="full"
-              />
-            );
+            return <TripSummaryPanel fracht={record} vehicle={vehForSummary} driverEvents={driverEvents} fuelEntries={fuelEntries} variant="full" />;
           })()}
 
-          {/* ZLECENIE */}
+          {/* ZLECENIE PDF */}
           <div className="pt-2 border-t border-gray-100">
             <label className={lbl}>📋 Zlecenie transportowe</label>
             {f.urlZlecenie ? (
@@ -19802,37 +19930,26 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
                   <div className="text-sm font-semibold text-blue-800">Zlecenie wgrane</div>
                   <a href={safeHref(f.urlZlecenie)} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">Otwórz dokument →</a>
                 </div>
-                <ZlecenieUploadBtn
-                  frachtId={record?.id || "new"}
-                  onUploaded={(url, parsed) => { set("urlZlecenie", url); if(parsed) Object.entries(parsed).forEach(([k,v]) => { if(v != null && v !== "" && !f[k]) set(k, String(v)); }); }}
-                  label="Zastąp"
-                />
-                <button type="button" onClick={() => set("urlZlecenie", "")}
-                  className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50" title="Usuń zlecenie">✕</button>
+                <ZlecenieUploadBtn frachtId={record?.id || "new"} onUploaded={onUploadedParsed} label="Zastąp" />
+                <button type="button" onClick={() => set("urlZlecenie","")} className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50" title="Usuń zlecenie">✕</button>
               </div>
             ) : (
-              <ZlecenieUploadBtn
-                frachtId={record?.id || "new"}
-                onUploaded={(url, parsed) => { set("urlZlecenie", url); if(parsed) Object.entries(parsed).forEach(([k,v]) => { if(v != null && v !== "" && !f[k]) set(k, String(v)); }); }}
-                label="📎 Wgraj zlecenie (PDF / JPG)"
-                fullWidth
-              />
+              <ZlecenieUploadBtn frachtId={record?.id || "new"} onUploaded={onUploadedParsed} label="📎 Wgraj zlecenie (PDF / JPG)" fullWidth />
             )}
           </div>
         </div>
+
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0">
           <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-100">Anuluj</button>
           {canSendWhatsapp && (
-            <button
-              onClick={() => setShowWhatsappPreview(true)}
+            <button onClick={() => setShowWhatsappPreview(true)}
               className="px-4 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-2"
               style={{background:"#25D366"}}
-              title={`Wyślij zlecenie na WhatsApp do: ${waDriver.displayName || waDriver.email}`}
-            >
+              title={`Wyślij zlecenie na WhatsApp do: ${waDriver.displayName || waDriver.email}`}>
               📱 Wyślij na WhatsApp
             </button>
           )}
-          <button onClick={() => { if(!f.vehicleId){alert("Wybierz pojazd");return;} if(!f.cenaEur){alert("Wpisz cene EUR");return;} onSave(f); }} className="px-5 py-2 rounded-lg text-sm font-semibold text-white" style={{background:"#111827"}}>{record ? "Zapisz zmiany" : "Dodaj fracht"}</button>
+          <button onClick={() => { if(!f.vehicleId){alert("Wybierz pojazd");return;} if(!f.cenaEur){alert("Wpisz cenę EUR");return;} onSave(f); }} className="px-5 py-2 rounded-lg text-sm font-semibold text-white" style={{background:"#111827"}}>{record ? "Zapisz zmiany" : "Dodaj fracht"}</button>
         </div>
       </div>
     </div>
