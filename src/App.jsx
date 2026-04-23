@@ -8066,6 +8066,12 @@ function GpsTrasySection({ device, showToast }) {
 function GpsCzasPracySection({ device, position, driverActivities = [], showToast }) {
   const [, forceTick] = useState(0);
   const [showWeek, setShowWeek] = useState(false); // rozwiniety timeline 7-dniowy
+  // Manualne wpisywanie segmentu (uzupełnianie luk / przed startem systemu)
+  const [manualFormOpen, setManualFormOpen] = useState(false);
+  const [mfStart, setMfStart] = useState("");
+  const [mfEnd, setMfEnd] = useState("");
+  const [mfType, setMfType] = useState("drive");
+  const [mfSaving, setMfSaving] = useState(false);
   // Tick co 30s żeby liczniki live się odświeżały
   useEffect(() => {
     const t = setInterval(() => forceTick(x => x + 1), 30000);
@@ -8076,6 +8082,34 @@ function GpsCzasPracySection({ device, position, driverActivities = [], showToas
   const activeDriver = (vehicle?.driverHistory || []).find(d => !d.to);
   const driverEmail = activeDriver?.email;
   const driverName = activeDriver?.name || driverEmail || "—";
+
+  const submitManualSegment = async () => {
+    if (!mfStart || !mfEnd) { showToast?.("Wypełnij start i koniec"); return; }
+    const sMs = new Date(mfStart).getTime();
+    const eMs = new Date(mfEnd).getTime();
+    if (!isFinite(sMs) || !isFinite(eMs)) { showToast?.("Nieprawidłowe daty"); return; }
+    if (eMs <= sMs) { showToast?.("Koniec musi być po starcie"); return; }
+    if (!vehicle || !driverEmail) { showToast?.("Brak pojazdu lub kierowcy"); return; }
+    setMfSaving(true);
+    try {
+      await addDoc(collection(db, "driverActivities"), {
+        driverEmail,
+        driverName,
+        vehicleId: vehicle.id,
+        type: mfType,
+        startTs: new Date(sMs).toISOString(),
+        endTs: new Date(eMs).toISOString(),
+        source: "manual",
+        createdAt: new Date().toISOString(),
+      });
+      showToast?.(`Dodano segment: ${ACTIVITY_TYPES[mfType]?.label || mfType}`);
+      setMfStart(""); setMfEnd(""); setMfType("drive");
+      setManualFormOpen(false);
+    } catch (e) {
+      showToast?.("Błąd zapisu: " + (e?.message || "").slice(0, 60));
+    }
+    setMfSaving(false);
+  };
 
   if (!vehicle || !driverEmail) {
     return (
@@ -8466,10 +8500,42 @@ function GpsCzasPracySection({ device, position, driverActivities = [], showToas
 
       {/* Historia aktywności */}
       <div className="bg-white rounded-2xl border border-gray-100 p-5">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div className="text-sm font-bold text-gray-900">Historia aktywności (ostatnie 24h)</div>
-          <div className="text-[11px] text-gray-400">Auto-wykrywanie z GPS + kliknięcia kierowcy</div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="text-[11px] text-gray-400">Auto-GPS + kierowca + ręcznie</div>
+            <button onClick={() => setManualFormOpen(v => !v)} className="px-2 py-1 rounded-lg text-[11px] font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200">
+              {manualFormOpen ? "✕ anuluj" : "＋ Dodaj ręcznie"}
+            </button>
+          </div>
         </div>
+        {manualFormOpen && (
+          <div className="mb-4 p-3 rounded-lg bg-blue-50 border border-blue-100">
+            <div className="text-xs font-semibold text-blue-900 mb-2">Uzupełnij lukę w historii — segment dla {driverName}</div>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-end">
+              <div>
+                <label className="block text-[10px] text-gray-600 mb-1">Typ</label>
+                <select value={mfType} onChange={e => setMfType(e.target.value)} className="w-full px-2 py-1.5 rounded border border-gray-200 text-xs">
+                  {Object.entries(ACTIVITY_TYPES).map(([id, meta]) => (
+                    <option key={id} value={id}>{meta.icon} {meta.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] text-gray-600 mb-1">Start</label>
+                <input type="datetime-local" value={mfStart} onChange={e => setMfStart(e.target.value)} className="w-full px-2 py-1.5 rounded border border-gray-200 text-xs" />
+              </div>
+              <div>
+                <label className="block text-[10px] text-gray-600 mb-1">Koniec</label>
+                <input type="datetime-local" value={mfEnd} onChange={e => setMfEnd(e.target.value)} className="w-full px-2 py-1.5 rounded border border-gray-200 text-xs" />
+              </div>
+              <button disabled={mfSaving} onClick={submitManualSegment} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400">
+                {mfSaving ? "Zapisuję…" : "Zapisz segment"}
+              </button>
+            </div>
+            <div className="text-[10px] text-gray-500 mt-2">Segment ręczny nie jest nadpisywany przez auto-detection GPS (priorytet: DDD &gt; ręczny &gt; GPS).</div>
+          </div>
+        )}
         {(() => {
           const nowMs = Date.now();
           const from = nowMs - 24 * 3600000;
