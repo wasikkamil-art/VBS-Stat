@@ -10,7 +10,7 @@
  */
 
 const { onDocumentWritten, onDocumentCreated } = require("firebase-functions/v2/firestore");
-const { onCall, HttpsError }  = require("firebase-functions/v2/https");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { initializeApp }       = require("firebase-admin/app");
 const { getAuth }             = require("firebase-admin/auth");
 const { getFirestore }        = require("firebase-admin/firestore");
@@ -949,5 +949,271 @@ exports.parseDddFile = onCall(
       metadata,
       activitiesCount: activities.length,
     };
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════
+// WHATSAPP INTEGRATION
+// sendWhatsappMessage — wysyła wiadomość do kierowcy (onCall)
+// whatsappWebhook     — odbiera wiadomości od kierowców (onRequest)
+//
+// Konfiguracja w Firestore konfiguracja/whatsapp:
+//   znak                        — permanent access token
+//   identyfikator numeru telefonu — Phone Number ID (Meta)
+//   wabaId                      — WhatsApp Business Account ID
+//   nazwaSzablon                — nazwa zatwierdzonego szablonu
+// ═══════════════════════════════════════════════════════════════
+
+// Verify token do weryfikacji webhooka przez Meta
+const WA_VERIFY_TOKEN = "fleetstat_wa_verify_2026";
+
+// Helper: pobierz konfigurację WhatsApp z Firestore
+async function getWaConfig() {
+  const snap = await getFirestore().doc("konfiguracja/whatsapp").get();
+  if (!snap.exists) throw new HttpsError("not-found", "Brak konfiguracji WhatsApp w Firestore (konfiguracja/whatsapp)");
+  const d = snap.data();
+  return {
+    token:         d["znak"],
+    phoneNumberId: d["identyfikator numeru telefonu"],
+    wabaId:        d["wabaId"],
+    templateName:  d["nazwaSzablon"],
+  };
+}
+
+// Helper: wywołaj Meta Graph API
+async function callMetaApi(phoneNumberId, token, body) {
+  const url = `https://graph.facebook.com/v20.0/${phoneNumberId}/messages`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json();
+  if (!res.ok) {
+    console.error("[WA] Meta API error:", JSON.stringify(json));
+    throw new HttpsError("internal", `Meta API error: ${json.error?.message || res.status}`);
+  }
+  return json;
+}
+
+// ── sendWhatsappMessage ────────────────────────────────────────
+// Parametry:
+//   to:         string    — numer telefonu kierowcy np. "48791234567" (bez +)
+//   type:       "template" | "text"
+//   text?:      string    — treść dla type="text" (tylko w oknie 24h)
+//   params?:    string[]  — [nr_zlecenia, zaladunek, godz, rozladunek] dla template
+//   driverName? string    — do logu / meta pokoju
+//   vehicleId?  string    — do logu / meta pokoju
+exports.sendWhatsappMessage = onCall(
+  { region: "europe-west1" },
+  async (request) => {
+    const role = request.auth?.token?.role;
+    if (!["admin", "dyspozytor"].includes(role)) {
+      throw new HttpsError("permission-denied", "Brak uprawnien — wymagana rola admin lub dyspozytor");
+    }
+
+    const { to, type, text, params, driverName, vehicleId } = request.data;
+    if (!to)   throw new HttpsError("invalid-argument", "Brak numeru telefonu (to)");
+    if (!type) throw new HttpsError("invalid-argument", "Brak typu wiadomosci (type)");
+
+    const cfg = await getWaConfig();
+    let messageBody;
+
+    if (type === "text") {
+      if (!text) throw new HttpsError("invalid-argument", "Brak treści (text) dla type=text");
+      messageBody = {
+        messaging_product: "whatsapp",
+        to,
+        type: "text",
+        text: { body: text },
+      };
+    } else {
+      // type === "template"
+      const templateParams = params || [];
+      messageBody = {
+        messaging_product: "whatsapp",
+        to,
+        type: "template",
+        template: {
+          name: cfg.templateName,
+          language: { code: "pl" },
+          components: [
+            {
+              type: "body",
+              parameters: templateParams.map((p) => ({ type: "text", text: String(p) })),
+            },
+          ],
+        },
+      };
+    }
+
+    const result = await callMetaApi(cfg.phoneNumberId, cfg.token, messageBody);
+    const waMessageId = result.messages?.[0]?.id || null;
+
+    // Zapisz wiadomość do chatRooms
+    const db = getFirestore();
+    const roomId = `wa_${to.replace(/\D/g, "")}`;
+    const logText = type === "text"
+      ? text
+      : `[Szablon: ${cfg.templateName}] ${(params || []).join(" | ")}`;
+
+    await db.collection("chatRooms").doc(roomId).collection("messages").add({
+      text: logText,
+      sender: request.auth.token.email || "system",
+      channel: "whatsapp",
+      direction: "out",
+      to,
+      driverName: driverName || null,
+      vehicleId:  vehicleId  || null,
+      waMessageId,
+      deliveryStatus: "sent",
+      timestamp: new Date().toISOString(),
+    });
+
+    // Ustaw/zaktualizuj meta pokoju
+    await db.collection("chatRooms").doc(roomId).set({
+      phone:       to,
+      driverName:  driverName  || null,
+      vehicleId:   vehicleId   || null,
+      lastMessage: new Date().toISOString(),
+      lastMessageText: logText,
+      channel: "whatsapp",
+    }, { merge: true });
+
+    console.log(`[WA] Wyslano do ${to}, type=${type}, msgId=${waMessageId}`);
+    return { success: true, messageId: waMessageId };
+  }
+);
+
+// ── whatsappWebhook ────────────────────────────────────────────
+// GET  — weryfikacja webhooka przez Meta (hub.challenge)
+// POST — odbieranie wiadomosci od kierowcow i zapis do chatRooms
+exports.whatsappWebhook = onRequest(
+  { region: "europe-west1" },
+  async (req, res) => {
+
+    // ── GET: weryfikacja ──────────────────────────────────────
+    if (req.method === "GET") {
+      const mode      = req.query["hub.mode"];
+      const token     = req.query["hub.verify_token"];
+      const challenge = req.query["hub.challenge"];
+      if (mode === "subscribe" && token === WA_VERIFY_TOKEN) {
+        console.log("[WA Webhook] Weryfikacja OK");
+        res.status(200).send(challenge);
+      } else {
+        console.warn("[WA Webhook] Weryfikacja nieudana — zly token");
+        res.status(403).send("Forbidden");
+      }
+      return;
+    }
+
+    // ── POST: przychodzące wiadomości ─────────────────────────
+    if (req.method === "POST") {
+      try {
+        const value = req.body?.entry?.[0]?.changes?.[0]?.value;
+
+        // Obsługa statusów dostarczenia (nie wiadomości)
+        if (value?.statuses) {
+          for (const s of value.statuses) {
+            if (!s.id) continue;
+            // Znajdź wiadomość po waMessageId i zaktualizuj status
+            const db = getFirestore();
+            const snap = await db.collectionGroup("messages")
+              .where("waMessageId", "==", s.id)
+              .limit(1)
+              .get();
+            if (!snap.empty) {
+              await snap.docs[0].ref.update({ deliveryStatus: s.status });
+            }
+          }
+          res.status(200).send("OK");
+          return;
+        }
+
+        if (!value?.messages) {
+          res.status(200).send("OK");
+          return;
+        }
+
+        const db = getFirestore();
+        const cfg = await getWaConfig();
+
+        for (const msg of value.messages) {
+          const from      = msg.from; // numer telefonu kierowcy (bez +)
+          const waMessageId = msg.id;
+          const timestamp = new Date(parseInt(msg.timestamp) * 1000).toISOString();
+
+          let text = "";
+          if (msg.type === "text") {
+            text = msg.text?.body || "";
+          } else {
+            text = `[${msg.type}]`; // audio, image, document...
+          }
+
+          // Znajdź kierowcę po numerze telefonu w kolekcji users
+          const usersSnap = await db.collection("users")
+            .where("phone", "==", from)
+            .limit(1)
+            .get();
+
+          let driverName  = null;
+          let driverEmail = null;
+          let vehicleId   = null;
+
+          if (!usersSnap.empty) {
+            const u = usersSnap.docs[0].data();
+            driverName  = u.displayName || u.name || null;
+            driverEmail = u.email || null;
+          }
+
+          const roomId = `wa_${from.replace(/\D/g, "")}`;
+
+          // Zapisz wiadomość przychodzącą
+          await db.collection("chatRooms").doc(roomId).collection("messages").add({
+            text,
+            sender:      driverName || from,
+            senderPhone: from,
+            driverEmail,
+            channel:         "whatsapp",
+            direction:       "in",
+            waMessageId,
+            deliveryStatus:  "received",
+            timestamp,
+          });
+
+          // Zaktualizuj meta pokoju (hasUnread = true → dyspozytor zobaczy badge)
+          await db.collection("chatRooms").doc(roomId).set({
+            phone:           from,
+            driverName,
+            vehicleId,
+            driverEmail,
+            lastMessage:     timestamp,
+            lastMessageText: text,
+            channel:         "whatsapp",
+            hasUnread:       true,
+          }, { merge: true });
+
+          // Oznacz jako przeczytane po stronie WhatsApp (niebieskie ptaszki)
+          await callMetaApi(cfg.phoneNumberId, cfg.token, {
+            messaging_product: "whatsapp",
+            status:     "read",
+            message_id: waMessageId,
+          }).catch((e) => console.warn("[WA Webhook] Read receipt error:", e.message));
+
+          console.log(`[WA Webhook] Wiadomosc od ${from}: ${text.substring(0, 60)}`);
+        }
+
+        res.status(200).send("OK");
+      } catch (e) {
+        console.error("[WA Webhook] Blad:", e);
+        res.status(200).send("OK"); // zawsze 200 — Meta ponawia przy blędach
+      }
+      return;
+    }
+
+    res.status(405).send("Method Not Allowed");
   }
 );
