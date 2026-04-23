@@ -268,6 +268,61 @@ function fmtPLN(n) { return Number(n).toLocaleString("pl-PL", { minimumFractionD
 function fmtEUR(n) { return Number(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €"; }
 function fmtDate(d) { try { return new Date(d).toLocaleDateString("pl-PL"); } catch { return d; } }
 
+// ─── WHATSAPP — format zlecenia dla kierowcy (filtr widoczności: bez cen/marży) ───
+function parseGeoString(geo) {
+  if (!geo || typeof geo !== "string") return null;
+  const [latStr, lngStr] = geo.split(",").map(s => s.trim());
+  const lat = Number(latStr), lng = Number(lngStr);
+  if (isNaN(lat) || isNaN(lng)) return null;
+  return { lat, lng };
+}
+function formatOrderForWhatsapp(fracht) {
+  if (!fracht) return { body: "", pickup: null, delivery: null };
+  const fmtD = (d) => d ? d.split("-").reverse().join(".") : "—";
+  const fmtT = (t) => t || "—";
+  const addrZal = (fracht.zaladunekAdres || [fracht.zaladunekKod, fracht.zaladunekKod2, fracht.zaladunekKod3].filter(Boolean).join(" / ") || "").trim();
+  const addrRoz = (fracht.rozladunekAdres || [fracht.dokod, fracht.dokod2, fracht.dokod3].filter(Boolean).join(" / ") || "").trim();
+  const pickupGeo = parseGeoString(fracht.zaladunekGeo);
+  const deliveryGeo = parseGeoString(fracht.rozladunekGeo);
+
+  const lines = [];
+  lines.push(`🚛 Nowe zlecenie${fracht.nrRef ? ` #${fracht.nrRef}` : ""}`);
+  lines.push("");
+  lines.push(`📍 ZAŁADUNEK — ${fmtD(fracht.dataZaladunku)} ${fmtT(fracht.godzZaladunku)}`);
+  if (addrZal) lines.push(addrZal);
+  if (pickupGeo) lines.push(`GPS: ${pickupGeo.lat.toFixed(5)}, ${pickupGeo.lng.toFixed(5)}`);
+  if (fracht.zaladunekTelefon) lines.push(`Tel: ${fracht.zaladunekTelefon}`);
+  lines.push("");
+  lines.push(`📍 ROZŁADUNEK — ${fmtD(fracht.dataRozladunku)} ${fmtT(fracht.godzRozladunku)}`);
+  if (addrRoz) lines.push(addrRoz);
+  if (deliveryGeo) lines.push(`GPS: ${deliveryGeo.lat.toFixed(5)}, ${deliveryGeo.lng.toFixed(5)}`);
+  if (fracht.rozladunekTelefon) lines.push(`Tel: ${fracht.rozladunekTelefon}`);
+  lines.push("");
+
+  const towarParts = [];
+  if (fracht.towarIloscPalet) towarParts.push(`${fracht.towarIloscPalet} ${fracht.towarOpis || "palet"}`);
+  else if (fracht.towarOpis) towarParts.push(fracht.towarOpis);
+  if (fracht.towarPalety) towarParts.push(fracht.towarPalety);
+  if (towarParts.length) lines.push(`📦 ${towarParts.join(", ")}`);
+  if (fracht.zaladunekTyp) lines.push(`Załadunek: ${fracht.zaladunekTyp}`);
+  if (fracht.wagaLadunku) lines.push(`Waga: ${fracht.wagaLadunku} kg`);
+  if (fracht.uwagi) { lines.push(""); lines.push(`ℹ️ ${fracht.uwagi}`); }
+
+  return {
+    body: lines.join("\n").trim(),
+    pickup: pickupGeo ? { ...pickupGeo, name: "Załadunek", address: addrZal || null } : null,
+    delivery: deliveryGeo ? { ...deliveryGeo, name: "Rozładunek", address: addrRoz || null } : null,
+  };
+}
+
+const WA_SYSTEM_REMINDER = [
+  "ℹ️ *FleetStat — przypomnienie:*",
+  "• Zlecenie masz też w aplikacji FleetStat",
+  "• Po dojechaniu na załadunek → kliknij *\"Dotarcie na załadunek\"* w apce",
+  "• Zrób zdjęcia CMR i towaru",
+  "• Po rozładunku → kliknij *\"Dotarcie na rozładunek\"* + zdjęcie CMR",
+].join("\n");
+
 // ─── SERVICE HELPERS ────────────────────────────────────────────────────────
 function serviceStatus(daysLeft) {
   if (daysLeft === null) return null;
@@ -4028,6 +4083,8 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               fuelEntries={fuelEntries}
               canEdit={canEdit}
               currentUser={user}
+              appUsers={appUsers}
+              showToast={showToast}
               onAdd={(r) => { const fid = uid(); setFrachtyList(p => [{ ...r, id: fid }, ...p]); logAction("add", "frachty", { id: fid, vehicleId: r.vehicleId, dokod: r.dokod }); }}
               onDelete={(id) => { setFrachtyList(p => p.filter(r => r.id !== id)); logAction("delete", "frachty", { id }); }}
               onUpdate={(id, data) => { setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r)); logAction("update", "frachty", { id }); }}
@@ -4081,7 +4138,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             if (isMob) return null;
             return (
               <div style={{ height: "calc(100vh - 2rem)" }}>
-                <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} onActiveRoomChange={setChatHasActiveRoom} />
+                <ChatTab currentUser={user} appUsers={appUsers} vehicles={vehicles} showToast={showToast} onActiveRoomChange={setChatHasActiveRoom} />
               </div>
             );
           })()}
@@ -4364,7 +4421,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             </div>
             {/* ChatTab */}
             <div className="flex-1 overflow-hidden">
-              <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} />
+              <ChatTab currentUser={user} appUsers={appUsers} vehicles={vehicles} showToast={showToast} />
             </div>
           </div>
         </div>
@@ -4439,7 +4496,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
       {/* ── MOBILE FULLSCREEN CHAT OVERLAY ── */}
       {tab === "chat" && typeof window !== 'undefined' && window.innerWidth < 768 && (
         <MobileChatOverlay hasActiveRoom={chatHasActiveRoom}>
-          <ChatTab currentUser={user} appUsers={appUsers} showToast={showToast} onActiveRoomChange={setChatHasActiveRoom} />
+          <ChatTab currentUser={user} appUsers={appUsers} vehicles={vehicles} showToast={showToast} onActiveRoomChange={setChatHasActiveRoom} />
         </MobileChatOverlay>
       )}
     </div>
@@ -4513,7 +4570,7 @@ function MobileChatOverlay({ children, hasActiveRoom }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // CHAT TAB — pełna wersja z edycją, usuwaniem, reply, reakcjami, zarządzaniem pokojami
 // ═══════════════════════════════════════════════════════════════════════════════
-function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) {
+function ChatTab({ currentUser, appUsers = [], vehicles = [], showToast, onActiveRoomChange }) {
   const [rooms, setRooms] = useState([]);
   const [activeRoom, setActiveRoom] = useState(null);
 
@@ -4646,7 +4703,16 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
         }
         return data;
       });
-      const myRooms = all.filter(r => r.type === "channel" || (r.members || []).includes(currentUser.uid))
+      // Admin + dyspozytor widzą także pokoje WhatsApp (nawet jeśli nie są w members)
+      // — współdzielony pokój per kierowca (wszyscy dyspozytorzy w jednym wątku)
+      const myUserRole = appUsers.find(u => u.uid === currentUser.uid)?.role;
+      const canSeeWhatsapp = myUserRole === "admin" || myUserRole === "dyspozytor";
+      const myRooms = all.filter(r => {
+        if (r.type === "channel") return true;
+        if ((r.members || []).includes(currentUser.uid)) return true;
+        if (r.type === "whatsapp" && canSeeWhatsapp) return true;
+        return false;
+      })
         .sort((a, b) => tsToMs(b.lastMessageAt) - tsToMs(a.lastMessageAt)); // desc — najnowsze na górze
       myRooms.forEach(r => {
         const prev = lastRoomTimestamps.current[r.id];
@@ -4779,6 +4845,45 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
   const sendMessage = async (text, fileUrl, fileName) => {
     if (!activeRoom) return;
     if (!text?.trim() && !fileUrl) return;
+
+    // ── Pokój WhatsApp: wyślij przez Cloud Function (Graph API + auto-podpis dyspozytora) ──
+    if (activeRoom.type === "whatsapp") {
+      if (fileUrl) {
+        showToast("Załączniki dla WhatsApp w PHASE 2 — teraz tylko tekst");
+        return;
+      }
+      if (!activeRoom.driverUid) {
+        showToast("❌ Pokój WA bez driverUid");
+        return;
+      }
+      try {
+        const sendFn = httpsCallable(functions, "sendWhatsappMessage");
+        await sendFn({
+          driverUid: activeRoom.driverUid,
+          type: "text",
+          content: { body: text.trim() },
+          // frachtId: brak (chat niezwiązany z konkretnym frachtem)
+        });
+        clearTimeout(typingTimeoutRef.current);
+        await updateDoc(doc(db, "chatRooms", activeRoom.id), {
+          [`typing.${currentUser.uid}`]: null,
+        });
+        setMsgText(""); setReplyTo(null);
+      } catch (e) {
+        console.error("WhatsApp send error:", e);
+        const msg = e?.message || "Nieznany błąd";
+        if (msg.includes("24 hours") || msg.includes("re-engagement") || msg.includes("131047")) {
+          showToast("⚠️ Okno 24h zamknięte — kierowca musi pierwszy napisać");
+        } else if (msg.includes("failed-precondition")) {
+          showToast("❌ Kierowca bez numeru WhatsApp");
+        } else {
+          showToast(`❌ ${msg.slice(0, 100)}`);
+        }
+      }
+      return;
+    }
+
+    // ── Zwykły pokój wewnętrzny: zapis bezpośrednio do Firestore ──
     const msg = {
       text: text?.trim() || "",
       senderId: currentUser.uid,
@@ -4964,10 +5069,22 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
     return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
   };
 
+  // Znajdź pojazd przypisany do kierowcy (po emailu) — dla pokojów WhatsApp
+  const findDriverVehicle = (driverEmail) => {
+    if (!driverEmail) return null;
+    return vehicles.find(v => v.assignedDriver === driverEmail) || null;
+  };
+
   const roomDisplayName = (r) => {
     if (r.type === "dm" && r.members) {
       const other = r.members.find(uid => uid !== currentUser.uid);
       return appUsers.find(u => u.uid === other)?.email?.split("@")[0] || r.name;
+    }
+    if (r.type === "whatsapp") {
+      // Format: "{plate} · {driver name}" — jak Slickshift
+      const veh = findDriverVehicle(r.driverEmail);
+      const driverName = r.name || r.driverEmail?.split("@")[0] || "Kierowca";
+      return veh?.plate ? `${veh.plate} · ${driverName}` : driverName;
     }
     return r.name;
   };
@@ -5034,27 +5151,36 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
             // Aktywny pokój = czytany (nie czekamy na serverTimestamp round-trip)
             const hasUnread = r.id !== activeRoom?.id && r.lastMessageAt && r.lastSender !== currentUser.email && (!myRead || tsToMs(r.lastMessageAt) - tsToMs(myRead) > 5000);
             const isActive = activeRoom?.id === r.id;
+            const isWhatsapp = r.type === "whatsapp";
             const avatarColors = ['linear-gradient(135deg, #3b82f6, #6366f1)', 'linear-gradient(135deg, #22c55e, #14b8a6)', 'linear-gradient(135deg, #f59e0b, #ef4444)', 'linear-gradient(135deg, #8b5cf6, #ec4899)'];
-            const avatarBg = avatarColors[ri % avatarColors.length];
+            // WhatsApp: zawsze zielony gradient (spójne z brandingiem WA)
+            const avatarBg = isWhatsapp ? 'linear-gradient(135deg, #25D366, #128C7E)' : avatarColors[ri % avatarColors.length];
             const initials = roomDisplayName(r).slice(0, 2).toUpperCase();
+            // Preview dla WA: lastMessagePreview (inbound) albo lastMessage (outbound local)
+            const lastPreview = r.lastMessagePreview || r.lastMessage;
             return (
               <button key={r.id} onClick={() => { setActiveRoom(r); setShowSearch(false); setSearchQuery(""); setContextMenu(null); }}
                 className="w-full text-left px-4 py-3 flex items-center gap-3 transition-colors hover:bg-gray-100/60"
-                style={{ background: isActive ? '#eff6ff' : 'transparent', borderLeft: isActive ? '3px solid #3b82f6' : '3px solid transparent' }}>
+                style={{ background: isActive ? (isWhatsapp ? '#f0fdf4' : '#eff6ff') : 'transparent', borderLeft: isActive ? `3px solid ${isWhatsapp ? '#25D366' : '#3b82f6'}` : '3px solid transparent' }}>
                 {/* Avatar */}
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm flex-shrink-0" style={{ background: avatarBg }}>{initials}</div>
+                <div className="relative w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm flex-shrink-0" style={{ background: avatarBg }}>
+                  {initials}
+                  {isWhatsapp && (
+                    <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center text-[9px]" style={{ background: '#fff', border: '1.5px solid #25D366' }} title="WhatsApp">📱</span>
+                  )}
+                </div>
                 {/* Info */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between">
                     <span className={`text-sm truncate ${hasUnread ? "font-bold text-gray-900" : "font-semibold text-gray-700"}`}>{roomDisplayName(r)}</span>
                     <span className="text-xs flex-shrink-0 ml-2 text-gray-400">{fmtTime(r.lastMessageAt)}</span>
                   </div>
-                  {r.lastMessage && (
+                  {lastPreview && (
                     <div className="mt-0.5 flex items-center gap-1">
                       <span className={`text-xs truncate max-w-[160px] ${hasUnread ? "text-gray-600 font-medium" : "text-gray-400"}`}>
-                        {r.lastSender ? `${r.lastSender.split("@")[0]}: ` : ""}{r.lastMessage}
+                        {r.lastSender && !isWhatsapp ? `${r.lastSender.split("@")[0]}: ` : ""}{lastPreview}
                       </span>
-                      {hasUnread && <span className="ml-auto px-1.5 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0" style={{ background: '#3b82f6', color: '#fff' }}>1</span>}
+                      {hasUnread && <span className="ml-auto px-1.5 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0" style={{ background: isWhatsapp ? '#25D366' : '#3b82f6', color: '#fff' }}>1</span>}
                     </div>
                   )}
                 </div>
@@ -5073,11 +5199,25 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
               <button onClick={() => setActiveRoom(null)} className="md:hidden p-1" style={{ color: '#64748b' }}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
               </button>
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-xs flex-shrink-0" style={{ background: 'linear-gradient(135deg, #22c55e, #14b8a6)' }}>{roomDisplayName(activeRoom).slice(0, 2).toUpperCase()}</div>
+              <div className="relative w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-xs flex-shrink-0"
+                style={{ background: activeRoom.type === "whatsapp" ? 'linear-gradient(135deg, #25D366, #128C7E)' : 'linear-gradient(135deg, #22c55e, #14b8a6)' }}>
+                {roomDisplayName(activeRoom).slice(0, 2).toUpperCase()}
+                {activeRoom.type === "whatsapp" && (
+                  <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center text-[9px]" style={{ background: '#fff', border: '1.5px solid #25D366' }}>📱</span>
+                )}
+              </div>
               <div>
-                <h3 className="font-semibold" style={{ fontSize: '15px', color: '#1e293b' }}>{roomDisplayName(activeRoom)}</h3>
-                <div className="flex items-center gap-1" style={{ fontSize: '12px', color: '#22c55e' }}>
-                  <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: '#22c55e' }}/> online
+                <h3 className="font-semibold flex items-center gap-2" style={{ fontSize: '15px', color: '#1e293b' }}>
+                  {roomDisplayName(activeRoom)}
+                  {activeRoom.type === "whatsapp" && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold" style={{ background: '#dcfce7', color: '#166534' }}>WhatsApp</span>
+                  )}
+                </h3>
+                <div className="flex items-center gap-1" style={{ fontSize: '12px', color: activeRoom.type === "whatsapp" ? '#25D366' : '#22c55e' }}>
+                  <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: activeRoom.type === "whatsapp" ? '#25D366' : '#22c55e' }}/>
+                  {activeRoom.type === "whatsapp"
+                    ? (activeRoom.whatsappNumber ? `+${activeRoom.whatsappNumber}` : 'WhatsApp')
+                    : 'online'}
                 </div>
               </div>
               <div className="ml-auto flex items-center gap-1.5">
@@ -5165,16 +5305,27 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
                 const showSender = !isMine && (i === 0 || filteredMessages[i - 1]?.senderId !== m.senderId);
                 const showAvatar = i === 0 || filteredMessages[i - 1]?.senderId !== m.senderId;
                 const isDeleted = m.deleted;
+                // WhatsApp: rozróżnij kierowcę (direction="inbound") od innego dyspozytora (direction="outbound" + senderId != me)
+                const isWaChannel = activeRoom.type === "whatsapp";
+                const isDriverMsg = isWaChannel && m.direction === "inbound";
+                const avatarBg = isMine
+                  ? 'linear-gradient(135deg, #3b82f6, #6366f1)'
+                  : isDriverMsg
+                    ? 'linear-gradient(135deg, #25D366, #128C7E)'
+                    : 'linear-gradient(135deg, #22c55e, #14b8a6)';
                 return (
                   <div key={m.id} className={`flex items-end gap-1 sm:gap-1.5 ${isMine ? "flex-row-reverse" : ""} group`}>
                     {/* Small avatar — hidden on very small screens */}
                     {showAvatar ? (
-                      <div className="hidden sm:flex w-6 h-6 rounded-md items-center justify-center text-white text-[9px] font-bold flex-shrink-0" style={{ background: isMine ? 'linear-gradient(135deg, #3b82f6, #6366f1)' : 'linear-gradient(135deg, #22c55e, #14b8a6)' }}>
+                      <div className="hidden sm:flex w-6 h-6 rounded-md items-center justify-center text-white text-[9px] font-bold flex-shrink-0" style={{ background: avatarBg }}>
                         {(m.senderName || m.senderEmail?.split("@")[0] || "?").slice(0, 2).toUpperCase()}
                       </div>
                     ) : <div className="hidden sm:block w-6 flex-shrink-0"/>}
                     <div className="max-w-[85%] sm:max-w-[70%] relative">
-                      {showSender && <div className="text-xs mb-0.5 ml-2" style={{ fontSize: '11px', fontWeight: 600, color: '#64748b' }}>{m.senderName || m.senderEmail?.split("@")[0]}</div>}
+                      {showSender && <div className="text-xs mb-0.5 ml-2 flex items-center gap-1" style={{ fontSize: '11px', fontWeight: 600, color: isDriverMsg ? '#128C7E' : '#64748b' }}>
+                        {m.senderName || m.senderEmail?.split("@")[0]}
+                        {isDriverMsg && <span className="text-[9px] font-normal" style={{ color: '#64748b' }}>· kierowca</span>}
+                      </div>}
 
                       {/* Reply quote */}
                       {m.replyTo && !isDeleted && (
@@ -5187,6 +5338,7 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
                         borderRadius: '18px',
                         ...(isDeleted ? { background: '#f1f5f9', color: '#94a3b8', fontStyle: 'italic' } :
                           isMine ? { background: 'linear-gradient(135deg, #3b82f6, #2563eb)', color: '#fff', borderBottomRightRadius: '6px' } :
+                          isDriverMsg ? { background: '#dcfce7', color: '#14532d', borderBottomLeftRadius: '6px', border: '1px solid #bbf7d0' } :
                           { background: '#f1f5f9', color: '#1e293b', borderBottomLeftRadius: '6px' }),
                         lineHeight: '1.5',
                       }}
@@ -5225,7 +5377,20 @@ function ChatTab({ currentUser, appUsers = [], showToast, onActiveRoomChange }) 
 
                       <div className={`text-xs mt-1 flex items-center gap-1 ${isMine ? "justify-end mr-2" : "ml-2"}`} style={{ color: '#94a3b8', fontSize: '10px' }}>
                         <span>{fmtTime(m.timestamp)}</span>
-                        {isMine && !isDeleted && (() => {
+                        {/* Delivery status dla WhatsApp (outbound moja) — z webhooka */}
+                        {isMine && !isDeleted && isWaChannel && m.channel === "whatsapp" && (() => {
+                          const ds = m.deliveryStatus;
+                          if (ds === "failed") {
+                            const err = m.deliveryError?.title || "Błąd dostarczenia";
+                            return <span title={err} className="cursor-help text-red-500">⚠️ failed</span>;
+                          }
+                          if (ds === "read") return <span title="Przeczytano" className="cursor-default"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 6 7 17 2 12"/><polyline points="22 6 11 17"/></svg></span>;
+                          if (ds === "delivered") return <span title="Dostarczono" className="cursor-default"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 6 7 17 2 12"/><polyline points="22 6 11 17"/></svg></span>;
+                          if (ds === "sent") return <span title="Wysłano" className="cursor-default"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>;
+                          return <span title="W trakcie" className="cursor-default">⏳</span>;
+                        })()}
+                        {/* Delivery status dla zwykłych chatów (lastRead map) */}
+                        {isMine && !isDeleted && !isWaChannel && (() => {
                           const msgMs = tsToMs(m.timestamp);
                           const readers = Object.entries(lastReadMap).filter(([uid, ts]) => uid !== currentUser.uid && tsToMs(ts) >= msgMs).map(([uid]) => uid);
                           if (readers.length === 0) return <span title="Wysłano"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>;
@@ -8701,6 +8866,33 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
     showToast("✅ Kierowca odpisany od pojazdu");
   }
 
+  // ── Normalizacja numeru WhatsApp do formatu E.164 bez "+" (np. "48501234567") ──
+  function normalizeWhatsappNumber(raw) {
+    if (!raw) return "";
+    let n = String(raw).replace(/[^\d+]/g, "");
+    if (n.startsWith("+")) n = n.slice(1);
+    if (n.startsWith("00")) n = n.slice(2);
+    if (n.startsWith("0") && n.length === 10) n = "48" + n.slice(1); // polski bez prefiksu
+    return n;
+  }
+
+  async function saveDriverWhatsapp(uid, raw) {
+    const normalized = normalizeWhatsappNumber(raw);
+    if (normalized && !/^\d{9,15}$/.test(normalized)) {
+      showToast("❌ Nieprawidłowy numer (format E.164, 9-15 cyfr)");
+      return;
+    }
+    try {
+      await setDoc(doc(db, "users", uid), { whatsappNumber: normalized }, { merge: true });
+      logAction("update", "users", { targetUid: uid, whatsappNumber: normalized });
+      setUsers(p => p.map(u => u.uid === uid ? { ...u, whatsappNumber: normalized } : u));
+      showToast(normalized ? "✅ Numer WhatsApp zapisany" : "✅ Numer usunięty");
+    } catch(e) {
+      console.error("Błąd zapisu whatsappNumber:", e);
+      showToast("❌ Błąd zapisu numeru");
+    }
+  }
+
   const ROLES_BIURO = [
     { id: "admin",      label: "Admin",      icon: "👑", desc: "Pełny dostęp",                      color: "#92400e", bg: "#fef3c7" },
     { id: "dyspozytor", label: "Dyspozytor", icon: "🚚", desc: "Edycja frachtów i kosztów",          color: "#1d4ed8", bg: "#eff6ff" },
@@ -8975,9 +9167,25 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
                       style={{ background: "#ecfdf5", color: "#059669" }}>
                       {(u.email||"?")[0].toUpperCase()}
                     </div>
-                    <div>
+                    <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium text-gray-800">{u.displayName || u.email?.split("@")[0] || "—"}</div>
-                      <div className="text-xs text-gray-400 truncate max-w-48">{u.email}</div>
+                      <div className="text-xs text-gray-400 truncate">{u.email}</div>
+                      <div className="flex items-center gap-1 mt-1">
+                        <span className="text-xs">📱</span>
+                        <input
+                          type="tel"
+                          placeholder="+48 501 234 567"
+                          defaultValue={u.whatsappNumber ? `+${u.whatsappNumber}` : ""}
+                          onBlur={(e) => {
+                            const val = e.target.value.trim();
+                            const current = u.whatsappNumber || "";
+                            const normalized = normalizeWhatsappNumber(val);
+                            if (normalized !== current) saveDriverWhatsapp(u.uid, val);
+                          }}
+                          className="text-xs px-2 py-1 rounded-md border border-gray-200 bg-gray-50 focus:bg-white focus:border-emerald-300 focus:outline-none flex-1 min-w-0"
+                          title="Numer WhatsApp kierowcy (E.164)"
+                        />
+                      </div>
                     </div>
                   </div>
 
@@ -9468,18 +9676,47 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
   const todayStr = new Date().toISOString().slice(0, 10);
   const today = new Date();
 
-  // Podział na aktywne / przyszłe / historia
-  const active = frachty.filter(f => {
-    if (f.statusRozladunku === "rozladowano") return false;
+  // Helper: czy fracht jest rozładowany (status na fracht LUB driverEvent bez nowszego cofnięcia)
+  const isFrachtRozladowano = (f) => {
+    if (f.statusRozladunku === "rozladowano") return true;
+    const evts = driverEvents.filter(e => e.frachtId === f.id);
+    const rozEv = evts.filter(e => e.type === "rozladowano").sort((a,b) => (b.ts||"").localeCompare(a.ts||""))[0];
+    const undoEv = evts.filter(e => e.type === "cofnij_rozladowano").sort((a,b) => (b.ts||"").localeCompare(a.ts||""))[0];
+    return !!rozEv && (!undoEv || rozEv.ts > undoEv.ts);
+  };
+
+  // Auto-archive: fracht starszy niż 7 dni bez dataRozladunku/statusu traktuj jak zamknięty
+  // (zabezpieczenie przed legacy frachtami które nigdy nie zostały oznaczone jako rozładowane)
+  const STALE_DAYS = 7;
+  const staleThreshold = new Date(Date.now() - STALE_DAYS * 86400000).toISOString().slice(0, 10);
+  const isStaleUnfinished = (f) => {
     if (!f.dataZaladunku) return false;
-    return f.dataZaladunku <= todayStr && (!f.dataRozladunku || f.dataRozladunku >= todayStr);
-  });
-  const upcoming = frachty.filter(f => {
-    if (f.statusRozladunku === "rozladowano") return false;
-    return f.dataZaladunku && f.dataZaladunku > todayStr;
-  });
+    if (f.dataZaladunku >= staleThreshold) return false; // młody fracht — nie archiwizuj
+    // Stary + nie ma dataRozladunku w przyszłości = assume porzucony/dostarczony
+    if (!f.dataRozladunku) return true;
+    if (f.dataRozladunku < todayStr) return true;
+    return false;
+  };
+
+  // Podział na aktywne / przyszłe / historia
+  const active = frachty
+    .filter(f => {
+      if (isFrachtRozladowano(f)) return false;
+      if (!f.dataZaladunku) return false;
+      if (isStaleUnfinished(f)) return false; // auto-archive stare frachty bez statusu
+      return f.dataZaladunku <= todayStr && (!f.dataRozladunku || f.dataRozladunku >= todayStr);
+    })
+    // Sort DESC po dataZaladunku — najnowszy aktywny na pierwszym miejscu (mobile tile)
+    .sort((a, b) => (b.dataZaladunku || "").localeCompare(a.dataZaladunku || ""));
+  const upcoming = frachty
+    .filter(f => {
+      if (isFrachtRozladowano(f)) return false;
+      return f.dataZaladunku && f.dataZaladunku > todayStr;
+    })
+    // Sort ASC po dataZaladunku — najbliższy nadchodzący pierwszy
+    .sort((a, b) => (a.dataZaladunku || "").localeCompare(b.dataZaladunku || ""));
   const history = frachty.filter(f =>
-    f.statusRozladunku === "rozladowano" || (f.dataRozladunku && f.dataRozladunku < todayStr)
+    isFrachtRozladowano(f) || isStaleUnfinished(f) || (f.dataRozladunku && f.dataRozladunku < todayStr)
   );
 
   const formatKody = (f) => {
@@ -9576,6 +9813,19 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
         ts: new Date().toISOString(),
       });
       logAction(field, "driverEvents", { frachtId: fracht.id, vehicleId: vehicle?.id });
+      // Propaguj status na fracht — żeby admin+home tile+filtry widziały poprawnie
+      // (event zostaje w driverEvents jako log, statusRozladunku = single source of truth dla filtrów)
+      const frachtStatusMap = {
+        rozladowano: "rozladowano",
+        cofnij_rozladowano: "", // cofnij czyści status
+      };
+      if (field in frachtStatusMap) {
+        try {
+          await updateDoc(doc(db, "frachty", fracht.id), { statusRozladunku: frachtStatusMap[field] });
+        } catch (e) {
+          console.warn("statusRozladunku propagation failed:", e?.message || e);
+        }
+      }
       const toastMap = {
         zaladowano: "✅ Załadunek potwierdzony",
         rozladowano: "✅ Rozładunek potwierdzony",
@@ -17984,7 +18234,7 @@ function KomentarzBaner({ frachtyList, vehicleId, onUpdate }) {
   );
 }
 
-function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = [], onAdd, onDelete, onUpdate, onBulkAdd, canEdit = false, currentUser = null }) {
+function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = [], onAdd, onDelete, onUpdate, onBulkAdd, canEdit = false, currentUser = null, appUsers = [], showToast = () => {} }) {
   // Index driverEvents by frachtId for quick lookup
   const eventsByFracht = useMemo(() => {
     const map = {};
@@ -18610,7 +18860,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
           </tbody>
         </table>
       </div>
-      {showForm && <FrachtyModal record={editRecord} vehicles={vehicles} driverEvents={driverEvents} fuelEntries={fuelEntries} defaultVehicleId={selectedVehicle} onSave={(data) => { if(editId) onUpdate(editId,data); else onAdd(data); setShowForm(false); setEditId(null); }} onClose={() => { setShowForm(false); setEditId(null); }} />}
+      {showForm && <FrachtyModal record={editRecord} vehicles={vehicles} driverEvents={driverEvents} fuelEntries={fuelEntries} defaultVehicleId={selectedVehicle} appUsers={appUsers} currentUser={currentUser} showToast={showToast} onSave={(data) => { if(editId) onUpdate(editId,data); else onAdd(data); setShowForm(false); setEditId(null); }} onClose={() => { setShowForm(false); setEditId(null); }} />}
     </div>
   );
 }
@@ -19121,15 +19371,214 @@ function GeoPickerModal({ initialGeo, address, onSave, onClose }) {
   );
 }
 
-function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], onSave, onClose, defaultVehicleId="" }) {
+// ═══════════════════════════════════════════════════════════════════════════
+// WhatsappSendPreviewModal — podgląd treści przed wysłaniem zlecenia
+//   Wysyła 4 wiadomości: tekst podpisany dyspozytorem + info systemowe
+//   + pinezka GPS załadunku + pinezka GPS rozładunku
+// ═══════════════════════════════════════════════════════════════════════════
+function WhatsappSendPreviewModal({ fracht, driver, dispatcherName, onClose, onSent, showToast }) {
+  const order = useMemo(() => formatOrderForWhatsapp(fracht), [fracht]);
+  const [body, setBody] = useState(order.body);
+  const [sending, setSending] = useState(false);
+  const [sendReminder, setSendReminder] = useState(true);
+
+  const signedPreview = `*${dispatcherName}:*\n${body}`;
+
+  async function send() {
+    if (!driver?.uid) { showToast("❌ Brak kierowcy"); return; }
+    if (!driver.whatsappNumber) { showToast("❌ Kierowca nie ma numeru WhatsApp"); return; }
+    if (!body.trim()) { showToast("❌ Pusta treść"); return; }
+
+    setSending(true);
+    try {
+      const sendFn = httpsCallable(functions, "sendWhatsappMessage");
+
+      // 1) Tekst zlecenia (podpisany dyspozytorem)
+      await sendFn({
+        driverUid: driver.uid,
+        type: "text",
+        content: { body },
+        frachtId: fracht?.id || null,
+      });
+
+      // 2) Info systemowe (bez podpisu dyspozytora)
+      if (sendReminder) {
+        await sendFn({
+          driverUid: driver.uid,
+          type: "text",
+          content: { body: WA_SYSTEM_REMINDER, signature: false },
+          frachtId: fracht?.id || null,
+        });
+      }
+
+      // 3) Pinezka załadunku
+      if (order.pickup) {
+        await sendFn({
+          driverUid: driver.uid,
+          type: "location",
+          content: {
+            latitude: order.pickup.lat,
+            longitude: order.pickup.lng,
+            name: order.pickup.name,
+            address: order.pickup.address,
+          },
+          frachtId: fracht?.id || null,
+        });
+      }
+
+      // 4) Pinezka rozładunku
+      if (order.delivery) {
+        await sendFn({
+          driverUid: driver.uid,
+          type: "location",
+          content: {
+            latitude: order.delivery.lat,
+            longitude: order.delivery.lng,
+            name: order.delivery.name,
+            address: order.delivery.address,
+          },
+          frachtId: fracht?.id || null,
+        });
+      }
+
+      showToast("✅ Zlecenie wysłane na WhatsApp");
+      if (onSent) onSent();
+      onClose();
+    } catch (e) {
+      console.error("WhatsApp send error:", e);
+      const msg = e?.message || "Nieznany błąd";
+      const details = e?.details ? ` [${JSON.stringify(e.details).slice(0, 120)}]` : "";
+      if (msg.includes("24 hours") || msg.includes("re-engagement") || msg.includes("outside") || msg.includes("131047")) {
+        showToast("⚠️ Okno 24h zamknięte — poproś kierowcę o napisanie do nas WhatsApp albo użyj szablonu");
+      } else if (msg.includes("failed-precondition")) {
+        showToast("❌ Kierowca nie ma numeru WhatsApp");
+      } else if (msg.includes("131030") || msg.includes("not in allowed")) {
+        showToast("⚠️ Numer kierowcy nie jest na liście test recipients w Meta");
+      } else {
+        showToast(`❌ Błąd wysyłki: ${msg.slice(0, 140)}${details}`);
+      }
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const totalMsgs = 1 + (sendReminder ? 1 : 0) + (order.pickup ? 1 : 0) + (order.delivery ? 1 : 0);
+
+  return (
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{background:"rgba(0,0,0,0.6)", zIndex: 10000}}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col" style={{maxHeight:"90vh"}}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <div>
+            <h3 className="text-base font-bold text-gray-900">📱 Wyślij zlecenie na WhatsApp</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Do: <strong>{driver?.displayName || driver?.email || "?"}</strong>
+              {driver?.whatsappNumber && <span className="text-gray-400"> · +{driver.whatsappNumber}</span>}
+              {" · "}Wiadomości: <strong>{totalMsgs}</strong>
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+        </div>
+
+        <div className="px-5 py-4 overflow-y-auto" style={{flex:"1 1 auto"}}>
+          {/* Treść zlecenia (edytowalna) */}
+          <div className="mb-4">
+            <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider">
+              1️⃣ Treść zlecenia (podpisana: {dispatcherName})
+            </label>
+            <textarea
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              rows={12}
+              className="w-full mt-2 px-3 py-2 rounded-lg border border-gray-200 text-sm font-mono"
+              style={{resize:"vertical"}}
+            />
+            <div className="mt-2 text-xs text-gray-500">
+              Kierowca zobaczy: <span className="font-mono bg-gray-50 px-1">*{dispatcherName}:*</span> + treść (jak wyżej).
+            </div>
+          </div>
+
+          {/* Info systemowe toggle */}
+          <div className="mb-4">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={sendReminder}
+                onChange={(e) => setSendReminder(e.target.checked)}
+                className="mt-0.5"
+              />
+              <div>
+                <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                  2️⃣ Info systemowe (przypomnienie o aplikacji)
+                </div>
+                <pre className="mt-1 p-2 bg-gray-50 rounded-lg text-xs text-gray-700 whitespace-pre-wrap font-sans border border-gray-100">
+{WA_SYSTEM_REMINDER}
+                </pre>
+              </div>
+            </label>
+          </div>
+
+          {/* Pinezki GPS */}
+          <div className="space-y-2">
+            {order.pickup && (
+              <div className="flex items-center gap-2 p-2 bg-emerald-50 rounded-lg border border-emerald-100">
+                <span className="text-base">📍</span>
+                <div className="flex-1 text-xs">
+                  <div className="font-semibold text-emerald-800">3️⃣ Pinezka załadunku</div>
+                  <div className="text-emerald-600">{order.pickup.lat.toFixed(5)}, {order.pickup.lng.toFixed(5)}</div>
+                </div>
+              </div>
+            )}
+            {order.delivery && (
+              <div className="flex items-center gap-2 p-2 bg-blue-50 rounded-lg border border-blue-100">
+                <span className="text-base">📍</span>
+                <div className="flex-1 text-xs">
+                  <div className="font-semibold text-blue-800">4️⃣ Pinezka rozładunku</div>
+                  <div className="text-blue-600">{order.delivery.lat.toFixed(5)}, {order.delivery.lng.toFixed(5)}</div>
+                </div>
+              </div>
+            )}
+            {(!order.pickup || !order.delivery) && (
+              <div className="text-xs text-amber-600 bg-amber-50 border border-amber-100 p-2 rounded-lg">
+                ⚠️ {!order.pickup && "Brak GPS załadunku. "}{!order.delivery && "Brak GPS rozładunku. "}
+                Ustaw lokalizację w formularzu żeby wysłać pinezkę.
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-end gap-2">
+          <button onClick={onClose} disabled={sending}
+            className="px-4 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-100">Anuluj</button>
+          <button onClick={send} disabled={sending || !driver?.whatsappNumber}
+            className="px-5 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-2"
+            style={{background: sending ? "#9ca3af" : "#25D366"}}>
+            {sending ? "Wysyłanie..." : `📱 Wyślij (${totalMsgs})`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], onSave, onClose, defaultVehicleId="", appUsers = [], currentUser = null, showToast = () => {} }) {
   const empty = {dataZlecenia:"",dataZaladunku:"",dataRozladunku:"",godzZaladunku:"",godzRozladunku:"",skad:"",zaladunekKod:"",zaladunekKod2:"",zaladunekKod3:"",zaladunekAdres:"",zaladunekTelefon:"",zaladunekGeo:"",dokod:"",dokod2:"",dokod3:"",rozladunekAdres:"",rozladunekTelefon:"",rozladunekGeo:"",rozladunekAdres2:"",rozladunekTelefon2:"",rozladunekGeo2:"",dataRozladunku2:"",godzRozladunku2:"",klient:"",cenaEur:"",kmPodjazd:"",kmLadowne:"",kmWszystkie:"",wagaLadunku:"",dyspozytor:"",nrFV:"",dataWyslania:"",terminPlatnosci:"",uwagi:"",urlZlecenie:"",nrZlecenia:"",nrRef:"",towarOpis:"",towarPalety:"",towarIloscPalet:"",zaladunekTyp:"",vehicleId:defaultVehicleId};
   const [f, setF] = useState(record ? {...empty,...record} : empty);
   const set = (k,v) => setF(prev => { const next={...prev,[k]:v}; const pod=parseInt(next.kmPodjazd)||0; const lad=parseInt(next.kmLadowne)||0; next.kmWszystkie=pod+lad>0?String(pod+lad):""; return next; });
   const eurKmLad = f.kmLadowne && f.cenaEur ? (parseFloat(f.cenaEur)/parseInt(f.kmLadowne)).toFixed(2) : null;
   const eurKmWsz = f.kmWszystkie && f.cenaEur ? (parseFloat(f.cenaEur)/parseInt(f.kmWszystkie)).toFixed(2) : null;
   const [geoPickerFor, setGeoPickerFor] = useState(null); // "zaladunek" | "rozladunek" | "rozladunek2" | null
+  const [showWhatsappPreview, setShowWhatsappPreview] = useState(false);
   const inp = "w-full text-sm px-3 py-2 rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-gray-400";
   const lbl = "text-xs font-semibold text-gray-500 mb-1 block";
+
+  // Wyliczony kierowca przypisany do pojazdu (dla WhatsApp)
+  const waDriver = (() => {
+    const veh = vehicles.find(v => v.id === f.vehicleId);
+    if (!veh?.assignedDriver) return null;
+    return appUsers.find(u => u.email === veh.assignedDriver && u.role === "kierowca") || null;
+  })();
+  const dispatcherName = (currentUser?.displayName || currentUser?.name || (currentUser?.email || "").split("@")[0] || "Dyspozytor");
+  const canSendWhatsapp = !!(record?.id && waDriver?.whatsappNumber);
   return (
     <>
     {geoPickerFor && (
@@ -19373,10 +19822,30 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
         </div>
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0">
           <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-100">Anuluj</button>
+          {canSendWhatsapp && (
+            <button
+              onClick={() => setShowWhatsappPreview(true)}
+              className="px-4 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-2"
+              style={{background:"#25D366"}}
+              title={`Wyślij zlecenie na WhatsApp do: ${waDriver.displayName || waDriver.email}`}
+            >
+              📱 Wyślij na WhatsApp
+            </button>
+          )}
           <button onClick={() => { if(!f.vehicleId){alert("Wybierz pojazd");return;} if(!f.cenaEur){alert("Wpisz cene EUR");return;} onSave(f); }} className="px-5 py-2 rounded-lg text-sm font-semibold text-white" style={{background:"#111827"}}>{record ? "Zapisz zmiany" : "Dodaj fracht"}</button>
         </div>
       </div>
     </div>
+    {showWhatsappPreview && canSendWhatsapp && (
+      <WhatsappSendPreviewModal
+        fracht={{...f, id: record?.id}}
+        driver={waDriver}
+        dispatcherName={dispatcherName}
+        onClose={() => setShowWhatsappPreview(false)}
+        onSent={() => { setShowWhatsappPreview(false); showToast && showToast("Wysłano na WhatsApp", "success"); }}
+        showToast={showToast}
+      />
+    )}
     </>
   );
 }

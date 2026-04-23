@@ -10,12 +10,14 @@
  */
 
 const { onDocumentWritten, onDocumentCreated } = require("firebase-functions/v2/firestore");
-const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onCall, HttpsError }  = require("firebase-functions/v2/https");
+const { defineSecret }        = require("firebase-functions/params");
 const { initializeApp }       = require("firebase-admin/app");
 const { getAuth }             = require("firebase-admin/auth");
 const { getFirestore }        = require("firebase-admin/firestore");
 const { getMessaging }        = require("firebase-admin/messaging");
 const { getStorage }          = require("firebase-admin/storage");
+const crypto                  = require("crypto");
 
 // Inicjalizacja Firebase Admin
 initializeApp();
@@ -953,267 +955,370 @@ exports.parseDddFile = onCall(
 );
 
 // ═══════════════════════════════════════════════════════════════
-// WHATSAPP INTEGRATION
-// sendWhatsappMessage — wysyła wiadomość do kierowcy (onCall)
-// whatsappWebhook     — odbiera wiadomości od kierowców (onRequest)
-//
-// Konfiguracja w Firestore konfiguracja/whatsapp:
-//   znak                        — permanent access token
-//   identyfikator numeru telefonu — Phone Number ID (Meta)
-//   wabaId                      — WhatsApp Business Account ID
-//   nazwaSzablon                — nazwa zatwierdzonego szablonu
+// WHATSAPP BUSINESS CLOUD API — wysyłka i odbiór wiadomości
+//   sendWhatsappMessage — onCall, admin/dyspozytor wysyła do kierowcy
+//   whatsappWebhook     — onRequest, Meta push (incoming + delivery status)
 // ═══════════════════════════════════════════════════════════════
 
-// Verify token do weryfikacji webhooka przez Meta
-const WA_VERIFY_TOKEN = "fleetstat_wa_verify_2026";
+const WHATSAPP_TOKEN          = defineSecret("WHATSAPP_TOKEN");
+const WHATSAPP_PHONE_ID       = defineSecret("WHATSAPP_PHONE_ID");
+const WHATSAPP_APP_SECRET     = defineSecret("WHATSAPP_APP_SECRET");
+const WHATSAPP_VERIFY_TOKEN   = defineSecret("WHATSAPP_VERIFY_TOKEN");
 
-// Helper: pobierz konfigurację WhatsApp z Firestore
-async function getWaConfig() {
-  const snap = await getFirestore().doc("konfiguracja/whatsapp").get();
-  if (!snap.exists) throw new HttpsError("not-found", "Brak konfiguracji WhatsApp w Firestore (konfiguracja/whatsapp)");
-  const d = snap.data();
-  return {
-    token:         d["znak"],
-    phoneNumberId: d["identyfikator numeru telefonu"],
-    wabaId:        d["wabaId"],
-    templateName:  d["nazwaSzablon"],
-  };
-}
+const WA_API_VERSION = "v25.0";
+const WA_ROOM_PREFIX = "whatsapp_"; // chatRooms/whatsapp_{driverUid}
 
-// Helper: wywołaj Meta Graph API
-async function callMetaApi(phoneNumberId, token, body) {
-  const url = `https://graph.facebook.com/v20.0/${phoneNumberId}/messages`;
-  const res = await fetch(url, {
+// Helper — wywołanie Graph API z payloadem
+async function callWhatsappApi(phoneId, token, payload) {
+  const url = `https://graph.facebook.com/${WA_API_VERSION}/${phoneId}/messages`;
+  const resp = await fetch(url, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   });
-  const json = await res.json();
-  if (!res.ok) {
-    console.error("[WA] Meta API error:", JSON.stringify(json));
-    throw new HttpsError("internal", `Meta API error: ${json.error?.message || res.status}`);
+  const body = await resp.text();
+  let data;
+  try { data = JSON.parse(body); } catch { data = { raw: body }; }
+  if (!resp.ok) {
+    const errMsg = data?.error?.message || `HTTP ${resp.status}`;
+    const errCode = data?.error?.code || resp.status;
+    const errType = data?.error?.type || "";
+    const errDetails = data?.error?.error_data?.details || "";
+    const fbtrace = data?.error?.fbtrace_id || "";
+    // Log błąd Mety do GCP Logging — bez dump'owania całego HTML jeśli dostaliśmy stronę
+    const rawPreview = typeof data?.raw === "string" ? data.raw.slice(0, 200) + "..." : null;
+    console.error("[WA send] Meta API error", {
+      status: resp.status,
+      code: errCode,
+      type: errType,
+      message: errMsg,
+      details: errDetails,
+      fbtrace,
+      ...(rawPreview ? { rawPreview } : {}),
+    });
+    const fullMsg = errDetails ? `${errMsg} — ${errDetails}` : errMsg;
+    throw new HttpsError("internal", `WhatsApp API (${errCode}): ${fullMsg}`, { code: errCode, type: errType });
   }
-  return json;
+  return data;
 }
 
-// ── sendWhatsappMessage ────────────────────────────────────────
-// Parametry:
-//   to:         string    — numer telefonu kierowcy np. "48791234567" (bez +)
-//   type:       "template" | "text"
-//   text?:      string    — treść dla type="text" (tylko w oknie 24h)
-//   params?:    string[]  — [nr_zlecenia, zaladunek, godz, rozladunek] dla template
-//   driverName? string    — do logu / meta pokoju
-//   vehicleId?  string    — do logu / meta pokoju
+// Helper — zapewnia że pokój kierowcy istnieje (shared dla wszystkich dyspozytorów)
+async function ensureWhatsappRoom(driverUid, driverData) {
+  const db = getFirestore();
+  const roomId = `${WA_ROOM_PREFIX}${driverUid}`;
+  const roomRef = db.doc(`chatRooms/${roomId}`);
+  const snap = await roomRef.get();
+  if (!snap.exists) {
+    await roomRef.set({
+      id: roomId,
+      type: "whatsapp",
+      channel: "whatsapp",
+      name: driverData?.displayName || driverData?.email || "Kierowca",
+      driverUid,
+      driverEmail: driverData?.email || null,
+      whatsappNumber: driverData?.whatsappNumber || null,
+      members: [driverUid], // dyspozytorzy widzą przez type==="whatsapp"
+      createdAt: new Date().toISOString(),
+      lastMessageAt: new Date().toISOString(),
+      lastMessagePreview: "",
+    });
+  }
+  return roomRef;
+}
+
+// ── sendWhatsappMessage — onCall ──
+// Request data:
+//   { driverUid, type: "text"|"location"|"template", content: {...}, frachtId? }
+// type="text":     content = { body: "...", signature?: "Agnieszka Wrona" }
+// type="location": content = { latitude, longitude, name?, address? }
+// type="template": content = { templateName, languageCode, components: [...] }
 exports.sendWhatsappMessage = onCall(
-  { region: "europe-west1" },
+  {
+    region: "europe-west1",
+    timeoutSeconds: 30,
+    secrets: [WHATSAPP_TOKEN, WHATSAPP_PHONE_ID],
+  },
   async (request) => {
-    const role = request.auth?.token?.role;
-    if (!["admin", "dyspozytor"].includes(role)) {
-      throw new HttpsError("permission-denied", "Brak uprawnien — wymagana rola admin lub dyspozytor");
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musisz być zalogowany.");
+    const callerRole = request.auth.token.role;
+    if (!["admin", "dyspozytor"].includes(callerRole)) {
+      throw new HttpsError("permission-denied", "Tylko admin/dyspozytor może wysyłać wiadomości.");
     }
 
-    const { to, type, text, params, driverName, vehicleId } = request.data;
-    if (!to)   throw new HttpsError("invalid-argument", "Brak numeru telefonu (to)");
-    if (!type) throw new HttpsError("invalid-argument", "Brak typu wiadomosci (type)");
+    const { driverUid, type, content, frachtId } = request.data || {};
+    if (!driverUid || !type || !content) {
+      throw new HttpsError("invalid-argument", "Wymagane: driverUid, type, content.");
+    }
+    if (!["text", "location", "template"].includes(type)) {
+      throw new HttpsError("invalid-argument", `Nieprawidłowy typ: ${type}`);
+    }
 
-    const cfg = await getWaConfig();
-    let messageBody;
+    const db = getFirestore();
+    const driverSnap = await db.doc(`users/${driverUid}`).get();
+    if (!driverSnap.exists) throw new HttpsError("not-found", "Kierowca nie istnieje.");
+    const driver = driverSnap.data();
+    const toNumber = driver.whatsappNumber;
+    if (!toNumber) throw new HttpsError("failed-precondition", "Kierowca nie ma przypisanego numeru WhatsApp.");
 
+    // Pobierz nadawcę
+    const senderSnap = await db.doc(`users/${request.auth.uid}`).get();
+    const sender = senderSnap.exists ? senderSnap.data() : {};
+    const senderName = sender.displayName || sender.name || (sender.email || "").split("@")[0] || "Dyspozytor";
+
+    // Zbuduj payload Meta
+    let payload;
+    let previewText = "";
     if (type === "text") {
-      if (!text) throw new HttpsError("invalid-argument", "Brak treści (text) dla type=text");
-      messageBody = {
+      // Dyspozytor podpisuje treść na początku: *Imię Nazwisko:*\n{body}
+      const rawBody = content.body || "";
+      const useSignature = content.signature !== false; // default true
+      const finalBody = useSignature ? `*${senderName}:*\n${rawBody}` : rawBody;
+      payload = {
         messaging_product: "whatsapp",
-        to,
+        to: toNumber,
         type: "text",
-        text: { body: text },
+        text: { body: finalBody, preview_url: true },
       };
-    } else {
-      // type === "template"
-      const templateParams = params || [];
-      messageBody = {
+      previewText = rawBody.slice(0, 80);
+    } else if (type === "location") {
+      const lat = Number(content.latitude);
+      const lng = Number(content.longitude);
+      if (isNaN(lat) || isNaN(lng)) throw new HttpsError("invalid-argument", "latitude/longitude muszą być liczbami.");
+      payload = {
         messaging_product: "whatsapp",
-        to,
-        type: "template",
-        template: {
-          name: cfg.templateName,
-          language: { code: "pl" },
-          components: [
-            {
-              type: "body",
-              parameters: templateParams.map((p) => ({ type: "text", text: String(p) })),
-            },
-          ],
+        to: toNumber,
+        type: "location",
+        location: {
+          latitude: lat,
+          longitude: lng,
+          ...(content.name ? { name: content.name } : {}),
+          ...(content.address ? { address: content.address } : {}),
         },
       };
+      previewText = `📍 ${content.name || "Lokalizacja"}`;
+    } else if (type === "template") {
+      if (!content.templateName) throw new HttpsError("invalid-argument", "templateName wymagane.");
+      payload = {
+        messaging_product: "whatsapp",
+        to: toNumber,
+        type: "template",
+        template: {
+          name: content.templateName,
+          language: { code: content.languageCode || "pl" },
+          ...(content.components ? { components: content.components } : {}),
+        },
+      };
+      previewText = `📋 ${content.templateName}`;
     }
 
-    const result = await callMetaApi(cfg.phoneNumberId, cfg.token, messageBody);
-    const waMessageId = result.messages?.[0]?.id || null;
+    // Wyślij przez Graph API
+    const apiResp = await callWhatsappApi(
+      WHATSAPP_PHONE_ID.value(),
+      WHATSAPP_TOKEN.value(),
+      payload
+    );
+    const wamid = apiResp?.messages?.[0]?.id || null;
 
-    // Zapisz wiadomość do chatRooms
-    const db = getFirestore();
-    const roomId = `wa_${to.replace(/\D/g, "")}`;
-    const logText = type === "text"
-      ? text
-      : `[Szablon: ${cfg.templateName}] ${(params || []).join(" | ")}`;
-
-    await db.collection("chatRooms").doc(roomId).collection("messages").add({
-      text: logText,
-      sender: request.auth.token.email || "system",
+    // Zapewnij pokój i zapisz wiadomość
+    const roomRef = await ensureWhatsappRoom(driverUid, { ...driver, uid: driverSnap.id });
+    const now = new Date().toISOString();
+    const msgRef = roomRef.collection("messages").doc();
+    const msgDoc = {
+      id: msgRef.id,
       channel: "whatsapp",
-      direction: "out",
-      to,
-      driverName: driverName || null,
-      vehicleId:  vehicleId  || null,
-      waMessageId,
+      direction: "outbound",
+      type,
+      senderId: request.auth.uid,
+      senderName,
+      senderEmail: sender.email || null,
+      timestamp: now,
+      waMessageId: wamid,
       deliveryStatus: "sent",
-      timestamp: new Date().toISOString(),
+      ...(type === "text" ? { text: content.body || "", signed: true } : {}),
+      ...(type === "location" ? { location: { latitude: Number(content.latitude), longitude: Number(content.longitude), name: content.name || null, address: content.address || null } } : {}),
+      ...(type === "template" ? { template: { name: content.templateName, language: content.languageCode || "pl" } } : {}),
+      ...(frachtId ? { frachtId } : {}),
+    };
+    await msgRef.set(msgDoc);
+    await roomRef.update({
+      lastMessageAt: now,
+      lastMessagePreview: previewText,
+      lastSender: sender.email || request.auth.uid,
     });
 
-    // Ustaw/zaktualizuj meta pokoju
-    await db.collection("chatRooms").doc(roomId).set({
-      phone:       to,
-      driverName:  driverName  || null,
-      vehicleId:   vehicleId   || null,
-      lastMessage: new Date().toISOString(),
-      lastMessageText: logText,
-      channel: "whatsapp",
-    }, { merge: true });
-
-    console.log(`[WA] Wyslano do ${to}, type=${type}, msgId=${waMessageId}`);
-    return { success: true, messageId: waMessageId };
+    return { success: true, wamid, messageId: msgRef.id, roomId: roomRef.id };
   }
 );
 
-// ── whatsappWebhook ────────────────────────────────────────────
-// GET  — weryfikacja webhooka przez Meta (hub.challenge)
-// POST — odbieranie wiadomosci od kierowcow i zapis do chatRooms
+// ── whatsappWebhook — onRequest (HTTPS) ──
+// GET  → weryfikacja Meta (hub.challenge)
+// POST → przychodzące wiadomości + statusy dostawy
 exports.whatsappWebhook = onRequest(
-  { region: "europe-west1" },
+  {
+    region: "europe-west1",
+    timeoutSeconds: 30,
+    secrets: [WHATSAPP_TOKEN, WHATSAPP_APP_SECRET, WHATSAPP_VERIFY_TOKEN],
+    cors: false,
+  },
   async (req, res) => {
-
-    // ── GET: weryfikacja ──────────────────────────────────────
-    if (req.method === "GET") {
-      const mode      = req.query["hub.mode"];
-      const token     = req.query["hub.verify_token"];
-      const challenge = req.query["hub.challenge"];
-      if (mode === "subscribe" && token === WA_VERIFY_TOKEN) {
-        console.log("[WA Webhook] Weryfikacja OK");
-        res.status(200).send(challenge);
-      } else {
-        console.warn("[WA Webhook] Weryfikacja nieudana — zly token");
-        res.status(403).send("Forbidden");
+    try {
+      // ── GET: weryfikacja webhooka przez Metę ──
+      if (req.method === "GET") {
+        const mode = req.query["hub.mode"];
+        const token = req.query["hub.verify_token"];
+        const challenge = req.query["hub.challenge"];
+        if (mode === "subscribe" && token === WHATSAPP_VERIFY_TOKEN.value()) {
+          console.log("[WA webhook] verified");
+          return res.status(200).send(challenge);
+        }
+        console.warn("[WA webhook] verify failed", { mode, token: token ? "***" : null });
+        return res.status(403).send("Forbidden");
       }
-      return;
-    }
 
-    // ── POST: przychodzące wiadomości ─────────────────────────
-    if (req.method === "POST") {
-      try {
-        const value = req.body?.entry?.[0]?.changes?.[0]?.value;
+      if (req.method !== "POST") {
+        return res.status(405).send("Method not allowed");
+      }
 
-        // Obsługa statusów dostarczenia (nie wiadomości)
-        if (value?.statuses) {
-          for (const s of value.statuses) {
-            if (!s.id) continue;
-            // Znajdź wiadomość po waMessageId i zaktualizuj status
-            const db = getFirestore();
-            const snap = await db.collectionGroup("messages")
-              .where("waMessageId", "==", s.id)
+      // ── Weryfikacja HMAC X-Hub-Signature-256 ──
+      const signature = req.get("x-hub-signature-256") || "";
+      const rawBody = req.rawBody ? req.rawBody.toString("utf8") : JSON.stringify(req.body || {});
+      const expected = "sha256=" + crypto
+        .createHmac("sha256", WHATSAPP_APP_SECRET.value())
+        .update(rawBody)
+        .digest("hex");
+      if (signature !== expected) {
+        console.warn("[WA webhook] signature mismatch");
+        return res.status(401).send("Invalid signature");
+      }
+
+      const body = req.body || {};
+      const db = getFirestore();
+
+      // Meta webhook struktura: entry[0].changes[0].value
+      for (const entry of body.entry || []) {
+        for (const change of entry.changes || []) {
+          const value = change.value || {};
+
+          // ── messages[]: przychodzące od kierowcy ──
+          for (const msg of value.messages || []) {
+            const from = msg.from; // numer WhatsApp bez +
+            const wamid = msg.id;
+            const ts = msg.timestamp ? new Date(Number(msg.timestamp) * 1000).toISOString() : new Date().toISOString();
+
+            // Znajdź kierowcę po numerze
+            const driversSnap = await db.collection("users")
+              .where("whatsappNumber", "==", from)
               .limit(1)
               .get();
-            if (!snap.empty) {
-              await snap.docs[0].ref.update({ deliveryStatus: s.status });
+            if (driversSnap.empty) {
+              console.warn(`[WA webhook] nieznany numer ${from}`);
+              continue;
+            }
+            const driverDoc = driversSnap.docs[0];
+            const driver = { uid: driverDoc.id, ...driverDoc.data() };
+            const roomRef = await ensureWhatsappRoom(driver.uid, driver);
+
+            // Dedup po wamid
+            const existing = await roomRef.collection("messages").where("waMessageId", "==", wamid).limit(1).get();
+            if (!existing.empty) continue;
+
+            const msgRef = roomRef.collection("messages").doc();
+            const base = {
+              id: msgRef.id,
+              channel: "whatsapp",
+              direction: "inbound",
+              senderId: driver.uid,
+              senderName: driver.displayName || driver.email || from,
+              timestamp: ts,
+              waMessageId: wamid,
+              deliveryStatus: "delivered",
+            };
+            let previewText = "";
+
+            if (msg.type === "text") {
+              await msgRef.set({ ...base, type: "text", text: msg.text?.body || "" });
+              previewText = (msg.text?.body || "").slice(0, 80);
+            } else if (msg.type === "location") {
+              await msgRef.set({
+                ...base, type: "location",
+                location: { latitude: msg.location?.latitude, longitude: msg.location?.longitude, name: msg.location?.name || null, address: msg.location?.address || null },
+              });
+              previewText = "📍 Lokalizacja";
+            } else if (["image", "document", "audio", "video", "voice"].includes(msg.type)) {
+              const media = msg[msg.type] || {};
+              await msgRef.set({
+                ...base, type: msg.type,
+                media: { mediaId: media.id, mimeType: media.mime_type, caption: media.caption || null, filename: media.filename || null },
+              });
+              previewText = msg.type === "image" ? "🖼️ Zdjęcie" :
+                           msg.type === "document" ? `📄 ${media.filename || "Dokument"}` :
+                           msg.type === "audio" || msg.type === "voice" ? "🎤 Głosówka" :
+                           msg.type === "video" ? "🎥 Film" : `📎 ${msg.type}`;
+            } else {
+              await msgRef.set({ ...base, type: msg.type, raw: msg });
+              previewText = `📎 ${msg.type}`;
+            }
+
+            await roomRef.update({
+              lastMessageAt: ts,
+              lastMessagePreview: previewText,
+              lastSender: driver.email || driver.uid,
+            });
+          }
+
+          // ── statuses[]: delivery status updates ──
+          for (const st of value.statuses || []) {
+            const wamid = st.id;
+            const status = st.status; // sent | delivered | read | failed
+            const ts = st.timestamp ? new Date(Number(st.timestamp) * 1000).toISOString() : new Date().toISOString();
+
+            // Log KAŻDY status — szczególnie błędy dostarczenia od Mety
+            console.log("[WA webhook] status update", {
+              wamid: wamid?.slice(-20),
+              status,
+              recipient: st.recipient_id,
+              ts,
+              ...(st.errors?.[0] ? {
+                errorCode: st.errors[0].code,
+                errorTitle: st.errors[0].title,
+                errorMessage: st.errors[0].message,
+                errorDetails: st.errors[0].error_data?.details,
+              } : {}),
+            });
+
+            // Znajdź wiadomość po wamid — skanujemy pokoje WhatsApp
+            const roomsSnap = await db.collection("chatRooms").where("channel", "==", "whatsapp").get();
+            let found = false;
+            for (const roomDoc of roomsSnap.docs) {
+              const msgsSnap = await roomDoc.ref.collection("messages")
+                .where("waMessageId", "==", wamid)
+                .limit(1)
+                .get();
+              if (!msgsSnap.empty) {
+                await msgsSnap.docs[0].ref.update({
+                  deliveryStatus: status,
+                  [`deliveryTimes.${status}`]: ts,
+                  ...(status === "failed" && st.errors?.[0] ? { deliveryError: st.errors[0] } : {}),
+                });
+                found = true;
+                break;
+              }
+            }
+            if (!found) {
+              console.warn("[WA webhook] status: wamid nie znaleziony w bazie", { wamid: wamid?.slice(-20), status, roomsScanned: roomsSnap.size });
             }
           }
-          res.status(200).send("OK");
-          return;
         }
-
-        if (!value?.messages) {
-          res.status(200).send("OK");
-          return;
-        }
-
-        const db = getFirestore();
-        const cfg = await getWaConfig();
-
-        for (const msg of value.messages) {
-          const from      = msg.from; // numer telefonu kierowcy (bez +)
-          const waMessageId = msg.id;
-          const timestamp = new Date(parseInt(msg.timestamp) * 1000).toISOString();
-
-          let text = "";
-          if (msg.type === "text") {
-            text = msg.text?.body || "";
-          } else {
-            text = `[${msg.type}]`; // audio, image, document...
-          }
-
-          // Znajdź kierowcę po numerze telefonu w kolekcji users
-          const usersSnap = await db.collection("users")
-            .where("phone", "==", from)
-            .limit(1)
-            .get();
-
-          let driverName  = null;
-          let driverEmail = null;
-          let vehicleId   = null;
-
-          if (!usersSnap.empty) {
-            const u = usersSnap.docs[0].data();
-            driverName  = u.displayName || u.name || null;
-            driverEmail = u.email || null;
-          }
-
-          const roomId = `wa_${from.replace(/\D/g, "")}`;
-
-          // Zapisz wiadomość przychodzącą
-          await db.collection("chatRooms").doc(roomId).collection("messages").add({
-            text,
-            sender:      driverName || from,
-            senderPhone: from,
-            driverEmail,
-            channel:         "whatsapp",
-            direction:       "in",
-            waMessageId,
-            deliveryStatus:  "received",
-            timestamp,
-          });
-
-          // Zaktualizuj meta pokoju (hasUnread = true → dyspozytor zobaczy badge)
-          await db.collection("chatRooms").doc(roomId).set({
-            phone:           from,
-            driverName,
-            vehicleId,
-            driverEmail,
-            lastMessage:     timestamp,
-            lastMessageText: text,
-            channel:         "whatsapp",
-            hasUnread:       true,
-          }, { merge: true });
-
-          // Oznacz jako przeczytane po stronie WhatsApp (niebieskie ptaszki)
-          await callMetaApi(cfg.phoneNumberId, cfg.token, {
-            messaging_product: "whatsapp",
-            status:     "read",
-            message_id: waMessageId,
-          }).catch((e) => console.warn("[WA Webhook] Read receipt error:", e.message));
-
-          console.log(`[WA Webhook] Wiadomosc od ${from}: ${text.substring(0, 60)}`);
-        }
-
-        res.status(200).send("OK");
-      } catch (e) {
-        console.error("[WA Webhook] Blad:", e);
-        res.status(200).send("OK"); // zawsze 200 — Meta ponawia przy blędach
       }
-      return;
-    }
 
-    res.status(405).send("Method Not Allowed");
+      return res.status(200).send("OK");
+    } catch (e) {
+      console.error("[WA webhook] error:", e);
+      // 200 mimo błędu — Meta nie retryuje bez sensu
+      return res.status(200).send("ERR");
+    }
   }
 );
