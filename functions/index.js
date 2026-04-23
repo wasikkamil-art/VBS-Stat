@@ -524,7 +524,7 @@ function atlasDateTimeToMsBackend(dt) {
 }
 
 exports.scheduledGpsPoll = onSchedule(
-  { schedule: "*/2 * * * *", timeZone: "Europe/Warsaw", region: "europe-west1", timeoutSeconds: 120 },
+  { schedule: "* * * * *", timeZone: "Europe/Warsaw", region: "europe-west1", timeoutSeconds: 120 },
   async () => {
     const db = getFirestore();
     const startMs = Date.now();
@@ -650,6 +650,112 @@ exports.scheduledGpsPoll = onSchedule(
 
     const durMs = Date.now() - startMs;
     console.log(`scheduledGpsPoll OK — ${positions.length} pozycji, breadcrumby ${breadcrumbsWritten}, segmenty +${segmentsOpened}/−${segmentsClosed}, ${durMs}ms`);
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════
+// SCHEDULED HISTORY SYNC — raz dziennie o 3:00 pobiera z Atlas /history
+// gęste dane wczorajszego dnia (zwykle zsynchronizowane w nocy) i
+// uzupełnia breadcrumby. Scheduled poll co minutę daje 1440 punktów/dobę;
+// Atlas /history może mieć ich wielokrotnie więcej (co zmianę speed/RPM).
+// Dedup po docId = timestamp → wielokrotne runy bez duplikatów.
+// ═══════════════════════════════════════════════════════════════
+exports.scheduledHistorySync = onSchedule(
+  { schedule: "0 3 * * *", timeZone: "Europe/Warsaw", region: "europe-west1", timeoutSeconds: 540 },
+  async () => {
+    const db = getFirestore();
+    const startMs = Date.now();
+
+    // Wczoraj (Europe/Warsaw). Bierzemy "Y-m-d" lokalnie, potem konwertujemy na UTC zakres.
+    const yesterdayWarsaw = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Warsaw" }));
+    yesterdayWarsaw.setDate(yesterdayWarsaw.getDate() - 1);
+    const year = yesterdayWarsaw.getFullYear();
+    const month = yesterdayWarsaw.getMonth() + 1;
+    const day = yesterdayWarsaw.getDate();
+    const dayStartMs = Date.parse(`${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T00:00:00+02:00`);
+    const dayEndMs = dayStartMs + 24 * 3600 * 1000;
+
+    // Fleet + credentials
+    const fleetSnap = await db.doc("fleet/data").get();
+    const vehicles = fleetSnap.data()?.fleetv2_vehicles || [];
+    if (vehicles.length === 0) { console.log("scheduledHistorySync: brak pojazdów"); return; }
+
+    const configSnap = await db.doc("config/gps").get();
+    const cfg = configSnap.data() || {};
+    if (!cfg.username || !cfg.password) { console.error("scheduledHistorySync: brak credentials"); return; }
+
+    // Fetch /history dla roku+miesiąca
+    let items = [];
+    try {
+      const url = `https://widziszwszystko.eu/atlas/${cfg.group}/${cfg.username}/history?year=${year}&month=${month}`;
+      const resp = await fetch(url, {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+          "Authorization": "Basic " + Buffer.from(`${cfg.username}:${cfg.password}`).toString("base64"),
+        },
+        signal: AbortSignal.timeout(60000),
+      });
+      if (!resp.ok) { console.error(`scheduledHistorySync: Atlas ${resp.status}`); return; }
+      const body = await resp.json();
+      const payload = body?.data || body || {};
+      items = Array.isArray(payload) ? payload
+        : Array.isArray(payload?.positionList) ? payload.positionList
+        : Array.isArray(payload?.historyList) ? payload.historyList
+        : [];
+    } catch (e) {
+      console.error("scheduledHistorySync: Atlas fetch error:", e.message);
+      return;
+    }
+    if (items.length === 0) {
+      console.log(`scheduledHistorySync: Atlas /history zwróciło pusto dla ${year}-${month}`);
+      return;
+    }
+
+    let totalAdded = 0;
+    for (const vehicle of vehicles) {
+      const vPlate = String(vehicle.plate || "").replace(/\s+/g, "").toUpperCase();
+      if (!vPlate || !vehicle.id) continue;
+
+      // Filter punkty dla tego pojazdu + wczorajszego dnia
+      const matches = [];
+      for (const p of items) {
+        const pPlate = String(p?.dev?.deviceName || p?.dev?.plate || p?.deviceName || p?.plate || "")
+          .replace(/\s+/g, "").toUpperCase();
+        if (pPlate && !(pPlate === vPlate || pPlate.includes(vPlate) || vPlate.includes(pPlate))) continue;
+
+        const lat = p?.coordinate?.latitude ?? p?.latitude;
+        const lng = p?.coordinate?.longitude ?? p?.longitude;
+        if (typeof lat !== "number" || typeof lng !== "number") continue;
+
+        const ts = atlasDateTimeToMsBackend(p?.dateTime);
+        if (!ts || ts < dayStartMs || ts >= dayEndMs) continue;
+
+        matches.push({
+          ts, lat, lng,
+          speed: Number(p?.speed) || 0,
+          mileage: p?.can?.mileage?.value ?? null,
+        });
+      }
+
+      if (matches.length === 0) continue;
+
+      // Batch write (Firestore limit 500 per batch, zostawiamy zapas na 450)
+      const col = db.collection("gpsBreadcrumbs").doc(vehicle.id).collection("points");
+      for (let i = 0; i < matches.length; i += 450) {
+        const batch = db.batch();
+        matches.slice(i, i + 450).forEach(m => {
+          const ref = col.doc(String(m.ts));
+          // merge:true — jeśli scheduledGpsPoll już zapisał ten ts, zachowaj wartości
+          batch.set(ref, { lat: m.lat, lng: m.lng, ts: m.ts, speed: m.speed, mileage: m.mileage, source: "atlas_history" }, { merge: true });
+        });
+        await batch.commit();
+      }
+      totalAdded += matches.length;
+      console.log(`scheduledHistorySync: ${vehicle.plate} (${vehicle.id}) — ${matches.length} punktów`);
+    }
+    const durMs = Date.now() - startMs;
+    console.log(`scheduledHistorySync OK — łącznie ${totalAdded} punktów wczoraj (${year}-${month}-${day}), ${durMs}ms`);
   }
 );
 
