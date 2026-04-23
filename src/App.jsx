@@ -18961,9 +18961,14 @@ Odpowiedz TYLKO w formacie JSON (bez markdown):
   "zaladunekKod": "kod pocztowy + miasto załadunku (np. ES 46720 Villalonga)",
   "zaladunekAdres": "pełny adres ulicy załadunku",
   "zaladunekTelefon": "telefon kontaktowy na załadunku lub null",
-  "dokod": "kod pocztowy + miasto rozładunku (np. IT 34151 Trieste)",
-  "rozladunekAdres": "pełny adres ulicy rozładunku",
-  "rozladunekTelefon": "telefon kontaktowy na rozładunku lub null",
+  "dokod": "kod pocztowy + miasto 1. rozładunku (np. IT 34151 Trieste)",
+  "rozladunekAdres": "pełny adres ulicy 1. rozładunku",
+  "rozladunekTelefon": "telefon kontaktowy na 1. rozładunku lub null",
+  "dokod2": "kod pocztowy + miasto 2. rozładunku lub null",
+  "rozladunekAdres2": "pełny adres ulicy 2. rozładunku lub null",
+  "rozladunekTelefon2": "telefon kontaktowy na 2. rozładunku lub null",
+  "dataRozladunku2": "YYYY-MM-DD data 2. rozładunku lub null",
+  "godzRozladunku2": "HH:MM godzina 2. rozładunku lub null",
   "klient": "nazwa zleceniodawcy/klienta",
   "towarOpis": "krótki opis towaru (np. Palety, Kartony)",
   "towarIloscPalet": "ilość palet/sztuk (cyfra)",
@@ -19117,24 +19122,37 @@ function GeoPickerModal({ initialGeo, address, onSave, onClose }) {
 }
 
 function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], onSave, onClose, defaultVehicleId="" }) {
-  const empty = {dataZlecenia:"",dataZaladunku:"",dataRozladunku:"",godzZaladunku:"",godzRozladunku:"",skad:"",zaladunekKod:"",zaladunekKod2:"",zaladunekKod3:"",zaladunekAdres:"",zaladunekTelefon:"",zaladunekGeo:"",dokod:"",dokod2:"",dokod3:"",rozladunekAdres:"",rozladunekTelefon:"",rozladunekGeo:"",klient:"",cenaEur:"",kmPodjazd:"",kmLadowne:"",kmWszystkie:"",wagaLadunku:"",dyspozytor:"",nrFV:"",dataWyslania:"",terminPlatnosci:"",uwagi:"",urlZlecenie:"",nrZlecenia:"",nrRef:"",towarOpis:"",towarPalety:"",towarIloscPalet:"",zaladunekTyp:"",vehicleId:defaultVehicleId};
+  const empty = {dataZlecenia:"",dataZaladunku:"",dataRozladunku:"",godzZaladunku:"",godzRozladunku:"",skad:"",zaladunekKod:"",zaladunekKod2:"",zaladunekKod3:"",zaladunekAdres:"",zaladunekTelefon:"",zaladunekGeo:"",dokod:"",dokod2:"",dokod3:"",rozladunekAdres:"",rozladunekTelefon:"",rozladunekGeo:"",rozladunekAdres2:"",rozladunekTelefon2:"",rozladunekGeo2:"",dataRozladunku2:"",godzRozladunku2:"",klient:"",cenaEur:"",kmPodjazd:"",kmLadowne:"",kmWszystkie:"",wagaLadunku:"",dyspozytor:"",nrFV:"",dataWyslania:"",terminPlatnosci:"",uwagi:"",urlZlecenie:"",nrZlecenia:"",nrRef:"",towarOpis:"",towarPalety:"",towarIloscPalet:"",zaladunekTyp:"",vehicleId:defaultVehicleId};
   const [f, setF] = useState(record ? {...empty,...record} : empty);
   const set = (k,v) => setF(prev => { const next={...prev,[k]:v}; const pod=parseInt(next.kmPodjazd)||0; const lad=parseInt(next.kmLadowne)||0; next.kmWszystkie=pod+lad>0?String(pod+lad):""; return next; });
   const eurKmLad = f.kmLadowne && f.cenaEur ? (parseFloat(f.cenaEur)/parseInt(f.kmLadowne)).toFixed(2) : null;
   const eurKmWsz = f.kmWszystkie && f.cenaEur ? (parseFloat(f.cenaEur)/parseInt(f.kmWszystkie)).toFixed(2) : null;
-  const [geoPickerFor, setGeoPickerFor] = useState(null); // "zaladunek" | "rozladunek" | null
+  const [geoPickerFor, setGeoPickerFor] = useState(null); // "zaladunek" | "rozladunek" | "rozladunek2" | null
   const inp = "w-full text-sm px-3 py-2 rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-gray-400";
   const lbl = "text-xs font-semibold text-gray-500 mb-1 block";
   return (
     <>
     {geoPickerFor && (
       <GeoPickerModal
-        initialGeo={geoPickerFor === "zaladunek" ? f.zaladunekGeo : f.rozladunekGeo}
-        address={geoPickerFor === "zaladunek"
-          ? [f.zaladunekAdres, f.zaladunekKod].filter(Boolean).join(", ")
-          : [f.rozladunekAdres, f.dokod].filter(Boolean).join(", ")}
+        initialGeo={
+          geoPickerFor === "zaladunek"   ? f.zaladunekGeo :
+          geoPickerFor === "rozladunek2" ? (f.rozladunekGeo2 || "") :
+          f.rozladunekGeo
+        }
+        address={
+          geoPickerFor === "zaladunek"
+            ? [f.zaladunekAdres, f.zaladunekKod].filter(Boolean).join(", ")
+            : geoPickerFor === "rozladunek2"
+              ? [f.rozladunekAdres2, f.dokod2].filter(Boolean).join(", ")
+              : [f.rozladunekAdres, f.dokod].filter(Boolean).join(", ")
+        }
         onSave={(geo) => {
-          set(geoPickerFor === "zaladunek" ? "zaladunekGeo" : "rozladunekGeo", geo);
+          set(
+            geoPickerFor === "zaladunek"   ? "zaladunekGeo" :
+            geoPickerFor === "rozladunek2" ? "rozladunekGeo2" :
+            "rozladunekGeo",
+            geo
+          );
           setGeoPickerFor(null);
         }}
         onClose={() => setGeoPickerFor(null)}
@@ -19253,6 +19271,30 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
               </div>
             </div>
             <div><label className={lbl}>Telefon na rozładunku</label><input placeholder="+39..." value={f.rozladunekTelefon||""} onChange={e => set("rozladunekTelefon",e.target.value)} className={inp} /></div>
+
+            {/* ROZŁADUNEK 2 — widoczny gdy dokod2 jest ustawiony */}
+            {f.dokod2?.trim() && (<>
+              <div className="col-span-1 md:col-span-2" style={{borderTop:"1px dashed #e5e7eb", paddingTop:10, marginTop:2}}>
+                <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">📦 Rozładunek 2 — {f.dokod2.trim()}</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div><label className={lbl}>Data rozładunku 2</label><input type="date" value={f.dataRozladunku2||""} onChange={e => set("dataRozladunku2",e.target.value)} className={inp} /></div>
+                  <div><label className={lbl}>Godz. rozładunku 2</label><input type="time" value={f.godzRozladunku2||""} onChange={e => set("godzRozladunku2",e.target.value)} className={inp} /></div>
+                  <div>
+                    <label className={lbl}>Adres rozładunku 2</label>
+                    <input placeholder="ulica, miasto" value={f.rozladunekAdres2||""} onChange={e => set("rozladunekAdres2",e.target.value)} className={inp} />
+                    <div className="flex items-center gap-2 mt-1">
+                      <button type="button" onClick={() => setGeoPickerFor("rozladunek2")}
+                        className="text-xs font-medium px-2 py-1 rounded-lg transition-all hover:bg-blue-50"
+                        style={{ color: f.rozladunekGeo2 ? "#15803d" : "#3b82f6", background: f.rozladunekGeo2 ? "#f0fdf4" : "transparent" }}>
+                        {f.rozladunekGeo2 ? `✅ ${f.rozladunekGeo2}` : "📍 Ustaw lokalizację"}
+                      </button>
+                      {f.rozladunekGeo2 && <button type="button" onClick={() => set("rozladunekGeo2","")} className="text-xs text-gray-400 hover:text-red-400">✕</button>}
+                    </div>
+                  </div>
+                  <div><label className={lbl}>Telefon na rozładunku 2</label><input placeholder="+39..." value={f.rozladunekTelefon2||""} onChange={e => set("rozladunekTelefon2",e.target.value)} className={inp} /></div>
+                </div>
+              </div>
+            </>)}
           </div>
           {/* TOWAR */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
