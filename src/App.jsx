@@ -1689,6 +1689,59 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     }
   }, [chatUnreadCount, chatUnreadMsgCount]);
 
+  // ── UPDATE DETECTION — pokaż banner gdy Vercel wdroży nową wersję ──
+  // Co 5 min fetchujemy index.html i sprawdzamy hash aktualnego bundla;
+  // jeśli się zmienił → user ma otwarty stary build → banner "Odśwież".
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const initialBundleRef = useRef(null);
+  useEffect(() => {
+    if (!initialBundleRef.current) {
+      const scripts = Array.from(document.scripts);
+      const mainScript = scripts.find(s => /\/assets\/index-[a-zA-Z0-9_-]+\.js/.test(s.src));
+      initialBundleRef.current = mainScript?.src.match(/index-[a-zA-Z0-9_-]+\.js/)?.[0] || null;
+    }
+    if (!initialBundleRef.current) return; // dev server (Vite HMR) — pomijamy
+    let cancelled = false;
+    const checkVersion = async () => {
+      try {
+        const resp = await fetch(`/?_v=${Date.now()}`, { cache: "no-store", credentials: "omit" });
+        if (!resp.ok || cancelled) return;
+        const html = await resp.text();
+        const newBundle = html.match(/index-[a-zA-Z0-9_-]+\.js/)?.[0];
+        if (!newBundle || cancelled) return;
+        if (newBundle !== initialBundleRef.current) setUpdateAvailable(true);
+      } catch { /* silent — błąd sieci olewamy */ }
+    };
+    const firstTimer = setTimeout(checkVersion, 30000);        // pierwsze po 30s
+    const interval = setInterval(checkVersion, 5 * 60 * 1000); // potem co 5 min
+    return () => { cancelled = true; clearTimeout(firstTimer); clearInterval(interval); };
+  }, []);
+
+  // Banner renderowany na górze w obu wariantach (admin i DriverPanel)
+  const updateBanner = updateAvailable ? (
+    <div style={{
+      position: "fixed", top: 0, left: 0, right: 0, zIndex: 9998,
+      background: "#3b82f6", color: "#fff",
+      padding: "10px 16px",
+      paddingTop: "calc(10px + env(safe-area-inset-top, 0px))",
+      textAlign: "center", fontSize: 13, fontWeight: 600,
+      boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+      display: "flex", alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap",
+    }}>
+      <span>🔄 Nowa wersja FleetStat dostępna</span>
+      <button onClick={() => window.location.reload()}
+        style={{ padding: "5px 14px", borderRadius: 6, background: "#fff", color: "#3b82f6",
+          border: "none", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+        Odśwież teraz
+      </button>
+      <button onClick={() => setUpdateAvailable(false)}
+        style={{ padding: "5px 10px", borderRadius: 6, background: "transparent", color: "#fff",
+          border: "1px solid rgba(255,255,255,0.4)", fontSize: 11, cursor: "pointer" }}>
+        Później
+      </button>
+    </div>
+  ) : null;
+
   // ── LOAD — real-time onSnapshot ──
   useEffect(() => {
     const unsub = onSnapshot(DATA_REF(), (snap) => {
@@ -2835,18 +2888,21 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     const myDriverDocs = driverDocs.filter(dd => dd.driverEmail === user.email);
 
     return (
-      <DriverPanel
-        user={user}
-        vehicle={myVehicle}
-        frachty={myFrachty}
-        pauzy={pauzy.filter(p => myVehicle && p.vehicleId === myVehicle.id)}
-        operacyjne={myOperacyjne}
-        driverEvents={driverEvents}
-        driverActivities={driverActivities.filter(a => a.driverEmail === user.email)}
-        fuelEntries={myFuelEntries}
-        driverDocs={myDriverDocs}
-        showToast={showToast}
-      />
+      <>
+        {updateBanner}
+        <DriverPanel
+          user={user}
+          vehicle={myVehicle}
+          frachty={myFrachty}
+          pauzy={pauzy.filter(p => myVehicle && p.vehicleId === myVehicle.id)}
+          operacyjne={myOperacyjne}
+          driverEvents={driverEvents}
+          driverActivities={driverActivities.filter(a => a.driverEmail === user.email)}
+          fuelEntries={myFuelEntries}
+          driverDocs={myDriverDocs}
+          showToast={showToast}
+        />
+      </>
     );
   }
 
@@ -2855,6 +2911,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", color: "#111827" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 
+      {updateBanner}
 
       {/* TOAST */}
       {toast && (
