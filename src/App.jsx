@@ -6698,10 +6698,14 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
   }, [autoRefresh]);
 
   // ── AUTO-DETECTION aktywności kierowców z GPS ──
-  // Dla każdego pojazdu z aktywnym kierowcą: prędkość > 3 km/h → drive, else rest
-  // Uruchamiane po każdym odświeżeniu pozycji (30s). Zamyka stare segmenty, otwiera nowe.
+  // WYŁĄCZONE (2026-04-23): logika przeniesiona do Cloud Function scheduledGpsPoll
+  // która działa 24/7 co 5 min niezależnie od sesji klienta. Zapobiega to
+  // lukom w historii gdy admin nie miał otwartej aplikacji.
+  // Kod pozostawiony jako referencja — usunąć po okresie obserwacji.
   const autoDetectRef = useRef({ inProgress: false, lastRun: 0 });
   useEffect(() => {
+    return; // DISABLED — patrz scheduledGpsPoll w functions/index.js
+    // eslint-disable-next-line no-unreachable
     if (!gpsPositions || gpsPositions.length === 0) return;
     if (!gpsDevices || gpsDevices.length === 0) return;
     // Rate limit: max raz na 25s (pozwala pominąć szybkie re-rendery)

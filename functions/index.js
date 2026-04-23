@@ -497,6 +497,163 @@ exports.sendFleetEmail20 = onSchedule(
 );
 
 // ═══════════════════════════════════════════════════════════════
+// SCHEDULED GPS POLL — co 5 min pobiera Atlas positionsWithCanDetails
+// dla wszystkich pojazdów i aktualizuje breadcrumby + auto-detect
+// driverActivities (drive/rest). Działa 24/7 niezależnie od sesji klienta.
+// ═══════════════════════════════════════════════════════════════
+
+// Helper: konwersja Atlas DateTime ({year, month, day, hour, minute, seconds, timezone})
+// do unix millis. Używane w CF (backend) — odpowiednik atlasDateTimeToMs z App.jsx.
+function atlasDateTimeToMsBackend(dt) {
+  if (!dt) return null;
+  if (typeof dt === "number") return dt > 1e12 ? dt : dt * 1000;
+  if (typeof dt === "string") {
+    const n = Date.parse(dt);
+    return isNaN(n) ? null : n;
+  }
+  if (typeof dt === "object" && dt.year) {
+    const y = dt.year, mo = dt.month || 1, d = dt.day || 1;
+    const h = dt.hour || 0, mi = dt.minute || 0, s = dt.seconds || 0;
+    const tz = (dt.timezone && String(dt.timezone)) || "UTC";
+    const tzPart = tz === "UTC" || tz === "Z" ? "Z" : tz;
+    const str = `${y}-${String(mo).padStart(2,"0")}-${String(d).padStart(2,"0")}T${String(h).padStart(2,"0")}:${String(mi).padStart(2,"0")}:${String(s).padStart(2,"0")}${tzPart}`;
+    const n = Date.parse(str);
+    return isNaN(n) ? null : n;
+  }
+  return null;
+}
+
+exports.scheduledGpsPoll = onSchedule(
+  { schedule: "*/5 * * * *", timeZone: "Europe/Warsaw", region: "europe-west1", timeoutSeconds: 120 },
+  async () => {
+    const db = getFirestore();
+    const startMs = Date.now();
+
+    // 1. Fleet vehicles
+    const fleetSnap = await db.doc("fleet/data").get();
+    const fleetData = fleetSnap.data() || {};
+    const vehicles = fleetData.fleetv2_vehicles || [];
+    if (vehicles.length === 0) { console.log("scheduledGpsPoll: brak pojazdów"); return; }
+
+    // 2. Atlas credentials
+    const configSnap = await db.doc("config/gps").get();
+    const cfg = configSnap.data() || {};
+    if (!cfg.username || !cfg.password) { console.error("scheduledGpsPoll: brak credentials Atlas w config/gps"); return; }
+
+    // 3. Fetch positions z Atlas
+    let positions = [];
+    try {
+      const url = `https://widziszwszystko.eu/atlas/${cfg.group}/${cfg.username}/positionsWithCanDetails`;
+      const resp = await fetch(url, {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+          "Authorization": "Basic " + Buffer.from(`${cfg.username}:${cfg.password}`).toString("base64"),
+        },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!resp.ok) { console.error(`scheduledGpsPoll: Atlas ${resp.status}`); return; }
+      const body = await resp.json();
+      const payload = body?.data || body || {};
+      positions = Array.isArray(payload) ? payload
+        : Array.isArray(payload?.positionList) ? payload.positionList
+        : Array.isArray(payload?.historyList) ? payload.historyList
+        : [];
+    } catch (e) {
+      console.error("scheduledGpsPoll: Atlas fetch error:", e.message);
+      return;
+    }
+    if (positions.length === 0) { console.log("scheduledGpsPoll: pusta lista pozycji"); return; }
+
+    const nowIso = new Date(startMs).toISOString();
+    let breadcrumbsWritten = 0, segmentsOpened = 0, segmentsClosed = 0;
+
+    // 4. Per-pozycja: match + breadcrumb + activity
+    for (const pos of positions) {
+      const devPlate = String(pos?.dev?.deviceName || pos?.dev?.plate || pos?.deviceName || pos?.plate || "")
+        .replace(/\s+/g, "").toUpperCase();
+      const vehicle = vehicles.find(v => {
+        const fp = String(v.plate || "").replace(/\s+/g, "").toUpperCase();
+        return fp && (fp === devPlate || devPlate.includes(fp) || fp.includes(devPlate));
+      });
+      if (!vehicle) continue;
+
+      const lat = pos?.coordinate?.latitude ?? pos?.latitude;
+      const lng = pos?.coordinate?.longitude ?? pos?.longitude;
+      if (typeof lat !== "number" || typeof lng !== "number") continue;
+
+      const speed = Number(pos?.speed) || 0;
+      const mileage = pos?.can?.mileage?.value ?? null;
+      const atlasTs = atlasDateTimeToMsBackend(pos?.dateTime) || startMs;
+
+      // 4a. Breadcrumb (docId = ts, dedup idempotentnie)
+      try {
+        await db.collection("gpsBreadcrumbs").doc(vehicle.id).collection("points").doc(String(atlasTs))
+          .set({ lat, lng, ts: atlasTs, speed, mileage });
+        breadcrumbsWritten++;
+      } catch (e) {
+        console.warn(`scheduledGpsPoll: breadcrumb write ${vehicle.id}:`, e.message);
+      }
+
+      // 4b. Auto-detect driverActivity
+      const activeDriver = (vehicle.driverHistory || []).find(d => !d.to);
+      if (!activeDriver?.email) continue;
+      const detectedType = speed > 3 ? "drive" : "rest";
+
+      // Ostatni segment tego kierowcy (jakiegokolwiek źródła)
+      let latest = null;
+      try {
+        const snap = await db.collection("driverActivities")
+          .where("driverEmail", "==", activeDriver.email)
+          .orderBy("startTs", "desc")
+          .limit(1)
+          .get();
+        if (!snap.empty) latest = { id: snap.docs[0].id, ...snap.docs[0].data() };
+      } catch (e) {
+        console.warn(`scheduledGpsPoll: query latest ${activeDriver.email}:`, e.message);
+        continue;
+      }
+
+      // Jeśli latest jest OTWARTY segment manual/ddd — nie ruszaj (priorytet dowodowy)
+      if (latest && !latest.endTs && (latest.source === "manual" || latest.source === "ddd")) continue;
+
+      // Jeśli latest jest OTWARTY auto_gps tego samego typu — segment trwa (noop)
+      if (latest && !latest.endTs && latest.source === "auto_gps" && latest.type === detectedType) continue;
+
+      // Zamknij stary otwarty auto_gps jeśli typ się zmienił
+      if (latest && !latest.endTs && latest.source === "auto_gps" && latest.type !== detectedType) {
+        try {
+          await db.collection("driverActivities").doc(latest.id).update({ endTs: nowIso });
+          segmentsClosed++;
+        } catch (e) {
+          console.warn(`scheduledGpsPoll: close segment ${latest.id}:`, e.message);
+        }
+      }
+
+      // Otwórz nowy
+      try {
+        await db.collection("driverActivities").add({
+          driverEmail: activeDriver.email,
+          driverName: activeDriver.name || activeDriver.email || "—",
+          vehicleId: vehicle.id,
+          type: detectedType,
+          startTs: nowIso,
+          endTs: null,
+          source: "auto_gps",
+          createdAt: nowIso,
+        });
+        segmentsOpened++;
+      } catch (e) {
+        console.warn(`scheduledGpsPoll: open segment ${activeDriver.email}:`, e.message);
+      }
+    }
+
+    const durMs = Date.now() - startMs;
+    console.log(`scheduledGpsPoll OK — ${positions.length} pozycji, breadcrumby ${breadcrumbsWritten}, segmenty +${segmentsOpened}/−${segmentsClosed}, ${durMs}ms`);
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════
 // CLEANUP GPS BREADCRUMBS — kasuje punkty starsze niż 7 dni
 // Raz dziennie o 2:30 CET. Chroni przed niekontrolowanym wzrostem storage.
 // ═══════════════════════════════════════════════════════════════
