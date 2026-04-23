@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "driverActivities",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "driverEmail", "order": "ASCENDING" },
+        { "fieldPath": "startTs", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

@@ -43,6 +43,7 @@ scripts/
 !package.json
 !package-lock.json
 !public/manifest.json
+!firestore.indexes.json
 *.csv
 *.xlsx
 
