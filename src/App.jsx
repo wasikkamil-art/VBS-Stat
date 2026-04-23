@@ -19714,17 +19714,19 @@ function GeoPickerModal({ initialGeo, address, onSave, onClose }) {
   const mapInstance = useRef(null);
   const markerRef = useRef(null);
   const [searchQuery, setSearchQuery] = useState(address || "");
-  const [coords, setCoords] = useState(() => {
-    if (initialGeo) {
-      const [lat, lng] = initialGeo.split(",").map(Number);
-      if (lat && lng && !(Math.abs(lat - 51.5) < 0.01 && Math.abs(lng - 19.0) < 0.01)) return { lat, lng };
-    }
-    return { lat: 51.5, lng: 19.0 }; // Polska centrum
-  });
   const hasRealGeo = initialGeo && (() => {
     const [lat, lng] = initialGeo.split(",").map(Number);
     return lat && lng && !(Math.abs(lat - 51.5) < 0.01 && Math.abs(lng - 19.0) < 0.01);
   })();
+  const [coords, setCoords] = useState(() => {
+    if (hasRealGeo) {
+      const [lat, lng] = initialGeo.split(",").map(Number);
+      return { lat, lng };
+    }
+    return { lat: 52.0, lng: 19.0 };
+  });
+  // hasPinned: czy user już ustawił pinezkę (klik lub drag). Przy edycji istniejącej geo → true.
+  const [hasPinned, setHasPinned] = useState(hasRealGeo);
   const [searching, setSearching] = useState(false);
 
   useEffect(() => {
@@ -19732,43 +19734,50 @@ function GeoPickerModal({ initialGeo, address, onSave, onClose }) {
     if (typeof window.L === "undefined") return;
     const map = window.L.map(mapRef.current).setView([coords.lat, coords.lng], hasRealGeo ? 15 : 6);
     window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "© OpenStreetMap",
-      maxZoom: 19,
+      attribution: "© OpenStreetMap", maxZoom: 19,
     }).addTo(map);
-    const marker = window.L.marker([coords.lat, coords.lng], { draggable: true }).addTo(map);
+    // Pinezka niewidoczna dopóki user nie kliknie / nie przeciągnie (ukryta przez opacity 0)
+    const marker = window.L.marker([coords.lat, coords.lng], { draggable: true, opacity: hasRealGeo ? 1 : 0 }).addTo(map);
     marker.on("dragend", () => {
       const pos = marker.getLatLng();
       setCoords({ lat: pos.lat, lng: pos.lng });
+      setHasPinned(true);
+      marker.setOpacity(1);
     });
     map.on("click", (e) => {
       marker.setLatLng(e.latlng);
       setCoords({ lat: e.latlng.lat, lng: e.latlng.lng });
+      setHasPinned(true);
+      marker.setOpacity(1);
     });
     mapInstance.current = map;
     markerRef.current = marker;
-    // Zawsze szukaj adresu automatycznie jeśli jest dostępny
-    if (address) {
-      setTimeout(() => searchAddress(address), 500);
+    // Przy NOWYM wyborze: auto-pan do adresu, ale BEZ stawiania pinezki
+    if (address && !hasRealGeo) {
+      setTimeout(() => panToAddress(address), 500);
     }
     return () => { map.remove(); mapInstance.current = null; };
   }, []);
 
-  const searchAddress = async (query) => {
+  // Przesuwa mapę do wyniku Nominatim — NIE stawia pinezki (user musi kliknąć sam)
+  const panToAddress = async (query) => {
     if (!query?.trim()) return;
-    setSearching(true);
     try {
       const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`);
       const data = await resp.json();
       if (data.length > 0) {
         const { lat, lon } = data[0];
-        const newCoords = { lat: parseFloat(lat), lng: parseFloat(lon) };
-        setCoords(newCoords);
         if (mapInstance.current) {
-          mapInstance.current.setView([newCoords.lat, newCoords.lng], 16);
-          markerRef.current?.setLatLng([newCoords.lat, newCoords.lng]);
+          mapInstance.current.setView([parseFloat(lat), parseFloat(lon)], 15);
         }
       }
     } catch (e) { console.error("Geocoding error:", e); }
+  };
+
+  const searchAddress = async (query) => {
+    if (!query?.trim()) return;
+    setSearching(true);
+    await panToAddress(query);
     setSearching(false);
   };
 
@@ -19791,19 +19800,24 @@ function GeoPickerModal({ initialGeo, address, onSave, onClose }) {
               {searching ? "..." : "Szukaj"}
             </button>
           </div>
-          <div className="text-xs text-gray-400 mt-1">Kliknij w mapę lub przeciągnij pin na dokładne miejsce (np. brama wjazdowa)</div>
+          <div className="text-xs mt-1" style={{color: hasPinned ? "#9ca3af" : "#dc2626", fontWeight: hasPinned ? 400 : 600}}>
+            {hasPinned
+              ? "Możesz przeciągnąć pinezkę lub kliknąć ponownie, aby skorygować."
+              : "⚠️ Kliknij w mapę dokładnie tam, gdzie jest brama wjazdowa / miejsce rozładunku."}
+          </div>
         </div>
         <div ref={mapRef} style={{height: 350, width: "100%"}}></div>
         <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between">
           <span className="text-xs text-gray-500">
-            {coords.lat.toFixed(6)}, {coords.lng.toFixed(6)}
+            {hasPinned ? `${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}` : <span style={{color: "#dc2626"}}>Pinezka nie ustawiona</span>}
           </span>
           <div className="flex gap-2">
             <button onClick={onClose}
               className="px-4 py-2 rounded-lg text-sm font-medium text-gray-500 hover:bg-gray-100">Anuluj</button>
             <button onClick={() => onSave(`${coords.lat.toFixed(6)},${coords.lng.toFixed(6)}`)}
+              disabled={!hasPinned}
               className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
-              style={{background:"#111827"}}>
+              style={{background: hasPinned ? "#111827" : "#9ca3af", cursor: hasPinned ? "pointer" : "not-allowed"}}>
               ✓ Zapisz lokalizację
             </button>
           </div>
