@@ -7852,7 +7852,9 @@ function GpsTrasySection({ device, showToast }) {
       const devId = String(device?.deviceId || device?.id || "");
 
       const gpsProxy = httpsCallable(functions, "gpsProxy");
-      const res = await gpsProxy({ endpoint: "history", params: { year: d.getFullYear(), month: d.getMonth() + 1, device: devId } });
+      // UWAGA: nie przekazujemy `device` — Atlas /history oczekuje deviceName (nie numeric deviceId);
+      // filtrowanie robimy client-side po każdym znanym polu identyfikatora.
+      const res = await gpsProxy({ endpoint: "history", params: { year: d.getFullYear(), month: d.getMonth() + 1 } });
       // Atlas może zwrócić: array bezpośrednio / obiekt z positionList / historyList
       const payload = res?.data?.data || res?.data || [];
       const items = Array.isArray(payload) ? payload
@@ -7860,14 +7862,18 @@ function GpsTrasySection({ device, showToast }) {
         : Array.isArray(payload?.historyList) ? payload.historyList
         : [];
 
-      console.log("[GpsTrasy] raw items:", items.length, "first sample:", items[0], "payload keys:", Object.keys(payload || {}));
+      const devName = String(device?.deviceName || "");
+      console.log("[GpsTrasy] raw payload:", payload, "items count:", items.length, "first sample:", items[0], "filter by devId:", devId, "devName:", devName);
 
       const parsed = items
         .filter(p => {
-          // Filter po deviceId — zagnieżdżone dev.deviceId / device.deviceId / flat deviceId. Brak pola = akceptuj (payload już per-device).
-          const pid = String(p?.dev?.deviceId || p?.device?.deviceId || p?.deviceId || p?.id || "");
-          if (pid && pid !== devId) return false;
-          return true;
+          // Filter po deviceId / deviceName (zagnieżdżone lub flat). Brak pola = akceptuj.
+          const pidDev = String(p?.dev?.deviceId || p?.device?.deviceId || p?.deviceId || p?.id || "");
+          const pNameDev = String(p?.dev?.deviceName || p?.device?.deviceName || p?.deviceName || "");
+          if (!pidDev && !pNameDev) return true;
+          if (pidDev && pidDev === devId) return true;
+          if (pNameDev && devName && pNameDev === devName) return true;
+          return false;
         })
         .map(p => {
           const lat = p?.coordinate?.latitude ?? p?.latitude ?? p?.lat;
