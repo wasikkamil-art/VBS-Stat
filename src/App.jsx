@@ -19759,7 +19759,29 @@ function GeoPickerModal({ initialGeo, address, onSave, onClose }) {
     return () => { map.remove(); mapInstance.current = null; };
   }, []);
 
-  // Przesuwa mapę do wyniku Nominatim — NIE stawia pinezki (user musi kliknąć sam)
+  // Wyciąga lat,lng ze stringu (np. wklejone z Google Maps: "50.027385, 19.942322")
+  // Obsługiwane formaty: "50.02, 19.94" / "50.02,19.94" / "50.02 19.94" (spacja zamiast przecinka)
+  const parseCoords = (str) => {
+    if (!str) return null;
+    const m = String(str).trim().match(/^(-?\d{1,3}(?:\.\d+)?)[,\s]+(-?\d{1,3}(?:\.\d+)?)$/);
+    if (!m) return null;
+    const lat = parseFloat(m[1]), lng = parseFloat(m[2]);
+    if (isNaN(lat) || isNaN(lng)) return null;
+    if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+    return { lat, lng };
+  };
+
+  // Umieszcza pinezkę pod podanymi współrzędnymi (lat,lng) — NIE wymaga kliknięcia w mapę
+  const placePinAt = (lat, lng) => {
+    if (!mapInstance.current || !markerRef.current) return;
+    markerRef.current.setLatLng([lat, lng]);
+    markerRef.current.setOpacity(1);
+    mapInstance.current.setView([lat, lng], 17); // zoom blisko żeby user zweryfikował
+    setCoords({ lat, lng });
+    setHasPinned(true);
+  };
+
+  // Przesuwa mapę do wyniku Nominatim — NIE stawia pinezki
   const panToAddress = async (query) => {
     if (!query?.trim()) return;
     try {
@@ -19774,12 +19796,19 @@ function GeoPickerModal({ initialGeo, address, onSave, onClose }) {
     } catch (e) { console.error("Geocoding error:", e); }
   };
 
+  // "Szukaj / Ustaw" — jeśli user wpisał współrzędne → stawiamy pin bezpośrednio.
+  // Inaczej traktujemy jako adres → pan do Nominatim (user potem klika w mapę).
   const searchAddress = async (query) => {
     if (!query?.trim()) return;
+    const c = parseCoords(query);
+    if (c) { placePinAt(c.lat, c.lng); return; }
     setSearching(true);
     await panToAddress(query);
     setSearching(false);
   };
+
+  // Czy aktualny input to współrzędne? — wpływa na etykietę przycisku
+  const inputIsCoords = !!parseCoords(searchQuery);
 
   return (
     <div className="fixed inset-0 flex items-center justify-center p-4" style={{background:"rgba(0,0,0,0.6)", zIndex: 9999}}>
@@ -19792,18 +19821,22 @@ function GeoPickerModal({ initialGeo, address, onSave, onClose }) {
           <div className="flex gap-2">
             <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
               onKeyDown={e => e.key === "Enter" && searchAddress(searchQuery)}
-              placeholder="Szukaj adresu..."
-              className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+              placeholder="Wklej współrzędne (np. 50.027385, 19.942322) lub wpisz adres"
+              className="flex-1 px-3 py-2 rounded-lg border text-sm"
+              style={{borderColor: inputIsCoords ? "#10b981" : "#e5e7eb"}} />
             <button onClick={() => searchAddress(searchQuery)} disabled={searching}
-              className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
-              style={{background: searching ? "#9ca3af" : "#3b82f6"}}>
-              {searching ? "..." : "Szukaj"}
+              className="px-4 py-2 rounded-lg text-sm font-semibold text-white whitespace-nowrap"
+              style={{background: searching ? "#9ca3af" : inputIsCoords ? "#10b981" : "#3b82f6"}}>
+              {searching ? "..." : inputIsCoords ? "📍 Ustaw pinezkę" : "Szukaj"}
             </button>
+          </div>
+          <div className="text-[11px] mt-1 text-gray-400">
+            💡 Tip: w Google Maps kliknij prawym na punkt (Street View znajdzie wjazd) → kopiuj współrzędne → wklej tutaj → "Ustaw pinezkę"
           </div>
           <div className="text-xs mt-1" style={{color: hasPinned ? "#9ca3af" : "#dc2626", fontWeight: hasPinned ? 400 : 600}}>
             {hasPinned
               ? "Możesz przeciągnąć pinezkę lub kliknąć ponownie, aby skorygować."
-              : "⚠️ Kliknij w mapę dokładnie tam, gdzie jest brama wjazdowa / miejsce rozładunku."}
+              : "⚠️ Wklej współrzędne z Google lub kliknij w mapę na dokładne miejsce (np. brama wjazdowa)."}
           </div>
         </div>
         <div ref={mapRef} style={{height: 350, width: "100%"}}></div>
