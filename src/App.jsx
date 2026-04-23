@@ -7368,12 +7368,25 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
 
     // ═══ Helper: zbuduj trasę planowaną (OSRM) ═══
     const buildPlanned = async (f) => {
-      const loadPoints = [f.zaladunekGeo || f.zaladunekAdres || f.zaladunekKod];
-      if (f.zaladunekKod2?.trim()) loadPoints.push(f.zaladunekKod2);
-      if (f.zaladunekKod3?.trim()) loadPoints.push(f.zaladunekKod3);
-      const unloadPoints = [f.rozladunekGeo || f.rozladunekAdres || f.dokod];
-      if (f.dokod2?.trim()) unloadPoints.push(f.dokod2);
-      if (f.dokod3?.trim()) unloadPoints.push(f.dokod3);
+      // Priorytet: geo (parsowany bez Nominatim) → pełny adres "ulica, kod miasto" → compat string
+      const pickBest = (geo, adres, kodPocztowy, miasto, compatKod) => {
+        if (geo && String(geo).trim()) return String(geo).trim();
+        const full = [adres, kodPocztowy, miasto].map(s => (s || "").trim()).filter(Boolean).join(", ");
+        if (full) return full;
+        const compat = (compatKod || "").trim();
+        return compat || null;
+      };
+      const loadPoints = [
+        pickBest(f.zaladunekGeo,  f.zaladunekAdres,  f.zaladunekKodPocztowy,  f.zaladunekMiasto,  f.zaladunekKod),
+        pickBest(f.zaladunekGeo2, f.zaladunekAdres2, f.zaladunekKodPocztowy2, f.zaladunekMiasto2, f.zaladunekKod2),
+      ].filter(Boolean);
+      const unloadPoints = [
+        pickBest(f.rozladunekGeo,  f.rozladunekAdres,  f.dokodPocztowy,  f.dokodMiasto,  f.dokod),
+        pickBest(f.rozladunekGeo2, f.rozladunekAdres2, f.dokodPocztowy2, f.dokodMiasto2, f.dokod2),
+        pickBest(f.rozladunekGeo3, f.rozladunekAdres3, f.dokodPocztowy3, f.dokodMiasto3, f.dokod3),
+        pickBest(f.rozladunekGeo4, f.rozladunekAdres4, f.dokodPocztowy4, f.dokodMiasto4, f.dokod4),
+        pickBest(f.rozladunekGeo5, f.rozladunekAdres5, f.dokodPocztowy5, f.dokodMiasto5, f.dokod5),
+      ].filter(Boolean);
 
       const allPoints = [...loadPoints, ...unloadPoints];
       const geocoded = await Promise.all(allPoints.map(p => geocode(p)));
@@ -7474,6 +7487,7 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
         if (isDone) {
           // ── RZECZYWISTA trasa z Atlas /history ──
           const real = await buildReal(targetFracht);
+          if (!mapInstanceRef.current) return; // user zmienił zakładkę podczas ładowania
           if (real) {
             // Zielona solidna linia = faktyczna trasa
             const polyline = L.polyline(real.coordinates, {
@@ -7514,6 +7528,7 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
           } else {
             // Brak danych historycznych → fallback na planowaną, ale z adnotacją
             const planned = await buildPlanned(targetFracht);
+            if (!mapInstanceRef.current) return;
             if (planned) {
               const polyline = L.polyline(planned.route.coordinates, {
                 color: "#60a5fa", weight: 5, opacity: 0.8, dashArray: "8 5",
@@ -7554,6 +7569,7 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
         } else {
           // ── PLANOWANA trasa (OSRM) dla aktywnych zleceń ──
           const planned = await buildPlanned(targetFracht);
+          if (!mapInstanceRef.current) return;
           if (planned) {
             const polyline = L.polyline(planned.route.coordinates, {
               color: "#3b82f6", weight: 5, opacity: 0.7, dashArray: "10 6",
@@ -7808,9 +7824,11 @@ function GpsKilometrySection({ device, position, showToast }) {
 
 // ── Sekcja: TRASY (historia tras na mapie) ──
 function GpsTrasySection({ device, showToast }) {
-  const [routes, setRoutes] = useState([]);
+  const [points, setPoints] = useState([]); // [{lat,lng,ts}]
+  const [stats, setStats] = useState(null); // { km, durationMin, firstTs, lastTs }
   const [routeLoading, setRouteLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [hasFetched, setHasFetched] = useState(false);
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
 
@@ -7826,25 +7844,76 @@ function GpsTrasySection({ device, showToast }) {
 
   const fetchRoute = async () => {
     setRouteLoading(true);
+    setHasFetched(true);
     try {
-      const d = new Date(selectedDate);
+      const d = new Date(selectedDate + "T00:00:00");
+      const dayStart = d.getTime();
+      const dayEnd = dayStart + 24 * 3600 * 1000;
+      const devId = String(device?.deviceId || device?.id || "");
+
       const gpsProxy = httpsCallable(functions, "gpsProxy");
-      const res = await gpsProxy({ endpoint: "history", params: { year: d.getFullYear(), month: d.getMonth() + 1 } });
-      if (res.data?.success) {
-        setRoutes(res.data.data || []);
-        showToast("Trasy załadowane");
+      const res = await gpsProxy({ endpoint: "history", params: { year: d.getFullYear(), month: d.getMonth() + 1, device: devId } });
+      // Atlas może zwrócić: array bezpośrednio / obiekt z positionList / historyList
+      const payload = res?.data?.data || res?.data || [];
+      const items = Array.isArray(payload) ? payload
+        : Array.isArray(payload?.positionList) ? payload.positionList
+        : Array.isArray(payload?.historyList) ? payload.historyList
+        : [];
+
+      console.log("[GpsTrasy] raw items:", items.length, "first sample:", items[0], "payload keys:", Object.keys(payload || {}));
+
+      const parsed = items
+        .filter(p => {
+          // Filter po deviceId — zagnieżdżone dev.deviceId / device.deviceId / flat deviceId. Brak pola = akceptuj (payload już per-device).
+          const pid = String(p?.dev?.deviceId || p?.device?.deviceId || p?.deviceId || p?.id || "");
+          if (pid && pid !== devId) return false;
+          return true;
+        })
+        .map(p => {
+          const lat = p?.coordinate?.latitude ?? p?.latitude ?? p?.lat;
+          const lng = p?.coordinate?.longitude ?? p?.longitude ?? p?.lng ?? p?.lon;
+          const ts = atlasDateTimeToMs(p?.dateTime || p?.datetime || p?.timestamp || p?.date || p?.time);
+          return { lat, lng, ts };
+        })
+        .filter(p => p.lat && p.lng && p.ts && p.ts >= dayStart && p.ts < dayEnd)
+        .sort((a, b) => a.ts - b.ts);
+
+      if (parsed.length < 2) {
+        setPoints([]);
+        setStats(null);
+        showToast(parsed.length === 0 ? "Brak tras dla tej daty" : "Za mało punktów do narysowania trasy");
+        return;
       }
-    } catch(e) {
-      showToast("Błąd tras: " + (e.message || "").slice(0, 60));
+
+      // Oblicz km (haversine) i czas
+      const toRad = v => v * Math.PI / 180;
+      const haversine = (a, b) => {
+        const R = 6371;
+        const dLat = toRad(b.lat - a.lat);
+        const dLng = toRad(b.lng - a.lng);
+        const s = Math.sin(dLat/2)**2 + Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLng/2)**2;
+        return 2 * R * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+      };
+      let km = 0;
+      for (let i = 1; i < parsed.length; i++) km += haversine(parsed[i - 1], parsed[i]);
+      const durationMin = Math.round((parsed[parsed.length - 1].ts - parsed[0].ts) / 60000);
+
+      setPoints(parsed);
+      setStats({ km, durationMin, firstTs: parsed[0].ts, lastTs: parsed[parsed.length - 1].ts, count: parsed.length });
+      showToast(`Trasa: ${km.toFixed(1)} km, ${parsed.length} punktów`);
+    } catch (e) {
+      console.warn("[GpsTrasy] fetch error:", e);
+      showToast("Błąd tras: " + (e?.message || "").slice(0, 80));
+      setPoints([]);
+      setStats(null);
     }
     setRouteLoading(false);
   };
 
   // Render route on map
   useEffect(() => {
-    if (!mapRef.current || routes.length === 0) return;
-    let L;
-    L = window.L; if (!L) return;
+    if (!mapRef.current) return;
+    const L = window.L; if (!L) return;
 
     if (!mapInstanceRef.current) {
       mapInstanceRef.current = L.map(mapRef.current).setView([52.0, 19.0], 7);
@@ -7853,26 +7922,24 @@ function GpsTrasySection({ device, showToast }) {
       }).addTo(mapInstanceRef.current);
     }
 
-    // Clear previous layers
+    // Clear previous layers (tylko polyline + markers; zostawiamy tile layer)
     mapInstanceRef.current.eachLayer(layer => {
       if (layer instanceof L.Polyline || layer instanceof L.Marker) layer.remove();
     });
 
-    // Try to find route points for selected device
-    const devId = String(device.deviceId || device.id);
-    let points = [];
-    if (Array.isArray(routes)) {
-      points = routes.filter(r => String(r.deviceId || r.id) === devId && (r.latitude || r.lat));
-    }
+    if (points.length < 2) return;
 
-    if (points.length > 0) {
-      const coords = points.map(p => [p.latitude || p.lat, p.longitude || p.lng || p.lon]).filter(c => c[0] && c[1]);
-      if (coords.length > 0) {
-        L.polyline(coords, { color: "#7c3aed", weight: 4, opacity: 0.8 }).addTo(mapInstanceRef.current);
-        mapInstanceRef.current.fitBounds(coords);
-      }
-    }
-  }, [routes, device]);
+    const coords = points.map(p => [p.lat, p.lng]);
+    L.polyline(coords, { color: "#7c3aed", weight: 4, opacity: 0.8 }).addTo(mapInstanceRef.current);
+
+    // Start (zielony) + koniec (czerwony)
+    const startIcon = L.divIcon({ html: `<div style="background:#16a34a;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 2px 6px rgba(0,0,0,0.3);border:2px solid #fff;">▶</div>`, className: "", iconSize: [28, 28], iconAnchor: [14, 14] });
+    const endIcon = L.divIcon({ html: `<div style="background:#dc2626;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 2px 6px rgba(0,0,0,0.3);border:2px solid #fff;">■</div>`, className: "", iconSize: [28, 28], iconAnchor: [14, 14] });
+    L.marker(coords[0], { icon: startIcon }).addTo(mapInstanceRef.current);
+    L.marker(coords[coords.length - 1], { icon: endIcon }).addTo(mapInstanceRef.current);
+
+    mapInstanceRef.current.fitBounds(coords, { padding: [30, 30] });
+  }, [points]);
 
   useEffect(() => {
     return () => {
@@ -7880,21 +7947,37 @@ function GpsTrasySection({ device, showToast }) {
     };
   }, []);
 
+  const fmtHm = (ts) => {
+    const d = new Date(ts);
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  };
+
   return (
     <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+      <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 flex-wrap gap-2">
         <h4 className="text-sm font-semibold text-gray-800">Historia tras</h4>
         <div className="flex gap-2 items-center">
           <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
             className="px-3 py-1.5 rounded-lg border border-gray-200 text-sm" />
           <button onClick={fetchRoute} disabled={routeLoading}
             className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-violet-600 hover:bg-violet-700 disabled:bg-gray-400">
-            {routeLoading ? "..." : "Pokaż trasę"}
+            {routeLoading ? "Ładuję…" : "Pokaż trasę"}
           </button>
         </div>
       </div>
+      {stats && (
+        <div className="px-5 py-2 border-b border-gray-100 flex flex-wrap gap-4 text-xs text-gray-700 bg-gray-50">
+          <span><b>{stats.km.toFixed(1)}</b> km</span>
+          <span>Czas: <b>{Math.floor(stats.durationMin / 60)}h {stats.durationMin % 60}min</b></span>
+          <span>{fmtHm(stats.firstTs)} → {fmtHm(stats.lastTs)}</span>
+          <span className="text-gray-400">{stats.count} punktów</span>
+        </div>
+      )}
       <div ref={mapRef} style={{ height: "450px", width: "100%" }}></div>
-      {routes.length === 0 && (
+      {hasFetched && points.length < 2 && !routeLoading && (
+        <div className="text-center py-6 text-xs text-gray-400">Brak tras dla tej daty — pojazd prawdopodobnie nie jeździł lub Atlas nie odnotował punktów.</div>
+      )}
+      {!hasFetched && (
         <div className="text-center py-6 text-xs text-gray-400">Wybierz datę i kliknij "Pokaż trasę"</div>
       )}
     </div>
