@@ -5475,8 +5475,8 @@ function ChatTab({ currentUser, appUsers = [], vehicles = [], showToast, onActiv
 
       {/* ── CONTEXT MENU (prawy klik / double tap) ── */}
       {contextMenu && (
-        <div className="fixed z-50 rounded-xl shadow-xl py-1 min-w-[180px]" style={{ background: '#fff', border: '1px solid #e2e8f0' }}
-          style={{ top: Math.min(contextMenu.y, window.innerHeight - 280), left: Math.min(contextMenu.x, window.innerWidth - 200) }}>
+        <div className="fixed z-50 rounded-xl shadow-xl py-1 min-w-[180px]"
+          style={{ background: '#fff', border: '1px solid #e2e8f0', top: Math.min(contextMenu.y, window.innerHeight - 280), left: Math.min(contextMenu.x, window.innerWidth - 200) }}>
           {/* Reakcje */}
           <div className="flex gap-1 px-3 py-2 border-b border-gray-100">
             {REACTIONS.map(emoji => (
