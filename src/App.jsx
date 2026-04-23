@@ -10237,37 +10237,6 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     </div>
   );
 
-  // ── Helper: photo step (dodaj zdjęcie z datą + usuwanie) ──
-  const renderPhotoStep = (isDone, label, photoEvent, enabled, photoType) => (
-    <div style={{padding: 12, borderRadius: 12, marginBottom: 8, opacity: enabled ? 1 : 0.4,
-      background: isDone ? "#f0fdf4" : "#f8fafc", border: `1px solid ${isDone ? "#bbf7d0" : "#e5e7eb"}`}}>
-      <div className="flex items-center justify-between">
-        <div style={{flex: 1, minWidth: 0}}>
-          <div style={{fontSize: 13, fontWeight: 600, color: isDone ? "#15803d" : "#374151"}}>
-            {isDone ? "✅" : "📄"} {label}
-          </div>
-          {photoEvent && <div style={{fontSize: 12, color: "#6b7280", marginTop: 2}}>
-            {photoEvent.ts ? new Date(photoEvent.ts).toLocaleString("pl-PL", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "Dodane"}
-            {photoEvent.photoUrl && <span> · <a href={photoEvent.photoUrl} target="_blank" rel="noopener noreferrer" style={{color: "#6366f1", textDecoration: "none"}}>Zobacz</a></span>}
-          </div>}
-        </div>
-        <div className="flex items-center gap-2">
-          {isDone && photoEvent?.id && (
-            <button onClick={() => deleteDriverPhoto(photoEvent.id)}
-              style={{background: "none", border: "none", color: "#d1d5db", fontSize: 14, cursor: "pointer", padding: "4px"}}>✕</button>
-          )}
-          {enabled && !isDone && (
-            <label style={{padding: "8px 16px", borderRadius: 10, border: "none", background: "#6366f1", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4}}>
-              📷 Dodaj
-              <input type="file" accept="image/*" capture="environment" className="hidden"
-                onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto(photoType, file); e.target.value=""; }} />
-            </label>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-
   // ── Detail view (zlecenie) — wg mockupu ──
   if (selectedFracht) {
     const f = selectedFracht;
@@ -10280,9 +10249,9 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     const rozUndo = myEvents.filter(e => e.type === "cofnij_rozladowano").pop();
     const towarPhotos = myEvents.filter(e => e.type === "towar_photo");
     const towarDmgPhotos = myEvents.filter(e => e.type === "towar_damage_photo");
-    const cmrZalPhoto = myEvents.find(e => e.type === "cmr_zaladunek_photo");
-    const cmrRozPhoto = myEvents.find(e => e.type === "cmr_rozladunek_photo");
-    const cmrPhotoLegacy = myEvents.find(e => e.type === "cmr_photo");
+    const cmrZalPhotos = myEvents.filter(e => e.type === "cmr_zaladunek_photo");
+    // cmr_photo = stary format (legacy, sprzed rozbicia na załadunek/rozładunek) — traktujemy jak rozładunek
+    const cmrRozPhotos = myEvents.filter(e => e.type === "cmr_rozladunek_photo" || e.type === "cmr_photo");
     // Nowe statusy
     const dotarcieZalEvent = myEvents.filter(e => e.type === "dotarcie_zaladunek").pop();
     const dotarcieZalUndo = myEvents.filter(e => e.type === "cofnij_dotarcie_zaladunek").pop();
@@ -10299,8 +10268,8 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     // Uwagi kierowcy
     const uwagiZalEvent = myEvents.filter(e => e.type === "uwagi_zaladunek").pop();
     const uwagiRozEvent = myEvents.filter(e => e.type === "uwagi_rozladunek").pop();
-    const hasCmrZal = !!cmrZalPhoto;
-    const hasCmrRoz = !!cmrRozPhoto || !!cmrPhotoLegacy;
+    const hasCmrZal = cmrZalPhotos.length > 0;
+    const hasCmrRoz = cmrRozPhotos.length > 0;
 
     return (
       <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", paddingTop: "env(safe-area-inset-top, 0px)", paddingBottom: 40, zoom: driverZoom === "large" ? 1.2 : 1 }}>
@@ -10487,15 +10456,52 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                 <label style={{display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
                   padding: "10px", borderRadius: 10, border: "1px dashed #d1d5db", background: "#fff",
                   color: "#6b7280", fontSize: 13, fontWeight: 500, cursor: "pointer"}}>
-                  📷 {towarPhotos.length > 0 ? "Dodaj kolejne zdjęcie" : "Dodaj zdjęcie towaru"}
-                  <input type="file" accept="image/*" capture="environment" className="hidden"
-                    onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto("towar", file); e.target.value=""; }} />
+                  📷 {towarPhotos.length > 0 ? "Dodaj kolejne zdjęcie" : "Dodaj zdjęcia towaru"}
+                  <input type="file" accept="image/*" multiple className="hidden"
+                    onChange={async (e) => {
+                      const files = Array.from(e.target.files || []);
+                      for (const file of files) { await uploadDriverPhoto("towar", file); }
+                      e.target.value = "";
+                    }} />
                 </label>
               </div>
             )}
 
-            {/* 3. CMR załadunek */}
-            {hasDotarcieZal && renderPhotoStep(hasCmrZal, "CMR załadunek", cmrZalPhoto, hasDotarcieZal, "cmr_zaladunek")}
+            {/* 3. CMR załadunek — wiele zdjęć, z galerii lub aparatu */}
+            {hasDotarcieZal && (
+              <div style={{padding: 12, borderRadius: 12, marginBottom: 8, background: hasCmrZal ? "#f0fdf4" : "#f8fafc", border: `1px solid ${hasCmrZal ? "#bbf7d0" : "#e5e7eb"}`}}>
+                <div style={{fontSize: 13, fontWeight: 600, color: hasCmrZal ? "#15803d" : "#374151", marginBottom: 8}}>
+                  {hasCmrZal ? "✅" : "📄"} CMR załadunek {cmrZalPhotos.length > 1 && <span style={{fontSize: 11, color: "#6b7280", fontWeight: 400}}>({cmrZalPhotos.length})</span>}
+                </div>
+                {cmrZalPhotos.length > 0 && (
+                  <div style={{display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8}}>
+                    {cmrZalPhotos.map((p, i) => (
+                      <div key={p.id || i} style={{display: "flex", alignItems: "center", gap: 2}}>
+                        <a href={p.photoUrl} target="_blank" rel="noopener noreferrer"
+                          style={{display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8,
+                            background: "#eef2ff", border: "1px solid #c7d2fe", fontSize: 12, color: "#4338ca",
+                            fontWeight: 500, textDecoration: "none"}}>
+                          📄 CMR {i + 1} · {p.ts ? new Date(p.ts).toLocaleString("pl-PL", {hour:"2-digit",minute:"2-digit"}) : ""}
+                        </a>
+                        {p.id && <button onClick={() => deleteDriverPhoto(p.id)}
+                          style={{background: "none", border: "none", color: "#d1d5db", fontSize: 14, cursor: "pointer", padding: "4px"}}>✕</button>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <label style={{display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  padding: "10px", borderRadius: 10, border: "1px dashed #d1d5db", background: "#fff",
+                  color: "#6b7280", fontSize: 13, fontWeight: 500, cursor: "pointer"}}>
+                  📷 {cmrZalPhotos.length > 0 ? "Dodaj kolejne CMR" : "Dodaj CMR załadunek"}
+                  <input type="file" accept="image/*" multiple className="hidden"
+                    onChange={async (e) => {
+                      const files = Array.from(e.target.files || []);
+                      for (const file of files) { await uploadDriverPhoto("cmr_zaladunek", file); }
+                      e.target.value = "";
+                    }} />
+                </label>
+              </div>
+            )}
 
             {/* 4. Uwagi kierowcy — załadunek */}
             {hasDotarcieZal && (
@@ -10570,8 +10576,41 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
               </div>
             )}
 
-            {/* 2. CMR rozładunek */}
-            {hasDotarcieRoz && renderPhotoStep(hasCmrRoz, "CMR rozładunek", cmrRozPhoto || cmrPhotoLegacy, hasDotarcieRoz, "cmr_rozladunek")}
+            {/* 2. CMR rozładunek — wiele zdjęć, z galerii lub aparatu */}
+            {hasDotarcieRoz && (
+              <div style={{padding: 12, borderRadius: 12, marginBottom: 8, background: hasCmrRoz ? "#f0fdf4" : "#f8fafc", border: `1px solid ${hasCmrRoz ? "#bbf7d0" : "#e5e7eb"}`}}>
+                <div style={{fontSize: 13, fontWeight: 600, color: hasCmrRoz ? "#15803d" : "#374151", marginBottom: 8}}>
+                  {hasCmrRoz ? "✅" : "📄"} CMR rozładunek {cmrRozPhotos.length > 1 && <span style={{fontSize: 11, color: "#6b7280", fontWeight: 400}}>({cmrRozPhotos.length})</span>}
+                </div>
+                {cmrRozPhotos.length > 0 && (
+                  <div style={{display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8}}>
+                    {cmrRozPhotos.map((p, i) => (
+                      <div key={p.id || i} style={{display: "flex", alignItems: "center", gap: 2}}>
+                        <a href={p.photoUrl} target="_blank" rel="noopener noreferrer"
+                          style={{display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8,
+                            background: "#eef2ff", border: "1px solid #c7d2fe", fontSize: 12, color: "#4338ca",
+                            fontWeight: 500, textDecoration: "none"}}>
+                          📄 CMR {i + 1} · {p.ts ? new Date(p.ts).toLocaleString("pl-PL", {hour:"2-digit",minute:"2-digit"}) : ""}
+                        </a>
+                        {p.id && <button onClick={() => deleteDriverPhoto(p.id)}
+                          style={{background: "none", border: "none", color: "#d1d5db", fontSize: 14, cursor: "pointer", padding: "4px"}}>✕</button>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <label style={{display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  padding: "10px", borderRadius: 10, border: "1px dashed #d1d5db", background: "#fff",
+                  color: "#6b7280", fontSize: 13, fontWeight: 500, cursor: "pointer"}}>
+                  📷 {cmrRozPhotos.length > 0 ? "Dodaj kolejne CMR" : "Dodaj CMR rozładunek"}
+                  <input type="file" accept="image/*" multiple className="hidden"
+                    onChange={async (e) => {
+                      const files = Array.from(e.target.files || []);
+                      for (const file of files) { await uploadDriverPhoto("cmr_rozladunek", file); }
+                      e.target.value = "";
+                    }} />
+                </label>
+              </div>
+            )}
 
             {/* 3. Uwagi kierowcy — rozładunek */}
             {hasDotarcieRoz && (
@@ -10612,9 +10651,13 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                 <label style={{display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
                   padding: "10px", borderRadius: 10, border: "1px dashed #fecaca", background: "#fff",
                   color: "#9ca3af", fontSize: 13, fontWeight: 500, cursor: "pointer"}}>
-                  📷 Dodaj zdjęcie uszkodzenia
-                  <input type="file" accept="image/*" capture="environment" className="hidden"
-                    onChange={async (e) => { const file = e.target.files?.[0]; if (file) await uploadDriverPhoto("towar_damage", file); e.target.value=""; }} />
+                  📷 {towarDmgPhotos.length > 0 ? "Dodaj kolejne zdjęcie uszkodzenia" : "Dodaj zdjęcia uszkodzenia"}
+                  <input type="file" accept="image/*" multiple className="hidden"
+                    onChange={async (e) => {
+                      const files = Array.from(e.target.files || []);
+                      for (const file of files) { await uploadDriverPhoto("towar_damage", file); }
+                      e.target.value = "";
+                    }} />
                 </label>
               </div>
             )}
