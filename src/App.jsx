@@ -7256,6 +7256,40 @@ async function getRoute(waypoints) {
   return null;
 }
 
+// ── OSRM map-matching — dopasuj surowe punkty GPS do dróg (snap-to-road) ──
+// Zamienia dane z rzadkich punktów breadcrumb (co 1-5 min) w gładką trasę
+// następującą po rzeczywistej sieci drogowej. Input: [{lat,lng,ts}], output:
+// { coordinates: [[lat,lng]...], distance: meters } lub null.
+async function mapMatchRoute(points) {
+  if (!points || points.length < 2) return null;
+  let pts = points;
+  // OSRM match limit 100 koord/request — redukuj przez próbkowanie co Nty
+  if (pts.length > 100) {
+    const step = Math.ceil(pts.length / 100);
+    pts = pts.filter((_, i) => i % step === 0 || i === points.length - 1);
+  }
+  const coords = pts.map(p => `${p.lng},${p.lat}`).join(";");
+  const radiuses = pts.map(() => 50).join(";"); // 50m tolerancja GPS
+  const timestamps = pts.map(p => Math.floor((p.ts || Date.now()) / 1000)).join(";");
+  try {
+    const url = `https://router.project-osrm.org/match/v1/driving/${coords}?overview=full&geometries=geojson&radiuses=${radiuses}&timestamps=${timestamps}`;
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (data?.code === "Ok" && Array.isArray(data.matchings) && data.matchings.length > 0) {
+      const allCoords = [];
+      let totalDist = 0;
+      data.matchings.forEach(m => {
+        if (m.geometry?.coordinates) {
+          allCoords.push(...m.geometry.coordinates.map(c => [c[1], c[0]]));
+        }
+        totalDist += m.distance || 0;
+      });
+      if (allCoords.length > 0) return { coordinates: allCoords, distance: totalDist };
+    }
+  } catch (e) { console.warn("[OSRM match] error:", e?.message); }
+  return null;
+}
+
 function GpsMapSection({ device, position, allPositions, allDevices, frachtyList = [], vehicles = [], selectedFracht = null }) {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
@@ -7900,6 +7934,7 @@ function GpsKilometrySection({ device, position, showToast }) {
 // ── Sekcja: TRASY (historia tras na mapie) ──
 function GpsTrasySection({ device, showToast }) {
   const [points, setPoints] = useState([]); // [{lat,lng,ts}]
+  const [matchedCoords, setMatchedCoords] = useState(null); // [[lat,lng]...] z OSRM map-matching
   const [stats, setStats] = useState(null); // { km, durationMin, firstTs, lastTs }
   const [routeLoading, setRouteLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -8013,6 +8048,24 @@ function GpsTrasySection({ device, showToast }) {
     }
   };
 
+  // ── Map-matching: gdy zmienią się punkty, dopasuj do dróg przez OSRM ──
+  useEffect(() => {
+    if (points.length < 2) { setMatchedCoords(null); return; }
+    let cancelled = false;
+    (async () => {
+      const result = await mapMatchRoute(points);
+      if (cancelled) return;
+      if (result?.coordinates?.length > 1) {
+        setMatchedCoords(result.coordinates);
+        // aktualizuj km stats do tego co OSRM zwrócił (dokładniejsze niż haversine między punktami)
+        setStats(prev => prev ? { ...prev, km: (result.distance || 0) / 1000, matched: true } : prev);
+      } else {
+        setMatchedCoords(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [points]);
+
   // Render route on map
   useEffect(() => {
     if (!mapRef.current) return;
@@ -8032,17 +8085,20 @@ function GpsTrasySection({ device, showToast }) {
 
     if (points.length < 2) return;
 
-    const coords = points.map(p => [p.lat, p.lng]);
-    L.polyline(coords, { color: "#7c3aed", weight: 4, opacity: 0.8 }).addTo(mapInstanceRef.current);
+    // Używamy dopasowanej geometrii z map-matchingu (jeśli gotowa), inaczej surowych punktów
+    const polyCoords = matchedCoords || points.map(p => [p.lat, p.lng]);
+    L.polyline(polyCoords, { color: "#7c3aed", weight: 4, opacity: 0.8 }).addTo(mapInstanceRef.current);
 
-    // Start (zielony) + koniec (czerwony)
+    // Start/koniec na surowych współrzędnych GPS (faktyczna pozycja pojazdu)
+    const startPt = [points[0].lat, points[0].lng];
+    const endPt = [points[points.length - 1].lat, points[points.length - 1].lng];
     const startIcon = L.divIcon({ html: `<div style="background:#16a34a;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 2px 6px rgba(0,0,0,0.3);border:2px solid #fff;">▶</div>`, className: "", iconSize: [28, 28], iconAnchor: [14, 14] });
     const endIcon = L.divIcon({ html: `<div style="background:#dc2626;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 2px 6px rgba(0,0,0,0.3);border:2px solid #fff;">■</div>`, className: "", iconSize: [28, 28], iconAnchor: [14, 14] });
-    L.marker(coords[0], { icon: startIcon }).addTo(mapInstanceRef.current);
-    L.marker(coords[coords.length - 1], { icon: endIcon }).addTo(mapInstanceRef.current);
+    L.marker(startPt, { icon: startIcon }).addTo(mapInstanceRef.current);
+    L.marker(endPt, { icon: endIcon }).addTo(mapInstanceRef.current);
 
-    mapInstanceRef.current.fitBounds(coords, { padding: [30, 30] });
-  }, [points]);
+    mapInstanceRef.current.fitBounds(polyCoords, { padding: [30, 30] });
+  }, [points, matchedCoords]);
 
   useEffect(() => {
     return () => {

@@ -524,7 +524,7 @@ function atlasDateTimeToMsBackend(dt) {
 }
 
 exports.scheduledGpsPoll = onSchedule(
-  { schedule: "*/5 * * * *", timeZone: "Europe/Warsaw", region: "europe-west1", timeoutSeconds: 120 },
+  { schedule: "*/2 * * * *", timeZone: "Europe/Warsaw", region: "europe-west1", timeoutSeconds: 120 },
   async () => {
     const db = getFirestore();
     const startMs = Date.now();
