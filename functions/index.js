@@ -496,6 +496,38 @@ exports.sendFleetEmail20 = onSchedule(
   async () => { await sendFleetStatusEmail(); }
 );
 
+// ═══════════════════════════════════════════════════════════════
+// CLEANUP GPS BREADCRUMBS — kasuje punkty starsze niż 7 dni
+// Raz dziennie o 2:30 CET. Chroni przed niekontrolowanym wzrostem storage.
+// ═══════════════════════════════════════════════════════════════
+exports.cleanupBreadcrumbs = onSchedule(
+  { schedule: "30 2 * * *", timeZone: "Europe/Warsaw", region: "europe-west1" },
+  async () => {
+    const db = getFirestore();
+    const cutoffMs = Date.now() - 7 * 24 * 3600 * 1000;
+    let totalDeleted = 0;
+    try {
+      const vehicleDocs = await db.collection("gpsBreadcrumbs").listDocuments();
+      for (const vehRef of vehicleDocs) {
+        const snap = await vehRef.collection("points").where("ts", "<", cutoffMs).get();
+        if (snap.empty) continue;
+        // Firestore batch limit 500 operacji — tnij na chunki
+        const docs = snap.docs;
+        for (let i = 0; i < docs.length; i += 500) {
+          const batch = db.batch();
+          docs.slice(i, i + 500).forEach(d => batch.delete(d.ref));
+          await batch.commit();
+        }
+        totalDeleted += docs.length;
+        console.log(`cleanupBreadcrumbs: vehicle ${vehRef.id} — skasowano ${docs.length}`);
+      }
+      console.log(`cleanupBreadcrumbs: łącznie skasowano ${totalDeleted} punktów starszych niż 7 dni`);
+    } catch (e) {
+      console.error("cleanupBreadcrumbs error:", e);
+    }
+  }
+);
+
 // CALLABLE: ręczna wysyłka testowa (admin)
 exports.sendFleetEmailNow = onCall(
   { region: "europe-west1" },

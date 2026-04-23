@@ -224,6 +224,39 @@ service cloud.firestore {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // DRIVER ACTIVITIES — segmenty czasu pracy kierowcy
+    // Auto-detection z GPS, ręczne wpisy kierowcy, DDD. Każdy zalogowany
+    // tworzy/czyta (kierowca sam sobie); admin/dyspozytor edytuje.
+    // ═══════════════════════════════════════════════════════════════
+    match /driverActivities/{docId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update: if canEdit() || (isAuth() && resource.data.driverEmail == request.auth.token.email);
+      allow delete: if canEdit();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // DDD FILES — pliki tachografu uploadowane przez admin/kierowcę
+    // ═══════════════════════════════════════════════════════════════
+    match /dddFiles/{docId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update, delete: if canEdit();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // GPS BREADCRUMBS — ślad GPS pojazdu (live trail)
+    // Zapisywane co ~60s z fetchGpsData. Admin/dyspozytor write,
+    // każdy zalogowany może czytać (w przyszłości tracker klienta
+    // będzie czytał przez Cloud Function + token).
+    // ═══════════════════════════════════════════════════════════════
+    match /gpsBreadcrumbs/{vehicleId}/points/{pointId} {
+      allow read: if isAuth();
+      allow create, update: if canEdit();
+      allow delete: if canEdit();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // DOMYŚLNA REGUŁA — blokuj wszystko inne
     // ═══════════════════════════════════════════════════════════════
     match /{document=**} {

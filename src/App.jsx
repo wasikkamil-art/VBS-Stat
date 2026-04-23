@@ -5,7 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 // ─── FIREBASE CONFIG ────────────────────────────────────────────────────────
 // 👇 WKLEJ TUTAJ SWÓJ firebaseConfig z Firebase Console
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, orderBy, arrayUnion, serverTimestamp, writeBatch, limit as firestoreLimit } from "firebase/firestore";
+import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, where, orderBy, arrayUnion, serverTimestamp, writeBatch, limit as firestoreLimit } from "firebase/firestore";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, browserLocalPersistence, setPersistence } from "firebase/auth";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
@@ -6614,6 +6614,35 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
   // Wybrane zlecenie z listy pod mapą — nadpisuje domyślny "aktywny fracht"
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const refreshRef = useRef(null);
+  // Throttle zapisu breadcrumbów: { [vehicleId]: lastWriteMs }. Max 1 zapis / 60s / pojazd.
+  const breadcrumbThrottleRef = useRef({});
+
+  // ── Zapis GPS breadcrumb do Firestore (live trail + przyszły tracker) ──
+  const writeBreadcrumbs = (mappedDevices, positions) => {
+    const now = Date.now();
+    const devToVehicle = {};
+    mappedDevices.forEach(dev => {
+      if (dev.fleetVehicle?.id) {
+        devToVehicle[String(dev.deviceId || dev.id)] = dev.fleetVehicle.id;
+      }
+    });
+    positions.forEach(pos => {
+      const pid = String(pos.deviceId || pos.id || pos?.dev?.deviceId || "");
+      const vehicleId = devToVehicle[pid];
+      if (!vehicleId) return;
+      const lastTs = breadcrumbThrottleRef.current[vehicleId] || 0;
+      if (now - lastTs < 60000) return; // throttle 60s per pojazd
+      const lat = pos?.coordinate?.latitude ?? pos.latitude ?? pos.lat;
+      const lng = pos?.coordinate?.longitude ?? pos.longitude ?? pos.lng;
+      if (typeof lat !== "number" || typeof lng !== "number") return;
+      const atlasTs = atlasDateTimeToMs(pos.dateTime) || now;
+      breadcrumbThrottleRef.current[vehicleId] = now;
+      setDoc(
+        doc(db, "gpsBreadcrumbs", vehicleId, "points", String(atlasTs)),
+        { lat, lng, ts: atlasTs, speed: Number(pos.speed) || 0, mileage: pos?.can?.mileage?.value ?? null }
+      ).catch(e => console.warn("[Breadcrumb] write error:", e?.message));
+    });
+  };
 
   // ── Fetch devices + positions on mount ──
   const fetchGpsData = async (showLoader) => {
@@ -6630,21 +6659,25 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
       const positionList = posRes.data?.data?.positionList || posRes.data?.data || [];
       const devArray = Array.isArray(deviceList) ? deviceList : [];
       const posArray = Array.isArray(positionList) ? positionList : [];
-      if (devRes.data?.success && devArray.length > 0) {
-        // Map GPS devices to fleet vehicles by plate
-        const mapped = devArray.map(dev => {
-          const devPlate = (dev.plate || dev.deviceName || dev.name || "").replace(/\s+/g, "").toUpperCase();
-          const fleetVeh = vehicles.find(v => {
-            const fp = (v.plate || "").replace(/\s+/g, "").toUpperCase();
-            return fp && (fp === devPlate || devPlate.includes(fp) || fp.includes(devPlate));
-          });
-          return { ...dev, fleetVehicle: fleetVeh || null, normalizedPlate: devPlate };
+
+      // Wspólne mapowanie device → fleetVehicle — używane przez setGpsDevices ORAZ breadcrumb
+      const mapped = devArray.map(dev => {
+        const devPlate = (dev.plate || dev.deviceName || dev.name || "").replace(/\s+/g, "").toUpperCase();
+        const fleetVeh = vehicles.find(v => {
+          const fp = (v.plate || "").replace(/\s+/g, "").toUpperCase();
+          return fp && (fp === devPlate || devPlate.includes(fp) || fp.includes(devPlate));
         });
+        return { ...dev, fleetVehicle: fleetVeh || null, normalizedPlate: devPlate };
+      });
+
+      if (devRes.data?.success && mapped.length > 0) {
         setGpsDevices(mapped);
         if (!selectedDevice && mapped.length > 0) setSelectedDevice(mapped[0].deviceId || mapped[0].id);
       }
       if (posRes.data?.success && posArray.length > 0) {
         setGpsPositions(posArray);
+        // Zapis breadcrumba co ~60s per pojazd (throttle inside)
+        writeBreadcrumbs(mapped, posArray);
       }
     } catch(e) {
       console.error("[GPS] Error:", e);
@@ -7224,11 +7257,13 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
   const mapInstanceRef = useRef(null);
   const markersRef = useRef([]);
   const routeLayerRef = useRef(null);
+  const breadcrumbLayerRef = useRef(null); // ślad GPS (niebieska linia, live trail)
   const initialViewSetRef = useRef(false);
   const lastSelectedDevRef = useRef(null);
   const lastRouteKeyRef = useRef(null); // cache key: "<frachtId>_<planned|real>"
   const [routeInfo, setRouteInfo] = useState(null);
   const [routeLoading, setRouteLoading] = useState(false);
+  const [breadcrumbPoints, setBreadcrumbPoints] = useState([]); // [{lat,lng,ts,speed}]
 
   useEffect(() => {
     // Dynamically load Leaflet CSS
@@ -7635,6 +7670,42 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
     };
   }, []);
 
+  // ── Subscribe to GPS breadcrumb (live trail) dla wybranego pojazdu, ostatnie 24h ──
+  useEffect(() => {
+    const vehicleId = device?.fleetVehicle?.id;
+    if (!vehicleId) { setBreadcrumbPoints([]); return; }
+    const since = Date.now() - 24 * 3600 * 1000;
+    const q = query(
+      collection(db, "gpsBreadcrumbs", vehicleId, "points"),
+      where("ts", ">=", since),
+      orderBy("ts", "asc")
+    );
+    const unsub = onSnapshot(q,
+      snap => {
+        const pts = snap.docs.map(d => d.data()).filter(d => d?.lat && d?.lng);
+        setBreadcrumbPoints(pts);
+      },
+      err => console.warn("[Breadcrumb] subscribe error:", err?.message)
+    );
+    return () => unsub();
+  }, [device?.fleetVehicle?.id]);
+
+  // ── Render breadcrumb polyline na mapie ──
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+    const L = window.L; if (!L) return;
+    // Wyczyść poprzedni
+    if (breadcrumbLayerRef.current) {
+      breadcrumbLayerRef.current.remove();
+      breadcrumbLayerRef.current = null;
+    }
+    if (breadcrumbPoints.length < 2) return;
+    const coords = breadcrumbPoints.map(p => [p.lat, p.lng]);
+    breadcrumbLayerRef.current = L.polyline(coords, {
+      color: "#0ea5e9", weight: 3, opacity: 0.65,
+    }).addTo(mapInstanceRef.current);
+  }, [breadcrumbPoints]);
+
   return (
     <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
       <div ref={mapRef} style={{ height: "500px", width: "100%" }}></div>
@@ -7912,8 +7983,9 @@ function GpsTrasySection({ device, showToast }) {
       showToast("Błąd tras: " + (e?.message || "").slice(0, 80));
       setPoints([]);
       setStats(null);
+    } finally {
+      setRouteLoading(false);
     }
-    setRouteLoading(false);
   };
 
   // Render route on map
