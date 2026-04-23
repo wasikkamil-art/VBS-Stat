@@ -2,7 +2,7 @@
 
 > Dokument do przeniesienia do nowego chatu. Zawiera pełny kontekst: architektura, pliki, API, konwencje, co zrobiono, co w planie.
 
-*Ostatnia aktualizacja: 2026-04-21*
+*Ostatnia aktualizacja: 2026-04-23*
 
 ---
 
@@ -14,6 +14,8 @@
 2. **GPS/Monitoring — rozbudowa** — klikalna lista zleceń pod mapą, rzeczywista trasa z Atlas `/history` dla zakończonych zleceń (zielona linia), planowana z OSRM dla aktywnych (niebieska przerywana).
 3. **Moduł Czas pracy kierowcy MVP** — pełny dashboard compliance zgodny z rozp. 561/2006 + Pakiet Mobilności. Auto-detection z GPS (prędkość → jazda/odpoczynek) + ręczne kliknięcia kierowcy (4 typy aktywności). Plan do przodu (kiedy przerwa, koniec dnia, odpoczynek 11h/45h, 28-dniowy powrót do bazy).
 4. **Parser DDD** — Cloud Function `parseDddFile` z `readesm-js`. Upload plików `.ddd` przez admina (GPS/Monitoring → Pliki DDD) lub kierowcę (mobile, Czas pracy → dół ekranu). Sparsowane aktywności nadpisują GPS w compliance (priorytet dowodowy).
+5. **WhatsApp Business Cloud API** — Cloud Functions `sendWhatsappMessage` (onCall) i `whatsappWebhook` (onRequest) wdrożone na produkcję. Dane uwierzytelniające w Firebase Secrets. Przycisk "Wyślij na WhatsApp" w FrachtyModal. Czeka na zatwierdzenie szablonu `zlecenia_przydzielone` przez Meta.
+6. **FrachtyModal v2** — pełny redesign formularza zlecenia: karty Z1/Z2 (załadunek) i R1–R5 (rozładunek) każda z osobnymi polami kod pocztowy + miasto + adres + geo + telefon + data + godzina. Nowa sekcja Zleceniodawca (firma, osoba, telefon, email — do wysyłki trackera). Backward compat przez `splitKM()`. AI prompt zaktualizowany.
 
 **Integracja z widziszwszystko.eu**:
 - Atlas API (oficjalne, udokumentowane) — używamy: pozycje GPS, CAN details, history. Działa.
@@ -22,10 +24,10 @@
 - **Dla 1/6 pojazdów (WGM 0475M)** już jest zainstalowany moduł do zdalnego odczytu DDD. Pozostałe 5 — sprzęt opłacony, czeka na instalację.
 
 **Co dalej (priorytety)**:
+- **WhatsApp — dokończenie**: ustawić Firebase Secrets (`firebase functions:secrets:set WHATSAPP_TOKEN` itp.) → skonfigurować webhook URL w Meta Dev Console → po zatwierdzeniu szablonu testować wysyłkę
 - **Moduł Czas pracy — iteracja 2**: kompensaty za skrócone odpoczynki, alerty w banerze, timeline 7-dniowy, push notifications
-- **Parser DDD — test end-to-end**: za ~28 dni gdy pierwszy plik DDD dla WGM 0475M pojawi się w panelu widziszwszystko
-- **Code splitting**: App.jsx = 1.77 MB (gzip 441 KB) — dla mobile mocno
-- **Integracja chat ↔ WhatsApp** (pomysł) — model Slickshift: dyspozytor pisze u nas, kierowca dostaje na WhatsApp. Szczegóły w sekcji 14.E.
+- **Parser DDD — test end-to-end**: ~28 dni gdy pierwszy plik DDD dla WGM 0475M pojawi się w panelu widziszwszystko
+- **Code splitting**: App.jsx = 1.81 MB (gzip ~450 KB) — dla mobile mocno
 
 ---
 
@@ -78,6 +80,8 @@
 
 ## 3. Cloud Functions (functions/index.js)
 
+Plik: `functions/index.js` (~1220 linii). Używa Firebase Secrets (`defineSecret` z `firebase-functions/params`).
+
 | Funkcja | Typ | Opis |
 |---------|-----|------|
 | `onRoleChange` | onDocumentWritten | Synchronizacja roli użytkownika do custom claims |
@@ -89,6 +93,37 @@
 | `gpsProxy` | onCall | Proxy do Atlas API (widziszwszystko.eu) |
 | `setGpsConfig` | onCall | Zapis konfiguracji GPS (klucz API) |
 | **`parseDddFile`** | **onCall** | **Parser plików DDD — `readesm-js.convertToJson()` + zapis do `driverActivities`** |
+| **`sendWhatsappMessage`** | **onCall** | **Wysyłka wiadomości WhatsApp do kierowcy. Input: `{driverUid, type, content, frachtId}`. Typy: text/location/template. Zapisuje do `chatRooms/whatsapp_{driverUid}/messages`.** |
+| **`whatsappWebhook`** | **onRequest** | **Publiczny webhook Meta (GET = verify, POST = events). HMAC X-Hub-Signature-256. Odbiera wiadomości/statusy od kierowców, dedup po wamid, zapis do chatRooms.** |
+
+### Firebase Secrets (WhatsApp)
+Zdefiniowane przez `defineSecret()` w functions/index.js:
+```
+WHATSAPP_TOKEN       — stały token dostępu do WhatsApp Business Cloud API
+WHATSAPP_PHONE_ID    — Phone Number ID: 1056038134263202
+WHATSAPP_APP_SECRET  — App Secret (do weryfikacji HMAC webhook)
+WHATSAPP_VERIFY_TOKEN — dowolny string verify token (ustawiony przez nas)
+```
+**⚠️ WAŻNE**: Secrety muszą być ustawione przez CLI zanim functions będą działać:
+```bash
+firebase functions:secrets:set WHATSAPP_TOKEN
+firebase functions:secrets:set WHATSAPP_PHONE_ID
+firebase functions:secrets:set WHATSAPP_APP_SECRET
+firebase functions:secrets:set WHATSAPP_VERIFY_TOKEN
+firebase deploy --only functions:sendWhatsappMessage,functions:whatsappWebhook
+```
+Numer kierowcy: `+48792096709` (numer firmowy FleetStat do WhatsApp Business).
+API version: `v25.0` (Meta Graph API).
+
+### Stałe WhatsApp w functions/index.js
+```javascript
+const WA_API_VERSION = "v25.0";
+const WA_ROOM_PREFIX = "whatsapp_";  // prefix dla chatRooms
+```
+
+### Helpery WhatsApp w functions/index.js
+- `callWhatsappApi(phoneId, token, payload)` — POST do Meta Graph API z error logging
+- `ensureWhatsappRoom(driverUid, driverData)` — tworzy doc chatRooms jeśli nie istnieje
 
 ## 4. Struktura App.jsx — główne komponenty
 
@@ -151,9 +186,11 @@ Numery linii są PRZYBLIŻONE (plik rośnie, używaj Grep zamiast twardych numer
 ~16280  FrachtyTab ← przekazuje driverEvents i fuelEntries do Trip Summary
 ~16800  FrachtyImportModal
 ~17040  FVEditModal
-~17100  ZlecenieUploadBtn
+~17100  ZlecenieUploadBtn ← AI parsing prompt zwraca split pola + dane zleceniodawcy
 ~17195  GeoPickerModal
-~17295  FrachtyModal ← z TripSummaryPanel gdy statusRozladunku === "rozladowano"
+~17295  FrachtyModal v2 ← redesign Z1/Z2/R1-R5, Zleceniodawca, splitKM, TripSummaryPanel, WhatsApp preview
+~19xxx  WhatsappSendPreviewModal ← podgląd wiadomości WA przed wysyłką
+~19xxx  formatOrderForWhatsapp ← helper formatujący zlecenie do tekstu WA
 ```
 
 ## 5. GPS / Mapa — szczegóły techniczne
@@ -211,26 +248,61 @@ Zauważony przy analizie Network tab ich panelu. **Nieudokumentowany, bez oficja
 
 ```javascript
 {
-  id, vehicleId, klient,
-  dataZlecenia, dataZaladunku, dataRozladunku,
-  godzZaladunku, godzRozladunku,
-  // Punkty załadunku (do 3):
-  zaladunekKod, zaladunekKod2, zaladunekKod3,
+  id, vehicleId, klient, dyspozytor,
+  dataZlecenia, skad, urlZlecenie,
+  // ── ZAŁADUNEK Z1 ──
+  zaladunekKodPocztowy, zaladunekMiasto,
+  zaladunekKod,       // compat: auto = zaladunekKodPocztowy + " " + zaladunekMiasto
   zaladunekAdres, zaladunekGeo, zaladunekTelefon,
-  // Punkty rozładunku (do 3):
-  dokod, dokod2, dokod3,
+  dataZaladunku, godzZaladunku,
+  // ── ZAŁADUNEK Z2 ──
+  zaladunekKodPocztowy2, zaladunekMiasto2,
+  zaladunekKod2,      // compat
+  zaladunekAdres2, zaladunekGeo2, zaladunekTelefon2,
+  dataZaladunku2, godzZaladunku2,
+  // ── ROZŁADUNEK R1 ──
+  dokodPocztowy, dokodMiasto,
+  dokod,              // compat: auto = dokodPocztowy + " " + dokodMiasto
   rozladunekAdres, rozladunekGeo, rozladunekTelefon,
-  // Status:
-  statusRozladunku,   // "rozladowano" = zakończony, inne = aktywny
-  // Dane finansowe/logistyczne:
+  dataRozladunku, godzRozladunku,
+  // ── ROZŁADUNEK R2 ──
+  dokodPocztowy2, dokodMiasto2, dokod2,
+  rozladunekAdres2, rozladunekGeo2, rozladunekTelefon2,
+  dataRozladunku2, godzRozladunku2,
+  // ── ROZŁADUNEK R3 ──
+  dokodPocztowy3, dokodMiasto3, dokod3,
+  rozladunekAdres3, rozladunekGeo3, rozladunekTelefon3,
+  dataRozladunku3, godzRozladunku3,
+  // ── ROZŁADUNEK R4 ──
+  dokodPocztowy4, dokodMiasto4, dokod4,
+  rozladunekAdres4, rozladunekGeo4, rozladunekTelefon4,
+  dataRozladunku4, godzRozladunku4,
+  // ── ROZŁADUNEK R5 ──
+  dokodPocztowy5, dokodMiasto5, dokod5,
+  rozladunekAdres5, rozladunekGeo5, rozladunekTelefon5,
+  dataRozladunku5, godzRozladunku5,
+  // ── ZLECENIODAWCA (NOWE) ──
+  zleceniodawcaFirma, zleceniodawcaOsoba,
+  zleceniodawcaTelefon, zleceniodawcaEmail,
+  // ── TOWAR ──
+  nrRef, nrZlecenia, towarOpis, towarIloscPalet, towarPalety,
+  zaladunekTyp, wagaLadunku, uwagi,
+  // ── FINANSE / BIURO ──
   cenaEur, kmPodjazd, kmLadowne, kmWszystkie,
-  wagaLadunku, nrRef, nrZlecenia, nrFV,
-  // NOWE dla Trip Summary:
+  nrFV, dataWyslania, terminPlatnosci,
+  // ── STATUS ──
+  statusRozladunku,   // "rozladowano" = zakończony, inne = aktywny
+  // ── TRIP SUMMARY ──
   kmStart,  // auto-capture z CAN przy evencie start_rozladunek
   kmEnd,    // auto-capture z CAN przy evencie dotarcie_rozladunek
-  urlZlecenie,
 }
 ```
+
+### Backward compat (splitKM)
+Stare rekordy mają `zaladunekKod = "PL 44-100 Gliwice"` (połączony string). FrachtyModal przy otwarciu wywołuje `splitKM(s)` który rozbija na `[kodPocztowy, miasto]`. Pola compat (`zaladunekKod`, `dokod`, `dokod2`, `dokod3`) są auto-synchronizowane przez `set()` przy każdej zmianie pól split.
+
+### Adresy w innych miejscach (FrachtyTab, mapy itp.)
+Większość miejsc w kodzie czyta `zaladunekKod` / `dokod` (compat). Geo-picking przekazuje teraz pełny adres: `${adres}, ${kodPocztowy} ${miasto}` do Nominatim — lepsza precyzja.
 
 **Priorytet geokodowania**: geo (najdokładniejsze) → adres → kod pocztowy
 
@@ -489,7 +561,7 @@ Firebase Storage → Cloud Function parseDddFile → readesm-js
 driverActivities (z source="ddd", priorytet nad GPS)
 ```
 
-## 13. Co zostało zrobione (chronologicznie — 2026-04-21)
+## 13. Co zostało zrobione (chronologicznie)
 
 1. ✅ Rozszerzenie dokumentów o ubezpieczenia i umowy (DOC_TYPES, coverage, contract)
 2. ✅ AI prompt w BulkUploadModal — auto-match nowych pól
@@ -510,65 +582,93 @@ driverActivities (z source="ddd", priorytet nad GPS)
 17. ✅ **Parser DDD end-to-end** — Cloud Function parseDddFile z readesm-js, UI uploadu dla admina i kierowcy, priorytet DDD nad GPS w compliance
 18. ✅ Cleanup diagnostyki Atlas API (etyka — nie scrapujemy ich rest-api bez zgody)
 19. ✅ `.gitignore` rozszerzony o `dist-*/`
+20. ✅ **FrachtyModal — fix prod**: pola dla 2. rozładunku (adres, geo, telefon, data, godz) — były niewidoczne
+21. ✅ **WhatsApp Business Cloud API** — Cloud Functions `sendWhatsappMessage` + `whatsappWebhook` wdrożone (firebase deploy). Dane uwierzytelniające jako Firebase Secrets. API v25.0. HMAC X-Hub-Signature-256 na webhook.
+22. ✅ **Meta template `zlecenia_przydzielone`** — Polski, kategoria Utility, 3 parametry (kierowca, opis, data). Statusowo "W trakcie sprawdzania" przez Meta.
+23. ✅ **WhatsappSendPreviewModal + formatOrderForWhatsapp** — podgląd wiadomości przed wysyłką, przycisk w FrachtyModal gdy kierowca ma numer WA
+24. ✅ **FrachtyModal v2 — pełny redesign** (2026-04-23):
+    - Karta Z1 + opcjonalna Z2 (załadunek): osobne pola kod pocztowy, miasto, adres, geo, telefon, data, godzina
+    - Karty R1–R5 (rozładunek): identyczna struktura, progressive disclosure (＋ dodaj)
+    - Sekcja **Zleceniodawca**: firma, osoba kontaktowa, telefon, email (do trackera)
+    - `splitKM()` — backward compat: rozbija stare `"PL 44-100 Gliwice"` → `["PL 44-100", "Gliwice"]`
+    - `set()` auto-synchronizuje compat pola `zaladunekKod` / `dokod` z pól split
+    - Geo picker: adres = `"${adres}, ${kodPocztowy} ${miasto}"` — lepsza precyzja Nominatim
+    - AI PDF parsing prompt zaktualizowany — zwraca split pola + dane zleceniodawcy
 
 ## 14. Co w planie (NASTĘPNE ZADANIA)
 
-### A. Moduł Czas pracy — iteracja 2
-- **Kompensaty** — auto-wykrywanie skróconych odpoczynków (9h zamiast 11h, 24h zamiast 45h) + deadline nadrobienia (np. do najbliższego regularnego odpoczynku)
-- **Alerty w banerze** — gdy kierowca < 30 min do wymagalnej przerwy, czerwony banner w panelu mobile i w panelu admina
+### A. WhatsApp — dokończenie (PRIORYTET)
+Stan: Cloud Functions wdrożone, `WhatsappSendPreviewModal` w UI, template `zlecenia_przydzielone` złożony do Meta.
+
+**Do zrobienia**:
+1. Ustawić Firebase Secrets (wymagane do działania functions):
+   ```bash
+   firebase functions:secrets:set WHATSAPP_TOKEN      # stały token z Meta
+   firebase functions:secrets:set WHATSAPP_PHONE_ID   # 1056038134263202
+   firebase functions:secrets:set WHATSAPP_APP_SECRET # z Meta App → App Secret
+   firebase functions:secrets:set WHATSAPP_VERIFY_TOKEN # dowolny string
+   firebase deploy --only functions:sendWhatsappMessage,functions:whatsappWebhook
+   ```
+2. Skonfigurować **Webhook URL w Meta Developer Console**:
+   - URL: `https://europe-west1-vbs-stats.cloudfunctions.net/whatsappWebhook`
+   - Verify token: ten sam co WHATSAPP_VERIFY_TOKEN
+   - Subskrybować: `messages`, `message_deliveries`, `message_reads`
+3. Poczekać na zatwierdzenie template `zlecenia_przydzielone` przez Meta (24-48h)
+4. Przetestować wysyłkę: FrachtyModal → "Wyślij na WhatsApp" (dostępne gdy `record.id` istnieje i kierowca ma `whatsappNumber`)
+
+**Numer firmowy**: `+48792096709` (numer FleetStat przypisany do WhatsApp Business Cloud API).
+
+**Template `zlecenia_przydzielone`** (Utility, PL):
+```
+Zlecenie przydzielone - {{1}}
+Trasa: {{2}}
+Data zaladunku: {{3}}
+Szczegoly w aplikacji FleetStat.
+```
+
+**Schema wiadomości w `chatRooms/whatsapp_{driverUid}/messages`**:
+```javascript
+{
+  id, text, sender: "dispatcher"|"driver",
+  ts: ISO, channel: "whatsapp",
+  wamid?: string,      // Meta message ID (do dedup)
+  status?: "sent"|"delivered"|"read"|"failed",
+  type: "text"|"location"|"template"|"media"|"other",
+}
+```
+
+### B. Moduł Czas pracy — iteracja 2
+- **Kompensaty** — auto-wykrywanie skróconych odpoczynków (9h zamiast 11h, 24h zamiast 45h) + deadline nadrobienia
+- **Alerty w banerze** — gdy kierowca < 30 min do wymagalnej przerwy, czerwony banner w panelu mobile i admina
 - **Timeline 7-dniowy** — kolorowe paski 24h per dzień (z zatwierdzonego mockupu `preview-czas-pracy.html`)
 - **Push notifications** — Cloud Function wysyła FCM 30 min przed obligatoryjną przerwą
 
-### B. Parser DDD — dopracowanie
+### C. Parser DDD — dopracowanie
 - Test end-to-end na pierwszym prawdziwym pliku z WGM 0475M (za ~28 dni)
 - Dostosowanie heurystyk `findBlock()` do struktury jaką zwraca `readesm-js` dla prawdziwego DDD
 - Obsługa Smart Tachograph Gen2v2 jeśli stara biblioteka nie obsłuży
 
-### C. Porównanie trasy planowanej vs rzeczywistej (visual)
-- Nałożenie obu tras na mapie (planowana + historia Atlas) — już częściowo jest (przełączanie), ale chcemy OBOK siebie
-- Wykrywanie odchyleń od trasy (zjazd, objazd)
+### D. Tracker dla zleceniodawcy
+- Dane zleceniodawcy są już w modelu frachtu (`zleceniodawcaFirma`, `zleceniodawcaEmail` itp.)
+- Potrzebna: publiczna strona trackera (bez logowania) z pozycją pojazdu na mapie
+- Wysyłka linku na email/WhatsApp zleceniodawcy
 
-### D. Z roadmapy ZASADY-VBS-STAT.md
-- SendGrid na Cloud Functions
-- **Code splitting App.jsx** — bundle 1.77 MB, dla mobile za duży
+### E. Z roadmapy ZASADY-VBS-STAT.md
+- **Code splitting App.jsx** — bundle 1.81 MB (gzip ~450 KB), dla mobile za duże
 - Rate limiting na /api/claude
 - Weryfikacja kosztów sty–maj 2025 (netto/brutto)
 - Migracja Firestore Timestamp w czatach (fix chronologii wiadomości)
 
-### E. Integracja czatu z WhatsApp (pomysł — model Slickshift)
-**Cel**: Dyspozytor pisze w FleetStat chat → kierowca dostaje wiadomość na WhatsApp; odpowiedź kierowcy z WhatsApp wraca do FleetStat chat. Identyczny model jak obecnie używany Slickshift.
-
-**Stack**: WhatsApp Business Cloud API (Meta, oficjalne) — bezpośrednio lub przez BSP (Twilio/360dialog).
-
-**Architektura**:
-- Cloud Function `whatsappWebhook` (HTTPS, publiczna) — odbiera wiadomości od Meta, mapuje `from` (numer telefonu) → kierowca (`users` / `vehicles.driverHistory`) → zapis do odpowiedniego `chatRooms`
-- Cloud Function `sendWhatsappMessage` (onCall) — dyspozytor wysyła wiadomość → CF woła Meta Graph API → dostarczenie na telefon kierowcy
-- Rozszerzenie schematu wiadomości w `chatRooms` o `channel: "whatsapp" | "app"` + `deliveryStatus`
-- Templatki do wiadomości inicjujących (np. "Nowe zlecenie #{{1}}, załadunek {{2}} o {{3}}") — wymaga aprobaty Meta
-
-**Koszty** (dla floty 6 pojazdów):
-- Cloud API: 1000 service conversations/mies darmo, potem ~0,02 EUR/rozmowa → praktycznie 0
-- Twilio (jeśli wybierzemy): +~0,005 USD/msg + opłaty Meta — droższe ale prostszy setup
-
-**Blokery/setup** (główny tradeoff — to nie jest "1 dzień pracy"):
-- Weryfikacja Meta Business Account (dni–tygodnie)
-- Aprobata templatek (każda nowa templatka osobno, zwykle 24-48h)
-- Numer telefonu firmy dedykowany do Cloud API — **po podpięciu przestaje działać w zwykłym WhatsApp Business App** (decyzja: nowy numer czy port obecnego?)
-- 24h "service window" — po odpowiedzi kierowcy masz 24h na wolne wiadomości, potem znów templatka
-
-**Decyzje do podjęcia przed startem**:
-1. Cloud API bezpośrednio czy przez Twilio/BSP?
-2. Który numer firmowy przeznaczyć?
-3. Lista template'ów (nowe zlecenie, zmiana godziny, pytanie dyspozytora, potwierdzenie rozładunku...)
-
 ## 15. Znane problemy / uwagi
 
-- **Duplicate "style" attribute** warning w JSX (linia ~5270) — kontekst menu czatu ma dwa atrybuty `style`. Nie blokuje builda.
-- **Chunk size warning** — `index-*.js` = 1.77 MB (gzip 441 KB). Dla mobile trochę dużo — iteracja na code splitting w planach.
+- **Duplicate "style" attribute** warning w JSX (linia ~5479) — kontekst menu czatu ma dwa atrybuty `style`. Nie blokuje builda — do poprawienia przy okazji.
+- **Chunk size warning** — `index-*.js` = 1.81 MB (gzip ~450 KB). Dla mobile trochę dużo — code splitting w planach.
 - `react-leaflet@5.0.0` zainstalowany ale nieużywany — zostawiony, usunięcie wymaga `.npmrc` cleanup.
 - Vercel build wymaga `.npmrc` z `legacy-peer-deps=true`.
 - **Parser DDD** — `readesm-js` z 2020, może nie obsługiwać Gen2v2 (2023+) tachografów — dostosujemy na pierwszym prawdziwym pliku.
 - **Czas pracy kierowcy MVP** — MVP bazuje na prędkości GPS, może być niedokładne dla krótkich postojów (<2 min) — dopiero DDD daje pełną precyzję.
+- **WhatsApp Firebase Secrets** — functions `sendWhatsappMessage` i `whatsappWebhook` są wdrożone, ale nie działają dopóki nie ustawisz secrets przez CLI (patrz sekcja 3 i 14.A).
+- **WhatsApp template** — `zlecenia_przydzielone` złożony do Meta, status "W trakcie sprawdzania". Stary template `nowe_zlecenie` (Marketing, EN) jest Active ale droższy.
 
 ## 16. Zmienne środowiskowe / konfiguracja
 
@@ -579,6 +679,12 @@ driverActivities (z source="ddd", priorytet nad GPS)
 - **OSRM**: publiczny, darmowy, bez klucza
 - **Vercel**: auto-deploy z GitHub, konfiguracja w panelu Vercel
 - **SendGrid API key**: Firestore `config/email`
+- **WhatsApp (Firebase Secrets — do ustawienia przez CLI)**:
+  - `WHATSAPP_TOKEN` — stały token dostępu (permanent token z Meta)
+  - `WHATSAPP_PHONE_ID` — `1056038134263202`
+  - `WHATSAPP_APP_SECRET` — App Secret z Meta Developer Console → App → Basic Settings
+  - `WHATSAPP_VERIFY_TOKEN` — dowolny string (np. `fleetstat_wa_verify_2026`)
+- **Konfiguracja WhatsApp w Firestore** `konfiguracja/whatsapp`: `{ identyfikatorNumeruTelefonu, nazwaSzablon, znak, wabaId }` (dane pomocnicze, główne credentiale w Secrets)
 
 ## 17. Flota (6 pojazdów)
 
@@ -636,4 +742,4 @@ Użytkownicy w Firestore `users/{uid}` z polem `role`. Cloud Function `onRoleCha
 
 ---
 
-*Wygenerowano: 2026-04-21 (pełna aktualizacja po sesjach Trip Summary, GPS, Czas pracy, DDD Parser)*
+*Zaktualizowano: 2026-04-23 (dodano: WhatsApp Business Cloud API, FrachtyModal v2 redesign Z1/Z2/R1-R5/Zleceniodawca)*
