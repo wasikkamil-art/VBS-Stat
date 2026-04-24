@@ -1651,9 +1651,17 @@ async function geocodeAddress(query) {
 }
 
 async function osrmRoute(from, to) {
-  if (!from || !to) return null;
+  return osrmMultiRoute([from, to]);
+}
+
+// Multi-waypoint routing — np. pos → R1 → R2 (przez R1 jako waypoint).
+// Zwraca sumaryczny dystans i czas dla całej trasy.
+async function osrmMultiRoute(points) {
+  if (!Array.isArray(points) || points.length < 2) return null;
+  if (points.some(p => !p || typeof p.lat !== "number" || typeof p.lng !== "number")) return null;
   try {
-    const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=false`;
+    const coords = points.map(p => `${p.lng},${p.lat}`).join(";");
+    const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=false`;
     const resp = await fetch(url, { signal: AbortSignal.timeout(15000) });
     if (!resp.ok) return null;
     const data = await resp.json();
@@ -1800,7 +1808,9 @@ exports.trackerData = onRequest(
         console.warn("trackerData: events query failed:", e.message);
       }
 
-      // Aktywny krok (0..3): 0 Dojazd do załadunku, 1 Załadowano, 2 W trasie, 3 Dostarczono
+      // Aktywny krok:
+      //   Dla 1 rozładunku (0..3): Dojazd, Załadowano, W trasie, Dostarczono
+      //   Dla 2 rozładunków (0..4): Dojazd, Załadowano, Rozładunek 1, Rozładunek 2, Dostarczono
       let activeStep = 0;
       {
         const effective = (type) => {
@@ -1814,10 +1824,19 @@ exports.trackerData = onRequest(
         const startRoz = !!effective("start_rozladunek");
         const dotarcieRoz = !!effective("dotarcie_rozladunek");
         const rozladowano = !!effective("rozladowano") || fracht.statusRozladunku === "rozladowano";
-        if (rozladowano || dotarcieRoz) activeStep = 3;
-        else if (startRoz) activeStep = 2;
-        else if (dotarcieZal) activeStep = 1;
-        else activeStep = 0;
+        if (hasR2) {
+          // 5-stopniowy: 0 Dojazd, 1 Załadowano, 2 W trasie do R1, 3 Po R1 / W trasie do R2, 4 Dostarczono
+          if (rozladowano) activeStep = 4;
+          else if (dotarcieRoz) activeStep = 3; // dotarł do R1, teraz jedzie do R2
+          else if (startRoz) activeStep = 2;
+          else if (dotarcieZal) activeStep = 1;
+          else activeStep = 0;
+        } else {
+          if (rozladowano || dotarcieRoz) activeStep = 3;
+          else if (startRoz) activeStep = 2;
+          else if (dotarcieZal) activeStep = 1;
+          else activeStep = 0;
+        }
       }
 
       // Zdjęcia — tylko te kategorie, które admin zaznaczył w trackerShow
@@ -1836,14 +1855,23 @@ exports.trackerData = onRequest(
         if (show.towar && urls.towar.length) photos.towar = urls.towar;
       }
 
-      // 2. Planowany czas dostawy i załadunku (Europe/Warsaw)
+      // 2. Planowane czasy (Europe/Warsaw) + detekcja drugiego rozładunku
       const toMs = (date, time) => {
         if (!date) return null;
         const t = time || "00:00";
         const p = Date.parse(`${date}T${t}:00+02:00`);
         return isNaN(p) ? null : p;
       };
-      const plannedMs = toMs(fracht.dataRozladunku, fracht.godzRozladunku);
+      const hasR2 = !!(
+        (fracht.dokodPocztowy2 && String(fracht.dokodPocztowy2).trim()) ||
+        (fracht.dokodMiasto2 && String(fracht.dokodMiasto2).trim()) ||
+        (fracht.dokod2 && String(fracht.dokod2).trim()) ||
+        (fracht.rozladunekGeo2 && String(fracht.rozladunekGeo2).trim())
+      );
+      const plannedR1Ms = toMs(fracht.dataRozladunku, fracht.godzRozladunku);
+      const plannedR2Ms = hasR2 ? toMs(fracht.dataRozladunku2, fracht.godzRozladunku2) : null;
+      // Końcowa dostawa = ostatni rozładunek (R2 jeśli istnieje, inaczej R1)
+      const plannedMs = hasR2 ? (plannedR2Ms || plannedR1Ms) : plannedR1Ms;
       const plannedLoadMs = toMs(fracht.dataZaladunku, fracht.godzZaladunku);
 
       // 3. Quick return — zakończone
@@ -1851,8 +1879,11 @@ exports.trackerData = onRequest(
         return res.json({
           nrZlecenia,
           status: "zakonczony",
-          activeStep: 3,
+          activeStep: hasR2 ? 4 : 3,
+          hasR2,
           plannedMs,
+          plannedR1Ms,
+          plannedR2Ms,
           plannedLoadMs,
           photos,
           updatedAt: Date.now(),
@@ -1873,14 +1904,24 @@ exports.trackerData = onRequest(
         }
       }
 
-      // 5. Destination R1 — geo → fallback geocode
-      let dest = parseGeoStringBackend(fracht.rozladunekGeo);
-      if (!dest) {
+      // 5. Destinations — R1 (zawsze) + R2 (jeśli hasR2)
+      let destR1 = parseGeoStringBackend(fracht.rozladunekGeo);
+      if (!destR1) {
         const q = [fracht.rozladunekAdres, fracht.dokodPocztowy, fracht.dokodMiasto]
           .filter(Boolean).join(", ");
-        dest = await geocodeAddress(q || fracht.dokod);
+        destR1 = await geocodeAddress(q || fracht.dokod);
       }
-      if (!dest) return res.status(500).json({ error: "no_destination" });
+      if (!destR1) return res.status(500).json({ error: "no_destination" });
+
+      let destR2 = null;
+      if (hasR2) {
+        destR2 = parseGeoStringBackend(fracht.rozladunekGeo2);
+        if (!destR2) {
+          const q = [fracht.rozladunekAdres2, fracht.dokodPocztowy2, fracht.dokodMiasto2]
+            .filter(Boolean).join(", ");
+          destR2 = await geocodeAddress(q || fracht.dokod2);
+        }
+      }
 
       // 6. Brak pozycji — jeszcze nie wyjechał
       if (!pos) {
@@ -1888,7 +1929,10 @@ exports.trackerData = onRequest(
           nrZlecenia,
           status: "przed_trasa",
           activeStep,
+          hasR2,
           plannedMs,
+          plannedR1Ms,
+          plannedR2Ms,
           plannedLoadMs,
           percentDone: 0,
           photos,
@@ -1904,13 +1948,16 @@ exports.trackerData = onRequest(
         start = await geocodeAddress(q || fracht.zaladunekKod);
       }
 
-      // 8. Routing
-      const routeCurrent = await osrmRoute(pos, dest);
+      // 8. Routing — dla multi-rozładunku przez R1 jako waypoint do R2 (cel końcowy)
+      const finalDest = hasR2 && destR2 ? destR2 : destR1;
+      const waypoints = hasR2 && destR2 ? [pos, destR1, destR2] : [pos, destR1];
+      const routeCurrent = await osrmMultiRoute(waypoints);
       if (!routeCurrent) return res.status(500).json({ error: "osrm_failed" });
 
       let kmTotal = routeCurrent.distanceKm;
       if (start) {
-        const routeTotal = await osrmRoute(start, dest);
+        const totalWp = hasR2 && destR2 ? [start, destR1, destR2] : [start, destR1];
+        const routeTotal = await osrmMultiRoute(totalWp);
         if (routeTotal && routeTotal.distanceKm > 0) kmTotal = routeTotal.distanceKm;
       }
       const kmRemaining = routeCurrent.distanceKm;
@@ -1953,6 +2000,7 @@ exports.trackerData = onRequest(
         nrZlecenia,
         status: "w_trasie",
         activeStep,
+        hasR2,
         lat: pos.lat,
         lng: pos.lng,
         kmTotal: Math.round(kmTotal),
@@ -1961,6 +2009,8 @@ exports.trackerData = onRequest(
         percentDone,
         etaMs,
         plannedMs,
+        plannedR1Ms,
+        plannedR2Ms,
         plannedLoadMs,
         delayMin,
         breakMinutes,

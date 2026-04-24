@@ -1502,18 +1502,26 @@ function TrackerPublicView({ token }) {
   const nr = d.nrZlecenia || "—";
   const status = d.status; // "przed_trasa" | "w_trasie" | "zakonczony"
 
-  // Stepper — 4 kroki
-  // 0 Dojazd do załadunku · 1 Załadowano · 2 W trasie · 3 Dostarczono
-  // activeStep z backendu (z driverEvents); fallback do mapowania ze statusu
+  // Stepper — dynamiczny: 4 kroki (bez R2) lub 5 kroków (z R2)
+  // hasR2 z backendu wskazuje czy są 2 rozładunki
+  const hasR2 = !!d.hasR2;
   const activeIdx = typeof d.activeStep === "number"
     ? d.activeStep
-    : (status === "zakonczony" ? 3 : status === "w_trasie" ? 2 : 0);
-  const steps = [
-    { label: "Dojazd do załadunku", icon: "🚚" },
-    { label: "Załadowano",           icon: "📦" },
-    { label: "W trasie",             icon: "🚛" },
-    { label: "Dostarczono",          icon: "✅" },
-  ];
+    : (status === "zakonczony" ? (hasR2 ? 4 : 3) : status === "w_trasie" ? 2 : 0);
+  const steps = hasR2
+    ? [
+        { label: "Dojazd do załadunku", icon: "🚚" },
+        { label: "Załadowano",           icon: "📦" },
+        { label: "Rozładunek 1",         icon: "📍" },
+        { label: "Rozładunek 2",         icon: "📍" },
+        { label: "Dostarczono",          icon: "✅" },
+      ]
+    : [
+        { label: "Dojazd do załadunku", icon: "🚚" },
+        { label: "Załadowano",           icon: "📦" },
+        { label: "W trasie",             icon: "🚛" },
+        { label: "Dostarczono",          icon: "✅" },
+      ];
 
   const Stepper = () => (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0 4px", gap: 4 }}>
@@ -1591,18 +1599,18 @@ function TrackerPublicView({ token }) {
   }
 
   // Karty dat
-  const loadDateBox = d.plannedLoadMs ? (
+  const dateCard = (title, ms) => (
     <div style={{ flex: 1, padding: "12px 14px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, minWidth: 0 }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: 0.5, textTransform: "uppercase" }}>Załadunek</div>
-      <div style={{ fontSize: 13, fontWeight: 700, color: "#334155", marginTop: 3 }}>{fmtDateSmart(d.plannedLoadMs)}</div>
+      <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: 0.5, textTransform: "uppercase" }}>{title}</div>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "#334155", marginTop: 3 }}>{fmtDateSmart(ms)}</div>
     </div>
-  ) : null;
-  const unloadDateBox = d.plannedMs ? (
-    <div style={{ flex: 1, padding: "12px 14px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, minWidth: 0 }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: 0.5, textTransform: "uppercase" }}>Planowana dostawa</div>
-      <div style={{ fontSize: 13, fontWeight: 700, color: "#334155", marginTop: 3 }}>{fmtDateSmart(d.plannedMs)}</div>
-    </div>
-  ) : null;
+  );
+  const loadDateBox = d.plannedLoadMs ? dateCard("Załadunek", d.plannedLoadMs) : null;
+  // Gdy hasR2: osobne karty dla R1 i R2, każda z datą. Gdy tylko R1: jedna karta "Planowana dostawa".
+  const unloadR1Box = hasR2
+    ? (d.plannedR1Ms ? dateCard("Rozładunek 1", d.plannedR1Ms) : null)
+    : (d.plannedMs ? dateCard("Planowana dostawa", d.plannedMs) : null);
+  const unloadR2Box = hasR2 && d.plannedR2Ms ? dateCard("Rozładunek 2", d.plannedR2Ms) : null;
 
   return (
     <Shell>
@@ -1666,10 +1674,11 @@ function TrackerPublicView({ token }) {
         </div>
 
         {/* Daty */}
-        {(loadDateBox || unloadDateBox) && (
-          <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+        {(loadDateBox || unloadR1Box || unloadR2Box) && (
+          <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
             {loadDateBox}
-            {unloadDateBox}
+            {unloadR1Box}
+            {unloadR2Box}
           </div>
         )}
 
