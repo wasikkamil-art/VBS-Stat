@@ -384,12 +384,8 @@ function formatOrderForDriverCopy(fracht, vehicles = []) {
     lines.push("");
   }
 
-  // Podsumowanie
-  const sumParts = [];
-  if (fracht.kmWszystkie || fracht.kmLadowne) sumParts.push(`${fracht.kmWszystkie || fracht.kmLadowne} km`);
-  if (fracht.cenaEur) sumParts.push(`${fracht.cenaEur} €`);
-  if (sumParts.length) lines.push(`━━━━━━━━━━━━━━━━━━`);
-  if (sumParts.length) lines.push(sumParts.join(" · "));
+  // Uwaga: celowo NIE dodajemy km ani ceny — to info wewnętrzne
+  // (dla dyspozytora / księgowości), kierowca widzi tylko dane logistyczne.
 
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
