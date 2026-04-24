@@ -7951,8 +7951,24 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
     );
     const unsub = onSnapshot(q,
       snap => {
-        const pts = snap.docs.map(d => d.data()).filter(d => d?.lat && d?.lng);
-        setBreadcrumbPoints(pts);
+        const raw = snap.docs.map(d => d.data()).filter(d => d?.lat && d?.lng && d?.ts);
+        // Outlier filter — prędkość między sąsiadami > 200 km/h = błąd GPS, odrzucamy
+        const toRad = v => v * Math.PI / 180;
+        const hv = (a, b) => {
+          const R = 6371;
+          const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lng - a.lng);
+          const s = Math.sin(dLat/2)**2 + Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLng/2)**2;
+          return 2 * R * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+        };
+        const sorted = raw.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+        const cleaned = sorted.length > 0 ? [sorted[0]] : [];
+        for (let i = 1; i < sorted.length; i++) {
+          const prev = cleaned[cleaned.length - 1], p = sorted[i];
+          const dH = (p.ts - prev.ts) / 3600000;
+          if (dH > 0 && hv(prev, p) / dH > 200) continue;
+          cleaned.push(p);
+        }
+        setBreadcrumbPoints(cleaned);
       },
       err => console.warn("[Breadcrumb] subscribe error:", err?.message)
     );
@@ -8270,7 +8286,8 @@ function GpsTrasySection({ device, showToast }) {
         return;
       }
 
-      // Oblicz km (haversine) i czas
+      // ── Outlier filter: punkty, które wymagałyby prędkości > 200 km/h między
+      //    sąsiadami to błędy GPS / artefakty. Odrzucamy.
       const toRad = v => v * Math.PI / 180;
       const haversine = (a, b) => {
         const R = 6371;
@@ -8279,6 +8296,27 @@ function GpsTrasySection({ device, showToast }) {
         const s = Math.sin(dLat/2)**2 + Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLng/2)**2;
         return 2 * R * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
       };
+      const cleaned = [parsed[0]];
+      let dropped = 0;
+      for (let i = 1; i < parsed.length; i++) {
+        const prev = cleaned[cleaned.length - 1];
+        const p = parsed[i];
+        const dKm = haversine(prev, p);
+        const dH = (p.ts - prev.ts) / 3600000;
+        if (dH > 0 && dKm / dH > 200) { dropped++; continue; } // odrzuć — prędkość > 200 km/h
+        cleaned.push(p);
+      }
+      if (dropped > 0) console.warn(`[GpsTrasy] odrzucono ${dropped} outlierów (prędkość > 200 km/h)`);
+      parsed = cleaned;
+
+      if (parsed.length < 2) {
+        setPoints([]);
+        setStats(null);
+        showToast("Za mało punktów po filtrze outlierów");
+        return;
+      }
+
+      // Oblicz km (haversine) i czas
       let km = 0;
       for (let i = 1; i < parsed.length; i++) km += haversine(parsed[i - 1], parsed[i]);
       const durationMin = Math.round((parsed[parsed.length - 1].ts - parsed[0].ts) / 60000);
