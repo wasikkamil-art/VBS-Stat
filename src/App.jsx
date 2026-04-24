@@ -19012,6 +19012,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
   const totalKmLad = rows.reduce((s,r) => s + (parseInt(r.kmLadowne)||0), 0);
   const totalKmWsz = rows.reduce((s,r) => s + (parseInt(r.kmWszystkie)||0), 0);
   const avgEurKm = totalKmWszAll > 0 ? (totalCena/totalKmWszAll).toFixed(2) : (totalKmLad > 0 ? (totalCena/totalKmLad).toFixed(2) : "-");
+  const avgEurKmLad = totalKmLad > 0 ? (totalCena/totalKmLad).toFixed(2) : "-";
   const avgEurKmWsz = totalKmWsz > 0 ? (totalCena/totalKmWsz).toFixed(2) : "-";
   const miesiaceL = ["Styczniu","Lutym","Marcu","Kwietniu","Maju","Czerwcu","Lipcu","Sierpniu","Wrzesniu","Pazdzierniku","Listopadzie","Grudniu"];
   return (
@@ -19401,7 +19402,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                 <td className="px-2 py-2.5 text-right text-blue-700">{totalKmPodj.toLocaleString("pl-PL")}</td>
                 <td className="px-2 py-2.5 text-right text-blue-700">{totalKmLad.toLocaleString("pl-PL")}</td>
                 <td className="px-2 py-2.5 text-right text-blue-700">{totalKmWsz.toLocaleString("pl-PL")}</td>
-                <td className="px-2 py-2.5 text-right text-amber-600">{avgEurKm}</td>
+                <td className="px-2 py-2.5 text-right text-amber-600">{avgEurKmLad}</td>
                 <td className="px-2 py-2.5 text-right text-blue-600">{avgEurKmWsz}</td>
                 <td colSpan={5}></td>
               </tr>
