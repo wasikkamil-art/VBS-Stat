@@ -1615,7 +1615,7 @@ function TrackerPublicView({ token }) {
   return (
     <Shell>
       <div style={{ background: "#fff", borderRadius: 16, padding: 22, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 18 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 18 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 13, color: "#64748b", fontWeight: 600, marginBottom: 4 }}>Zlecenie nr</div>
             <div style={{ fontSize: 18, fontWeight: 800, color: "#111827", marginBottom: d.vehiclePlate ? 10 : 0 }}>{nr}</div>
@@ -1626,8 +1626,8 @@ function TrackerPublicView({ token }) {
               </div>
             )}
           </div>
-          <div style={{ flexShrink: 0 }}>
-            <img src="/vbs-logo.png" alt="VBS" style={{ width: 80, height: "auto", display: "block", opacity: 0.9 }} />
+          <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <img src="/vbs-logo.png" alt="VBS" style={{ width: 120, height: "auto", display: "block" }} />
           </div>
         </div>
 
