@@ -1785,12 +1785,18 @@ exports.trackerData = onRequest(
 
       const nrZlecenia = fracht.nrZlecenia || fracht.nrRef || (fracht.id || "").slice(0, 8) || "—";
 
-      // Aktywny krok (0..3): 0 Dojazd do załadunku, 1 Załadowano, 2 W trasie, 3 Dostarczono
-      // Źródło: driverEvents (dotarcie_zaladunek, start_rozladunek, dotarcie_rozladunek, rozladowano)
-      let activeStep = 0;
+      // Jedno query driverEvents — używane do: (a) activeStep, (b) zdjęcia do galerii
+      let events = [];
       try {
         const eventsSnap = await db.collection("driverEvents").where("frachtId", "==", fracht.id).get();
-        const events = eventsSnap.docs.map(e => e.data());
+        events = eventsSnap.docs.map(e => e.data());
+      } catch (e) {
+        console.warn("trackerData: events query failed:", e.message);
+      }
+
+      // Aktywny krok (0..3): 0 Dojazd do załadunku, 1 Załadowano, 2 W trasie, 3 Dostarczono
+      let activeStep = 0;
+      {
         const effective = (type) => {
           const ev = events.filter(e => e.type === type).sort((a, b) => (a.ts || "").localeCompare(b.ts || "")).pop();
           const un = events.filter(e => e.type === `cofnij_${type}`).sort((a, b) => (a.ts || "").localeCompare(b.ts || "")).pop();
@@ -1806,8 +1812,22 @@ exports.trackerData = onRequest(
         else if (startRoz) activeStep = 2;
         else if (dotarcieZal) activeStep = 1;
         else activeStep = 0;
-      } catch (e) {
-        console.warn("trackerData: events query failed:", e.message);
+      }
+
+      // Zdjęcia — tylko te kategorie, które admin zaznaczył w trackerShow
+      const show = fracht.trackerShow || {};
+      const photos = {};
+      if (show.cmrZal || show.cmrRoz || show.towar) {
+        const urls = { cmrZal: [], cmrRoz: [], towar: [] };
+        for (const e of events) {
+          if (!e.photoUrl) continue;
+          if (e.type === "cmr_zaladunek_photo") urls.cmrZal.push(e.photoUrl);
+          else if (e.type === "cmr_rozladunek_photo" || e.type === "cmr_photo") urls.cmrRoz.push(e.photoUrl);
+          else if (e.type === "towar_photo") urls.towar.push(e.photoUrl);
+        }
+        if (show.cmrZal && urls.cmrZal.length) photos.cmrZal = urls.cmrZal;
+        if (show.cmrRoz && urls.cmrRoz.length) photos.cmrRoz = urls.cmrRoz;
+        if (show.towar && urls.towar.length) photos.towar = urls.towar;
       }
 
       // 2. Planowany czas dostawy i załadunku (Europe/Warsaw)
@@ -1828,6 +1848,7 @@ exports.trackerData = onRequest(
           activeStep: 3,
           plannedMs,
           plannedLoadMs,
+          photos,
           updatedAt: Date.now(),
         });
       }
@@ -1864,6 +1885,7 @@ exports.trackerData = onRequest(
           plannedMs,
           plannedLoadMs,
           percentDone: 0,
+          photos,
           updatedAt: Date.now(),
         });
       }
@@ -1937,6 +1959,7 @@ exports.trackerData = onRequest(
         delayMin,
         breakMinutes,
         positionTs: pos.ts,
+        photos,
         updatedAt: Date.now(),
       });
     } catch (e) {

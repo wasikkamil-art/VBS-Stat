@@ -1329,6 +1329,36 @@ function LoginScreen() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// TRACKER PHOTO CARD — osobna karta z galerią zdjęć (klik otwiera oryginał w nowej karcie)
+// ═══════════════════════════════════════════════════════════════════════════════
+function TrackerPhotoCard({ title, urls }) {
+  return (
+    <div style={{ marginTop: 14, background: "#fff", borderRadius: 16, padding: 18, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", letterSpacing: 0.3, marginBottom: 10 }}>
+        {title} <span style={{ color: "#94a3b8", fontWeight: 500 }}>· {urls.length}</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+        {urls.map((url, i) => (
+          <a key={i} href={url} target="_blank" rel="noopener noreferrer"
+            style={{
+              aspectRatio: "1",
+              borderRadius: 8,
+              overflow: "hidden",
+              border: "1px solid #e2e8f0",
+              background: "#f8fafc",
+              display: "block",
+            }}>
+            <img src={url} alt="" loading="lazy"
+              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+            />
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // TRACKER PUBLIC VIEW — widok trackera dla zleceniodawcy (bez logowania)
 // Renderowany na ścieżce /t/{token}. Fetchuje Cloud Function trackerData co 30s.
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1657,6 +1687,17 @@ function TrackerPublicView({ token }) {
           </div>
         )}
       </div>
+
+      {/* Galerie zdjęć — osobne karty per kategoria */}
+      {d.photos?.cmrZal?.length > 0 && (
+        <TrackerPhotoCard title="📄 CMR — załadunek" urls={d.photos.cmrZal} />
+      )}
+      {d.photos?.cmrRoz?.length > 0 && (
+        <TrackerPhotoCard title="📄 CMR — rozładunek" urls={d.photos.cmrRoz} />
+      )}
+      {d.photos?.towar?.length > 0 && (
+        <TrackerPhotoCard title="📦 Zdjęcia towaru" urls={d.photos.towar} />
+      )}
 
       {/* Ostatnia aktualizacja */}
       {d.updatedAt && (
@@ -21109,9 +21150,13 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
         fracht={f}
         frachtId={record.id}
         trackerToken={trackerTokenLive}
+        initialShow={record.trackerShow || {}}
         onTokenGenerated={(t) => {
           setTrackerTokenLive(t);
           if (onPatch) onPatch(record.id, { trackerToken: t });
+        }}
+        onShowChange={(newShow) => {
+          if (onPatch) onPatch(record.id, { trackerShow: newShow });
         }}
         showToast={showToast}
         onClose={() => setShowTrackerModal(false)}
@@ -21125,9 +21170,14 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
 // SEND TRACKER LINK MODAL — publiczny link do śledzenia dla zleceniodawcy
 // Generuje trackerToken jeśli nie istnieje, daje opcje: kopiuj / WhatsApp / email.
 // ═══════════════════════════════════════════════════════════════════════════════
-function SendTrackerLinkModal({ fracht, frachtId, trackerToken, onTokenGenerated, showToast, onClose }) {
+function SendTrackerLinkModal({ fracht, frachtId, trackerToken, initialShow = {}, onTokenGenerated, onShowChange, showToast, onClose }) {
   const initialToken = trackerToken || "";
   const [token, setToken] = useState(initialToken);
+  const [show, setShow] = useState({
+    cmrZal: !!initialShow.cmrZal,
+    cmrRoz: !!initialShow.cmrRoz,
+    towar: !!initialShow.towar,
+  });
 
   useEffect(() => {
     if (!token) {
@@ -21140,6 +21190,12 @@ function SendTrackerLinkModal({ fracht, frachtId, trackerToken, onTokenGenerated
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const toggleShow = (key) => {
+    const next = { ...show, [key]: !show[key] };
+    setShow(next);
+    onShowChange && onShowChange(next);
+  };
 
   const link = token ? `https://fleetstat.pl/t/${token}` : "";
   const nrZl = fracht?.nrZlecenia || fracht?.nrRef || "";
@@ -21215,6 +21271,31 @@ function SendTrackerLinkModal({ fracht, frachtId, trackerToken, onTokenGenerated
           )}
 
           <div>
+            <label className="text-xs font-semibold text-gray-500 mb-2 block">Co pokazać zleceniodawcy</label>
+            <div className="space-y-1.5">
+              {[
+                { k: "cmrZal", label: "📄 CMR — załadunek", sub: "dokument z załadunku (weryfikacja zgodności ze zleceniem)" },
+                { k: "cmrRoz", label: "📄 CMR — rozładunek", sub: "dokument z pieczątką po dostawie" },
+                { k: "towar",  label: "📦 Zdjęcia towaru",    sub: "z załadunku (jak zapakowane)" },
+              ].map(opt => (
+                <label key={opt.k} className="flex items-start gap-2.5 cursor-pointer p-2 rounded-lg hover:bg-gray-50 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={!!show[opt.k]}
+                    onChange={() => toggleShow(opt.k)}
+                    className="mt-0.5 w-4 h-4 text-sky-600 rounded border-gray-300 focus:ring-sky-500 cursor-pointer"
+                  />
+                  <div className="flex-1">
+                    <div className="text-sm font-semibold text-gray-800">{opt.label}</div>
+                    <div className="text-[11px] text-gray-500">{opt.sub}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+            <div className="text-[11px] text-gray-400 mt-1 pl-1">Nic nie zaznaczone = tylko statusy i trasa (bez zdjęć).</div>
+          </div>
+
+          <div>
             <label className="text-xs font-semibold text-gray-500 mb-1 block">Link</label>
             <div className="flex items-stretch gap-2">
               <input
@@ -21231,7 +21312,7 @@ function SendTrackerLinkModal({ fracht, frachtId, trackerToken, onTokenGenerated
               </button>
             </div>
             <div className="text-[11px] text-gray-400 mt-1.5 leading-relaxed">
-              Na stronie widoczne będą: nr zlecenia, pasek postępu, km do celu i przewidywany czas dostawy.
+              Klient zobaczy: nr zlecenia, pasek postępu, status trasy, km do celu, ETA i — jeśli w trasie — aktualne koordynaty GPS.
               Dane wewnętrzne (cena, dyspozytor, adresy) są ukryte.
             </div>
           </div>
