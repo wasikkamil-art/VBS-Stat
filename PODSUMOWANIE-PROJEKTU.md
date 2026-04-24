@@ -2,32 +2,79 @@
 
 > Dokument do przeniesienia do nowego chatu. Zawiera pełny kontekst: architektura, pliki, API, konwencje, co zrobiono, co w planie.
 
-*Ostatnia aktualizacja: 2026-04-23*
+*Ostatnia aktualizacja: 2026-04-24 (duża sesja: GPS 24/7 + breadcrumby + kropki + kopiuj dane + banner update + multi-foto)*
 
 ---
 
 ## 0. STAN AKTUALNY (TL;DR dla nowego chatu)
 
-**Co działa w produkcji (`fleetstat.pl`)**:
+**Co działa w produkcji (`fleetstat.pl`)** — stan 2026-04-24:
 
-1. **Moduł Trip Summary** — panel podsumowania trasy (punktualność, km z CAN, średnia prędkość, spalanie) pod każdym zakończonym zleceniem. Progi spalania konfigurowane per pojazd.
-2. **GPS/Monitoring — rozbudowa** — klikalna lista zleceń pod mapą, rzeczywista trasa z Atlas `/history` dla zakończonych zleceń (zielona linia), planowana z OSRM dla aktywnych (niebieska przerywana).
-3. **Moduł Czas pracy kierowcy MVP** — pełny dashboard compliance zgodny z rozp. 561/2006 + Pakiet Mobilności. Auto-detection z GPS (prędkość → jazda/odpoczynek) + ręczne kliknięcia kierowcy (4 typy aktywności). Plan do przodu (kiedy przerwa, koniec dnia, odpoczynek 11h/45h, 28-dniowy powrót do bazy).
-4. **Parser DDD** — Cloud Function `parseDddFile` z `readesm-js`. Upload plików `.ddd` przez admina (GPS/Monitoring → Pliki DDD) lub kierowcę (mobile, Czas pracy → dół ekranu). Sparsowane aktywności nadpisują GPS w compliance (priorytet dowodowy).
-5. **WhatsApp Business Cloud API** — Cloud Functions `sendWhatsappMessage` (onCall) i `whatsappWebhook` (onRequest) wdrożone na produkcję. Dane uwierzytelniające w Firebase Secrets. Przycisk "Wyślij na WhatsApp" w FrachtyModal. Czeka na zatwierdzenie szablonu `zlecenia_przydzielone` przez Meta.
-6. **FrachtyModal v2** — pełny redesign formularza zlecenia: karty Z1/Z2 (załadunek) i R1–R5 (rozładunek) każda z osobnymi polami kod pocztowy + miasto + adres + geo + telefon + data + godzina. Nowa sekcja Zleceniodawca (firma, osoba, telefon, email — do wysyłki trackera). Backward compat przez `splitKM()`. AI prompt zaktualizowany.
+### Moduły GPS/Monitoring (nowe, działa 24/7)
+1. **`scheduledGpsPoll` Cloud Function** (cron `* * * * *` — co 1 minutę, Europe/Warsaw): fetch Atlas `positionsWithCanDetails` dla floty → zapis do `gpsBreadcrumbs/{vehicleId}/points/{ts}` + auto-detect driverActivities (speed > 3 km/h = drive, else rest). Działa 24/7 niezależnie od sesji. **Jedyny producent auto_gps segmentów** — client-side auto-detect WYŁĄCZONY.
+2. **`scheduledHistorySync` Cloud Function** (cron `0 3 * * *` — 3:00 CET): pobiera Atlas `/history` wczorajszego dnia, uzupełnia breadcrumby o gęstsze punkty (batch write, dedup po docId=ts). **UWAGA**: na 2026-04-24 Atlas `/history` dla WGM 0475M zwraca pusto → `scheduledHistorySync` czeka na ich sync.
+3. **`cleanupBreadcrumbs` Cloud Function** (cron `30 2 * * *` — 2:30 CET): kasuje punkty `gpsBreadcrumbs` starsze niż 7 dni. Storage bounded.
+4. **Firestore composite index** dla `driverActivities (driverEmail ASC + startTs DESC)` — `firestore.indexes.json` + `firebase.json`. Potrzebny bo scheduledGpsPoll query latest segment per kierowca.
+5. **Firestore rules** — dodane reguły: `driverActivities`, `dddFiles`, `gpsBreadcrumbs` (wcześniej blokowała reguła domyślna `allow: if false`).
 
-**Integracja z widziszwszystko.eu**:
-- Atlas API (oficjalne, udokumentowane) — używamy: pozycje GPS, CAN details, history. Działa.
-- `/rest-api/` z panelu beta — **nie używamy** (nieudokumentowane, nie mamy zgody widziszwszystko).
-- Tachograf/DDD — widziszwszystko przesłał info: brak API, brak automatycznego emaila (w planach). Flow: admin pobiera DDD z ich panelu Premium → upload do FleetStat → parser robi resztę.
-- **Dla 1/6 pojazdów (WGM 0475M)** już jest zainstalowany moduł do zdalnego odczytu DDD. Pozostałe 5 — sprzęt opłacony, czeka na instalację.
+### GpsMapSection (Mapa online) — rozbudowa
+- **Ikona pojazdu**: kółko ze strzałką obróconą o `course/heading/bearing` z Atlas (gdy jedzie), kółko z kropką gdy stoi. Znacznie czystsze od SVG ciężarówki.
+- **Pamięć widoku** (localStorage `gpsMapView`): zapisuje lat/lng/zoom przy moveend/zoomend. Po reloadzie mapa otwiera się z zapamiętanego widoku (nie Polska zoom 7).
+- **Breadcrumb trail 24h jako KROPKI** (L.circleMarker canvas renderer, r=3px, #0ea5e9) — BEZ polyline, BEZ map-matching. Gęste kropki wyglądają jak linia, rzadkie jako punkty. Bez zygzaków i bez "siatki" przy nakładaniu się przejazdów.
+- **Outlier filter**: punkty wymagające prędkości > 200 km/h między sąsiadami są odrzucane (błędy GPS).
+
+### GpsTrasySection (Trasy per dzień) — przepisany
+- Source **primary**: nasz `gpsBreadcrumbs` (Firestore query dla wybranego dnia). Fallback: Atlas `/history` dla dat > 7 dni (retention).
+- **OSRM map-matching** (`/match/v1/driving/`) — snap-to-road z parametrami: `radiuses=200m`, `gaps=ignore`, `tidy=true`, dedup stacjonarnych punktów.
+- **Km z raw haversine** (NIE z OSRM distance — tam znajdowaliśmy 4000-11000 km przy rozjazdach matchingu). Sanity check: odrzucamy matched geometry gdy > 3× raw haversine.
+- Stats: km, czas, godzina start/koniec, liczba punktów. Markery start (zielony ▶) i koniec (czerwony ■).
+
+### DriverPanel (mobile kierowcy) — zdjęcia
+- **CMR załadunek + rozładunek** — zmienione z pojedynczego na **wiele zdjęć (multi)**. Badge "CMR 1", "CMR 2" z godziną + delete per zdjęcie.
+- **Zdjęcia towaru + uszkodzeń** — już wcześniej multi, teraz bez `capture="environment"` → możliwość wyboru z galerii (nie tylko aparat).
+- Wszędzie `accept="image/*" multiple` + loop w onChange.
+- Legacy `cmr_photo` wyświetlany jako jeden z cmrRozPhotos (backward compat).
+
+### FrachtyModal — rozbudowa
+- **Przycisk "📋 Kopiuj dane"** (fioletowy, między Anuluj a WhatsApp) — otwiera `CopyOrderPreviewModal` z textarea, gdzie user może edytować przed skopiowaniem.
+- Format `formatOrderForDriverCopy(fracht, vehicles)`: bogaty format (Z1+Z2+R1-R5 per osobno z GPS/tel/adresy, towar, uwagi, zleceniodawca). **BEZ km i ceny** (info wewnętrzne, nie dla kierowcy).
+- `navigator.clipboard.writeText()` + fallback `execCommand`. Toast "Skopiowano".
+
+### GeoPickerModal — poprawiony workflow
+- Przy NOWYM wyborze (brak `initialGeo`): mapa auto-panuje do adresu **ale NIE stawia pinezki**. User MUSI kliknąć w mapę. `Zapisz lokalizację` disabled dopóki pinezka nie postawiona.
+- **Akceptuje wklejone koordy Google Maps** (`50.027385, 19.942322` / `50.027385,19.942322` / ze spacją). Input robi się zielony, przycisk zmienia się na "📍 Ustaw pinezkę". Klik stawia pin bezpośrednio.
+- Tip pod inputem: "W Google Maps prawym na punkt → kopiuj → wklej tutaj".
+
+### Banner "Nowa wersja dostępna"
+- Po deploy Vercel polling co 5 min (pierwsze po 30s): fetch `/` → ekstrakcja hash bundla → porównanie z załadowanym. Różnica → niebieski banner u góry "🔄 Nowa wersja FleetStat dostępna [Odśwież teraz] [Później]".
+- Działa w obu: admin + DriverPanel mobile. `env(safe-area-inset-top)` dla iOS notch.
+
+### GpsCzasPracySection — manual entry segmentów
+- Przycisk "＋ Dodaj ręcznie" w nagłówku Historii aktywności. Inline form: typ (drive/work/avail/rest), start, koniec (datetime-local), submit → addDoc z `source: "manual"`. Segmenty manual nie są nadpisywane przez auto-detection (priorytet DDD > manual > auto_gps).
+- Dodany bo scheduledGpsPoll startowało 23.04 o 13:36 — wcześniejsze jazdy (10:42-12:49) nie były wykryte. Seedowane ręcznie przez admin SDK + UI żeby user mógł w przyszłości uzupełniać luki.
+
+### FrachtyTab — fix SUMA
+- Kolumna **€/KM Ł** w wierszu SUMA liczyła z `totalKmWszAll` (kmWszystkie || kmLadowne) → mylnie równała się €/KM W. Teraz `avgEurKmLad = totalCena / totalKmLad` — prawdziwa średnia za km ładowny.
+
+### GpsMapSection — buildPlanned (naprawiony multi-stop)
+- Wcześniej: R2-R5 brane tylko po `dokod2/3` jako string, Nominatim geocodował losowo (przykład "Hiszpania zamiast Kielce"). Z2 i R4/R5 w ogóle pomijane.
+- Teraz: `pickBest(geo, adres, kodPocztowy, miasto, compatKod)` — priorytet geo, fallback pełny string "adres, kod miasto", ostatecznie compat. Wszystkie R1-R5 + Z1-Z2 honorują geo.
+- Null-guard po każdym `await buildPlanned/buildReal` (przed `addTo(map)`) — zapobiega TypeError "Cannot read properties of null (reading 'addLayer')" gdy user zmieni zakładkę.
+
+**Integracja z widziszwszystko.eu — stan 2026-04-24**:
+- Atlas API (oficjalne, 12 endpointów) — używamy nadal: `devices`, `positionsWithCanDetails`, `/history`. Działa.
+- `/rest-api/` z panelu beta — **nie dotykamy** (nieudokumentowany, bez zgody; w memory `feedback_widziszwszystko_ethics.md`).
+- **Atlas `/history` pusty dla WGM 0475M za kwiecień 2026** — ich sync opóźniony / może nigdy nie uzupełnić (GPS dopiero zainstalowany).
+- **Raport cykliczny "Karta drogowa Szczegółowa"** — user skonfigurował w panelu widziszwszystko codziennie CSV na email. **CZEKA NA PIERWSZY SAMPLE** (jutro rano). Po otrzymaniu: napisać parser → import do `gpsBreadcrumbs` / `driverActivities`. Oficjalna droga eksportu, nie wymaga API.
+- Widziszwszystko email support potwierdził: brak i nie planują API do DDD.
+- Panel widziszwszystko: Premium → Harmonogramy DDD → konfiguracja login/hasło dla API tachografu (VDO/TIS-Web/etc.) — żeby auto-pobierać DDD. Po skonfigurowaniu pliki trafiają do widziszwszystko → admin ręcznie pobiera → upload do FleetStat → `parseDddFile`.
 
 **Co dalej (priorytety)**:
-- **WhatsApp — dokończenie**: ustawić Firebase Secrets (`firebase functions:secrets:set WHATSAPP_TOKEN` itp.) → skonfigurować webhook URL w Meta Dev Console → po zatwierdzeniu szablonu testować wysyłkę
-- **Moduł Czas pracy — iteracja 2**: kompensaty za skrócone odpoczynki, alerty w banerze, timeline 7-dniowy, push notifications
-- **Parser DDD — test end-to-end**: ~28 dni gdy pierwszy plik DDD dla WGM 0475M pojawi się w panelu widziszwszystko
-- **Code splitting**: App.jsx = 1.81 MB (gzip ~450 KB) — dla mobile mocno
+- **Czekamy na pierwszy CSV "Karta drogowa"** od widziszwszystko (jutro rano). Potem: parser + przycisk "📥 Importuj raport" w FleetStat, opcjonalnie Cloud Function z IMAP/SendGrid Inbound dla automatyzacji.
+- **Tracker dla zleceniodawcy** — publiczna strona "gdzie jest moja przesyłka" dla klienta. Dane: aktualna pinezka + 24h breadcrumb dla danego frachtu. Linki wysyłane przez WhatsApp/email.
+- **DDD** — pierwszy plik za ~28 dni (harmonogramy DDD widziszwszystko). Wtedy test end-to-end parsera.
+- **WhatsApp** — Firebase Secrets do ustawienia (WHATSAPP_TOKEN, WHATSAPP_PHONE_ID, WHATSAPP_APP_SECRET, WHATSAPP_VERIFY_TOKEN) + webhook URL w Meta Dev Console + zatwierdzenie szablonu `zlecenia_przydzielone`.
+- **Code splitting**: App.jsx dalej bundle ~1.9 MB (gzip ~460 KB).
 
 ---
 
@@ -594,6 +641,29 @@ driverActivities (z source="ddd", priorytet nad GPS)
     - `set()` auto-synchronizuje compat pola `zaladunekKod` / `dokod` z pól split
     - Geo picker: adres = `"${adres}, ${kodPocztowy} ${miasto}"` — lepsza precyzja Nominatim
     - AI PDF parsing prompt zaktualizowany — zwraca split pola + dane zleceniodawcy
+25. ✅ **Fix duplicate style attribute w ChatTab context menu** (2026-04-23) — dwa `style={}` na divie, drugi nadpisywał pierwszy → tło i ramka menu nie renderowały się.
+26. ✅ **GpsMapSection buildPlanned — fix multi-stop geo** (2026-04-23) — wcześniej R2-R5 brane tylko po `dokod2/3` jako string do Nominatim (losowe trafienia, przykład "Hiszpania zamiast Kielce"). Teraz `pickBest(geo, adres, kodPocztowy, miasto, compatKod)` honoruje wszystkie R1-R5 + Z1-Z2 geo. Null-guard po `await` zapobiega crash'om gdy user zmieni zakładkę.
+27. ✅ **GpsTrasySection — rewrite z primary `gpsBreadcrumbs`** (2026-04-23, 2026-04-24): query Firestore dla wybranego dnia, fallback Atlas `/history` gdy breadcrumbów brak (> 7 dni). OSRM `/match/v1/driving/` z `radiuses=200m, gaps=ignore, tidy=true, dedup stacjonarnych`. Km z raw haversine (NIE z OSRM distance). Sanity check: gdy matched > 3× raw → fallback raw. Outlier filter: > 200 km/h między sąsiadami = punkt odrzucany.
+28. ✅ **GPS breadcrumb collection `gpsBreadcrumbs/{vehicleId}/points/{ts}`** (2026-04-23): zapis przez client (60s throttle) + CF `scheduledGpsPoll` co 1 min. Render jako KROPKI (L.circleMarker canvas renderer) na Mapie online — bez polyline, bez map-matching, gęstość pokazuje postoje. W zakładce Trasy — polyline z map-matching.
+29. ✅ **Cloud Functions — GPS 24/7** (2026-04-23, 2026-04-24):
+    - `scheduledGpsPoll` (cron `* * * * *`, było `*/2`, potem `*/5` — finalnie co minuta) — Atlas positionsWithCanDetails → breadcrumb + driverActivity. Jedyny producent auto_gps. Client-side auto-detect WYŁĄCZONY (return; early w useEffect).
+    - `scheduledHistorySync` (cron `0 3 * * *`) — nocny fetch Atlas `/history` wczoraj → uzupełnia breadcrumby (dedup docId=ts). Obecnie zwraca pusto dla WGM 0475M (ich sync delay).
+    - `cleanupBreadcrumbs` (cron `30 2 * * *`) — kasuje punkty > 7 dni, batch 450 per commit.
+30. ✅ **Firestore indexes + rules** (2026-04-23, 2026-04-24):
+    - `firestore.indexes.json` — composite index `driverActivities (driverEmail + startTs DESC)`. Bez niego scheduledGpsPoll padał `FAILED_PRECONDITION`.
+    - Rules: dodane reguły dla `driverActivities`, `dddFiles`, `gpsBreadcrumbs` (wcześniej błąd `permission-denied`).
+    - `.gitignore` — whitelist `!firestore.indexes.json` (catch-all `*.json` wcześniej blokował).
+31. ✅ **GpsCzasPracySection — UI manual entry segmentów** (2026-04-23) — przycisk "＋ Dodaj ręcznie" w Historii aktywności, form: type/start/end, submit → addDoc z `source: "manual"`. Nie nadpisywane przez auto-detection. Dla uzupełniania luk (przed startem server-side pollingu / gdy ktoś był offline).
+32. ✅ **Seed 23.04 driverActivities via admin SDK** (2026-04-23) — 3 segmenty z widziszwszystko panel (rest 02:40-10:42, drive 10:42-12:49 136.94km, rest 12:49-13:32) wprowadzone skryptem jednorazowym.
+33. ✅ **DriverPanel multi-foto** (2026-04-23) — CMR załadunek/rozładunek zmienione z single na multi (cmrZalPhotos[], cmrRozPhotos[]). Wszędzie `accept="image/*" multiple` + loop (usunięty `capture="environment"` → wybór galerii + aparat). Legacy `cmr_photo` wyświetlany w rozładunku (backward compat).
+34. ✅ **FrachtyModal — przycisk "Kopiuj dane"** (2026-04-24) — fioletowy, między Anuluj a WhatsApp. Otwiera `CopyOrderPreviewModal` z textarea (edytowalne). Format `formatOrderForDriverCopy(fracht, vehicles)`: Z1+Z2+R1-R5 per osobno z GPS/tel/adresy, towar, uwagi, zleceniodawca. BEZ km i ceny (info wewnętrzne). `navigator.clipboard.writeText()` + fallback.
+35. ✅ **GeoPickerModal — nie stawia automatycznie pinezki** (2026-04-24) — przy nowym wyborze pan do adresu ale pinezka ukryta dopóki user nie kliknie/nie przeciągnie. Save disabled do czasu pinezki. Dodatkowo: akceptuje wklejone koordy Google Maps (`50.027, 19.942` etc.) — input robi się zielony, przycisk "📍 Ustaw pinezkę" stawia pin bezpośrednio.
+36. ✅ **Banner "Nowa wersja dostępna"** (2026-04-24) — polling co 5 min (+ 30s po starcie) fetch `/` → porównanie hash bundla Vite. Jeśli różny → niebieski banner u góry z "Odśwież teraz" / "Później". Działa na admin + DriverPanel (env safe-area-inset-top).
+37. ✅ **GpsMapSection — ikona strzałki + pamięć widoku** (2026-04-24):
+    - Ikona: kółko ze strzałką obracaną o `course/heading/bearing` z Atlas (gdy jedzie), kółko z kropką gdy stoi. Zamiast SVG ciężarówki.
+    - Pamięć widoku: localStorage `gpsMapView` — lat/lng/zoom. Zapis na moveend/zoomend. Reload = zapamiętany widok zamiast Polska 7.
+38. ✅ **FrachtyTab — fix €/KM Ł w SUMA** (2026-04-24) — używał `totalKmWszAll` (= kmWszystkie || kmLadowne), mylnie równał się €/KM W. Teraz osobno `avgEurKmLad = totalCena / totalKmLad`.
+39. ✅ **Widziszwszystko: raport cykliczny Karta drogowa** (2026-04-24) — user skonfigurował w panelu widziszwszystko (Raporty → Raporty cykliczne → Karta drogowa Szczegółowa, codziennie, CSV, PL, email). **Czeka na pierwszy sample jutro** — parser + import do FleetStat po dostaniu pliku.
 
 ## 14. Co w planie (NASTĘPNE ZADANIA)
 
@@ -742,4 +812,4 @@ Użytkownicy w Firestore `users/{uid}` z polem `role`. Cloud Function `onRoleCha
 
 ---
 
-*Zaktualizowano: 2026-04-23 (dodano: WhatsApp Business Cloud API, FrachtyModal v2 redesign Z1/Z2/R1-R5/Zleceniodawca)*
+*Zaktualizowano: 2026-04-24 (duża sesja — punkty 25-39: GPS 24/7 CF, breadcrumby jako kropki, Trasy z map-matching, multi-foto CMR, Kopiuj dane, banner update, GeoPicker akceptuje wklejone koordy, ikona strzałka, SUMA €/KM Ł fix, raport cykliczny widziszwszystko w drodze)*
