@@ -1799,6 +1799,14 @@ exports.trackerData = onRequest(
 
       const nrZlecenia = fracht.nrZlecenia || fracht.nrRef || (fracht.id || "").slice(0, 8) || "—";
 
+      // Czy są dwa rozładunki — potrzebne do activeStep (5 kroków vs 4)
+      const hasR2 = !!(
+        (fracht.dokodPocztowy2 && String(fracht.dokodPocztowy2).trim()) ||
+        (fracht.dokodMiasto2 && String(fracht.dokodMiasto2).trim()) ||
+        (fracht.dokod2 && String(fracht.dokod2).trim()) ||
+        (fracht.rozladunekGeo2 && String(fracht.rozladunekGeo2).trim())
+      );
+
       // Jedno query driverEvents — używane do: (a) activeStep, (b) zdjęcia do galerii
       let events = [];
       try {
@@ -1855,19 +1863,13 @@ exports.trackerData = onRequest(
         if (show.towar && urls.towar.length) photos.towar = urls.towar;
       }
 
-      // 2. Planowane czasy (Europe/Warsaw) + detekcja drugiego rozładunku
+      // 2. Planowane czasy (Europe/Warsaw) — hasR2 już wyznaczone wcześniej
       const toMs = (date, time) => {
         if (!date) return null;
         const t = time || "00:00";
         const p = Date.parse(`${date}T${t}:00+02:00`);
         return isNaN(p) ? null : p;
       };
-      const hasR2 = !!(
-        (fracht.dokodPocztowy2 && String(fracht.dokodPocztowy2).trim()) ||
-        (fracht.dokodMiasto2 && String(fracht.dokodMiasto2).trim()) ||
-        (fracht.dokod2 && String(fracht.dokod2).trim()) ||
-        (fracht.rozladunekGeo2 && String(fracht.rozladunekGeo2).trim())
-      );
       const plannedR1Ms = toMs(fracht.dataRozladunku, fracht.godzRozladunku);
       const plannedR2Ms = hasR2 ? toMs(fracht.dataRozladunku2, fracht.godzRozladunku2) : null;
       // Końcowa dostawa = ostatni rozładunek (R2 jeśli istnieje, inaczej R1)
