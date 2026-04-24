@@ -1475,6 +1475,18 @@ function TrackerPublicView({ token }) {
     );
   }
 
+  if (error === "disabled") {
+    return (
+      <Shell>
+        <div style={{ background: "#fff", borderRadius: 16, padding: 32, textAlign: "center" }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#111827" }}>Śledzenie zostało wyłączone</div>
+          <div style={{ fontSize: 14, color: "#64748b", marginTop: 8 }}>Nadawca zamknął dostęp do tego linku. Skontaktuj się z nim, jeśli potrzebujesz aktualnych informacji.</div>
+        </div>
+      </Shell>
+    );
+  }
+
   if (error) {
     return (
       <Shell>
@@ -19358,6 +19370,48 @@ function KomentarzBaner({ frachtyList, vehicleId, onUpdate }) {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// TRACKER PILL — badge z toggle włączenia linku trackera dla zleceniodawcy
+// Zielony = link działa (trackerEnabled !== false), czerwony = wyłączony
+// Klik toggluje fracht.trackerEnabled. Token zostaje — włączając ponownie
+// działa ten sam link.
+// ═══════════════════════════════════════════════════════════════════════════════
+function TrackerPill({ fracht, onUpdate, compact = false }) {
+  const enabled = fracht.trackerEnabled !== false; // undefined = true (backward compat)
+  const onClick = (e) => {
+    e.stopPropagation();
+    const nextEnabled = !enabled;
+    const msg = nextEnabled
+      ? "Włączyć ponownie śledzenie dla zleceniodawcy?"
+      : 'Wyłączyć śledzenie? Zleceniodawca zobaczy "Śledzenie wyłączone" zamiast trasy.';
+    if (!window.confirm(msg)) return;
+    onUpdate(fracht.id, { trackerEnabled: nextEnabled });
+  };
+  const bg = enabled ? "#dcfce7" : "#fee2e2";
+  const fg = enabled ? "#15803d" : "#b91c1c";
+  const dot = enabled ? "#22c55e" : "#ef4444";
+  const label = enabled ? "Tracker" : "Tracker off";
+  const title = enabled ? "Kliknij, aby wyłączyć śledzenie" : "Kliknij, aby włączyć śledzenie";
+  if (compact) {
+    return (
+      <button onClick={onClick} title={title}
+        className="h-6 px-2 rounded-lg flex items-center gap-1 text-[10px] font-bold transition-all hover:opacity-80"
+        style={{ background: bg, color: fg }}>
+        <span style={{ width: 7, height: 7, borderRadius: "50%", background: dot, display: "inline-block" }}></span>
+        {label}
+      </button>
+    );
+  }
+  return (
+    <button onClick={onClick} title={title}
+      className="h-8 px-2.5 rounded-lg flex items-center gap-1.5 text-xs font-bold transition-all hover:opacity-80"
+      style={{ background: bg, color: fg }}>
+      <span style={{ width: 8, height: 8, borderRadius: "50%", background: dot, display: "inline-block" }}></span>
+      {label}
+    </button>
+  );
+}
+
 function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = [], onAdd, onDelete, onUpdate, onBulkAdd, canEdit = false, currentUser = null, appUsers = [], showToast = () => {} }) {
   // Index driverEvents by frachtId for quick lookup
   const eventsByFracht = useMemo(() => {
@@ -19651,6 +19705,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
               <div className="flex items-center justify-between pt-2 border-t border-gray-50">
                 <div className="text-xs text-gray-400">{r.dyspozytor || "—"} · {r.nrFV || "brak FV"}</div>
                 <div className="flex gap-1 flex-wrap">
+                  {r.trackerToken && <TrackerPill fracht={r} onUpdate={onUpdate} />}
                   {r.urlZlecenie && (
                     <a href={safeHref(r.urlZlecenie)} target="_blank" rel="noopener noreferrer"
                       className="h-8 px-2 rounded-lg flex items-center justify-center bg-blue-50 text-blue-600 text-xs font-semibold hover:bg-blue-100">📄 Zlecenie</a>
@@ -19757,6 +19812,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                         : <ZlecenieUploadBtn frachtId={r.id}
                             onUploaded={(url, parsed) => { const p = parsed || {}; const existing = frachtyList.find(x => x.id === r.id) || {}; const onlyNew = Object.fromEntries(Object.entries(p).filter(([k,v]) => v != null && v !== "" && !existing[k])); onUpdate(r.id, { urlZlecenie: url, ...onlyNew }); }} />
                       }
+                      {r.trackerToken && <TrackerPill fracht={r} onUpdate={onUpdate} compact />}
                       <button onClick={() => { setEditId(r.id); setShowForm(true); }} className="w-6 h-6 rounded-lg flex items-center justify-center transition-all hover:bg-indigo-50 text-xs" style={{background:"#f3f4f6"}} title="Edytuj">✏️</button>
                       <button onClick={() => { if(window.confirm("Usunac?")) onDelete(r.id); }} className="w-6 h-6 rounded-lg flex items-center justify-center text-xs bg-red-50 hover:bg-red-100 text-red-400">✕</button>
                     </div>
@@ -21229,13 +21285,17 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
         fracht={f}
         frachtId={record.id}
         trackerToken={trackerTokenLive}
+        trackerEnabled={record.trackerEnabled !== false}
         initialShow={record.trackerShow || {}}
         onTokenGenerated={(t) => {
           setTrackerTokenLive(t);
-          if (onPatch) onPatch(record.id, { trackerToken: t });
+          if (onPatch) onPatch(record.id, { trackerToken: t, trackerEnabled: true });
         }}
         onShowChange={(newShow) => {
           if (onPatch) onPatch(record.id, { trackerShow: newShow });
+        }}
+        onToggleEnabled={(enabled) => {
+          if (onPatch) onPatch(record.id, { trackerEnabled: enabled });
         }}
         showToast={showToast}
         onClose={() => setShowTrackerModal(false)}
@@ -21249,9 +21309,10 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
 // SEND TRACKER LINK MODAL — publiczny link do śledzenia dla zleceniodawcy
 // Generuje trackerToken jeśli nie istnieje, daje opcje: kopiuj / WhatsApp / email.
 // ═══════════════════════════════════════════════════════════════════════════════
-function SendTrackerLinkModal({ fracht, frachtId, trackerToken, initialShow = {}, onTokenGenerated, onShowChange, showToast, onClose }) {
+function SendTrackerLinkModal({ fracht, frachtId, trackerToken, trackerEnabled = true, initialShow = {}, onTokenGenerated, onShowChange, onToggleEnabled, showToast, onClose }) {
   const initialToken = trackerToken || "";
   const [token, setToken] = useState(initialToken);
+  const [enabled, setEnabled] = useState(trackerEnabled);
   const [show, setShow] = useState({
     cmrZal: !!initialShow.cmrZal,
     cmrRoz: !!initialShow.cmrRoz,
@@ -21274,6 +21335,17 @@ function SendTrackerLinkModal({ fracht, frachtId, trackerToken, initialShow = {}
     const next = { ...show, [key]: !show[key] };
     setShow(next);
     onShowChange && onShowChange(next);
+  };
+
+  const toggleEnabled = () => {
+    const next = !enabled;
+    const msg = next
+      ? "Włączyć ponownie śledzenie dla zleceniodawcy?"
+      : 'Wyłączyć śledzenie? Zleceniodawca zobaczy "Śledzenie wyłączone" zamiast trasy.';
+    if (!window.confirm(msg)) return;
+    setEnabled(next);
+    onToggleEnabled && onToggleEnabled(next);
+    showToast(next ? "Tracker włączony" : "Tracker wyłączony");
   };
 
   const link = token ? `https://fleetstat.pl/t/${token}` : "";
@@ -21348,6 +21420,35 @@ function SendTrackerLinkModal({ fracht, frachtId, trackerToken, initialShow = {}
               {firma && <> · <span className="text-gray-700">{firma}</span></>}
             </div>
           )}
+
+          {/* Status włączenia trackera */}
+          <div className="flex items-center justify-between p-3 rounded-xl border"
+            style={{
+              background: enabled ? "#f0fdf4" : "#fef2f2",
+              borderColor: enabled ? "#bbf7d0" : "#fecaca",
+            }}>
+            <div className="flex items-center gap-2.5">
+              <span style={{
+                width: 10, height: 10, borderRadius: "50%",
+                background: enabled ? "#22c55e" : "#ef4444",
+                boxShadow: enabled ? "0 0 0 3px rgba(34,197,94,0.25)" : "0 0 0 3px rgba(239,68,68,0.25)",
+                display: "inline-block",
+              }}></span>
+              <div>
+                <div className="text-sm font-bold" style={{ color: enabled ? "#15803d" : "#b91c1c" }}>
+                  {enabled ? "Tracker włączony" : "Tracker wyłączony"}
+                </div>
+                <div className="text-[11px]" style={{ color: enabled ? "#166534" : "#991b1b" }}>
+                  {enabled ? "Link działa — zleceniodawca widzi trasę" : 'Zleceniodawca widzi "Śledzenie wyłączone"'}
+                </div>
+              </div>
+            </div>
+            <button onClick={toggleEnabled}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-all hover:opacity-90"
+              style={{ background: enabled ? "#dc2626" : "#16a34a" }}>
+              {enabled ? "Wyłącz" : "Włącz"}
+            </button>
+          </div>
 
           <div>
             <label className="text-xs font-semibold text-gray-500 mb-2 block">Co pokazać zleceniodawcy</label>

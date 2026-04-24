@@ -1783,6 +1783,12 @@ exports.trackerData = onRequest(
       const fracht = frachtyList.find(f => f && f.trackerToken === token);
       if (!fracht) return res.status(404).json({ error: "not_found" });
 
+      // Tracker może być ręcznie wyłączony przez spedytora (fracht.trackerEnabled === false).
+      // Brak pola = domyślnie włączony (backward compat dla istniejących trackerów).
+      if (fracht.trackerEnabled === false) {
+        return res.status(403).json({ error: "disabled" });
+      }
+
       const nrZlecenia = fracht.nrZlecenia || fracht.nrRef || (fracht.id || "").slice(0, 8) || "—";
 
       // Jedno query driverEvents — używane do: (a) activeStep, (b) zdjęcia do galerii
