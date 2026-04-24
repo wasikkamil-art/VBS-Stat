@@ -7520,13 +7520,35 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
     const lat = position?.latitude || position?.lat || 52.0;
     const lng = position?.longitude || position?.lng || position?.lon || 19.0;
 
-    // Init map
+    // Init map — przywróć poprzedni widok z localStorage (zoom + pozycja)
     if (!mapInstanceRef.current) {
-      mapInstanceRef.current = L.map(mapRef.current).setView([lat, lng], 7);
+      let initLat = lat, initLng = lng, initZoom = 7;
+      try {
+        const savedRaw = localStorage.getItem("gpsMapView");
+        if (savedRaw) {
+          const saved = JSON.parse(savedRaw);
+          if (typeof saved?.lat === "number" && typeof saved?.lng === "number" && typeof saved?.zoom === "number") {
+            initLat = saved.lat; initLng = saved.lng; initZoom = saved.zoom;
+          }
+        }
+      } catch { /* silent */ }
+      mapInstanceRef.current = L.map(mapRef.current).setView([initLat, initLng], initZoom);
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: '&copy; OpenStreetMap',
         maxZoom: 19,
       }).addTo(mapInstanceRef.current);
+
+      // Zapisuj widok gdy user ręcznie przesuwa/zoomuje
+      const saveView = () => {
+        const m = mapInstanceRef.current;
+        if (!m) return;
+        const c = m.getCenter();
+        try {
+          localStorage.setItem("gpsMapView", JSON.stringify({ lat: c.lat, lng: c.lng, zoom: m.getZoom() }));
+        } catch { /* silent */ }
+      };
+      mapInstanceRef.current.on("moveend", saveView);
+      mapInstanceRef.current.on("zoomend", saveView);
     }
 
     // Clear old markers
@@ -7548,11 +7570,22 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
       const isMoving = pos.speed && pos.speed > 3;
 
       const markerColor = isSelected ? "#7c3aed" : isMoving ? "#16a34a" : "#6b7280";
-      const truckSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 24" width="${isSelected ? 40 : 32}" height="${isSelected ? 30 : 24}"><rect x="0" y="2" width="22" height="14" rx="3" fill="${markerColor}"/><rect x="22" y="6" width="10" height="10" rx="2" fill="${markerColor}"/><polygon points="28,6 32,10 32,16 28,16" fill="${markerColor}" opacity="0.8"/><rect x="23" y="8" width="6" height="5" rx="1" fill="rgba(255,255,255,0.3)"/><circle cx="7" cy="18" r="3.5" fill="#333" stroke="white" stroke-width="1.5"/><circle cx="7" cy="18" r="1.5" fill="#888"/><circle cx="26" cy="18" r="3.5" fill="#333" stroke="white" stroke-width="1.5"/><circle cx="26" cy="18" r="1.5" fill="#888"/><rect x="2" y="4" width="8" height="5" rx="1" fill="rgba(255,255,255,0.25)"/></svg>`;
+      // Heading / kierunek — Atlas może zwracać jako course / heading / bearing / azimuth
+      const heading = Number(pos.course ?? pos.heading ?? pos.bearing ?? pos.azimuth ?? 0) || 0;
+      const markerSize = isSelected ? 34 : 26;
+      const markerSvg = isMoving
+        ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="${markerSize}" height="${markerSize}" style="transform: rotate(${heading}deg); transform-origin: center;">
+             <circle cx="16" cy="16" r="14" fill="${markerColor}" stroke="white" stroke-width="2.5"/>
+             <polygon points="16,6 23,22 16,18 9,22" fill="white"/>
+           </svg>`
+        : `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="${markerSize}" height="${markerSize}">
+             <circle cx="16" cy="16" r="12" fill="${markerColor}" stroke="white" stroke-width="2.5"/>
+             <circle cx="16" cy="16" r="4" fill="white"/>
+           </svg>`;
       const icon = L.divIcon({
         className: "gps-marker",
         html: `<div style="display:flex; flex-direction:column; align-items:center; transform:translate(-50%,-100%); ${isSelected ? "z-index:999;" : ""}">
-          <div style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">${truckSvg}</div>
+          <div style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.35));">${markerSvg}</div>
           <div style="
             background: ${markerColor}; color: white; font-size: ${isSelected ? "11px" : "9px"}; font-weight: 700;
             padding: 2px 6px; border-radius: 8px; white-space: nowrap; margin-top: 2px;
