@@ -1329,9 +1329,261 @@ function LoginScreen() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// TRACKER PUBLIC VIEW — widok trackera dla zleceniodawcy (bez logowania)
+// Renderowany na ścieżce /t/{token}. Fetchuje Cloud Function trackerData co 30s.
+// ═══════════════════════════════════════════════════════════════════════════════
+function TrackerPublicView({ token }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    if (!token) { setError("missing_token"); setLoading(false); return; }
+    let active = true;
+    const fetchData = async () => {
+      try {
+        const url = `https://europe-west1-vbs-stats.cloudfunctions.net/trackerData?token=${encodeURIComponent(token)}`;
+        const resp = await fetch(url);
+        const json = await resp.json();
+        if (!active) return;
+        if (!resp.ok || json.error) {
+          setError(json.error || `http_${resp.status}`);
+          setData(null);
+        } else {
+          setData(json);
+          setError(null);
+        }
+      } catch (e) {
+        if (active) setError(e.message || "network_error");
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    fetchData();
+    const id = setInterval(fetchData, 30000);
+    return () => { active = false; clearInterval(id); };
+  }, [token]);
+
+  // Tick co minutę dla "ostatnia aktualizacja X min temu"
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 60000);
+    return () => clearInterval(id);
+  }, []);
+
+  const fmtHHMM = (ms) => {
+    if (!ms) return "—";
+    return new Date(ms).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Warsaw" });
+  };
+  const fmtDateSmart = (ms) => {
+    if (!ms) return "—";
+    const nowW = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Warsaw" }));
+    const tgtW = new Date(new Date(ms).toLocaleString("en-US", { timeZone: "Europe/Warsaw" }));
+    const nowDay = new Date(nowW.getFullYear(), nowW.getMonth(), nowW.getDate()).getTime();
+    const tgtDay = new Date(tgtW.getFullYear(), tgtW.getMonth(), tgtW.getDate()).getTime();
+    const diff = Math.round((tgtDay - nowDay) / 86400000);
+    if (diff === 0) return `dziś ${fmtHHMM(ms)}`;
+    if (diff === 1) return `jutro ${fmtHHMM(ms)}`;
+    if (diff === -1) return `wczoraj ${fmtHHMM(ms)}`;
+    const d = new Date(ms).toLocaleDateString("pl-PL", { day: "numeric", month: "long", timeZone: "Europe/Warsaw" });
+    return `${d}, ${fmtHHMM(ms)}`;
+  };
+  const fmtRelative = (ms) => {
+    if (!ms) return "";
+    const diff = Date.now() - ms;
+    const minutes = Math.floor(diff / 60000);
+    // tick w zależności żeby się odświeżało
+    void tick;
+    if (minutes < 1) return "przed chwilą";
+    if (minutes < 60) return `${minutes} min temu`;
+    const hours = Math.floor(minutes / 60);
+    return `${hours} h temu`;
+  };
+
+  // Wrapper layout
+  const Shell = ({ children }) => (
+    <div style={{
+      minHeight: "100vh",
+      background: "#f8f9fb",
+      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      padding: "20px 16px 40px",
+    }}>
+      <div style={{ width: "100%", maxWidth: 480 }}>
+        <div style={{ textAlign: "center", marginBottom: 28, color: "#64748b", fontSize: 13, fontWeight: 600, letterSpacing: 0.5 }}>
+          🚛 FleetStat
+        </div>
+        {children}
+        <div style={{ marginTop: 32, textAlign: "center", fontSize: 11, color: "#9ca3af" }}>
+          fleetstat.pl
+        </div>
+      </div>
+    </div>
+  );
+
+  if (loading && !data) {
+    return (
+      <Shell>
+        <div style={{ background: "#fff", borderRadius: 16, padding: 32, textAlign: "center", color: "#64748b" }}>
+          Ładowanie…
+        </div>
+      </Shell>
+    );
+  }
+
+  if (error === "not_found") {
+    return (
+      <Shell>
+        <div style={{ background: "#fff", borderRadius: 16, padding: 32, textAlign: "center" }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>🔍</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#111827" }}>Link wygasł lub nieprawidłowy</div>
+          <div style={{ fontSize: 14, color: "#64748b", marginTop: 8 }}>Skontaktuj się z nadawcą, aby otrzymać nowy link.</div>
+        </div>
+      </Shell>
+    );
+  }
+
+  if (error) {
+    return (
+      <Shell>
+        <div style={{ background: "#fff", borderRadius: 16, padding: 32, textAlign: "center" }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#dc2626" }}>Nie udało się wczytać danych</div>
+          <div style={{ fontSize: 13, color: "#64748b", marginTop: 8 }}>Spróbuj odświeżyć stronę za chwilę.</div>
+        </div>
+      </Shell>
+    );
+  }
+
+  const d = data || {};
+  const nr = d.nrZlecenia || "—";
+
+  // Status zakończony
+  if (d.status === "zakonczony") {
+    return (
+      <Shell>
+        <div style={{ background: "#fff", borderRadius: 16, padding: 28, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+          <div style={{ fontSize: 13, color: "#64748b", fontWeight: 600, marginBottom: 6 }}>Zlecenie nr {nr}</div>
+          <div style={{ marginTop: 18, padding: "16px 20px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 12, textAlign: "center" }}>
+            <div style={{ fontSize: 28, marginBottom: 6 }}>✅</div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: "#15803d" }}>Dostawa zrealizowana</div>
+            {d.plannedMs && (
+              <div style={{ fontSize: 13, color: "#166534", marginTop: 4 }}>
+                Planowany rozładunek: {fmtDateSmart(d.plannedMs)}
+              </div>
+            )}
+          </div>
+        </div>
+      </Shell>
+    );
+  }
+
+  // Status przed trasą
+  if (d.status === "przed_trasa") {
+    return (
+      <Shell>
+        <div style={{ background: "#fff", borderRadius: 16, padding: 28, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+          <div style={{ fontSize: 13, color: "#64748b", fontWeight: 600, marginBottom: 6 }}>Zlecenie nr {nr}</div>
+          <div style={{ marginTop: 18, padding: "16px 20px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, textAlign: "center" }}>
+            <div style={{ fontSize: 28, marginBottom: 6 }}>🕐</div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: "#334155" }}>Oczekiwanie na wyjazd</div>
+            {d.plannedMs && (
+              <div style={{ fontSize: 13, color: "#475569", marginTop: 4 }}>
+                Planowana dostawa: {fmtDateSmart(d.plannedMs)}
+              </div>
+            )}
+          </div>
+        </div>
+      </Shell>
+    );
+  }
+
+  // Status w trasie
+  const pct = Math.max(0, Math.min(100, d.percentDone || 0));
+  const kmRem = d.kmRemaining != null ? d.kmRemaining : null;
+  const delayMin = d.delayMin;
+  const onTime = delayMin === null || delayMin === undefined ? null : delayMin <= 15;
+
+  let statusBg, statusBorder, statusColor, statusIcon, statusText, statusSub;
+  if (onTime === null) {
+    statusBg = "#eff6ff"; statusBorder = "#bfdbfe"; statusColor = "#1d4ed8";
+    statusIcon = "🚛"; statusText = "W trasie";
+    statusSub = `Przewidywane dotarcie: ${fmtDateSmart(d.etaMs)}`;
+  } else if (onTime) {
+    statusBg = "#f0fdf4"; statusBorder = "#bbf7d0"; statusColor = "#15803d";
+    statusIcon = "✅"; statusText = "Dostawa na czas";
+    statusSub = `Planowana: ${fmtDateSmart(d.plannedMs)}`;
+  } else {
+    statusBg = "#fffbeb"; statusBorder = "#fde68a"; statusColor = "#b45309";
+    statusIcon = "⏱️"; statusText = `Przewidywane opóźnienie ${delayMin >= 60 ? Math.round(delayMin / 60) + " h" : delayMin + " min"}`;
+    statusSub = `Planowana: ${fmtDateSmart(d.plannedMs)} · Przewidywana: ${fmtDateSmart(d.etaMs)}`;
+  }
+
+  return (
+    <Shell>
+      <div style={{ background: "#fff", borderRadius: 16, padding: 24, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+        <div style={{ fontSize: 13, color: "#64748b", fontWeight: 600, marginBottom: 18 }}>Zlecenie nr {nr}</div>
+
+        {/* Pasek postępu */}
+        <div style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+          <div style={{ fontSize: 32, fontWeight: 800, color: "#111827", lineHeight: 1 }}>{pct}%</div>
+          {kmRem != null && (
+            <div style={{ fontSize: 14, color: "#64748b", fontWeight: 600 }}>
+              Do celu: <span style={{ color: "#111827", fontWeight: 700 }}>{kmRem} km</span>
+            </div>
+          )}
+        </div>
+        <div style={{ height: 10, background: "#e2e8f0", borderRadius: 999, overflow: "hidden", marginBottom: 24 }}>
+          <div style={{
+            width: `${pct}%`,
+            height: "100%",
+            background: "linear-gradient(90deg,#3b82f6,#1d4ed8)",
+            borderRadius: 999,
+            transition: "width 0.6s ease-out",
+          }} />
+        </div>
+
+        {/* Status dostawy */}
+        <div style={{
+          padding: "14px 16px",
+          background: statusBg,
+          border: `1px solid ${statusBorder}`,
+          borderRadius: 12,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+            <span style={{ fontSize: 22 }}>{statusIcon}</span>
+            <span style={{ fontSize: 16, fontWeight: 700, color: statusColor }}>{statusText}</span>
+          </div>
+          <div style={{ fontSize: 13, color: statusColor, opacity: 0.85, marginLeft: 32 }}>{statusSub}</div>
+        </div>
+
+        {/* Notka o tacho */}
+        <div style={{ marginTop: 14, fontSize: 11, color: "#94a3b8", lineHeight: 1.5, textAlign: "center", padding: "0 8px" }}>
+          Przewidywany czas dostawy uwzględnia wymagane przerwy kierowcy wynikające z przepisów o czasie pracy.
+        </div>
+      </div>
+
+      {/* Ostatnia aktualizacja */}
+      {d.updatedAt && (
+        <div style={{ marginTop: 14, textAlign: "center", fontSize: 12, color: "#94a3b8" }}>
+          Ostatnia aktualizacja: {fmtRelative(d.updatedAt)}
+        </div>
+      )}
+    </Shell>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // ROOT — auth wrapper
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function Root() {
+  // Publiczny tracker (bypass auth) — /t/{token}
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/t/")) {
+    const token = window.location.pathname.replace(/^\/t\//, "").replace(/\/$/, "");
+    return <TrackerPublicView token={token} />;
+  }
+
   const [user, setUser]         = useState(undefined);
   const [role, setRole]         = useState(null);
   const [roleLoaded, setRoleLoaded] = useState(false);
@@ -19519,7 +19771,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
           </tbody>
         </table>
       </div>
-      {showForm && <FrachtyModal record={editRecord} vehicles={vehicles} driverEvents={driverEvents} fuelEntries={fuelEntries} defaultVehicleId={selectedVehicle} appUsers={appUsers} currentUser={currentUser} showToast={showToast} onSave={(data) => { if(editId) onUpdate(editId,data); else onAdd(data); setShowForm(false); setEditId(null); }} onClose={() => { setShowForm(false); setEditId(null); }} />}
+      {showForm && <FrachtyModal record={editRecord} vehicles={vehicles} driverEvents={driverEvents} fuelEntries={fuelEntries} defaultVehicleId={selectedVehicle} appUsers={appUsers} currentUser={currentUser} showToast={showToast} onSave={(data) => { if(editId) onUpdate(editId,data); else onAdd(data); setShowForm(false); setEditId(null); }} onPatch={(id, partial) => onUpdate(id, partial)} onClose={() => { setShowForm(false); setEditId(null); }} />}
     </div>
   );
 }
@@ -20337,7 +20589,7 @@ function WhatsappSendPreviewModal({ fracht, driver, dispatcherName, onClose, onS
   );
 }
 
-function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], onSave, onClose, defaultVehicleId="", appUsers = [], currentUser = null, showToast = () => {} }) {
+function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], onSave, onPatch = null, onClose, defaultVehicleId="", appUsers = [], currentUser = null, showToast = () => {} }) {
   // ── pomocnik: rozbij "PL 44-100 Gliwice" → ["PL 44-100", "Gliwice"] ──
   function splitKM(s) {
     if (!s?.trim()) return ['',''];
@@ -20405,6 +20657,8 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
   const [geoPickerFor, setGeoPickerFor] = useState(null); // "z1"|"z2"|"r1"|"r2"|"r3"|"r4"|"r5"
   const [showWhatsappPreview, setShowWhatsappPreview] = useState(false);
   const [showCopyPreview, setShowCopyPreview] = useState(false);
+  const [showTrackerModal, setShowTrackerModal] = useState(false);
+  const [trackerTokenLive, setTrackerTokenLive] = useState(record?.trackerToken || "");
   const [showZ2, setShowZ2] = useState(!!(record?.zaladunekKodPocztowy2 || record?.zaladunekKod2?.trim()));
   const [showR2, setShowR2] = useState(!!(record?.dokodPocztowy2 || record?.dokod2?.trim()));
   const [showR3, setShowR3] = useState(!!(record?.dokodPocztowy3 || record?.dokod3?.trim()));
@@ -20718,6 +20972,14 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
             title="Podgląd danych zlecenia gotowy do skopiowania (Signal / SMS / email / inny komunikator)">
             📋 Kopiuj dane
           </button>
+          {record?.id && (
+            <button onClick={() => setShowTrackerModal(true)}
+              className="px-4 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-2"
+              style={{background: "#0ea5e9"}}
+              title="Wyślij zleceniodawcy link do śledzenia trasy">
+              🔗 Wyślij tracker
+            </button>
+          )}
           {canSendWhatsapp && (
             <button onClick={() => setShowWhatsappPreview(true)}
               className="px-4 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-2"
@@ -20748,6 +21010,166 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
         onClose={() => setShowCopyPreview(false)}
       />
     )}
+    {showTrackerModal && record?.id && (
+      <SendTrackerLinkModal
+        fracht={f}
+        frachtId={record.id}
+        trackerToken={trackerTokenLive}
+        onTokenGenerated={(t) => {
+          setTrackerTokenLive(t);
+          if (onPatch) onPatch(record.id, { trackerToken: t });
+        }}
+        showToast={showToast}
+        onClose={() => setShowTrackerModal(false)}
+      />
+    )}
     </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SEND TRACKER LINK MODAL — publiczny link do śledzenia dla zleceniodawcy
+// Generuje trackerToken jeśli nie istnieje, daje opcje: kopiuj / WhatsApp / email.
+// ═══════════════════════════════════════════════════════════════════════════════
+function SendTrackerLinkModal({ fracht, frachtId, trackerToken, onTokenGenerated, showToast, onClose }) {
+  const initialToken = trackerToken || "";
+  const [token, setToken] = useState(initialToken);
+
+  useEffect(() => {
+    if (!token) {
+      // Generuj losowy token (crypto.randomUUID() wspierane w nowoczesnych przeglądarkach)
+      const newToken = (typeof crypto !== "undefined" && crypto.randomUUID)
+        ? crypto.randomUUID().replace(/-/g, "")
+        : Math.random().toString(36).slice(2) + Date.now().toString(36) + Math.random().toString(36).slice(2);
+      setToken(newToken);
+      onTokenGenerated && onTokenGenerated(newToken);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const link = token ? `https://fleetstat.pl/t/${token}` : "";
+  const nrZl = fracht?.nrZlecenia || fracht?.nrRef || "";
+  const firma = fracht?.zleceniodawcaFirma || "";
+  const telefon = (fracht?.zleceniodawcaTelefon || "").trim();
+  const email = (fracht?.zleceniodawcaEmail || "").trim();
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(link);
+      showToast("Link skopiowany");
+    } catch {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = link; document.body.appendChild(ta); ta.select();
+        document.execCommand("copy"); document.body.removeChild(ta);
+        showToast("Link skopiowany");
+      } catch {
+        showToast("Nie udało się skopiować — skopiuj ręcznie");
+      }
+    }
+  };
+
+  const sendWhatsapp = () => {
+    const msg = [
+      firma ? `Dzień dobry${firma ? " " + firma : ""},` : "Dzień dobry,",
+      "",
+      `Śledzenie przesyłki${nrZl ? " (nr " + nrZl + ")" : ""}:`,
+      link,
+      "",
+      "Pozdrawiamy,",
+      "FleetStat",
+    ].join("\n");
+    const digits = telefon.replace(/[^\d+]/g, "").replace(/^\+/, "");
+    const url = `https://wa.me/${digits}?text=${encodeURIComponent(msg)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const sendEmail = () => {
+    const subject = `Śledzenie przesyłki${nrZl ? " — zlecenie nr " + nrZl : ""}`;
+    const body = [
+      firma ? `Dzień dobry${firma ? " " + firma : ""},` : "Dzień dobry,",
+      "",
+      `Poniżej link do śledzenia przesyłki${nrZl ? " (nr zlecenia: " + nrZl + ")" : ""}.`,
+      "Informacje są aktualizowane na bieżąco.",
+      "",
+      link,
+      "",
+      "Pozdrawiamy,",
+      "FleetStat",
+    ].join("\n");
+    const url = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = url;
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <div className="text-lg font-bold text-gray-800">🔗 Wyślij tracker</div>
+            <div className="text-xs text-gray-500 mt-0.5">Publiczny link do śledzenia dla zleceniodawcy</div>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl px-2">✕</button>
+        </div>
+
+        <div className="px-6 py-5 space-y-4">
+          {nrZl && (
+            <div className="text-sm text-gray-600">
+              Zlecenie: <span className="font-semibold text-gray-900">{nrZl}</span>
+              {firma && <> · <span className="text-gray-700">{firma}</span></>}
+            </div>
+          )}
+
+          <div>
+            <label className="text-xs font-semibold text-gray-500 mb-1 block">Link</label>
+            <div className="flex items-stretch gap-2">
+              <input
+                readOnly
+                value={link}
+                onFocus={e => e.target.select()}
+                className="flex-1 text-sm px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 font-mono text-gray-700"
+              />
+              <button onClick={copyLink}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+                style={{background:"#6366f1"}}
+                title="Skopiuj do schowka">
+                📋
+              </button>
+            </div>
+            <div className="text-[11px] text-gray-400 mt-1.5 leading-relaxed">
+              Na stronie widoczne będą: nr zlecenia, pasek postępu, km do celu i przewidywany czas dostawy.
+              Dane wewnętrzne (cena, dyspozytor, adresy) są ukryte.
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 pt-1">
+            <button onClick={sendWhatsapp}
+              disabled={!telefon}
+              className="px-3 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              style={{background:"#25D366"}}
+              title={telefon ? `Wyślij przez WhatsApp na ${telefon}` : "Brak telefonu zleceniodawcy"}>
+              📱 WhatsApp{telefon ? "" : " (brak tel.)"}
+            </button>
+            <button onClick={sendEmail}
+              disabled={!email}
+              className="px-3 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              style={{background:"#0284c7"}}
+              title={email ? `Wyślij email na ${email}` : "Brak emaila zleceniodawcy"}>
+              ✉️ Email{email ? "" : " (brak)"}
+            </button>
+          </div>
+
+          {(!telefon || !email) && (
+            <div className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              Aby skorzystać z WhatsApp/email, uzupełnij dane zleceniodawcy w sekcji „Zleceniodawca".
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-3 border-t border-gray-100 bg-gray-50 flex justify-end">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-200">Zamknij</button>
+        </div>
+      </div>
+    </div>
   );
 }

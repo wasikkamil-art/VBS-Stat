@@ -1617,3 +1617,296 @@ exports.whatsappWebhook = onRequest(
     }
   }
 );
+
+// ═══════════════════════════════════════════════════════════════
+// TRACKER DATA — publiczny endpoint dla trackera klienta
+//   Token w URL jest jedyną formą autoryzacji (losowy UUID).
+//   Zwraca: nr zlecenia, % trasy, km do celu, ETA uwzględniającą
+//   wymagane przerwy kierowcy (rozp. 561/2006 — uproszczone).
+// ═══════════════════════════════════════════════════════════════
+
+function parseGeoStringBackend(geo) {
+  if (!geo || typeof geo !== "string") return null;
+  const [latStr, lngStr] = geo.split(",").map(s => s.trim());
+  const lat = Number(latStr), lng = Number(lngStr);
+  if (isNaN(lat) || isNaN(lng)) return null;
+  return { lat, lng };
+}
+
+async function geocodeAddress(query) {
+  if (!query || !String(query).trim()) return null;
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(String(query))}`;
+    const resp = await fetch(url, {
+      headers: { "User-Agent": "FleetStat/1.0 (fleetstat.pl)" },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (!Array.isArray(data) || data.length === 0) return null;
+    return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+  } catch {
+    return null;
+  }
+}
+
+async function osrmRoute(from, to) {
+  if (!from || !to) return null;
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=false`;
+    const resp = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const r = data?.routes?.[0];
+    if (!r) return null;
+    return { distanceKm: r.distance / 1000, durationMin: r.duration / 60 };
+  } catch {
+    return null;
+  }
+}
+
+function normalizeSegmentBackend(s, nowIso) {
+  const startTs = s.startTs || s.start;
+  const endTs = s.endTs || s.end || nowIso;
+  const startMs = new Date(startTs).getTime();
+  const endMs = new Date(endTs).getTime();
+  return {
+    type: s.type || "avail",
+    source: s.source || "unknown",
+    startMs,
+    endMs,
+    durMin: Math.max(0, Math.round((endMs - startMs) / 60000)),
+  };
+}
+
+// Oblicza: continuousDrive (min od ostatniej przerwy >= 45min rest)
+//          dailyDrive (min od ostatniego >= 9h rest / fallback 24h w tył).
+function computeTrackerCompliance(rawSegments, now) {
+  const nowIso = now.toISOString();
+  const nowMs = now.getTime();
+  const segments = rawSegments
+    .map(s => normalizeSegmentBackend(s, nowIso))
+    .sort((a, b) => a.startMs - b.startMs);
+
+  let contCutoff = 0;
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const s = segments[i];
+    if (s.type === "rest" && s.durMin >= 45 && s.endMs <= nowMs) {
+      contCutoff = s.endMs;
+      break;
+    }
+  }
+  let continuousDrive = 0;
+  for (const s of segments) {
+    if (s.type !== "drive") continue;
+    const sMs = Math.max(s.startMs, contCutoff);
+    const eMs = Math.min(s.endMs, nowMs);
+    if (eMs > sMs) continuousDrive += Math.round((eMs - sMs) / 60000);
+  }
+
+  let dailyCutoff = nowMs - 24 * 3600000;
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const s = segments[i];
+    if (s.type === "rest" && s.durMin >= 540 && s.endMs <= nowMs) {
+      dailyCutoff = s.endMs;
+      break;
+    }
+  }
+  let dailyDrive = 0;
+  for (const s of segments) {
+    if (s.type !== "drive") continue;
+    const sMs = Math.max(s.startMs, dailyCutoff);
+    const eMs = Math.min(s.endMs, nowMs);
+    if (eMs > sMs) dailyDrive += Math.round((eMs - sMs) / 60000);
+  }
+
+  return { continuousDrive, dailyDrive };
+}
+
+// ETA z uwzględnieniem przerw. Dodaje 45min przerwę po każdych 4.5h jazdy,
+// oraz 11h odpoczynek po osiągnięciu dziennego limitu 9h jazdy.
+function calcEtaWithBreaks(startMs, driveMinutes, continuousDrive, dailyDrive) {
+  const CONT_LIMIT = 270;
+  const BREAK = 45;
+  const DAILY_LIMIT = 540;
+  const DAILY_REST = 11 * 60;
+
+  let now = startMs;
+  let remaining = Math.max(0, driveMinutes);
+  let contLeft = Math.max(0, CONT_LIMIT - continuousDrive);
+  let dailyLeft = Math.max(0, DAILY_LIMIT - dailyDrive);
+  let totalBreaks = 0;
+  let iter = 0;
+
+  while (remaining > 0 && iter < 100) {
+    iter++;
+    if (dailyLeft <= 0) {
+      now += DAILY_REST * 60000;
+      totalBreaks += DAILY_REST;
+      dailyLeft = DAILY_LIMIT;
+      contLeft = CONT_LIMIT;
+      continue;
+    }
+    if (contLeft <= 0) {
+      now += BREAK * 60000;
+      totalBreaks += BREAK;
+      contLeft = CONT_LIMIT;
+      continue;
+    }
+    const canDrive = Math.min(remaining, contLeft, dailyLeft);
+    now += canDrive * 60000;
+    remaining -= canDrive;
+    contLeft -= canDrive;
+    dailyLeft -= canDrive;
+  }
+
+  return { etaMs: now, breakMinutes: totalBreaks };
+}
+
+exports.trackerData = onRequest(
+  { region: "europe-west1", cors: true, timeoutSeconds: 30 },
+  async (req, res) => {
+    try {
+      const token = String(req.query.token || "").trim();
+      if (!token || token.length < 16) {
+        return res.status(400).json({ error: "missing_token" });
+      }
+
+      const db = getFirestore();
+
+      // 1. Dane fleet — frachty są array w fleet/data.fleetv2_frachty
+      const fleetSnap = await db.doc("fleet/data").get();
+      const fleetData = fleetSnap.data() || {};
+      const frachtyList = fleetData.fleetv2_frachty || [];
+      const vehicles = fleetData.fleetv2_vehicles || [];
+
+      const fracht = frachtyList.find(f => f && f.trackerToken === token);
+      if (!fracht) return res.status(404).json({ error: "not_found" });
+
+      const nrZlecenia = fracht.nrZlecenia || fracht.nrRef || (fracht.id || "").slice(0, 8) || "—";
+
+      // 2. Planowany czas dostawy (z dataRozladunku + godzRozladunku w Europe/Warsaw)
+      let plannedMs = null;
+      if (fracht.dataRozladunku) {
+        const timePart = fracht.godzRozladunku || "00:00";
+        const parsed = Date.parse(`${fracht.dataRozladunku}T${timePart}:00+02:00`);
+        if (!isNaN(parsed)) plannedMs = parsed;
+      }
+
+      // 3. Quick return — zakończone
+      if (fracht.statusRozladunku === "rozladowano") {
+        return res.json({
+          nrZlecenia,
+          status: "zakonczony",
+          plannedMs,
+          updatedAt: Date.now(),
+        });
+      }
+
+      const vehicleId = fracht.vehicleId;
+      if (!vehicleId) return res.status(400).json({ error: "no_vehicle" });
+
+      // 4. Latest breadcrumb (max 1 min stara dzięki scheduledGpsPoll)
+      const bsnap = await db.collection("gpsBreadcrumbs").doc(vehicleId)
+        .collection("points").orderBy("ts", "desc").limit(1).get();
+      let pos = null;
+      if (!bsnap.empty) {
+        const d = bsnap.docs[0].data();
+        if (typeof d.lat === "number" && typeof d.lng === "number") {
+          pos = { lat: d.lat, lng: d.lng, ts: d.ts };
+        }
+      }
+
+      // 5. Destination R1 — geo → fallback geocode
+      let dest = parseGeoStringBackend(fracht.rozladunekGeo);
+      if (!dest) {
+        const q = [fracht.rozladunekAdres, fracht.dokodPocztowy, fracht.dokodMiasto]
+          .filter(Boolean).join(", ");
+        dest = await geocodeAddress(q || fracht.dokod);
+      }
+      if (!dest) return res.status(500).json({ error: "no_destination" });
+
+      // 6. Brak pozycji — jeszcze nie wyjechał
+      if (!pos) {
+        return res.json({
+          nrZlecenia,
+          status: "przed_trasa",
+          plannedMs,
+          percentDone: 0,
+          updatedAt: Date.now(),
+        });
+      }
+
+      // 7. Start Z1 — geo → fallback geocode (dla % trasy)
+      let start = parseGeoStringBackend(fracht.zaladunekGeo);
+      if (!start) {
+        const q = [fracht.zaladunekAdres, fracht.zaladunekKodPocztowy, fracht.zaladunekMiasto]
+          .filter(Boolean).join(", ");
+        start = await geocodeAddress(q || fracht.zaladunekKod);
+      }
+
+      // 8. Routing
+      const routeCurrent = await osrmRoute(pos, dest);
+      if (!routeCurrent) return res.status(500).json({ error: "osrm_failed" });
+
+      let kmTotal = routeCurrent.distanceKm;
+      if (start) {
+        const routeTotal = await osrmRoute(start, dest);
+        if (routeTotal && routeTotal.distanceKm > 0) kmTotal = routeTotal.distanceKm;
+      }
+      const kmRemaining = routeCurrent.distanceKm;
+      const kmDone = Math.max(0, kmTotal - kmRemaining);
+      const percentDone = kmTotal > 0 ? Math.min(100, Math.round((kmDone / kmTotal) * 100)) : 0;
+
+      // 9. Compliance kierowcy (ostatnie 7 dni segmentów driverActivities)
+      const vehicle = vehicles.find(v => v.id === vehicleId);
+      const activeDriver = (vehicle?.driverHistory || []).find(d => !d.to);
+
+      let continuousDrive = 0, dailyDrive = 0;
+      if (activeDriver?.email) {
+        try {
+          const cutoffIso = new Date(Date.now() - 7 * 24 * 3600000).toISOString();
+          const asnap = await db.collection("driverActivities")
+            .where("driverEmail", "==", activeDriver.email)
+            .where("startTs", ">=", cutoffIso)
+            .orderBy("startTs", "asc")
+            .get();
+          const segments = asnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          const c = computeTrackerCompliance(segments, new Date());
+          continuousDrive = c.continuousDrive;
+          dailyDrive = c.dailyDrive;
+        } catch (e) {
+          console.warn("trackerData: compliance query failed:", e.message);
+        }
+      }
+
+      // 10. ETA z przerwami
+      const { etaMs, breakMinutes } = calcEtaWithBreaks(
+        Date.now(),
+        routeCurrent.durationMin,
+        continuousDrive,
+        dailyDrive
+      );
+
+      const delayMin = plannedMs ? Math.round((etaMs - plannedMs) / 60000) : null;
+
+      return res.json({
+        nrZlecenia,
+        status: "w_trasie",
+        kmTotal: Math.round(kmTotal),
+        kmRemaining: Math.round(kmRemaining),
+        kmDone: Math.round(kmDone),
+        percentDone,
+        etaMs,
+        plannedMs,
+        delayMin,
+        breakMinutes,
+        positionTs: pos.ts,
+        updatedAt: Date.now(),
+      });
+    } catch (e) {
+      console.error("trackerData error:", e);
+      return res.status(500).json({ error: "internal", message: e.message });
+    }
+  }
+);
