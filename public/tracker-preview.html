@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tracker — preview</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8f9fb; min-height: 100vh; padding: 40px 16px; color: #111827; }
+  .outer { max-width: 880px; margin: 0 auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 24px; align-items: start; }
+  .preview-label { text-align: center; font-size: 12px; font-weight: 700; color: #64748b; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 12px; }
+  .shell { max-width: 480px; margin: 0 auto; width: 100%; }
+  .logo-row { display: flex; justify-content: center; margin-bottom: 28px; }
+  .logo-row img { width: 200px; max-width: 70%; height: auto; }
+  .card { background: #fff; border-radius: 16px; padding: 22px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
+  .card-head-left { flex: 1; min-width: 0; }
+  .card-head-right img { width: 80px; height: auto; display: block; opacity: 0.9; }
+  .order-label { font-size: 13px; color: #64748b; font-weight: 600; margin-bottom: 4px; }
+  .order-nr { font-size: 18px; font-weight: 800; color: #111827; margin-bottom: 10px; }
+  .vehicle-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 12px; font-weight: 700; color: #475569; letter-spacing: 0.3px; }
+  .vehicle-badge-dot { font-size: 11px; }
+
+  /* Stepper */
+  .stepper { display: flex; align-items: center; justify-content: space-between; padding: 8px 0 4px; gap: 4px; }
+  .step { display: flex; flex-direction: column; align-items: center; min-width: 50px; position: relative; }
+  .step-dot { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; transition: all 0.3s; }
+  .step-label { font-size: 10px; font-weight: 600; margin-top: 6px; text-align: center; line-height: 1.2; }
+  .step.done .step-dot { background: #22c55e; color: #fff; }
+  .step.done .step-label { color: #15803d; }
+  .step.active .step-dot { background: #3b82f6; color: #fff; box-shadow: 0 0 0 4px rgba(59,130,246,0.18); }
+  .step.active .step-label { color: #1d4ed8; }
+  .step.pending .step-dot { background: #e2e8f0; color: #94a3b8; }
+  .step.pending .step-label { color: #94a3b8; }
+  .step-line { flex: 1; height: 2px; margin-top: -20px; background: #e2e8f0; transition: background 0.3s; }
+  .step-line.done { background: #22c55e; }
+
+  /* Progress */
+  .progress-block { margin-top: 22px; }
+  .progress-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+  .progress-pct { font-size: 24px; font-weight: 800; line-height: 1; }
+  .progress-km { font-size: 13px; color: #64748b; font-weight: 600; }
+  .progress-km b { color: #111827; font-weight: 700; }
+  .progress-bar { height: 10px; background: #e2e8f0; border-radius: 999px; overflow: hidden; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, #3b82f6, #1d4ed8); border-radius: 999px; }
+
+  /* GPS link */
+  .gps-link { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; padding: 8px 12px; background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 10px; font-size: 12px; color: #075985; text-decoration: none; }
+  .gps-link-left { display: flex; align-items: center; gap: 6px; }
+  .gps-mono { font-family: monospace; }
+
+  /* Date cards */
+  .date-cards { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+  .date-card { flex: 1; min-width: 0; padding: 12px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; }
+  .date-card-title { font-size: 10px; font-weight: 700; color: #94a3b8; letter-spacing: 0.5px; text-transform: uppercase; }
+  .date-card-value { font-size: 13px; font-weight: 700; color: #334155; margin-top: 3px; }
+
+  /* Status banner */
+  .banner { margin-top: 16px; padding: 14px 16px; border-radius: 12px; }
+  .banner.ok { background: #f0fdf4; border: 1px solid #bbf7d0; }
+  .banner.warn { background: #fffbeb; border: 1px solid #fde68a; }
+  .banner.info { background: #eff6ff; border: 1px solid #bfdbfe; }
+  .banner-title { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .banner-icon { font-size: 22px; }
+  .banner-title-text { font-size: 16px; font-weight: 700; }
+  .banner-sub { font-size: 13px; opacity: 0.85; margin-left: 32px; }
+  .ok .banner-title-text, .ok .banner-sub { color: #15803d; }
+  .warn .banner-title-text, .warn .banner-sub { color: #b45309; }
+  .info .banner-title-text, .info .banner-sub { color: #1d4ed8; }
+
+  .tacho-note { margin-top: 14px; font-size: 11px; color: #94a3b8; line-height: 1.5; text-align: center; padding: 0 8px; }
+  .last-update { margin-top: 14px; text-align: center; font-size: 12px; color: #94a3b8; }
+  .footer { margin-top: 32px; text-align: center; font-size: 11px; color: #9ca3af; }
+</style>
+</head>
+<body>
+  <div class="outer">
+
+    <!-- WARIANT 1: W trasie, 2 rozładunki, na czas -->
+    <div>
+      <div class="preview-label">wariant „w trasie" (2 rozładunki)</div>
+      <div class="shell">
+        <div class="logo-row">
+          <img src="logodologowania.png" alt="FleetStat">
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div class="card-head-left">
+              <div class="order-label">Zlecenie nr</div>
+              <div class="order-nr">2454/2026</div>
+              <div class="vehicle-badge">
+                <span class="vehicle-badge-dot">🚛</span>
+                <span>WGM 0475M</span>
+              </div>
+            </div>
+            <div class="card-head-right">
+              <img src="vbs-logo.png" alt="VBS">
+            </div>
+          </div>
+
+          <!-- Stepper 5 kroków -->
+          <div class="stepper">
+            <div class="step done">
+              <div class="step-dot">✓</div>
+              <div class="step-label">Dojazd do załadunku</div>
+            </div>
+            <div class="step-line done"></div>
+            <div class="step done">
+              <div class="step-dot">✓</div>
+              <div class="step-label">Załadowano</div>
+            </div>
+            <div class="step-line done"></div>
+            <div class="step active">
+              <div class="step-dot">📍</div>
+              <div class="step-label">Rozładunek 1</div>
+            </div>
+            <div class="step-line"></div>
+            <div class="step pending">
+              <div class="step-dot">📍</div>
+              <div class="step-label">Rozładunek 2</div>
+            </div>
+            <div class="step-line"></div>
+            <div class="step pending">
+              <div class="step-dot">✅</div>
+              <div class="step-label">Dostarczono</div>
+            </div>
+          </div>
+
+          <!-- Progress -->
+          <div class="progress-block">
+            <div class="progress-head">
+              <div class="progress-pct">54%</div>
+              <div class="progress-km">Do celu: <b>1026 km</b></div>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" style="width: 54%"></div></div>
+
+            <a href="#" class="gps-link">
+              <div class="gps-link-left">
+                <span>📍</span>
+                <span style="font-weight:600;">Aktualna pozycja:</span>
+                <span class="gps-mono">49.5897, 6.1634</span>
+              </div>
+              <span style="font-weight:700; font-size:11px;">Otwórz w mapach →</span>
+            </a>
+          </div>
+
+          <!-- Date cards -->
+          <div class="date-cards">
+            <div class="date-card">
+              <div class="date-card-title">Załadunek</div>
+              <div class="date-card-value">wczoraj 14:00</div>
+            </div>
+            <div class="date-card">
+              <div class="date-card-title">Rozładunek 1</div>
+              <div class="date-card-value">28 kwietnia, 08:00</div>
+            </div>
+            <div class="date-card">
+              <div class="date-card-title">Rozładunek 2</div>
+              <div class="date-card-value">28 kwietnia, 09:00</div>
+            </div>
+          </div>
+
+          <!-- Banner -->
+          <div class="banner ok">
+            <div class="banner-title">
+              <span class="banner-icon">✅</span>
+              <span class="banner-title-text">Dostawa na czas</span>
+            </div>
+            <div class="banner-sub">Planowana: 28 kwietnia, 09:00</div>
+          </div>
+
+          <div class="tacho-note">
+            Przewidywany czas dostawy uwzględnia wymagane przerwy kierowcy wynikające z przepisów o czasie pracy.
+          </div>
+        </div>
+
+        <div class="last-update">Ostatnia aktualizacja: przed chwilą</div>
+        <div class="footer">fleetstat.pl</div>
+      </div>
+    </div>
+
+    <!-- WARIANT 2: Opóźnienie -->
+    <div>
+      <div class="preview-label">wariant „opóźnienie"</div>
+      <div class="shell">
+        <div class="logo-row">
+          <img src="logodologowania.png" alt="FleetStat">
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div class="card-head-left">
+              <div class="order-label">Zlecenie nr</div>
+              <div class="order-nr">2455/2026</div>
+              <div class="vehicle-badge">
+                <span class="vehicle-badge-dot">🚛</span>
+                <span>TK 130EF</span>
+              </div>
+            </div>
+            <div class="card-head-right">
+              <img src="vbs-logo.png" alt="VBS">
+            </div>
+          </div>
+
+          <div class="stepper">
+            <div class="step done"><div class="step-dot">✓</div><div class="step-label">Dojazd do załadunku</div></div>
+            <div class="step-line done"></div>
+            <div class="step done"><div class="step-dot">✓</div><div class="step-label">Załadowano</div></div>
+            <div class="step-line done"></div>
+            <div class="step active"><div class="step-dot">🚛</div><div class="step-label">W trasie</div></div>
+            <div class="step-line"></div>
+            <div class="step pending"><div class="step-dot">✅</div><div class="step-label">Dostarczono</div></div>
+          </div>
+
+          <div class="progress-block">
+            <div class="progress-head">
+              <div class="progress-pct">72%</div>
+              <div class="progress-km">Do celu: <b>280 km</b></div>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" style="width: 72%"></div></div>
+
+            <a href="#" class="gps-link">
+              <div class="gps-link-left">
+                <span>📍</span>
+                <span style="font-weight:600;">Aktualna pozycja:</span>
+                <span class="gps-mono">52.1234, 14.5678</span>
+              </div>
+              <span style="font-weight:700; font-size:11px;">Otwórz w mapach →</span>
+            </a>
+          </div>
+
+          <div class="date-cards">
+            <div class="date-card">
+              <div class="date-card-title">Załadunek</div>
+              <div class="date-card-value">wczoraj 07:00</div>
+            </div>
+            <div class="date-card">
+              <div class="date-card-title">Planowana dostawa</div>
+              <div class="date-card-value">dziś 14:00</div>
+            </div>
+          </div>
+
+          <div class="banner warn">
+            <div class="banner-title">
+              <span class="banner-icon">⏱️</span>
+              <span class="banner-title-text">Przewidywane opóźnienie 1 h</span>
+            </div>
+            <div class="banner-sub">Planowana: dziś 14:00 · Przewidywana: dziś 15:00</div>
+          </div>
+
+          <div class="tacho-note">
+            Przewidywany czas dostawy uwzględnia wymagane przerwy kierowcy wynikające z przepisów o czasie pracy.
+          </div>
+        </div>
+
+        <div class="last-update">Ostatnia aktualizacja: 2 min temu</div>
+        <div class="footer">fleetstat.pl</div>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>

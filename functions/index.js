@@ -1799,6 +1799,10 @@ exports.trackerData = onRequest(
 
       const nrZlecenia = fracht.nrZlecenia || fracht.nrRef || (fracht.id || "").slice(0, 8) || "—";
 
+      // Rejestracja pojazdu do wyświetlenia w nagłówku trackera
+      const vehicleForDisplay = vehicles.find(v => v && v.id === fracht.vehicleId);
+      const vehiclePlate = (vehicleForDisplay?.plate || "").trim() || null;
+
       // Czy są dwa rozładunki — potrzebne do activeStep (5 kroków vs 4)
       const hasR2 = !!(
         (fracht.dokodPocztowy2 && String(fracht.dokodPocztowy2).trim()) ||
@@ -1880,6 +1884,7 @@ exports.trackerData = onRequest(
       if (fracht.statusRozladunku === "rozladowano") {
         return res.json({
           nrZlecenia,
+          vehiclePlate,
           status: "zakonczony",
           activeStep: hasR2 ? 4 : 3,
           hasR2,
@@ -1929,6 +1934,7 @@ exports.trackerData = onRequest(
       if (!pos) {
         return res.json({
           nrZlecenia,
+          vehiclePlate,
           status: "przed_trasa",
           activeStep,
           hasR2,
@@ -2000,6 +2006,7 @@ exports.trackerData = onRequest(
 
       return res.json({
         nrZlecenia,
+        vehiclePlate,
         status: "w_trasie",
         activeStep,
         hasR2,

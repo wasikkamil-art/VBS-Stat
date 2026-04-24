@@ -1615,8 +1615,21 @@ function TrackerPublicView({ token }) {
   return (
     <Shell>
       <div style={{ background: "#fff", borderRadius: 16, padding: 22, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
-        <div style={{ fontSize: 13, color: "#64748b", fontWeight: 600, marginBottom: 4 }}>Zlecenie nr</div>
-        <div style={{ fontSize: 18, fontWeight: 800, color: "#111827", marginBottom: 18 }}>{nr}</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 18 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, color: "#64748b", fontWeight: 600, marginBottom: 4 }}>Zlecenie nr</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "#111827", marginBottom: d.vehiclePlate ? 10 : 0 }}>{nr}</div>
+            {d.vehiclePlate && (
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 8, fontSize: 12, fontWeight: 700, color: "#475569", letterSpacing: 0.3 }}>
+                <span style={{ fontSize: 11 }}>🚛</span>
+                <span>{d.vehiclePlate}</span>
+              </div>
+            )}
+          </div>
+          <div style={{ flexShrink: 0 }}>
+            <img src="/vbs-logo.png" alt="VBS" style={{ width: 80, height: "auto", display: "block", opacity: 0.9 }} />
+          </div>
+        </div>
 
         {/* Stepper */}
         <Stepper />
