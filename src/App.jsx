@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, Fragment } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, CartesianGrid } from "recharts";
 // v2025.03.31 — YoY Scorecard rebuild
 
@@ -1458,110 +1458,172 @@ function TrackerPublicView({ token }) {
 
   const d = data || {};
   const nr = d.nrZlecenia || "—";
+  const status = d.status; // "przed_trasa" | "w_trasie" | "zakonczony"
 
-  // Status zakończony
-  if (d.status === "zakonczony") {
-    return (
-      <Shell>
-        <div style={{ background: "#fff", borderRadius: 16, padding: 28, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
-          <div style={{ fontSize: 13, color: "#64748b", fontWeight: 600, marginBottom: 6 }}>Zlecenie nr {nr}</div>
-          <div style={{ marginTop: 18, padding: "16px 20px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 12, textAlign: "center" }}>
-            <div style={{ fontSize: 28, marginBottom: 6 }}>✅</div>
-            <div style={{ fontSize: 17, fontWeight: 700, color: "#15803d" }}>Dostawa zrealizowana</div>
-            {d.plannedMs && (
-              <div style={{ fontSize: 13, color: "#166534", marginTop: 4 }}>
-                Planowany rozładunek: {fmtDateSmart(d.plannedMs)}
+  // Stepper — 4 kroki
+  // 1 Przyjęte · 2 Oczekiwanie na wyjazd · 3 W trasie · 4 Dostarczono
+  const activeIdx = status === "zakonczony" ? 3 : status === "w_trasie" ? 2 : 1;
+  const steps = [
+    { label: "Przyjęte",   icon: "📝" },
+    { label: "Oczekiwanie", icon: "🕐" },
+    { label: "W trasie",    icon: "🚛" },
+    { label: "Dostarczono", icon: "📦" },
+  ];
+
+  const Stepper = () => (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0 4px", gap: 4 }}>
+      {steps.map((s, i) => {
+        const done = i < activeIdx;
+        const active = i === activeIdx;
+        const dotBg = done ? "#22c55e" : active ? "#3b82f6" : "#e2e8f0";
+        const dotColor = done || active ? "#fff" : "#94a3b8";
+        const labelColor = done ? "#15803d" : active ? "#1d4ed8" : "#94a3b8";
+        const lineColor = done ? "#22c55e" : "#e2e8f0";
+        return (
+          <Fragment key={i}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 50, position: "relative" }}>
+              <div style={{
+                width: 34, height: 34, borderRadius: "50%",
+                background: dotBg, color: dotColor,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 16, fontWeight: 700,
+                boxShadow: active ? "0 0 0 4px rgba(59,130,246,0.18)" : "none",
+                transition: "all 0.3s",
+              }}>
+                {done ? "✓" : s.icon}
               </div>
-            )}
-          </div>
-        </div>
-      </Shell>
-    );
-  }
-
-  // Status przed trasą
-  if (d.status === "przed_trasa") {
-    return (
-      <Shell>
-        <div style={{ background: "#fff", borderRadius: 16, padding: 28, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
-          <div style={{ fontSize: 13, color: "#64748b", fontWeight: 600, marginBottom: 6 }}>Zlecenie nr {nr}</div>
-          <div style={{ marginTop: 18, padding: "16px 20px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, textAlign: "center" }}>
-            <div style={{ fontSize: 28, marginBottom: 6 }}>🕐</div>
-            <div style={{ fontSize: 17, fontWeight: 700, color: "#334155" }}>Oczekiwanie na wyjazd</div>
-            {d.plannedMs && (
-              <div style={{ fontSize: 13, color: "#475569", marginTop: 4 }}>
-                Planowana dostawa: {fmtDateSmart(d.plannedMs)}
+              <div style={{ fontSize: 10, fontWeight: 600, color: labelColor, marginTop: 6, textAlign: "center", lineHeight: 1.2 }}>
+                {s.label}
               </div>
+            </div>
+            {i < steps.length - 1 && (
+              <div style={{ flex: 1, height: 2, background: lineColor, marginTop: -20, transition: "background 0.3s" }} />
             )}
-          </div>
-        </div>
-      </Shell>
-    );
-  }
+          </Fragment>
+        );
+      })}
+    </div>
+  );
 
-  // Status w trasie
-  const pct = Math.max(0, Math.min(100, d.percentDone || 0));
-  const kmRem = d.kmRemaining != null ? d.kmRemaining : null;
+  // Delay / ETA
   const delayMin = d.delayMin;
   const onTime = delayMin === null || delayMin === undefined ? null : delayMin <= 15;
+  const pct = status === "zakonczony" ? 100 : Math.max(0, Math.min(100, d.percentDone || 0));
+  const kmRem = d.kmRemaining != null ? d.kmRemaining : null;
 
-  let statusBg, statusBorder, statusColor, statusIcon, statusText, statusSub;
-  if (onTime === null) {
-    statusBg = "#eff6ff"; statusBorder = "#bfdbfe"; statusColor = "#1d4ed8";
-    statusIcon = "🚛"; statusText = "W trasie";
-    statusSub = `Przewidywane dotarcie: ${fmtDateSmart(d.etaMs)}`;
+  let banner = null;
+  if (status === "zakonczony") {
+    banner = {
+      bg: "#f0fdf4", border: "#bbf7d0", color: "#15803d",
+      icon: "✅", title: "Dostawa zrealizowana",
+      sub: d.plannedMs ? `Planowana: ${fmtDateSmart(d.plannedMs)}` : null,
+    };
+  } else if (status === "przed_trasa") {
+    banner = {
+      bg: "#f8fafc", border: "#e2e8f0", color: "#334155",
+      icon: "🕐", title: "Oczekiwanie na wyjazd",
+      sub: "Pojazd przygotowuje się do wyjazdu",
+    };
+  } else if (onTime === null) {
+    banner = {
+      bg: "#eff6ff", border: "#bfdbfe", color: "#1d4ed8",
+      icon: "🚛", title: "W trasie",
+      sub: d.etaMs ? `Przewidywane dotarcie: ${fmtDateSmart(d.etaMs)}` : null,
+    };
   } else if (onTime) {
-    statusBg = "#f0fdf4"; statusBorder = "#bbf7d0"; statusColor = "#15803d";
-    statusIcon = "✅"; statusText = "Dostawa na czas";
-    statusSub = `Planowana: ${fmtDateSmart(d.plannedMs)}`;
+    banner = {
+      bg: "#f0fdf4", border: "#bbf7d0", color: "#15803d",
+      icon: "✅", title: "Dostawa na czas",
+      sub: d.plannedMs ? `Planowana: ${fmtDateSmart(d.plannedMs)}` : null,
+    };
   } else {
-    statusBg = "#fffbeb"; statusBorder = "#fde68a"; statusColor = "#b45309";
-    statusIcon = "⏱️"; statusText = `Przewidywane opóźnienie ${delayMin >= 60 ? Math.round(delayMin / 60) + " h" : delayMin + " min"}`;
-    statusSub = `Planowana: ${fmtDateSmart(d.plannedMs)} · Przewidywana: ${fmtDateSmart(d.etaMs)}`;
+    const delayStr = delayMin >= 60 ? Math.round(delayMin / 60) + " h" : delayMin + " min";
+    banner = {
+      bg: "#fffbeb", border: "#fde68a", color: "#b45309",
+      icon: "⏱️", title: `Przewidywane opóźnienie ${delayStr}`,
+      sub: `Planowana: ${fmtDateSmart(d.plannedMs)} · Przewidywana: ${fmtDateSmart(d.etaMs)}`,
+    };
   }
+
+  // Karty dat
+  const loadDateBox = d.plannedLoadMs ? (
+    <div style={{ flex: 1, padding: "12px 14px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, minWidth: 0 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: 0.5, textTransform: "uppercase" }}>Załadunek</div>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "#334155", marginTop: 3 }}>{fmtDateSmart(d.plannedLoadMs)}</div>
+    </div>
+  ) : null;
+  const unloadDateBox = d.plannedMs ? (
+    <div style={{ flex: 1, padding: "12px 14px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, minWidth: 0 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: 0.5, textTransform: "uppercase" }}>Planowana dostawa</div>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "#334155", marginTop: 3 }}>{fmtDateSmart(d.plannedMs)}</div>
+    </div>
+  ) : null;
 
   return (
     <Shell>
-      <div style={{ background: "#fff", borderRadius: 16, padding: 24, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
-        <div style={{ fontSize: 13, color: "#64748b", fontWeight: 600, marginBottom: 18 }}>Zlecenie nr {nr}</div>
+      <div style={{ background: "#fff", borderRadius: 16, padding: 22, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+        <div style={{ fontSize: 13, color: "#64748b", fontWeight: 600, marginBottom: 4 }}>Zlecenie nr</div>
+        <div style={{ fontSize: 18, fontWeight: 800, color: "#111827", marginBottom: 18 }}>{nr}</div>
 
-        {/* Pasek postępu */}
-        <div style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <div style={{ fontSize: 32, fontWeight: 800, color: "#111827", lineHeight: 1 }}>{pct}%</div>
-          {kmRem != null && (
-            <div style={{ fontSize: 14, color: "#64748b", fontWeight: 600 }}>
-              Do celu: <span style={{ color: "#111827", fontWeight: 700 }}>{kmRem} km</span>
-            </div>
-          )}
-        </div>
-        <div style={{ height: 10, background: "#e2e8f0", borderRadius: 999, overflow: "hidden", marginBottom: 24 }}>
-          <div style={{
-            width: `${pct}%`,
-            height: "100%",
-            background: "linear-gradient(90deg,#3b82f6,#1d4ed8)",
-            borderRadius: 999,
-            transition: "width 0.6s ease-out",
-          }} />
-        </div>
+        {/* Stepper */}
+        <Stepper />
 
-        {/* Status dostawy */}
-        <div style={{
-          padding: "14px 16px",
-          background: statusBg,
-          border: `1px solid ${statusBorder}`,
-          borderRadius: 12,
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-            <span style={{ fontSize: 22 }}>{statusIcon}</span>
-            <span style={{ fontSize: 16, fontWeight: 700, color: statusColor }}>{statusText}</span>
+        {/* Pasek postępu (zawsze widoczny, dla przed_trasa = 0%, zakonczony = 100%) */}
+        <div style={{ marginTop: 22 }}>
+          <div style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <div style={{ fontSize: 24, fontWeight: 800, color: "#111827", lineHeight: 1 }}>{pct}%</div>
+            {status === "w_trasie" && kmRem != null && (
+              <div style={{ fontSize: 13, color: "#64748b", fontWeight: 600 }}>
+                Do celu: <span style={{ color: "#111827", fontWeight: 700 }}>{kmRem} km</span>
+              </div>
+            )}
           </div>
-          <div style={{ fontSize: 13, color: statusColor, opacity: 0.85, marginLeft: 32 }}>{statusSub}</div>
+          <div style={{ height: 10, background: "#e2e8f0", borderRadius: 999, overflow: "hidden" }}>
+            <div style={{
+              width: `${pct}%`,
+              height: "100%",
+              background: status === "zakonczony"
+                ? "linear-gradient(90deg,#22c55e,#15803d)"
+                : "linear-gradient(90deg,#3b82f6,#1d4ed8)",
+              borderRadius: 999,
+              transition: "width 0.6s ease-out",
+            }} />
+          </div>
         </div>
 
-        {/* Notka o tacho */}
-        <div style={{ marginTop: 14, fontSize: 11, color: "#94a3b8", lineHeight: 1.5, textAlign: "center", padding: "0 8px" }}>
-          Przewidywany czas dostawy uwzględnia wymagane przerwy kierowcy wynikające z przepisów o czasie pracy.
-        </div>
+        {/* Daty */}
+        {(loadDateBox || unloadDateBox) && (
+          <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+            {loadDateBox}
+            {unloadDateBox}
+          </div>
+        )}
+
+        {/* Status banner */}
+        {banner && (
+          <div style={{
+            marginTop: 16,
+            padding: "14px 16px",
+            background: banner.bg,
+            border: `1px solid ${banner.border}`,
+            borderRadius: 12,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: banner.sub ? 4 : 0 }}>
+              <span style={{ fontSize: 22 }}>{banner.icon}</span>
+              <span style={{ fontSize: 16, fontWeight: 700, color: banner.color }}>{banner.title}</span>
+            </div>
+            {banner.sub && (
+              <div style={{ fontSize: 13, color: banner.color, opacity: 0.85, marginLeft: 32 }}>{banner.sub}</div>
+            )}
+          </div>
+        )}
+
+        {/* Notka o tacho — tylko dla w_trasie */}
+        {status === "w_trasie" && (
+          <div style={{ marginTop: 14, fontSize: 11, color: "#94a3b8", lineHeight: 1.5, textAlign: "center", padding: "0 8px" }}>
+            Przewidywany czas dostawy uwzględnia wymagane przerwy kierowcy wynikające z przepisów o czasie pracy.
+          </div>
+        )}
       </div>
 
       {/* Ostatnia aktualizacja */}

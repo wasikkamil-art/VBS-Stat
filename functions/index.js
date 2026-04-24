@@ -1785,13 +1785,15 @@ exports.trackerData = onRequest(
 
       const nrZlecenia = fracht.nrZlecenia || fracht.nrRef || (fracht.id || "").slice(0, 8) || "—";
 
-      // 2. Planowany czas dostawy (z dataRozladunku + godzRozladunku w Europe/Warsaw)
-      let plannedMs = null;
-      if (fracht.dataRozladunku) {
-        const timePart = fracht.godzRozladunku || "00:00";
-        const parsed = Date.parse(`${fracht.dataRozladunku}T${timePart}:00+02:00`);
-        if (!isNaN(parsed)) plannedMs = parsed;
-      }
+      // 2. Planowany czas dostawy i załadunku (Europe/Warsaw)
+      const toMs = (date, time) => {
+        if (!date) return null;
+        const t = time || "00:00";
+        const p = Date.parse(`${date}T${t}:00+02:00`);
+        return isNaN(p) ? null : p;
+      };
+      const plannedMs = toMs(fracht.dataRozladunku, fracht.godzRozladunku);
+      const plannedLoadMs = toMs(fracht.dataZaladunku, fracht.godzZaladunku);
 
       // 3. Quick return — zakończone
       if (fracht.statusRozladunku === "rozladowano") {
@@ -1799,6 +1801,7 @@ exports.trackerData = onRequest(
           nrZlecenia,
           status: "zakonczony",
           plannedMs,
+          plannedLoadMs,
           updatedAt: Date.now(),
         });
       }
@@ -1832,6 +1835,7 @@ exports.trackerData = onRequest(
           nrZlecenia,
           status: "przed_trasa",
           plannedMs,
+          plannedLoadMs,
           percentDone: 0,
           updatedAt: Date.now(),
         });
@@ -1899,6 +1903,7 @@ exports.trackerData = onRequest(
         percentDone,
         etaMs,
         plannedMs,
+        plannedLoadMs,
         delayMin,
         breakMinutes,
         positionTs: pos.ts,
