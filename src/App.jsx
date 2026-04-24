@@ -276,6 +276,124 @@ function parseGeoString(geo) {
   if (isNaN(lat) || isNaN(lng)) return null;
   return { lat, lng };
 }
+// Bogaty format zlecenia do skopiowania (Signal, SMS, email — poza WhatsApp który
+// używa templatu Meta). Obsługuje pełne Z1+Z2 + R1-R5 z GPS/telefonami per punkt.
+function formatOrderForDriverCopy(fracht, vehicles = []) {
+  if (!fracht) return "";
+  const fmtD = (d) => d ? d.split("-").reverse().join(".") : "—";
+  const fmtT = (t) => t || "—";
+  const lines = [];
+
+  const vehicle = vehicles.find(v => v.id === fracht.vehicleId);
+  const vehicleLabel = vehicle ? `${vehicle.plate || ""} ${vehicle.brand || ""}`.trim() : "";
+
+  // Nagłówek
+  lines.push(`🚛 ZLECENIE${fracht.nrRef ? ` #${fracht.nrRef}` : ""}${fracht.nrZlecenia ? ` (${fracht.nrZlecenia})` : ""}`);
+  if (vehicleLabel) lines.push(`Pojazd: ${vehicleLabel}`);
+  if (fracht.klient) lines.push(`Klient: ${fracht.klient}`);
+  lines.push("");
+
+  // ZAŁADUNEK — Z1 i Z2
+  const zalPunkty = [];
+  const z1full = [fracht.zaladunekAdres, [fracht.zaladunekKodPocztowy, fracht.zaladunekMiasto].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+  if (z1full || fracht.zaladunekKod) zalPunkty.push({
+    idx: "Z1", addr: z1full || fracht.zaladunekKod || "",
+    geo: fracht.zaladunekGeo, tel: fracht.zaladunekTelefon,
+    data: fracht.dataZaladunku, godz: fracht.godzZaladunku,
+  });
+  const z2full = [fracht.zaladunekAdres2, [fracht.zaladunekKodPocztowy2, fracht.zaladunekMiasto2].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+  if (z2full || fracht.zaladunekKod2) zalPunkty.push({
+    idx: "Z2", addr: z2full || fracht.zaladunekKod2 || "",
+    geo: fracht.zaladunekGeo2, tel: fracht.zaladunekTelefon2,
+    data: fracht.dataZaladunku2, godz: fracht.godzZaladunku2,
+  });
+
+  if (zalPunkty.length > 0) {
+    lines.push("📍 ZAŁADUNEK");
+    zalPunkty.forEach(p => {
+      lines.push(`🚩 ${p.idx} — ${fmtD(p.data)} ${fmtT(p.godz)}`);
+      if (p.addr) lines.push(`   ${p.addr}`);
+      const g = parseGeoString(p.geo);
+      if (g) lines.push(`   GPS: ${g.lat.toFixed(6)}, ${g.lng.toFixed(6)}`);
+      if (p.tel) lines.push(`   Tel: ${p.tel}`);
+      lines.push("");
+    });
+  }
+
+  // ROZŁADUNEK — R1 do R5
+  const rozPunkty = [];
+  for (let i = 1; i <= 5; i++) {
+    const sfx = i === 1 ? "" : String(i);
+    const kodPocztowy = fracht[`dokodPocztowy${sfx}`];
+    const miasto = fracht[`dokodMiasto${sfx}`];
+    const adres = fracht[`rozladunekAdres${sfx}`];
+    const kodCompat = fracht[`dokod${sfx}`];
+    const full = [adres, [kodPocztowy, miasto].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+    const addr = full || kodCompat || "";
+    if (!addr) continue;
+    rozPunkty.push({
+      idx: `R${i}`, addr,
+      geo: fracht[`rozladunekGeo${sfx}`],
+      tel: fracht[`rozladunekTelefon${sfx}`],
+      data: fracht[`dataRozladunku${sfx}`],
+      godz: fracht[`godzRozladunku${sfx}`],
+    });
+  }
+
+  if (rozPunkty.length > 0) {
+    lines.push("📦 ROZŁADUNEK");
+    rozPunkty.forEach(p => {
+      lines.push(`📦 ${p.idx} — ${fmtD(p.data)} ${fmtT(p.godz)}`);
+      if (p.addr) lines.push(`   ${p.addr}`);
+      const g = parseGeoString(p.geo);
+      if (g) lines.push(`   GPS: ${g.lat.toFixed(6)}, ${g.lng.toFixed(6)}`);
+      if (p.tel) lines.push(`   Tel: ${p.tel}`);
+      lines.push("");
+    });
+  }
+
+  // TOWAR
+  const towarLines = [];
+  if (fracht.towarIloscPalet || fracht.towarOpis) {
+    towarLines.push([fracht.towarIloscPalet, fracht.towarOpis].filter(Boolean).join(" × ") || fracht.towarOpis || `${fracht.towarIloscPalet} sztuk`);
+  }
+  if (fracht.towarPalety) towarLines.push(`Palety: ${fracht.towarPalety}`);
+  if (fracht.wagaLadunku) towarLines.push(`Waga: ${fracht.wagaLadunku} kg`);
+  if (fracht.zaladunekTyp) towarLines.push(`Załadunek: ${fracht.zaladunekTyp}`);
+  if (towarLines.length) {
+    lines.push("🧰 TOWAR");
+    towarLines.forEach(t => lines.push(`   ${t}`));
+    lines.push("");
+  }
+
+  if (fracht.uwagi) {
+    lines.push("📋 UWAGI");
+    lines.push(`   ${fracht.uwagi}`);
+    lines.push("");
+  }
+
+  // ZLECENIODAWCA
+  const zlecLines = [];
+  if (fracht.zleceniodawcaFirma) zlecLines.push(fracht.zleceniodawcaFirma);
+  if (fracht.zleceniodawcaOsoba) zlecLines.push(`Osoba: ${fracht.zleceniodawcaOsoba}`);
+  if (fracht.zleceniodawcaTelefon) zlecLines.push(`Tel: ${fracht.zleceniodawcaTelefon}`);
+  if (fracht.zleceniodawcaEmail) zlecLines.push(`Email: ${fracht.zleceniodawcaEmail}`);
+  if (zlecLines.length) {
+    lines.push("🏢 ZLECENIODAWCA");
+    zlecLines.forEach(l => lines.push(`   ${l}`));
+    lines.push("");
+  }
+
+  // Podsumowanie
+  const sumParts = [];
+  if (fracht.kmWszystkie || fracht.kmLadowne) sumParts.push(`${fracht.kmWszystkie || fracht.kmLadowne} km`);
+  if (fracht.cenaEur) sumParts.push(`${fracht.cenaEur} €`);
+  if (sumParts.length) lines.push(`━━━━━━━━━━━━━━━━━━`);
+  if (sumParts.length) lines.push(sumParts.join(" · "));
+
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 function formatOrderForWhatsapp(fracht) {
   if (!fracht) return { body: "", pickup: null, delivery: null };
   const fmtD = (d) => d ? d.split("-").reverse().join(".") : "—";
@@ -19861,6 +19979,70 @@ function GeoPickerModal({ initialGeo, address, onSave, onClose }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// CopyOrderPreviewModal — podgląd sformatowanego zlecenia gotowego do przeklejenia
+// (Signal, SMS, email, Telegram — cokolwiek kierowca używa). Obsługuje Z1+Z2 +
+// R1-R5 z GPS per punkt. User może edytować treść przed skopiowaniem.
+// ═══════════════════════════════════════════════════════════════════════════
+function CopyOrderPreviewModal({ fracht, vehicles = [], showToast, onClose }) {
+  const initialText = useMemo(() => formatOrderForDriverCopy(fracht, vehicles), [fracht, vehicles]);
+  const [text, setText] = useState(initialText);
+  const [copied, setCopied] = useState(false);
+  const textareaRef = useRef(null);
+
+  const copyToClipboard = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        // Fallback dla starszych przeglądarek / niesafe context (HTTP)
+        textareaRef.current?.select();
+        document.execCommand("copy");
+      }
+      setCopied(true);
+      showToast?.("📋 Skopiowano do schowka");
+      setTimeout(() => setCopied(false), 2500);
+    } catch (e) {
+      console.error("Copy failed:", e);
+      showToast?.("Błąd kopiowania — zaznacz tekst ręcznie i kopiuj Ctrl+C");
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{background: "rgba(0,0,0,0.6)", zIndex: 10000}}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl flex flex-col" style={{maxHeight: "90vh"}}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <h3 className="text-base font-bold text-gray-900">📋 Skopiuj dane zlecenia</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+        </div>
+        <div className="px-5 pt-3 pb-1 text-[11px] text-gray-500">
+          Sprawdź / edytuj treść przed kopiowaniem. Po skopiowaniu możesz wkleić np. w Signal, SMS, email.
+        </div>
+        <div className="px-5 pb-3 flex-1 overflow-hidden flex flex-col">
+          <textarea ref={textareaRef} value={text} onChange={e => setText(e.target.value)}
+            className="w-full h-80 px-3 py-2 rounded-lg border border-gray-200 text-xs font-mono resize-none"
+            style={{fontFamily: "'DM Mono', Menlo, monospace", whiteSpace: "pre", lineHeight: 1.5}} />
+        </div>
+        <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between gap-3 flex-wrap">
+          <button onClick={() => setText(initialText)}
+            className="px-3 py-2 rounded-lg text-xs font-medium text-gray-500 hover:bg-gray-100">
+            ↺ Przywróć oryginał
+          </button>
+          <div className="flex gap-2">
+            <button onClick={onClose}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-gray-500 hover:bg-gray-100">Zamknij</button>
+            <button onClick={copyToClipboard}
+              className="px-5 py-2 rounded-lg text-sm font-bold text-white flex items-center gap-2"
+              style={{background: copied ? "#16a34a" : "#111827"}}>
+              {copied ? "✅ Skopiowano" : "📋 Kopiuj do schowka"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // WhatsappSendPreviewModal — podgląd treści przed wysłaniem zlecenia
 //   Wysyła 4 wiadomości: tekst podpisany dyspozytorem + info systemowe
 //   + pinezka GPS załadunku + pinezka GPS rozładunku
@@ -20116,6 +20298,7 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
   const eurKmWsz = f.kmWszystkie && f.cenaEur ? (parseFloat(f.cenaEur)/parseInt(f.kmWszystkie)).toFixed(2) : null;
   const [geoPickerFor, setGeoPickerFor] = useState(null); // "z1"|"z2"|"r1"|"r2"|"r3"|"r4"|"r5"
   const [showWhatsappPreview, setShowWhatsappPreview] = useState(false);
+  const [showCopyPreview, setShowCopyPreview] = useState(false);
   const [showZ2, setShowZ2] = useState(!!(record?.zaladunekKodPocztowy2 || record?.zaladunekKod2?.trim()));
   const [showR2, setShowR2] = useState(!!(record?.dokodPocztowy2 || record?.dokod2?.trim()));
   const [showR3, setShowR3] = useState(!!(record?.dokodPocztowy3 || record?.dokod3?.trim()));
@@ -20421,8 +20604,14 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
           </div>
         </div>
 
-        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0">
+        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0 flex-wrap">
           <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-100">Anuluj</button>
+          <button onClick={() => setShowCopyPreview(true)}
+            className="px-4 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-2"
+            style={{background: "#6366f1"}}
+            title="Podgląd danych zlecenia gotowy do skopiowania (Signal / SMS / email / inny komunikator)">
+            📋 Kopiuj dane
+          </button>
           {canSendWhatsapp && (
             <button onClick={() => setShowWhatsappPreview(true)}
               className="px-4 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-2"
@@ -20443,6 +20632,14 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
         onClose={() => setShowWhatsappPreview(false)}
         onSent={() => { setShowWhatsappPreview(false); showToast && showToast("Wysłano na WhatsApp", "success"); }}
         showToast={showToast}
+      />
+    )}
+    {showCopyPreview && (
+      <CopyOrderPreviewModal
+        fracht={f}
+        vehicles={vehicles}
+        showToast={showToast}
+        onClose={() => setShowCopyPreview(false)}
       />
     )}
     </>
