@@ -8302,7 +8302,10 @@ function GpsTrasySection({ device, showToast }) {
     }
   };
 
-  // ── Map-matching: gdy zmienią się punkty, dopasuj do dróg przez OSRM ──
+  // ── Map-matching: dopasuj wizualnie do dróg (NIE używamy `distance` z OSRM bo
+  // przy fragmentarycznym matchingu zwraca zawyżone km — stats.km zostaje raw
+  // haversine z fetchRoute). Sanity check: jeśli matched linia > 3× większa niż
+  // raw → odrzucamy (znak że OSRM zrobił fikcyjne reroute).
   useEffect(() => {
     if (points.length < 2) { setMatchedCoords(null); return; }
     let cancelled = false;
@@ -8310,9 +8313,27 @@ function GpsTrasySection({ device, showToast }) {
       const result = await mapMatchRoute(points);
       if (cancelled) return;
       if (result?.coordinates?.length > 1) {
-        setMatchedCoords(result.coordinates);
-        // aktualizuj km stats do tego co OSRM zwrócił (dokładniejsze niż haversine między punktami)
-        setStats(prev => prev ? { ...prev, km: (result.distance || 0) / 1000, matched: true } : prev);
+        // Sanity: porównaj matched distance z raw haversine; odrzuć gdy dziwnie duża
+        const rawKm = (() => {
+          const toRad = v => v * Math.PI / 180;
+          const R = 6371;
+          let km = 0;
+          for (let i = 1; i < points.length; i++) {
+            const a = points[i-1], b = points[i];
+            const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lng - a.lng);
+            const s = Math.sin(dLat/2)**2 + Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLng/2)**2;
+            km += 2 * R * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+          }
+          return km;
+        })();
+        const matchedKm = (result.distance || 0) / 1000;
+        if (rawKm > 5 && matchedKm > rawKm * 3) {
+          // OSRM zwaliło — pomiń matching, zostaw surowe linie
+          console.warn(`[GpsTrasy] OSRM matching sus: raw=${rawKm.toFixed(0)}km vs matched=${matchedKm.toFixed(0)}km — fallback na raw`);
+          setMatchedCoords(null);
+        } else {
+          setMatchedCoords(result.coordinates);
+        }
       } else {
         setMatchedCoords(null);
       }
