@@ -1634,57 +1634,102 @@ function TrackerPublicView({ token }) {
         {/* Stepper */}
         <Stepper />
 
-        {/* Pasek postępu (zawsze widoczny, dla przed_trasa = 0%, zakonczony = 100%) */}
-        <div style={{ marginTop: 22 }}>
-          <div style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-            <div style={{ fontSize: 24, fontWeight: 800, color: "#111827", lineHeight: 1 }}>{pct}%</div>
-            {status === "w_trasie" && kmRem != null && (
-              <div style={{ fontSize: 13, color: "#64748b", fontWeight: 600 }}>
-                Do celu: <span style={{ color: "#111827", fontWeight: 700 }}>{kmRem} km</span>
+        {/* Paski postępu — dla 2 rozładunków dwa osobne, dla 1 rozładunku jeden główny */}
+        {hasR2 && status === "w_trasie" && typeof d.percentToR1 === "number" ? (
+          <div style={{ marginTop: 22 }}>
+            {/* R1 */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", letterSpacing: 0.3, textTransform: "uppercase" }}>Rozładunek 1</div>
+                {d.kmToR1 != null && (
+                  <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>
+                    <span style={{ color: "#111827", fontWeight: 700 }}>{d.kmToR1} km</span> · {d.percentToR1}%
+                  </div>
+                )}
               </div>
+              <div style={{ height: 8, background: "#e2e8f0", borderRadius: 999, overflow: "hidden" }}>
+                <div style={{
+                  width: `${d.percentToR1}%`,
+                  height: "100%",
+                  background: "linear-gradient(90deg,#38bdf8,#0ea5e9)",
+                  borderRadius: 999,
+                  transition: "width 0.6s ease-out",
+                }} />
+              </div>
+            </div>
+            {/* R2 — łącznie */}
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", letterSpacing: 0.3, textTransform: "uppercase" }}>Rozładunek 2 (łącznie)</div>
+                {kmRem != null && (
+                  <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>
+                    <span style={{ color: "#111827", fontWeight: 700 }}>{kmRem} km</span> · {pct}%
+                  </div>
+                )}
+              </div>
+              <div style={{ height: 8, background: "#e2e8f0", borderRadius: 999, overflow: "hidden" }}>
+                <div style={{
+                  width: `${pct}%`,
+                  height: "100%",
+                  background: "linear-gradient(90deg,#3b82f6,#1d4ed8)",
+                  borderRadius: 999,
+                  transition: "width 0.6s ease-out",
+                }} />
+              </div>
+            </div>
+            <div style={{ marginTop: 10, padding: "8px 12px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, fontSize: 11, color: "#92400e", lineHeight: 1.5 }}>
+              ℹ Przewidywany czas dotarcia do rozładunku 2 może ulec zmianie — zależy od czasu rozładunku przy pierwszym adresie.
+            </div>
+
+            {/* GPS link */}
+            {typeof d.lat === "number" && typeof d.lng === "number" && (
+              <a href={`https://www.google.com/maps?q=${d.lat},${d.lng}`} target="_blank" rel="noopener noreferrer"
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10, padding: "8px 12px", background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 10, textDecoration: "none", fontSize: 12, color: "#075985" }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 14 }}>📍</span>
+                  <span style={{ fontWeight: 600 }}>Aktualna pozycja:</span>
+                  <span style={{ fontFamily: "monospace" }}>{d.lat.toFixed(4)}, {d.lng.toFixed(4)}</span>
+                </span>
+                <span style={{ fontWeight: 700, fontSize: 11 }}>Otwórz w mapach →</span>
+              </a>
             )}
           </div>
-          <div style={{ height: 10, background: "#e2e8f0", borderRadius: 999, overflow: "hidden" }}>
-            <div style={{
-              width: `${pct}%`,
-              height: "100%",
-              background: status === "zakonczony"
-                ? "linear-gradient(90deg,#22c55e,#15803d)"
-                : "linear-gradient(90deg,#3b82f6,#1d4ed8)",
-              borderRadius: 999,
-              transition: "width 0.6s ease-out",
-            }} />
-          </div>
+        ) : (
+          <div style={{ marginTop: 22 }}>
+            <div style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <div style={{ fontSize: 24, fontWeight: 800, color: "#111827", lineHeight: 1 }}>{pct}%</div>
+              {status === "w_trasie" && kmRem != null && (
+                <div style={{ fontSize: 13, color: "#64748b", fontWeight: 600 }}>
+                  Do celu: <span style={{ color: "#111827", fontWeight: 700 }}>{kmRem} km</span>
+                </div>
+              )}
+            </div>
+            <div style={{ height: 10, background: "#e2e8f0", borderRadius: 999, overflow: "hidden" }}>
+              <div style={{
+                width: `${pct}%`,
+                height: "100%",
+                background: status === "zakonczony"
+                  ? "linear-gradient(90deg,#22c55e,#15803d)"
+                  : "linear-gradient(90deg,#3b82f6,#1d4ed8)",
+                borderRadius: 999,
+                transition: "width 0.6s ease-out",
+              }} />
+            </div>
 
-          {/* GPS link — tylko dla w_trasie gdy mamy pozycję */}
-          {status === "w_trasie" && typeof d.lat === "number" && typeof d.lng === "number" && (
-            <a
-              href={`https://www.google.com/maps?q=${d.lat},${d.lng}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginTop: 10,
-                padding: "8px 12px",
-                background: "#f0f9ff",
-                border: "1px solid #bae6fd",
-                borderRadius: 10,
-                textDecoration: "none",
-                fontSize: 12,
-                color: "#075985",
-              }}
-            >
-              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ fontSize: 14 }}>📍</span>
-                <span style={{ fontWeight: 600 }}>Aktualna pozycja:</span>
-                <span style={{ fontFamily: "monospace" }}>{d.lat.toFixed(4)}, {d.lng.toFixed(4)}</span>
-              </span>
-              <span style={{ fontWeight: 700, fontSize: 11 }}>Otwórz w mapach →</span>
-            </a>
-          )}
-        </div>
+            {/* GPS link — tylko dla w_trasie gdy mamy pozycję */}
+            {status === "w_trasie" && typeof d.lat === "number" && typeof d.lng === "number" && (
+              <a href={`https://www.google.com/maps?q=${d.lat},${d.lng}`} target="_blank" rel="noopener noreferrer"
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10, padding: "8px 12px", background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 10, textDecoration: "none", fontSize: 12, color: "#075985" }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 14 }}>📍</span>
+                  <span style={{ fontWeight: 600 }}>Aktualna pozycja:</span>
+                  <span style={{ fontFamily: "monospace" }}>{d.lat.toFixed(4)}, {d.lng.toFixed(4)}</span>
+                </span>
+                <span style={{ fontWeight: 700, fontSize: 11 }}>Otwórz w mapach →</span>
+              </a>
+            )}
+          </div>
+        )}
 
         {/* Daty */}
         {(loadDateBox || unloadR1Box || unloadR2Box) && (

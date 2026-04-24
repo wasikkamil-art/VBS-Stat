@@ -1972,6 +1972,24 @@ exports.trackerData = onRequest(
       const kmDone = Math.max(0, kmTotal - kmRemaining);
       const percentDone = kmTotal > 0 ? Math.min(100, Math.round((kmDone / kmTotal) * 100)) : 0;
 
+      // Dla 2 rozładunków: osobne km i % do R1 (żeby klient widział postęp
+      // dotarcia do pierwszego punktu, niezależnie od finalnego celu w R2).
+      let kmToR1 = null, kmTotalR1 = null, percentToR1 = null;
+      if (hasR2 && destR2) {
+        const routeToR1 = await osrmMultiRoute([pos, destR1]);
+        if (routeToR1) {
+          kmToR1 = Math.round(routeToR1.distanceKm);
+          if (start) {
+            const routeTotalR1 = await osrmMultiRoute([start, destR1]);
+            if (routeTotalR1 && routeTotalR1.distanceKm > 0) {
+              kmTotalR1 = Math.round(routeTotalR1.distanceKm);
+              const doneR1 = Math.max(0, kmTotalR1 - kmToR1);
+              percentToR1 = Math.min(100, Math.round((doneR1 / kmTotalR1) * 100));
+            }
+          }
+        }
+      }
+
       // 9. Compliance kierowcy (ostatnie 7 dni segmentów driverActivities)
       const vehicle = vehicles.find(v => v.id === vehicleId);
       const activeDriver = (vehicle?.driverHistory || []).find(d => !d.to);
@@ -2016,6 +2034,9 @@ exports.trackerData = onRequest(
         kmRemaining: Math.round(kmRemaining),
         kmDone: Math.round(kmDone),
         percentDone,
+        kmToR1,
+        kmTotalR1,
+        percentToR1,
         etaMs,
         plannedMs,
         plannedR1Ms,
