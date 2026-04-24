@@ -8703,13 +8703,50 @@ function GpsTrasySection({ device, showToast }) {
         return;
       }
 
-      // Oblicz km (haversine) i czas
+      // Oblicz km (haversine)
       let km = 0;
       for (let i = 1; i < parsed.length; i++) km += haversine(parsed[i - 1], parsed[i]);
-      const durationMin = Math.round((parsed[parsed.length - 1].ts - parsed[0].ts) / 60000);
+
+      // Znajdź pierwszy i ostatni moment faktycznej jazdy (speed > 3 km/h).
+      // scheduledGpsPoll zapisuje breadcrumby co minutę też gdy auto stoi na parkingu
+      // — raw "00:39 → 14:59" to po prostu doba obecności w bazie, bezużyteczne
+      // dla klienta/spedytora. Liczymy więc tylko to co było ruchem.
+      const DRIVE_SPEED = 3;
+      const MAX_GAP_MIN = 15; // gapy > 15 min traktujemy jako postój (nie dodajemy do driveMin)
+      let firstDriveIdx = -1, lastDriveIdx = -1;
+      for (let i = 0; i < parsed.length; i++) {
+        if ((parsed[i].speed || 0) > DRIVE_SPEED) {
+          if (firstDriveIdx < 0) firstDriveIdx = i;
+          lastDriveIdx = i;
+        }
+      }
+      let driveMin = 0;
+      if (firstDriveIdx >= 0) {
+        for (let i = Math.max(1, firstDriveIdx + 1); i <= lastDriveIdx; i++) {
+          const prev = parsed[i - 1], curr = parsed[i];
+          const moving = (prev.speed || 0) > DRIVE_SPEED || (curr.speed || 0) > DRIVE_SPEED;
+          if (!moving) continue;
+          const gapMin = (curr.ts - prev.ts) / 60000;
+          if (gapMin < MAX_GAP_MIN) driveMin += gapMin;
+        }
+      }
+      // Fallback: jeśli brak speed (stare dane / Atlas /history nie daje speed) — licz total od pierwszego do ostatniego punktu
+      const hasSpeed = firstDriveIdx >= 0;
+      const firstTs = hasSpeed ? parsed[firstDriveIdx].ts : parsed[0].ts;
+      const lastTs = hasSpeed ? parsed[lastDriveIdx].ts : parsed[parsed.length - 1].ts;
+      const totalMin = Math.round((lastTs - firstTs) / 60000);
+      const driveMinR = Math.round(driveMin) || totalMin;
+      const stopMin = Math.max(0, totalMin - driveMinR);
+      const startPt = hasSpeed ? parsed[firstDriveIdx] : parsed[0];
+      const endPt = hasSpeed ? parsed[lastDriveIdx] : parsed[parsed.length - 1];
 
       setPoints(parsed);
-      setStats({ km, durationMin, firstTs: parsed[0].ts, lastTs: parsed[parsed.length - 1].ts, count: parsed.length });
+      setStats({
+        km, count: parsed.length,
+        firstTs, lastTs,
+        driveMin: driveMinR, stopMin, totalMin,
+        startPt, endPt,
+      });
       showToast(`Trasa: ${km.toFixed(1)} km, ${parsed.length} punktów`);
     } catch (e) {
       console.warn("[GpsTrasy] fetch error:", e);
@@ -8783,16 +8820,29 @@ function GpsTrasySection({ device, showToast }) {
     const polyCoords = matchedCoords || points.map(p => [p.lat, p.lng]);
     L.polyline(polyCoords, { color: "#7c3aed", weight: 4, opacity: 0.8 }).addTo(mapInstanceRef.current);
 
-    // Start/koniec na surowych współrzędnych GPS (faktyczna pozycja pojazdu)
-    const startPt = [points[0].lat, points[0].lng];
-    const endPt = [points[points.length - 1].lat, points[points.length - 1].lng];
-    const startIcon = L.divIcon({ html: `<div style="background:#16a34a;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 2px 6px rgba(0,0,0,0.3);border:2px solid #fff;">▶</div>`, className: "", iconSize: [28, 28], iconAnchor: [14, 14] });
-    const endIcon = L.divIcon({ html: `<div style="background:#dc2626;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 2px 6px rgba(0,0,0,0.3);border:2px solid #fff;">■</div>`, className: "", iconSize: [28, 28], iconAnchor: [14, 14] });
-    L.marker(startPt, { icon: startIcon }).addTo(mapInstanceRef.current);
-    L.marker(endPt, { icon: endIcon }).addTo(mapInstanceRef.current);
+    // Start/koniec JAZDY (nie pierwszego/ostatniego breadcrumba z doby).
+    // stats.startPt/endPt pochodzą z fetchRoute i wskazują pierwsze/ostatnie
+    // punkty gdzie speed > 3 km/h.
+    const fmtHmLocal = (ts) => {
+      const dd = new Date(ts);
+      return `${String(dd.getHours()).padStart(2, "0")}:${String(dd.getMinutes()).padStart(2, "0")}`;
+    };
+    const makeMarkerIcon = (label, time, color) => L.divIcon({
+      html: `<div style="position:relative;">
+        <div style="background:${color};color:#fff;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,0.35);border:2px solid #fff;">${label[0]}</div>
+        <div style="position:absolute;top:38px;left:50%;transform:translateX(-50%);background:rgba(255,255,255,0.95);border:1px solid #e5e7eb;padding:3px 9px;border-radius:8px;font-size:11px;font-weight:700;white-space:nowrap;color:#111827;box-shadow:0 1px 3px rgba(0,0,0,0.12);">${label} · ${time}</div>
+      </div>`,
+      className: "", iconSize: [32, 32], iconAnchor: [16, 16],
+    });
+    const sp = stats?.startPt || points[0];
+    const ep = stats?.endPt || points[points.length - 1];
+    const startIcon = makeMarkerIcon("Start", fmtHmLocal(sp.ts), "#16a34a");
+    const endIcon   = makeMarkerIcon("Koniec", fmtHmLocal(ep.ts), "#dc2626");
+    L.marker([sp.lat, sp.lng], { icon: startIcon, zIndexOffset: 1000 }).addTo(mapInstanceRef.current);
+    L.marker([ep.lat, ep.lng], { icon: endIcon,   zIndexOffset: 1000 }).addTo(mapInstanceRef.current);
 
     mapInstanceRef.current.fitBounds(polyCoords, { padding: [30, 30] });
-  }, [points, matchedCoords]);
+  }, [points, matchedCoords, stats]);
 
   useEffect(() => {
     return () => {
@@ -8819,11 +8869,40 @@ function GpsTrasySection({ device, showToast }) {
         </div>
       </div>
       {stats && (
-        <div className="px-5 py-2 border-b border-gray-100 flex flex-wrap gap-4 text-xs text-gray-700 bg-gray-50">
-          <span><b>{stats.km.toFixed(1)}</b> km</span>
-          <span>Czas: <b>{Math.floor(stats.durationMin / 60)}h {stats.durationMin % 60}min</b></span>
-          <span>{fmtHm(stats.firstTs)} → {fmtHm(stats.lastTs)}</span>
-          <span className="text-gray-400">{stats.count} punktów</span>
+        <div className="px-5 py-3 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            {/* Dystans */}
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-2xl font-bold text-gray-900 tabular-nums">{stats.km.toFixed(1)}</span>
+              <span className="text-xs font-semibold text-gray-500">km</span>
+            </div>
+            {/* Zakres jazdy */}
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-green-50 text-green-700 text-xs font-bold">
+                <span className="w-2 h-2 rounded-full bg-green-600"></span>
+                {fmtHm(stats.firstTs)}
+              </span>
+              <span className="text-gray-300 text-sm">→</span>
+              <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-red-50 text-red-700 text-xs font-bold">
+                <span className="w-2 h-2 rounded-full bg-red-600"></span>
+                {fmtHm(stats.lastTs)}
+              </span>
+            </div>
+            {/* Jazda aktywna */}
+            <div className="flex items-baseline gap-1.5 text-sm">
+              <span className="text-gray-500 text-xs">Jazda:</span>
+              <span className="font-bold text-gray-900 tabular-nums">{Math.floor(stats.driveMin/60)}h {String(stats.driveMin%60).padStart(2,"0")}min</span>
+            </div>
+            {/* Postoje */}
+            {stats.stopMin > 0 && (
+              <div className="flex items-baseline gap-1.5 text-sm">
+                <span className="text-gray-500 text-xs">Postoje:</span>
+                <span className="font-semibold text-gray-700 tabular-nums">{Math.floor(stats.stopMin/60)}h {String(stats.stopMin%60).padStart(2,"0")}min</span>
+              </div>
+            )}
+            {/* Punkty (dyskretnie, wyłożone na prawo) */}
+            <div className="text-[11px] text-gray-400 ml-auto">{stats.count} pkt GPS</div>
+          </div>
         </div>
       )}
       <div ref={mapRef} style={{ height: "450px", width: "100%" }}></div>
