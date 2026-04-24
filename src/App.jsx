@@ -7959,43 +7959,37 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
     return () => unsub();
   }, [device?.fleetVehicle?.id]);
 
-  // ── Render breadcrumb polyline na mapie (z map-matching OSRM dla gładkich linii) ──
+  // ── Render breadcrumb jako kropki GPS (bez linii, bez map-matchingu) ──
+  // Każda kropka = jedna pozycja z Atlas. Gęste = auto stało lub jechało wolno,
+  // rzadkie = szybko. Wizualnie układa się w "linię" automatycznie przy
+  // wystarczającej gęstości. Wydajne przy 1000+ punktach (canvas renderer).
   useEffect(() => {
     if (!mapInstanceRef.current) return;
     const L = window.L; if (!L) return;
-    // Wyczyść poprzedni
+    // Wyczyść poprzedni layer group kropek
     if (breadcrumbLayerRef.current) {
       breadcrumbLayerRef.current.remove();
       breadcrumbLayerRef.current = null;
     }
-    if (breadcrumbPoints.length < 2) return;
+    if (breadcrumbPoints.length === 0) return;
 
-    let cancelled = false;
-
-    // Najpierw szybko narysuj surowe linie (żeby user zobaczył od razu)
-    const rawCoords = breadcrumbPoints.map(p => [p.lat, p.lng]);
-    const rawLine = L.polyline(rawCoords, {
-      color: "#0ea5e9", weight: 3, opacity: 0.4, dashArray: "4 4", // cienka, przerywana — jako placeholder podczas matchingu
-    }).addTo(mapInstanceRef.current);
-    breadcrumbLayerRef.current = rawLine;
-
-    // Następnie OSRM map-matching — dopasuj do dróg i zastąp gładką linią
-    (async () => {
-      const matched = await mapMatchRoute(breadcrumbPoints);
-      if (cancelled) return;
-      if (!mapInstanceRef.current) return;
-      // Zdjęcie poprzedniej (raw) warstwy
-      if (breadcrumbLayerRef.current) {
-        breadcrumbLayerRef.current.remove();
-        breadcrumbLayerRef.current = null;
-      }
-      const coords = matched?.coordinates?.length > 1 ? matched.coordinates : rawCoords;
-      breadcrumbLayerRef.current = L.polyline(coords, {
-        color: "#0ea5e9", weight: 3, opacity: 0.7,
-      }).addTo(mapInstanceRef.current);
-    })();
-
-    return () => { cancelled = true; };
+    // Canvas renderer — dużo szybszy niż SVG dla setek punktów
+    const renderer = L.canvas({ padding: 0.5 });
+    const group = L.layerGroup();
+    breadcrumbPoints.forEach(p => {
+      if (typeof p.lat !== "number" || typeof p.lng !== "number") return;
+      L.circleMarker([p.lat, p.lng], {
+        renderer,
+        radius: 3,
+        fillColor: "#0ea5e9",
+        fillOpacity: 0.65,
+        color: "#0ea5e9",
+        weight: 0,          // bez obwódki (cleaner)
+        interactive: false, // żeby nie przechwytywało kliknięć
+      }).addTo(group);
+    });
+    group.addTo(mapInstanceRef.current);
+    breadcrumbLayerRef.current = group;
   }, [breadcrumbPoints]);
 
   return (
