@@ -1785,6 +1785,31 @@ exports.trackerData = onRequest(
 
       const nrZlecenia = fracht.nrZlecenia || fracht.nrRef || (fracht.id || "").slice(0, 8) || "—";
 
+      // Aktywny krok (0..3): 0 Dojazd do załadunku, 1 Załadowano, 2 W trasie, 3 Dostarczono
+      // Źródło: driverEvents (dotarcie_zaladunek, start_rozladunek, dotarcie_rozladunek, rozladowano)
+      let activeStep = 0;
+      try {
+        const eventsSnap = await db.collection("driverEvents").where("frachtId", "==", fracht.id).get();
+        const events = eventsSnap.docs.map(e => e.data());
+        const effective = (type) => {
+          const ev = events.filter(e => e.type === type).sort((a, b) => (a.ts || "").localeCompare(b.ts || "")).pop();
+          const un = events.filter(e => e.type === `cofnij_${type}`).sort((a, b) => (a.ts || "").localeCompare(b.ts || "")).pop();
+          if (!ev) return null;
+          if (un && un.ts > ev.ts) return null;
+          return ev;
+        };
+        const dotarcieZal = !!effective("dotarcie_zaladunek");
+        const startRoz = !!effective("start_rozladunek");
+        const dotarcieRoz = !!effective("dotarcie_rozladunek");
+        const rozladowano = !!effective("rozladowano") || fracht.statusRozladunku === "rozladowano";
+        if (rozladowano || dotarcieRoz) activeStep = 3;
+        else if (startRoz) activeStep = 2;
+        else if (dotarcieZal) activeStep = 1;
+        else activeStep = 0;
+      } catch (e) {
+        console.warn("trackerData: events query failed:", e.message);
+      }
+
       // 2. Planowany czas dostawy i załadunku (Europe/Warsaw)
       const toMs = (date, time) => {
         if (!date) return null;
@@ -1800,6 +1825,7 @@ exports.trackerData = onRequest(
         return res.json({
           nrZlecenia,
           status: "zakonczony",
+          activeStep: 3,
           plannedMs,
           plannedLoadMs,
           updatedAt: Date.now(),
@@ -1834,6 +1860,7 @@ exports.trackerData = onRequest(
         return res.json({
           nrZlecenia,
           status: "przed_trasa",
+          activeStep,
           plannedMs,
           plannedLoadMs,
           percentDone: 0,
@@ -1897,6 +1924,9 @@ exports.trackerData = onRequest(
       return res.json({
         nrZlecenia,
         status: "w_trasie",
+        activeStep,
+        lat: pos.lat,
+        lng: pos.lng,
         kmTotal: Math.round(kmTotal),
         kmRemaining: Math.round(kmRemaining),
         kmDone: Math.round(kmDone),

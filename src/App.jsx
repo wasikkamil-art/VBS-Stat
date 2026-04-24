@@ -1461,13 +1461,16 @@ function TrackerPublicView({ token }) {
   const status = d.status; // "przed_trasa" | "w_trasie" | "zakonczony"
 
   // Stepper — 4 kroki
-  // 1 Przyjęte · 2 Oczekiwanie na wyjazd · 3 W trasie · 4 Dostarczono
-  const activeIdx = status === "zakonczony" ? 3 : status === "w_trasie" ? 2 : 1;
+  // 0 Dojazd do załadunku · 1 Załadowano · 2 W trasie · 3 Dostarczono
+  // activeStep z backendu (z driverEvents); fallback do mapowania ze statusu
+  const activeIdx = typeof d.activeStep === "number"
+    ? d.activeStep
+    : (status === "zakonczony" ? 3 : status === "w_trasie" ? 2 : 0);
   const steps = [
-    { label: "Przyjęte",   icon: "📝" },
-    { label: "Oczekiwanie", icon: "🕐" },
-    { label: "W trasie",    icon: "🚛" },
-    { label: "Dostarczono", icon: "📦" },
+    { label: "Dojazd do załadunku", icon: "🚚" },
+    { label: "Załadowano",           icon: "📦" },
+    { label: "W trasie",             icon: "🚛" },
+    { label: "Dostarczono",          icon: "✅" },
   ];
 
   const Stepper = () => (
@@ -1589,6 +1592,35 @@ function TrackerPublicView({ token }) {
               transition: "width 0.6s ease-out",
             }} />
           </div>
+
+          {/* GPS link — tylko dla w_trasie gdy mamy pozycję */}
+          {status === "w_trasie" && typeof d.lat === "number" && typeof d.lng === "number" && (
+            <a
+              href={`https://www.google.com/maps?q=${d.lat},${d.lng}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginTop: 10,
+                padding: "8px 12px",
+                background: "#f0f9ff",
+                border: "1px solid #bae6fd",
+                borderRadius: 10,
+                textDecoration: "none",
+                fontSize: 12,
+                color: "#075985",
+              }}
+            >
+              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: 14 }}>📍</span>
+                <span style={{ fontWeight: 600 }}>Aktualna pozycja:</span>
+                <span style={{ fontFamily: "monospace" }}>{d.lat.toFixed(4)}, {d.lng.toFixed(4)}</span>
+              </span>
+              <span style={{ fontWeight: 700, fontSize: 11 }}>Otwórz w mapach →</span>
+            </a>
+          )}
         </div>
 
         {/* Daty */}
