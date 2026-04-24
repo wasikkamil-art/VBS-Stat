@@ -8827,17 +8827,17 @@ function GpsTrasySection({ device, showToast }) {
       const dd = new Date(ts);
       return `${String(dd.getHours()).padStart(2, "0")}:${String(dd.getMinutes()).padStart(2, "0")}`;
     };
-    const makeMarkerIcon = (symbol, label, time, color, symbolSize = 14) => L.divIcon({
+    const makeMarkerIcon = (label, time, color) => L.divIcon({
       html: `<div style="position:relative;">
-        <div style="background:${color};color:#fff;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:${symbolSize}px;font-weight:700;line-height:1;box-shadow:0 2px 6px rgba(0,0,0,0.35);border:2px solid #fff;">${symbol}</div>
-        <div style="position:absolute;top:38px;left:50%;transform:translateX(-50%);background:rgba(255,255,255,0.95);border:1px solid #e5e7eb;padding:3px 9px;border-radius:8px;font-size:11px;font-weight:700;white-space:nowrap;color:#111827;box-shadow:0 1px 3px rgba(0,0,0,0.12);">${label} · ${time}</div>
+        <div style="background:${color};border-radius:50%;width:18px;height:18px;box-shadow:0 2px 6px rgba(0,0,0,0.35);border:3px solid #fff;"></div>
+        <div style="position:absolute;top:24px;left:50%;transform:translateX(-50%);background:rgba(255,255,255,0.95);border:1px solid #e5e7eb;padding:3px 9px;border-radius:8px;font-size:11px;font-weight:700;white-space:nowrap;color:#111827;box-shadow:0 1px 3px rgba(0,0,0,0.12);">${label} · ${time}</div>
       </div>`,
-      className: "", iconSize: [32, 32], iconAnchor: [16, 16],
+      className: "", iconSize: [18, 18], iconAnchor: [9, 9],
     });
     const sp = stats?.startPt || points[0];
     const ep = stats?.endPt || points[points.length - 1];
-    const startIcon = makeMarkerIcon("«", "Start", fmtHmLocal(sp.ts), "#16a34a", 20);
-    const endIcon   = makeMarkerIcon("K", "Koniec", fmtHmLocal(ep.ts), "#dc2626");
+    const startIcon = makeMarkerIcon("Start", fmtHmLocal(sp.ts), "#16a34a");
+    const endIcon   = makeMarkerIcon("Koniec", fmtHmLocal(ep.ts), "#dc2626");
     L.marker([sp.lat, sp.lng], { icon: startIcon, zIndexOffset: 1000 }).addTo(mapInstanceRef.current);
     L.marker([ep.lat, ep.lng], { icon: endIcon,   zIndexOffset: 1000 }).addTo(mapInstanceRef.current);
 
