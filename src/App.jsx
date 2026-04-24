@@ -1442,8 +1442,8 @@ function TrackerPublicView({ token }) {
       padding: "20px 16px 40px",
     }}>
       <div style={{ width: "100%", maxWidth: 480 }}>
-        <div style={{ textAlign: "center", marginBottom: 28, color: "#64748b", fontSize: 13, fontWeight: 600, letterSpacing: 0.5 }}>
-          🚛 FleetStat
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 28 }}>
+          <img src="/logodologowania.png" alt="FleetStat" style={{ width: 200, maxWidth: "70%" }} />
         </div>
         {children}
         <div style={{ marginTop: 32, textAlign: "center", fontSize: 11, color: "#9ca3af" }}>
