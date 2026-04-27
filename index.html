@@ -21,6 +21,14 @@
     
     <title>FleetStat</title>
 
+    <!-- Preconnect — wstępny handshake z Firebase / Google APIs (skraca pierwszy fetch o 200-500 ms) -->
+    <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin />
+    <link rel="preconnect" href="https://firebaseinstallations.googleapis.com" crossorigin />
+    <link rel="preconnect" href="https://identitytoolkit.googleapis.com" crossorigin />
+    <link rel="preconnect" href="https://firebaseappcheck.googleapis.com" crossorigin />
+    <link rel="dns-prefetch" href="https://firebasestorage.googleapis.com" />
+    <link rel="dns-prefetch" href="https://europe-west1-vbs-stats.cloudfunctions.net" />
+
     <!-- Leaflet (darmowa mapa OpenStreetMap) -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>

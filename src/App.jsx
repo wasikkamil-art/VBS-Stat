@@ -5,7 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 // ─── FIREBASE CONFIG ────────────────────────────────────────────────────────
 // 👇 WKLEJ TUTAJ SWÓJ firebaseConfig z Firebase Console
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, where, orderBy, arrayUnion, serverTimestamp, writeBatch, limit as firestoreLimit } from "firebase/firestore";
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, where, orderBy, arrayUnion, serverTimestamp, writeBatch, limit as firestoreLimit } from "firebase/firestore";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, browserLocalPersistence, setPersistence } from "firebase/auth";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
@@ -26,7 +26,18 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-const db        = getFirestore(app);
+// initializeFirestore z persistent cache — dane w IndexedDB, instant load przy
+// kolejnym otwarciu, automatyczna synchronizacja w tle. Fallback do getFirestore
+// jeśli przeglądarka nie wspiera IndexedDB (Safari prywatne, niektóre webview).
+let db;
+try {
+  db = initializeFirestore(app, {
+    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+  });
+} catch (e) {
+  console.warn("Firestore persistent cache niedostępny — fallback na in-memory:", e?.message);
+  db = getFirestore(app);
+}
 const auth      = getAuth(app);
 setPersistence(auth, browserLocalPersistence).catch(e => console.warn("setPersistence error", e));
 const storage   = getStorage(app);

@@ -1,6 +1,6 @@
 // FleetStat Service Worker — PWA support
 // CACHE_VERSION zmienia się z każdym buildem — wymusza pobranie nowych plików
-const CACHE_NAME = 'fleetstat-v3';
+const CACHE_NAME = 'fleetstat-v4';
 
 // Install — od razu przejmij kontrolę
 self.addEventListener('install', (e) => {
@@ -16,20 +16,57 @@ self.addEventListener('activate', (e) => {
   );
 });
 
-// Fetch — network first, cache only offline fallback
-// NIE cachuj plików JS/CSS z hashami Vite (i tak mają unikalne nazwy)
+// Strategie:
+//   1) Hashed assets Vite (assets/*-HASH.js|css) — CACHE FIRST (immutable, hash w nazwie)
+//   2) index.html — STALE-WHILE-REVALIDATE (szybko z cache, w tle pobiera świeży)
+//   3) Firebase/Firestore/API — pomijamy (network only, brak SW)
+//   4) Reszta (fonty, ikony) — network first, cache fallback
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
-  if (e.request.url.includes('/api/')) return;
-  if (e.request.url.includes('firestore.googleapis.com')) return;
-  if (e.request.url.includes('firebase')) return;
-  if (e.request.url.includes('googleapis.com')) return;
+  const url = e.request.url;
+  if (url.includes('/api/')) return;
+  if (url.includes('firestore.googleapis.com')) return;
+  if (url.includes('firebase')) return;
+  if (url.includes('googleapis.com')) return;
+  if (url.includes('cloudfunctions.net')) return;
 
-  // Pliki z hashem Vite (np. index-C8o9MIg5.js) — zawsze sieć, bez cache
-  if (e.request.url.match(/assets\/index-[a-zA-Z0-9_-]+\.(js|css)$/)) {
-    return; // pozwól przeglądarce normalnie pobrać — bez cache SW
+  // 1) Hashed assets — cache first (immutable)
+  if (url.match(/\/assets\/[^/]+-[a-zA-Z0-9_-]+\.(js|css|woff2|woff|ttf)(\?.*)?$/)) {
+    e.respondWith(
+      caches.match(e.request).then(cached => {
+        if (cached) return cached;
+        return fetch(e.request).then(res => {
+          if (res.ok) {
+            const clone = res.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone));
+          }
+          return res;
+        });
+      })
+    );
+    return;
   }
 
+  // 2) index.html i navigations — stale-while-revalidate
+  const isHtml = e.request.mode === 'navigate'
+    || (e.request.headers.get('accept') || '').includes('text/html');
+  if (isHtml) {
+    e.respondWith(
+      caches.match(e.request).then(cached => {
+        const networkPromise = fetch(e.request).then(res => {
+          if (res.ok) {
+            const clone = res.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone));
+          }
+          return res;
+        }).catch(() => cached);
+        return cached || networkPromise;
+      })
+    );
+    return;
+  }
+
+  // 3) Pozostałe — network first, cache fallback
   e.respondWith(
     fetch(e.request)
       .then(res => {
