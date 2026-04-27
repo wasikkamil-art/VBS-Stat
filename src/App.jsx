@@ -1360,31 +1360,31 @@ function LoginScreen() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// TRACKER PHOTO CARD — osobna karta z galerią zdjęć (klik otwiera oryginał w nowej karcie)
+// TRACKER PHASE CARD — karta fazowa (Po załadunku / Po rozładunku) z 1+ grupami zdjęć
+// Każda grupa = osobna sekcja (CMR / Towar) wewnątrz fazy.
 // ═══════════════════════════════════════════════════════════════════════════════
-function TrackerPhotoCard({ title, urls }) {
+function TrackerPhaseCard({ title, groups }) {
   return (
     <div style={{ marginTop: 14, background: "#fff", borderRadius: 16, padding: 18, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", letterSpacing: 0.3, marginBottom: 10 }}>
-        {title} <span style={{ color: "#94a3b8", fontWeight: 500 }}>· {urls.length}</span>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", letterSpacing: 0.3, marginBottom: 14 }}>
+        {title}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
-        {urls.map((url, i) => (
-          <a key={i} href={url} target="_blank" rel="noopener noreferrer"
-            style={{
-              aspectRatio: "1",
-              borderRadius: 8,
-              overflow: "hidden",
-              border: "1px solid #e2e8f0",
-              background: "#f8fafc",
-              display: "block",
-            }}>
-            <img src={url} alt="" loading="lazy"
-              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-            />
-          </a>
-        ))}
-      </div>
+      {groups.map((g, gi) => (
+        <div key={gi} style={{ marginBottom: gi < groups.length - 1 ? 14 : 0 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", letterSpacing: 0.3, marginBottom: 8, textTransform: "uppercase" }}>
+            {g.label} <span style={{ color: "#94a3b8", fontWeight: 500 }}>· {g.urls.length}</span>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+            {g.urls.map((url, i) => (
+              <a key={i} href={url} target="_blank" rel="noopener noreferrer"
+                style={{ aspectRatio: "1", borderRadius: 8, overflow: "hidden", border: "1px solid #e2e8f0", background: "#f8fafc", display: "block" }}>
+                <img src={url} alt="" loading="lazy"
+                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+              </a>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1654,6 +1654,12 @@ function TrackerPublicView({ token }) {
               <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 8, fontSize: 12, fontWeight: 700, color: "#475569", letterSpacing: 0.3 }}>
                 <span style={{ fontSize: 11 }}>🚛</span>
                 <span>{d.vehiclePlate}</span>
+                {d.vehicleMaxWeight ? (
+                  <>
+                    <span style={{ color: "#cbd5e1", fontWeight: 400 }}>·</span>
+                    <span style={{ color: "#64748b" }}>{d.vehicleMaxWeight.toLocaleString("pl-PL")} kg</span>
+                  </>
+                ) : null}
               </div>
             )}
           </div>
@@ -1798,16 +1804,27 @@ function TrackerPublicView({ token }) {
         )}
       </div>
 
-      {/* Galerie zdjęć — osobne karty per kategoria */}
-      {d.photos?.cmrZal?.length > 0 && (
-        <TrackerPhotoCard title="📄 CMR — załadunek" urls={d.photos.cmrZal} />
-      )}
-      {d.photos?.cmrRoz?.length > 0 && (
-        <TrackerPhotoCard title="📄 CMR — rozładunek" urls={d.photos.cmrRoz} />
-      )}
-      {d.photos?.towar?.length > 0 && (
-        <TrackerPhotoCard title="📦 Zdjęcia towaru" urls={d.photos.towar} />
-      )}
+      {/* Galerie zdjęć — chronologicznie wg fazy: Po załadunku / Po rozładunku */}
+      {(() => {
+        const cmrZal = d.photos?.cmrZal || [];
+        const cmrRoz = d.photos?.cmrRoz || [];
+        const towar = d.photos?.towar || [];
+        const afterLoad = [
+          ...(cmrZal.length ? [{ label: "📄 CMR załadunek", urls: cmrZal }] : []),
+          ...(towar.length ? [{ label: "📦 Zdjęcia towaru", urls: towar }] : []),
+        ];
+        const afterUnload = cmrRoz.length ? [{ label: "📄 CMR rozładunek", urls: cmrRoz }] : [];
+        return (
+          <>
+            {afterLoad.length > 0 && (
+              <TrackerPhaseCard title="🔵 Po załadunku" groups={afterLoad} />
+            )}
+            {afterUnload.length > 0 && (
+              <TrackerPhaseCard title="🟢 Po rozładunku" groups={afterUnload} />
+            )}
+          </>
+        );
+      })()}
 
       {/* Ostatnia aktualizacja */}
       {d.updatedAt && (
@@ -20062,49 +20079,83 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                                 </div>
                               );
                             })()}
-                            {/* Pozostałe eventy (zdjęcia, CMR, uwagi) */}
-                            {evts.filter(e => !["dotarcie_zaladunek","start_rozladunek","dotarcie_rozladunek"].includes(e.type)).map((ev, i) => {
-                              const meta = typeLabels[ev.type] || { icon: "•", label: ev.type, color: "#6b7280" };
-                              const time = ev.value || ev.ts;
-                              const timeStr = time ? new Date(time).toLocaleString("pl-PL", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" }) : "";
-                              return (
-                                <div key={ev.id || i} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-                                  {/* Timeline line */}
-                                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 20, flexShrink: 0 }}>
-                                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: meta.color, marginTop: 4 }}></div>
-                                    {i < evts.length - 1 && <div style={{ width: 1, height: 20, background: "#d1d5db" }}></div>}
-                                  </div>
-                                  {/* Content */}
-                                  <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                      <span style={{ fontSize: 13, fontWeight: 600, color: meta.color }}>{meta.icon} {meta.label}</span>
-                                      <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: "auto", flexShrink: 0 }}>{timeStr}</span>
-                                      {ev.id && (
-                                        <button onClick={async () => {
-                                          if (!window.confirm("Usunąć ten wpis?")) return;
-                                          try { await deleteDoc(doc(db, "driverEvents", ev.id)); } catch(e) { console.error(e); }
-                                        }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "#d1d5db", padding: "2px 4px" }}
-                                          title="Usuń wpis">✕</button>
+                            {/* Pozostałe eventy (zdjęcia, CMR, uwagi) — pogrupowane po fazie:
+                                Załadunek (ts < start_rozladunek.ts) vs Rozładunek (ts ≥ start_rozladunek.ts).
+                                Gdy brak start_rozladunek — wszystko traktujemy jako Załadunek. */}
+                            {(() => {
+                              const startRozEv = evts.find(e => e.type === "start_rozladunek");
+                              const phaseSplitTs = startRozEv ? (startRozEv.value || startRozEv.ts) : null;
+                              const isAfterUnload = (e) => phaseSplitTs && (e.value || e.ts) >= phaseSplitTs;
+                              const otherEvts = evts.filter(e => !["dotarcie_zaladunek","start_rozladunek","dotarcie_rozladunek"].includes(e.type));
+                              const beforeUnload = otherEvts.filter(e => !isAfterUnload(e));
+                              const afterUnload = otherEvts.filter(e => isAfterUnload(e));
+
+                              const renderEv = (ev, key, isLast) => {
+                                const meta = typeLabels[ev.type] || { icon: "•", label: ev.type, color: "#6b7280" };
+                                const time = ev.value || ev.ts;
+                                const timeStr = time ? new Date(time).toLocaleString("pl-PL", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" }) : "";
+                                return (
+                                  <div key={key} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 20, flexShrink: 0 }}>
+                                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: meta.color, marginTop: 6, marginLeft: 8 }}></div>
+                                      {!isLast && <div style={{ width: 1, height: 20, background: "#e5e7eb" }}></div>}
+                                    </div>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                        <span style={{ fontSize: 12, fontWeight: 600, color: meta.color }}>{meta.icon} {meta.label}</span>
+                                        <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: "auto", flexShrink: 0 }}>{timeStr}</span>
+                                        {ev.id && (
+                                          <button onClick={async () => {
+                                            if (!window.confirm("Usunąć ten wpis?")) return;
+                                            try { await deleteDoc(doc(db, "driverEvents", ev.id)); } catch(e) { console.error(e); }
+                                          }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "#d1d5db", padding: "2px 4px" }}
+                                            title="Usuń wpis">✕</button>
+                                        )}
+                                      </div>
+                                      {ev.photoUrl && (
+                                        <a href={ev.photoUrl} target="_blank" rel="noopener noreferrer"
+                                          style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 4,
+                                            fontSize: 11, color: "#6366f1", textDecoration: "none", padding: "3px 8px",
+                                            borderRadius: 6, background: "#f5f3ff", border: "1px solid #e9e5ff" }}>
+                                          🔍 Zobacz zdjęcie
+                                        </a>
+                                      )}
+                                      {ev.note && (
+                                        <div style={{ marginTop: 4, fontSize: 12, color: "#374151", padding: "6px 10px",
+                                          borderRadius: 6, background: "#f9fafb", border: "1px solid #f3f4f6", fontStyle: "italic" }}>
+                                          „{ev.note}"
+                                        </div>
                                       )}
                                     </div>
-                                    {ev.photoUrl && (
-                                      <a href={ev.photoUrl} target="_blank" rel="noopener noreferrer"
-                                        style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 4,
-                                          fontSize: 11, color: "#6366f1", textDecoration: "none", padding: "3px 8px",
-                                          borderRadius: 6, background: "#f5f3ff", border: "1px solid #e9e5ff" }}>
-                                        🔍 Zobacz zdjęcie
-                                      </a>
-                                    )}
-                                    {ev.note && (
-                                      <div style={{ marginTop: 4, fontSize: 12, color: "#374151", padding: "6px 10px",
-                                        borderRadius: 6, background: "#f9fafb", border: "1px solid #f3f4f6", fontStyle: "italic" }}>
-                                        „{ev.note}"
-                                      </div>
-                                    )}
                                   </div>
-                                </div>
+                                );
+                              };
+
+                              return (
+                                <>
+                                  {beforeUnload.length > 0 && (
+                                    <div style={{ marginTop: 6, padding: "10px 12px", background: "#eff6ff", border: "1px solid #dbeafe", borderRadius: 8 }}>
+                                      <div style={{ fontSize: 11, fontWeight: 700, color: "#1d4ed8", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                                        📦 Faza załadunku · {beforeUnload.length}
+                                      </div>
+                                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                                        {beforeUnload.map((ev, i) => renderEv(ev, ev.id || `bl-${i}`, i === beforeUnload.length - 1))}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {afterUnload.length > 0 && (
+                                    <div style={{ marginTop: 6, padding: "10px 12px", background: "#ecfdf5", border: "1px solid #d1fae5", borderRadius: 8 }}>
+                                      <div style={{ fontSize: 11, fontWeight: 700, color: "#059669", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                                        🚚 Faza rozładunku · {afterUnload.length}
+                                      </div>
+                                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                                        {afterUnload.map((ev, i) => renderEv(ev, ev.id || `au-${i}`, i === afterUnload.length - 1))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </>
                               );
-                            })}
+                            })()}
                           </div>
                           {/* ── Trip Summary (tylko zakończone) ── */}
                           {r.statusRozladunku === "rozladowano" && (
