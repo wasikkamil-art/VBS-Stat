@@ -848,11 +848,21 @@ Szczegoly w aplikacji FleetStat.
 
 ### F. Pozostałe TODO — zgłoszone 2026-04-27
 
-1. **Pole „nazwa firmy" w formularzu zlecenia** — formularz ma zaczytywać nazwę firmy ze zlecenia (autofill z `zleceniodawcaFirma` istniejącego frachtu / kontrahenta).
+1. ~~**Pole „nazwa firmy" w formularzu zlecenia**~~ — ✅ ZROBIONE 2026-04-27 (commit `1038850`). Pola `zaladunekFirma`/`zaladunekFirma2`/`rozladunekFirma`/`rozladunekFirma2..5` w FrachtyModal, AI parser schema (Claude wyciąga z PDF), `formatOrderForDriverCopy` dokleja firmę do daty Z#/R#. Równolegle: usunięty header (`🚛 ZLECENIE`, `Pojazd:`, `Klient:`) i sekcja `🏢 ZLECENIODAWCA` z formatu kierowcy + walidacja sklejonych adresów (`1. ... 2. ...`).
 
 2. **Tracker auto-off po rozładunku + email podsumowania trasy** — po finalnym rozładunku (`dotarcie_rozladunek` lub `dotarcie_rozladunek_2` przy hasR2) Tracker `/t/{token}` ma się sam wyłączać (toggle off w `TrackerPill`), równolegle wysyłka email do zleceniodawcy z podsumowaniem trasy: km, czas, zdjęcia (CMR zał/roz, towar, uszkodzenia), status końcowy. Łączy się z istniejącym `SendTrackerLinkModal`/`trackerData` CF.
 
 3. **Model „giełda wolnych pojazdów"** — przygotować strukturę danych do wprowadzania aut innych firm (zewnętrzni przewoźnicy z wolną przestrzenią ładunkową). Kierunek: marketplace/giełda. Do przemyślenia: kolekcja Firestore (osobna od `vehicles` żeby nie mieszać floty własnej z zewnętrzną?), role i widoczność (kto może dodawać/przeglądać), kontakty do przewoźnika, cykl życia ogłoszenia.
+
+4. **AI chat dla zakładki „Czas pracy"** — asystent dyspozytora z wiedzą wyłącznie o tachografie + regulaminie 561/2006 + Pakiecie Mobilności (refusal poza tematem).
+   - **Stack**: istniejący `/api/claude` endpoint (Vercel, `ANTHROPIC_API_KEY`). Model: **Claude Haiku 4.5** ($1/M in, $5/M out). Koszt: ~$0.001/zapytanie; user szacuje 30 zapytań/tydzień ≈ $0.12/mc. Balans Anthropic Console: 25 USD (wystarczy na lata przy tym wolumenie).
+   - **Kontekst per zapytanie** (~5k tok): wybrany kierowca + 30 dni segmentów (priorytet źródeł: DDD > ww_csv > manual > auto_gps) + wynik `computeDriverCompliance` + `computeDriverPlan` + meta o źródle (Claude musi wiedzieć że GPS ≠ tacho prawda).
+   - **System prompt**: zakres = czas pracy / 561/2006 / Pakiet Mobilności; refusal pattern; format odpowiedzi po polsku z odniesieniami do reguł.
+   - **Prompt caching**: system prompt + reguły 561 → 5-min TTL, kolejne zapytania ~90% taniej input.
+   - **Decyzje otwarte** (zanim implementacja):
+     a) Dostęp: tylko admin/dyspozytor (`GpsCzasPracySection`) czy też kierowca (`DriverCzasPracyDashboard`)
+     b) Selekcja: jeden kierowca per chat czy multi-kierowca (np. „kto z chłopaków ma najmniej do nadrobienia?")
+   - **Pre-req**: włączyć Auto-reload w Anthropic Console Settings → Billing (obecnie disabled — ryzyko że API zatrzyma się przy 0).
 
 ## 15. Znane problemy / uwagi
 
