@@ -1854,20 +1854,48 @@ exports.trackerData = onRequest(
         }
       }
 
-      // Zdjęcia — tylko te kategorie, które admin zaznaczył w trackerShow
+      // Zdjęcia — tylko te kategorie, które admin zaznaczył w trackerShow.
+      // Dla 2 rozładunków (hasR2): CMR rozładunkowe rozdzielone na R1/R2 wg ts
+      // drugiego eventu 'dotarcie_rozladunek' (kierowca klika 2x — pierwszy = R1).
       const show = fracht.trackerShow || {};
       const photos = {};
       if (show.cmrZal || show.cmrRoz || show.towar || show.damage) {
-        const urls = { cmrZal: [], cmrRoz: [], towar: [], damage: [] };
+        let phaseR2StartTs = null;
+        if (hasR2) {
+          const dotRozSorted = events.filter(e => e.type === "dotarcie_rozladunek")
+            .sort((a, b) => ((a.value || a.ts) || "").localeCompare((b.value || b.ts) || ""));
+          const dotRoz2 = dotRozSorted[1];
+          if (dotRoz2) phaseR2StartTs = dotRoz2.value || dotRoz2.ts;
+        }
+
+        const urls = { cmrZal: [], cmrRoz: [], cmrRozR1: [], cmrRozR2: [], towar: [], damage: [] };
         for (const e of events) {
           if (!e.photoUrl) continue;
-          if (e.type === "cmr_zaladunek_photo") urls.cmrZal.push(e.photoUrl);
-          else if (e.type === "cmr_rozladunek_photo" || e.type === "cmr_photo") urls.cmrRoz.push(e.photoUrl);
-          else if (e.type === "towar_photo") urls.towar.push(e.photoUrl);
-          else if (e.type === "towar_damage_photo") urls.damage.push(e.photoUrl);
+          if (e.type === "cmr_zaladunek_photo") {
+            urls.cmrZal.push(e.photoUrl);
+          } else if (e.type === "cmr_rozladunek_photo" || e.type === "cmr_photo") {
+            if (hasR2) {
+              const evTs = e.value || e.ts || "";
+              if (phaseR2StartTs && evTs >= phaseR2StartTs) urls.cmrRozR2.push(e.photoUrl);
+              else urls.cmrRozR1.push(e.photoUrl);
+            } else {
+              urls.cmrRoz.push(e.photoUrl);
+            }
+          } else if (e.type === "towar_photo") {
+            urls.towar.push(e.photoUrl);
+          } else if (e.type === "towar_damage_photo") {
+            urls.damage.push(e.photoUrl);
+          }
         }
         if (show.cmrZal && urls.cmrZal.length) photos.cmrZal = urls.cmrZal;
-        if (show.cmrRoz && urls.cmrRoz.length) photos.cmrRoz = urls.cmrRoz;
+        if (show.cmrRoz) {
+          if (hasR2) {
+            if (urls.cmrRozR1.length) photos.cmrRozR1 = urls.cmrRozR1;
+            if (urls.cmrRozR2.length) photos.cmrRozR2 = urls.cmrRozR2;
+          } else if (urls.cmrRoz.length) {
+            photos.cmrRoz = urls.cmrRoz;
+          }
+        }
         if (show.towar && urls.towar.length) photos.towar = urls.towar;
         if (show.damage && urls.damage.length) photos.damage = urls.damage;
       }

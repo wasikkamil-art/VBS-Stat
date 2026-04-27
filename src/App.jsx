@@ -1360,8 +1360,30 @@ function LoginScreen() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// TRACKER PHASE CARD — karta fazowa (Po załadunku / Po rozładunku) z 1+ grupami zdjęć
-// Każda grupa = osobna sekcja (CMR / Towar) wewnątrz fazy.
+// TRACKER PHOTO CARD — pojedyncza karta z galerią zdjęć dla jednej kategorii
+// (klik miniatury otwiera oryginał w nowej karcie)
+// ═══════════════════════════════════════════════════════════════════════════════
+function TrackerPhotoCard({ title, urls }) {
+  return (
+    <div style={{ marginTop: 14, background: "#fff", borderRadius: 16, padding: 18, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", letterSpacing: 0.3, marginBottom: 10 }}>
+        {title} <span style={{ color: "#94a3b8", fontWeight: 500 }}>· {urls.length}</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+        {urls.map((url, i) => (
+          <a key={i} href={url} target="_blank" rel="noopener noreferrer"
+            style={{ aspectRatio: "1", borderRadius: 8, overflow: "hidden", border: "1px solid #e2e8f0", background: "#f8fafc", display: "block" }}>
+            <img src={url} alt="" loading="lazy"
+              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TRACKER PHASE CARD — karta fazowa (legacy, jeszcze użyta? — sprawdź)
 // ═══════════════════════════════════════════════════════════════════════════════
 function TrackerPhaseCard({ title, groups }) {
   return (
@@ -1815,31 +1837,29 @@ function TrackerPublicView({ token }) {
         )}
       </div>
 
-      {/* Galerie zdjęć — chronologicznie wg fazy: Po załadunku / Po rozładunku */}
-      {(() => {
-        const cmrZal = d.photos?.cmrZal || [];
-        const cmrRoz = d.photos?.cmrRoz || [];
-        const towar = d.photos?.towar || [];
-        const damage = d.photos?.damage || [];
-        const afterLoad = [
-          ...(cmrZal.length ? [{ label: "📄 CMR z załadunku", urls: cmrZal }] : []),
-          ...(towar.length ? [{ label: "📦 Zdjęcie towaru z załadunku", urls: towar }] : []),
-        ];
-        const afterUnload = [
-          ...(cmrRoz.length ? [{ label: "📄 CMR z rozładunku", urls: cmrRoz }] : []),
-          ...(damage.length ? [{ label: "⚠️ Zdjęcie towaru po rozładunku", urls: damage }] : []),
-        ];
-        return (
-          <>
-            {afterLoad.length > 0 && (
-              <TrackerPhaseCard title="🔵 Po załadunku" groups={afterLoad} />
-            )}
-            {afterUnload.length > 0 && (
-              <TrackerPhaseCard title="🟢 Po rozładunku" groups={afterUnload} />
-            )}
-          </>
-        );
-      })()}
+      {/* Galerie zdjęć — osobne karty per kategoria, w kolejności logicznej:
+          1. CMR z załadunku
+          2. CMR z rozładunku (lub R1 + R2 gdy fracht ma 2 rozładunki)
+          3. Zdjęcie towaru z załadunku
+          4. Zdjęcie towaru po rozładunku (uszkodzenia, opcjonalne) */}
+      {d.photos?.cmrZal?.length > 0 && (
+        <TrackerPhotoCard title="📄 CMR z załadunku" urls={d.photos.cmrZal} />
+      )}
+      {d.photos?.cmrRoz?.length > 0 && (
+        <TrackerPhotoCard title="📄 CMR z rozładunku" urls={d.photos.cmrRoz} />
+      )}
+      {d.photos?.cmrRozR1?.length > 0 && (
+        <TrackerPhotoCard title="📄 CMR z rozładunku 1" urls={d.photos.cmrRozR1} />
+      )}
+      {d.photos?.cmrRozR2?.length > 0 && (
+        <TrackerPhotoCard title="📄 CMR z rozładunku 2" urls={d.photos.cmrRozR2} />
+      )}
+      {d.photos?.towar?.length > 0 && (
+        <TrackerPhotoCard title="📦 Zdjęcie towaru z załadunku" urls={d.photos.towar} />
+      )}
+      {d.photos?.damage?.length > 0 && (
+        <TrackerPhotoCard title="⚠️ Zdjęcie towaru po rozładunku" urls={d.photos.damage} />
+      )}
 
       {/* Ostatnia aktualizacja */}
       {d.updatedAt && (
