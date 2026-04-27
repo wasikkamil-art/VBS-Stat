@@ -1061,28 +1061,48 @@ function lastWeeklyRestEnd(segments, now) {
   return d.getTime();
 }
 
-// ── Priorytet źródeł: DDD > manual > auto_gps ──
-// Gdy dla kierowcy są segmenty z DDD w danym zakresie czasu, filtrujemy
-// pozostałe źródła z tego zakresu (traktujemy je jako zastąpione).
-function preferDddSegments(segments) {
-  const dddSegs = segments.filter(s => s.source === "ddd");
-  if (dddSegs.length === 0) return segments;
-
-  // Zbuduj listę przedziałów pokrytych przez DDD
-  const covered = dddSegs.map(s => [s.startMs, s.endMs]).sort((a, b) => a[0] - b[0]);
-  const isCovered = (ms) => {
-    for (const [a, b] of covered) {
-      if (ms >= a && ms < b) return true;
-    }
+// ── Priorytet źródeł: DDD > ww_csv > manual > auto_gps ──
+// Wyższy priorytet "wycina" niższy z tych samych przedziałów czasowych.
+// Helper: dla zbioru segmentów wybranego źródła zwraca filtr pokrycia czasowego.
+function _coverageFilter(segs) {
+  const ranges = segs.map(s => [s.startMs, s.endMs]).sort((a, b) => a[0] - b[0]);
+  return (s) => {
+    const mid = (s.startMs + s.endMs) / 2;
+    for (const [a, b] of ranges) if (mid >= a && mid < b) return true;
     return false;
   };
+}
 
-  // Segmenty DDD zachowujemy + te nie-DDD które leżą poza zakresem DDD
-  return segments.filter(s => {
-    if (s.source === "ddd") return true;
-    const midMs = (s.startMs + s.endMs) / 2;
-    return !isCovered(midMs);
-  });
+function preferDddSegments(segments) {
+  // Priorytet 1: DDD wycina ww_csv, manual, auto_gps z pokrytych zakresów
+  const ddd = segments.filter(s => s.source === "ddd");
+  let result = segments;
+  if (ddd.length > 0) {
+    const coveredByDdd = _coverageFilter(ddd);
+    result = result.filter(s => s.source === "ddd" || !coveredByDdd(s));
+  }
+
+  // Priorytet 2: ww_csv wycina manual i auto_gps
+  const ww = result.filter(s => s.source === "ww_csv");
+  if (ww.length > 0) {
+    const coveredByWw = _coverageFilter(ww);
+    result = result.filter(s => {
+      if (s.source === "ddd" || s.source === "ww_csv") return true;
+      return !coveredByWw(s);
+    });
+  }
+
+  // Priorytet 3: manual wycina auto_gps
+  const man = result.filter(s => s.source === "manual");
+  if (man.length > 0) {
+    const coveredByMan = _coverageFilter(man);
+    result = result.filter(s => {
+      if (s.source === "ddd" || s.source === "ww_csv" || s.source === "manual") return true;
+      return !coveredByMan(s);
+    });
+  }
+
+  return result;
 }
 
 // ── GŁÓWNA FUNKCJA: compliance dla kierowcy ──
