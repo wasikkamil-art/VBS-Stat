@@ -1651,19 +1651,28 @@ function TrackerPublicView({ token }) {
     };
   }
 
-  // Karty dat
-  const dateCard = (title, ms) => (
-    <div style={{ flex: 1, padding: "12px 14px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, minWidth: 0 }}>
+  // Karty dat — gdy etap już zrealizowany pokazujemy "✅ Załadowano/Rozładowano/Dostarczono"
+  // zamiast planowanej daty (która jest już nieaktualna z punktu widzenia klienta).
+  const stepNum = d.activeStep ?? 0;
+  const dateCard = (title, ms, doneLabel) => (
+    <div style={{
+      flex: 1, padding: "12px 14px", minWidth: 0,
+      background: doneLabel ? "#f0fdf4" : "#f8fafc",
+      border: doneLabel ? "1px solid #bbf7d0" : "1px solid #e2e8f0",
+      borderRadius: 10,
+    }}>
       <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: 0.5, textTransform: "uppercase" }}>{title}</div>
-      <div style={{ fontSize: 13, fontWeight: 700, color: "#334155", marginTop: 3 }}>{fmtDateSmart(ms)}</div>
+      <div style={{ fontSize: 13, fontWeight: 700, marginTop: 3, color: doneLabel ? "#15803d" : "#334155" }}>
+        {doneLabel || fmtDateSmart(ms)}
+      </div>
     </div>
   );
-  const loadDateBox = d.plannedLoadMs ? dateCard("Załadunek", d.plannedLoadMs) : null;
-  // Gdy hasR2: osobne karty dla R1 i R2, każda z datą. Gdy tylko R1: jedna karta "Planowana dostawa".
+  const loadDateBox = d.plannedLoadMs ? dateCard("Załadunek", d.plannedLoadMs, stepNum >= 1 ? "✅ Załadowano" : null) : null;
+  // Gdy hasR2: osobne karty dla R1 i R2. Gdy tylko R1: jedna karta "Planowana dostawa".
   const unloadR1Box = hasR2
-    ? (d.plannedR1Ms ? dateCard("Rozładunek 1", d.plannedR1Ms) : null)
-    : (d.plannedMs ? dateCard("Planowana dostawa", d.plannedMs) : null);
-  const unloadR2Box = hasR2 && d.plannedR2Ms ? dateCard("Rozładunek 2", d.plannedR2Ms) : null;
+    ? (d.plannedR1Ms ? dateCard("Rozładunek 1", d.plannedR1Ms, stepNum >= 3 ? "✅ Rozładowano" : null) : null)
+    : (d.plannedMs ? dateCard("Planowana dostawa", d.plannedMs, stepNum >= 3 ? "✅ Dostarczono" : null) : null);
+  const unloadR2Box = hasR2 && d.plannedR2Ms ? dateCard("Rozładunek 2", d.plannedR2Ms, stepNum >= 4 ? "✅ Dostarczono" : null) : null;
 
   return (
     <Shell>
