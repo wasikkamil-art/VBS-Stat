@@ -1857,17 +1857,19 @@ exports.trackerData = onRequest(
       // Zdjęcia — tylko te kategorie, które admin zaznaczył w trackerShow
       const show = fracht.trackerShow || {};
       const photos = {};
-      if (show.cmrZal || show.cmrRoz || show.towar) {
-        const urls = { cmrZal: [], cmrRoz: [], towar: [] };
+      if (show.cmrZal || show.cmrRoz || show.towar || show.damage) {
+        const urls = { cmrZal: [], cmrRoz: [], towar: [], damage: [] };
         for (const e of events) {
           if (!e.photoUrl) continue;
           if (e.type === "cmr_zaladunek_photo") urls.cmrZal.push(e.photoUrl);
           else if (e.type === "cmr_rozladunek_photo" || e.type === "cmr_photo") urls.cmrRoz.push(e.photoUrl);
           else if (e.type === "towar_photo") urls.towar.push(e.photoUrl);
+          else if (e.type === "towar_damage_photo") urls.damage.push(e.photoUrl);
         }
         if (show.cmrZal && urls.cmrZal.length) photos.cmrZal = urls.cmrZal;
         if (show.cmrRoz && urls.cmrRoz.length) photos.cmrRoz = urls.cmrRoz;
         if (show.towar && urls.towar.length) photos.towar = urls.towar;
+        if (show.damage && urls.damage.length) photos.damage = urls.damage;
       }
 
       // 2. Planowane czasy (Europe/Warsaw) — hasR2 już wyznaczone wcześniej

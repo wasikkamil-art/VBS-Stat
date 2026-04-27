@@ -1820,11 +1820,15 @@ function TrackerPublicView({ token }) {
         const cmrZal = d.photos?.cmrZal || [];
         const cmrRoz = d.photos?.cmrRoz || [];
         const towar = d.photos?.towar || [];
+        const damage = d.photos?.damage || [];
         const afterLoad = [
-          ...(cmrZal.length ? [{ label: "📄 CMR załadunek", urls: cmrZal }] : []),
-          ...(towar.length ? [{ label: "📦 Zdjęcia towaru", urls: towar }] : []),
+          ...(cmrZal.length ? [{ label: "📄 CMR z załadunku", urls: cmrZal }] : []),
+          ...(towar.length ? [{ label: "📦 Zdjęcie towaru z załadunku", urls: towar }] : []),
         ];
-        const afterUnload = cmrRoz.length ? [{ label: "📄 CMR rozładunek", urls: cmrRoz }] : [];
+        const afterUnload = [
+          ...(cmrRoz.length ? [{ label: "📄 CMR z rozładunku", urls: cmrRoz }] : []),
+          ...(damage.length ? [{ label: "⚠️ Zdjęcie towaru po rozładunku", urls: damage }] : []),
+        ];
         return (
           <>
             {afterLoad.length > 0 && (
@@ -21502,6 +21506,7 @@ function SendTrackerLinkModal({ fracht, frachtId, trackerToken, trackerEnabled =
     cmrZal: !!initialShow.cmrZal,
     cmrRoz: !!initialShow.cmrRoz,
     towar: !!initialShow.towar,
+    damage: !!initialShow.damage,
   });
 
   useEffect(() => {
@@ -21639,9 +21644,10 @@ function SendTrackerLinkModal({ fracht, frachtId, trackerToken, trackerEnabled =
             <label className="text-xs font-semibold text-gray-500 mb-2 block">Co pokazać zleceniodawcy</label>
             <div className="space-y-1.5">
               {[
-                { k: "cmrZal", label: "📄 CMR — załadunek", sub: "dokument z załadunku (weryfikacja zgodności ze zleceniem)" },
-                { k: "cmrRoz", label: "📄 CMR — rozładunek", sub: "dokument z pieczątką po dostawie" },
-                { k: "towar",  label: "📦 Zdjęcia towaru",    sub: "z załadunku (jak zapakowane)" },
+                { k: "cmrZal", label: "📄 CMR z załadunku",       sub: "dokument z załadunku (weryfikacja zgodności ze zleceniem)" },
+                { k: "towar",  label: "📦 Zdjęcie towaru z załadunku", sub: "jak towar został zapakowany / załadowany" },
+                { k: "cmrRoz", label: "📄 CMR z rozładunku",      sub: "dokument z pieczątką po dostawie" },
+                { k: "damage", label: "⚠️ Zdjęcie towaru po rozładunku", sub: "ewentualne uszkodzenia stwierdzone u odbiorcy" },
               ].map(opt => (
                 <label key={opt.k} className="flex items-start gap-2.5 cursor-pointer p-2 rounded-lg hover:bg-gray-50 transition-colors">
                   <input
