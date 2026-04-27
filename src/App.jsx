@@ -20031,12 +20031,40 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                               );
                             };
 
-                            // Podział eventów na fazę załadunkową/rozładunkową po dotarcie_rozladunek.ts
-                            const dotRozEv = evts.find(e => e.type === "dotarcie_rozladunek");
-                            const phaseSplitTs = dotRozEv ? (dotRozEv.value || dotRozEv.ts) : null;
+                            // Czy fracht ma 2 rozładunki (dataRozladunku2 / dokod2 / rozladunekGeo2)
+                            const hasR2 = !!(
+                              (r.dokodPocztowy2 && String(r.dokodPocztowy2).trim()) ||
+                              (r.dokodMiasto2 && String(r.dokodMiasto2).trim()) ||
+                              (r.dokod2 && String(r.dokod2).trim()) ||
+                              (r.rozladunekGeo2 && String(r.rozladunekGeo2).trim()) ||
+                              (r.dataRozladunku2 && String(r.dataRozladunku2).trim())
+                            );
+
+                            // Eventy 'dotarcie_rozladunek' chronologicznie — pierwszy = R1, drugi = R2 (gdy są dwa)
+                            const dotRozEvts = evts.filter(e => e.type === "dotarcie_rozladunek")
+                              .sort((a, b) => {
+                                const ta = a.value || a.ts || "";
+                                const tb = b.value || b.ts || "";
+                                return ta.localeCompare(tb);
+                              });
+                            const dotRoz1Ev = dotRozEvts[0];
+                            const dotRoz2Ev = dotRozEvts[1];
+
+                            const phaseR1Start = dotRoz1Ev ? (dotRoz1Ev.value || dotRoz1Ev.ts) : null;
+                            const phaseR2Start = dotRoz2Ev ? (dotRoz2Ev.value || dotRoz2Ev.ts) : null;
+                            // Punkt podziału załadunek/rozładunek = pierwsze dotarcie na rozładunek
+                            const phaseSplitTs = phaseR1Start;
+
                             const otherEvts = evts.filter(e => !["dotarcie_zaladunek","start_rozladunek","dotarcie_rozladunek"].includes(e.type));
                             const beforeUnload = otherEvts.filter(e => !phaseSplitTs || (e.value || e.ts) < phaseSplitTs);
-                            const afterUnload = otherEvts.filter(e => phaseSplitTs && (e.value || e.ts) >= phaseSplitTs);
+                            // Gdy hasR2: dziel afterUnload po phaseR2Start. Bez R2: wszystko jako afterUnload.
+                            const underR1 = hasR2
+                              ? otherEvts.filter(e => phaseR1Start && (e.value || e.ts) >= phaseR1Start && (!phaseR2Start || (e.value || e.ts) < phaseR2Start))
+                              : [];
+                            const underR2 = hasR2
+                              ? otherEvts.filter(e => phaseR2Start && (e.value || e.ts) >= phaseR2Start)
+                              : [];
+                            const afterUnload = hasR2 ? [] : otherEvts.filter(e => phaseSplitTs && (e.value || e.ts) >= phaseSplitTs);
 
                             return (
                           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -20088,51 +20116,69 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                             })()}
                             {/* Eventy fazy załadunkowej (CMR załadunek, zdjęcia towaru, uwagi) — wcięte pod Załadunkiem */}
                             {beforeUnload.map((ev, i) => renderSubEvent(ev, ev.id || `bl-${i}`))}
-                            {/* Rozładunek: plan vs dotarł w jednej linii */}
-                            {r.dataRozladunku && (() => {
-                              const dotEv = evts.find(e => e.type === "dotarcie_rozladunek");
-                              const planned = new Date(`${r.dataRozladunku}T${r.godzRozladunku || "23:59"}:00`);
-                              const dotTime = dotEv ? new Date(dotEv.value || dotEv.ts) : null;
-                              const diffMin = dotTime ? Math.round((dotTime - planned) / 60000) : null;
-                              const dotColor = diffMin === null ? "#6b7280" : diffMin <= 0 ? "#15803d" : diffMin <= 30 ? "#d97706" : "#dc2626";
-                              const dotStr = dotTime ? dotTime.toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : null;
-                              const isManual = dotEv?.source === "manual_admin";
-                              const isEditingThis = manualEv?.frachtId === r.id && manualEv?.type === "dotarcie_rozladunek";
-                              return (
-                                <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-                                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 20, flexShrink: 0 }}>
-                                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#10b981", marginTop: 4 }}></div>
-                                    <div style={{ width: 1, height: 20, background: "#d1d5db" }}></div>
-                                  </div>
-                                  <div style={{ flex: 1 }}>
-                                    <div style={{ fontSize: 13, fontWeight: 600, color: "#059669", marginBottom: 3 }}>📦 Rozładunek</div>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                                      <span style={{ fontSize: 12, color: "#6b7280" }}>Plan: {r.dataRozladunku?.slice(5)}{r.godzRozladunku ? ` · ${r.godzRozladunku}` : ""}</span>
-                                      {dotStr && <span style={{ fontSize: 12, fontWeight: 700, color: dotColor }}>→ Dotarł: {dotStr}</span>}
-                                      {isManual && <span title="Wpisane recznie przez admina/dyspozytora" style={{ fontSize: 10, color: "#92400e", background: "#fef3c7", padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>ręcznie</span>}
-                                      {canEdit && !isEditingThis && (
-                                        <button onClick={() => openManualEv(r, "dotarcie_rozladunek", dotEv)}
-                                          style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, background: "#ecfdf5", color: "#047857", border: "1px solid #a7f3d0", cursor: "pointer" }}
-                                          title={dotEv ? "Edytuj czas dotarcia" : "Ustaw czas dotarcia ręcznie"}>
-                                          ✏️ {dotEv ? "Edytuj" : "Ustaw ręcznie"}
-                                        </button>
+                            {/* Rozładunek/Rozładunki: 1 sekcja gdy 1 rozładunek, 2 osobne gdy hasR2 */}
+                            {(() => {
+                              // Helper renderujący sekcję rozładunku (parametryzowane labelem i danymi)
+                              const renderUnloadSection = (label, dataDate, dataGodz, dotEvLocal, isLastSection, allowEdit) => {
+                                if (!dataDate) return null;
+                                const planned = new Date(`${dataDate}T${dataGodz || "23:59"}:00`);
+                                const dotTime = dotEvLocal ? new Date(dotEvLocal.value || dotEvLocal.ts) : null;
+                                const diffMin = dotTime ? Math.round((dotTime - planned) / 60000) : null;
+                                const dotColor = diffMin === null ? "#6b7280" : diffMin <= 0 ? "#15803d" : diffMin <= 30 ? "#d97706" : "#dc2626";
+                                const dotStr = dotTime ? dotTime.toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : null;
+                                const isManual = dotEvLocal?.source === "manual_admin";
+                                const isEditingThis = manualEv?.frachtId === r.id && manualEv?.type === "dotarcie_rozladunek";
+                                return (
+                                  <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 20, flexShrink: 0 }}>
+                                      <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#10b981", marginTop: 4 }}></div>
+                                      {!isLastSection && <div style={{ width: 1, height: 20, background: "#d1d5db" }}></div>}
+                                    </div>
+                                    <div style={{ flex: 1 }}>
+                                      <div style={{ fontSize: 13, fontWeight: 600, color: "#059669", marginBottom: 3 }}>📦 {label}</div>
+                                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                        <span style={{ fontSize: 12, color: "#6b7280" }}>Plan: {dataDate?.slice(5)}{dataGodz ? ` · ${dataGodz}` : ""}</span>
+                                        {dotStr && <span style={{ fontSize: 12, fontWeight: 700, color: dotColor }}>→ Dotarł: {dotStr}</span>}
+                                        {isManual && <span title="Wpisane recznie przez admina/dyspozytora" style={{ fontSize: 10, color: "#92400e", background: "#fef3c7", padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>ręcznie</span>}
+                                        {allowEdit && canEdit && !isEditingThis && (
+                                          <button onClick={() => openManualEv(r, "dotarcie_rozladunek", dotEvLocal)}
+                                            style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, background: "#ecfdf5", color: "#047857", border: "1px solid #a7f3d0", cursor: "pointer" }}
+                                            title={dotEvLocal ? "Edytuj czas dotarcia" : "Ustaw czas dotarcia ręcznie"}>
+                                            ✏️ {dotEvLocal ? "Edytuj" : "Ustaw ręcznie"}
+                                          </button>
+                                        )}
+                                      </div>
+                                      {allowEdit && isEditingThis && (
+                                        <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                          <input type="datetime-local" value={manualEv.localDt}
+                                            onChange={(ev) => setManualEv(p => ({ ...p, localDt: ev.target.value }))}
+                                            style={{ fontSize: 12, padding: "4px 8px", borderRadius: 6, border: "1px solid #a7f3d0" }} />
+                                          <button onClick={saveManualEv} style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, background: "#059669", color: "#fff", border: "none", cursor: "pointer", fontWeight: 600 }}>Zapisz</button>
+                                          <button onClick={() => setManualEv(null)} style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, background: "#f3f4f6", color: "#374151", border: "none", cursor: "pointer" }}>Anuluj</button>
+                                        </div>
                                       )}
                                     </div>
-                                    {isEditingThis && (
-                                      <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                                        <input type="datetime-local" value={manualEv.localDt}
-                                          onChange={(ev) => setManualEv(p => ({ ...p, localDt: ev.target.value }))}
-                                          style={{ fontSize: 12, padding: "4px 8px", borderRadius: 6, border: "1px solid #a7f3d0" }} />
-                                        <button onClick={saveManualEv} style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, background: "#059669", color: "#fff", border: "none", cursor: "pointer", fontWeight: 600 }}>Zapisz</button>
-                                        <button onClick={() => setManualEv(null)} style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, background: "#f3f4f6", color: "#374151", border: "none", cursor: "pointer" }}>Anuluj</button>
-                                      </div>
-                                    )}
                                   </div>
-                                </div>
+                                );
+                              };
+
+                              if (hasR2) {
+                                return (
+                                  <>
+                                    {renderUnloadSection("Rozładunek 1", r.dataRozladunku, r.godzRozladunku, dotRoz1Ev, false, true)}
+                                    {underR1.map((ev, i) => renderSubEvent(ev, ev.id || `ur1-${i}`))}
+                                    {renderUnloadSection("Rozładunek 2", r.dataRozladunku2, r.godzRozladunku2, dotRoz2Ev, true, false)}
+                                    {underR2.map((ev, i) => renderSubEvent(ev, ev.id || `ur2-${i}`))}
+                                  </>
+                                );
+                              }
+                              return (
+                                <>
+                                  {renderUnloadSection("Rozładunek", r.dataRozladunku, r.godzRozladunku, dotRoz1Ev, true, true)}
+                                  {afterUnload.map((ev, i) => renderSubEvent(ev, ev.id || `au-${i}`))}
+                                </>
                               );
                             })()}
-                            {/* Eventy fazy rozładunkowej (CMR rozładunek z pieczątką itp.) — wcięte pod Rozładunkiem */}
-                            {afterUnload.map((ev, i) => renderSubEvent(ev, ev.id || `au-${i}`))}
                           </div>
                             );
                           })()}
