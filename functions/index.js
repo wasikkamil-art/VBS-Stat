@@ -2054,3 +2054,240 @@ exports.trackerData = onRequest(
     }
   }
 );
+
+// ═══════════════════════════════════════════════════════════════
+// WW REPORT INBOUND — webhook SendGrid Inbound Parse
+// Odbiera email z widziszwszystko (raport "Karta drogowa szczegółowa")
+// → parsuje CSV załącznik → wstawia segmenty do driverActivities z
+// source: "ww_csv". CSV ma priorytet nad auto_gps (zastępuje istniejące
+// segmenty auto_gps w tym samym przedziale czasu).
+//
+// Endpoint: https://europe-west1-vbs-stats.cloudfunctions.net/wwReportInbound
+// SendGrid posyła POST multipart/form-data z polami: from, subject, text,
+// attachments (count) i attachment1, attachment2, ... (pliki binarne).
+// ═══════════════════════════════════════════════════════════════
+const Busboy = require("busboy");
+const { parse: csvParse } = require("csv-parse/sync");
+
+function parseMultipartReq(req) {
+  return new Promise((resolve, reject) => {
+    const csvFiles = [];
+    const fields = {};
+    const busboy = Busboy({ headers: req.headers });
+    busboy.on("field", (name, val) => { fields[name] = val; });
+    busboy.on("file", (fieldname, file, info) => {
+      const chunks = [];
+      file.on("data", chunk => chunks.push(chunk));
+      file.on("end", () => {
+        const filename = info.filename || "";
+        if (filename.toLowerCase().endsWith(".csv")) {
+          csvFiles.push({ filename, content: Buffer.concat(chunks).toString("utf8") });
+        }
+      });
+      file.on("error", reject);
+    });
+    busboy.on("finish", () => resolve({ csvFiles, fields }));
+    busboy.on("error", reject);
+    if (req.rawBody) busboy.end(req.rawBody);
+    else req.pipe(busboy);
+  });
+}
+
+// Mapowanie typów segmentu z widziszwszystko na nasze
+const WW_TYPE_MAP = {
+  "Jazda": "drive",
+  "Postój": "rest",
+  "Postoj": "rest",
+  "Brak danych": null,    // ignoruj — to są szumy
+  "Inna praca": "work",
+  "Praca": "work",
+  "Dyspozycyjność": "avail",
+  "Dyspozycyjnosc": "avail",
+};
+
+async function importWWForVehicle(db, vehicles, plate, segments) {
+  const cleanPlate = String(plate || "").replace(/\s+/g, "").toUpperCase();
+  if (!cleanPlate) return { plate, error: "empty_plate", imported: 0, replaced: 0, skipped: segments.length };
+
+  const vehicle = vehicles.find(v => {
+    const vp = String(v.plate || "").replace(/\s+/g, "").toUpperCase();
+    return vp && (vp === cleanPlate || vp.includes(cleanPlate) || cleanPlate.includes(vp));
+  });
+  if (!vehicle) return { plate, error: "vehicle_not_found", imported: 0, replaced: 0, skipped: segments.length };
+
+  // Zakres dat dla całego raportu (do dedupu z istniejącymi segmentami)
+  const validStarts = segments.map(s => Date.parse(s.start)).filter(t => !isNaN(t));
+  const validEnds = segments.map(s => Date.parse(s.end)).filter(t => !isNaN(t));
+  if (validStarts.length === 0) return { plate: vehicle.plate, error: "no_valid_dates", imported: 0, replaced: 0, skipped: segments.length };
+
+  const startMs = Math.min(...validStarts);
+  const endMs = Math.max(...validEnds);
+  const startIso = new Date(startMs).toISOString();
+  const endIso = new Date(endMs).toISOString();
+
+  // Znajdź kierowcę dla tego okresu (driverHistory aktywny w dacie raportu)
+  const reportDay = startIso.slice(0, 10); // YYYY-MM-DD
+  const driver = (vehicle.driverHistory || []).find(d => {
+    const from = (d.from || "0000-00-00").slice(0, 10);
+    const to = (d.to || "9999-12-31").slice(0, 10);
+    return from <= reportDay && (!d.to || to >= reportDay);
+  }) || (vehicle.driverHistory || []).find(d => !d.to);
+
+  if (!driver?.email) {
+    return { plate: vehicle.plate, error: "no_driver_for_period", imported: 0, replaced: 0, skipped: segments.length, period: { from: startIso, to: endIso } };
+  }
+
+  // Dedup — usuń istniejące auto_gps i ww_csv segmenty w przedziale (CSV wygrywa)
+  let replaced = 0;
+  try {
+    const existingSnap = await db.collection("driverActivities")
+      .where("driverEmail", "==", driver.email)
+      .where("startTs", ">=", startIso)
+      .where("startTs", "<=", endIso)
+      .get();
+    const toDelete = existingSnap.docs.filter(d => {
+      const data = d.data();
+      return data.source === "auto_gps" || data.source === "ww_csv";
+    });
+    for (let i = 0; i < toDelete.length; i += 400) {
+      const batch = db.batch();
+      toDelete.slice(i, i + 400).forEach(d => batch.delete(d.ref));
+      await batch.commit();
+    }
+    replaced = toDelete.length;
+  } catch (e) {
+    console.warn(`[wwInbound] delete existing failed for ${plate}:`, e.message);
+  }
+
+  // Wstaw nowe segmenty (CSV → driverActivities)
+  let imported = 0, skipped = 0;
+  const nowIso = new Date().toISOString();
+  for (let i = 0; i < segments.length; i += 400) {
+    const batch = db.batch();
+    for (const seg of segments.slice(i, i + 400)) {
+      const type = WW_TYPE_MAP[String(seg.type || "").trim()];
+      if (!type) { skipped++; continue; }
+      const sMs = Date.parse(seg.start);
+      const eMs = Date.parse(seg.end);
+      if (isNaN(sMs) || isNaN(eMs) || eMs <= sMs) { skipped++; continue; }
+      const ref = db.collection("driverActivities").doc();
+      batch.set(ref, {
+        driverEmail: driver.email,
+        driverName: driver.name || driver.email,
+        vehicleId: vehicle.id,
+        type,
+        startTs: new Date(sMs).toISOString(),
+        endTs: new Date(eMs).toISOString(),
+        source: "ww_csv",
+        address: (seg.address || "").trim() || null,
+        distanceKm: parseFloat(seg.distance) || 0,
+        createdAt: nowIso,
+      });
+      imported++;
+    }
+    await batch.commit();
+  }
+
+  return {
+    plate: vehicle.plate,
+    driverEmail: driver.email,
+    period: { from: startIso, to: endIso },
+    imported,
+    replaced,
+    skipped,
+  };
+}
+
+async function processWWCsv(db, vehicles, file) {
+  let rows;
+  try {
+    // Toleruj BOM, skip empty, columns z nagłówka
+    rows = csvParse(file.content.replace(/^\uFEFF/, ""), {
+      columns: true,
+      skip_empty_lines: true,
+      trim: true,
+      relax_column_count: true,
+    });
+  } catch (e) {
+    return { file: file.filename, error: "csv_parse_failed", message: e.message };
+  }
+  if (rows.length === 0) return { file: file.filename, imported: 0, skipped: 0 };
+
+  // Wymagane kolumny
+  const sample = rows[0];
+  const needed = ["object", "type", "start", "end"];
+  for (const c of needed) {
+    if (!(c in sample)) return { file: file.filename, error: "missing_column", column: c, sample: Object.keys(sample) };
+  }
+
+  // Group po pojeździe
+  const byObject = new Map();
+  for (const r of rows) {
+    const obj = String(r.object || "").trim();
+    if (!obj) continue;
+    if (!byObject.has(obj)) byObject.set(obj, []);
+    byObject.get(obj).push(r);
+  }
+
+  let imp = 0, rep = 0, skp = 0;
+  const perVehicle = [];
+  for (const [plate, segments] of byObject.entries()) {
+    const r = await importWWForVehicle(db, vehicles, plate, segments);
+    imp += r.imported || 0;
+    rep += r.replaced || 0;
+    skp += r.skipped || 0;
+    perVehicle.push(r);
+  }
+  return { file: file.filename, imported: imp, replaced: rep, skipped: skp, vehicles: perVehicle };
+}
+
+exports.wwReportInbound = onRequest(
+  { region: "europe-west1", timeoutSeconds: 120, memory: "512MiB", cors: false },
+  async (req, res) => {
+    if (req.method !== "POST") return res.status(405).send("Method not allowed");
+    const ct = req.headers["content-type"] || "";
+    if (!ct.includes("multipart/form-data")) {
+      return res.status(400).json({ error: "expected_multipart" });
+    }
+    try {
+      const { csvFiles, fields } = await parseMultipartReq(req);
+      console.log(`[wwInbound] from=${fields.from || "?"} subject="${(fields.subject || "").slice(0, 60)}" csvFiles=${csvFiles.length}`);
+
+      if (csvFiles.length === 0) {
+        return res.json({ ok: true, warning: "no_csv_attachment" });
+      }
+
+      const db = getFirestore();
+      const fleetSnap = await db.doc("fleet/data").get();
+      const vehicles = fleetSnap.data()?.fleetv2_vehicles || [];
+
+      const results = [];
+      for (const file of csvFiles) {
+        results.push(await processWWCsv(db, vehicles, file));
+      }
+
+      const totalImported = results.reduce((s, r) => s + (r.imported || 0), 0);
+      const totalReplaced = results.reduce((s, r) => s + (r.replaced || 0), 0);
+
+      // Audit log
+      try {
+        await db.collection("auditLog").add({
+          action: "ww_csv_import",
+          ts: new Date().toISOString(),
+          source: "email_inbound",
+          from: fields.from || null,
+          subject: fields.subject || null,
+          imported: totalImported,
+          replaced: totalReplaced,
+          results,
+        });
+      } catch (e) { console.warn("[wwInbound] auditLog failed:", e.message); }
+
+      console.log(`[wwInbound] OK imported=${totalImported} replaced=${totalReplaced}`);
+      return res.json({ ok: true, imported: totalImported, replaced: totalReplaced, results });
+    } catch (e) {
+      console.error("[wwInbound] error:", e);
+      return res.status(500).json({ error: "internal", message: e.message });
+    }
+  }
+);
