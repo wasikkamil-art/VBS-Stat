@@ -864,6 +864,15 @@ Szczegoly w aplikacji FleetStat.
      b) Selekcja: jeden kierowca per chat czy multi-kierowca (np. „kto z chłopaków ma najmniej do nadrobienia?")
    - **Pre-req**: włączyć Auto-reload w Anthropic Console Settings → Billing (obecnie disabled — ryzyko że API zatrzyma się przy 0).
 
+5. **🔴 PRIORYTET — Quality infrastructure (warunek komercjalizacji FleetStat)**. Zgłoszone 2026-04-27: produkt ma być sprzedawany na zewnątrz innym firmom transportowym jako SaaS. Bar jakości musi być 10/10 — „nie chcemy niespodzianek u klienta". Audyt obecnego stanu (2026-04-27): brak ESLint, brak TypeScript, brak testów, brak CI bramy przed deployem; bundle 1.96 MB; monolit 21,763 linii w `src/App.jsx`; 274 inline `onClick={() =>}`; bug znaleziony dziś (`rozladunekFirma${i}` zamiast `${sfx}`) to typ błędu który TypeScript by wyłapał. Plan w kolejności ROI:
+   - **a) ESLint + plugin React + JSConfig `checkJs: true`** — ~2h pracy, wyłapie ~80% bugów typu literówki w nazwach pól, dead code, unused vars, missing returns. Bez pełnej migracji do TS (ten worktree jest vanilla JS).
+   - **b) Pre-commit hook (Husky + lint-staged)** — `eslint` + `vite build` musi przejść przed commitem. Blokuje broken main → produkcję.
+   - **c) Wydzielić 5 największych komponentów z `App.jsx`** do osobnych plików: `FrachtyModal`, `GpsCzasPracySection`, `TrackerPage`, `DriverPanel`, `CopyOrderPreviewModal`. Bez refactoru logic — samo cięcie. Pozwoli code-splitting (kierowcy 4G/3G).
+   - **d) Smoke test E2E** (Playwright, 2 scenariusze: dodaj fracht → tracker open → zdjęcia visible; mobile DriverPanel → zatwierdzenie eventu z zdjęciem). Nie pełna piramida, tylko canary blokujący najgorsze regresje.
+   - **e) Multi-tenant model** (gdy zbliżamy się do pierwszego klienta zewnętrznego) — kolekcja `tenants`, izolacja danych w `firestore.rules`, branding per tenant, custom domain support.
+   - **Realizacja**: iteracyjnie równolegle z feature work (a→b w pierwszej kolejności, potem c→d w spokojnym tempie), NIE jako big-bang refactor. Każda zmiana musi być testowana ręcznie + smoke test po implementacji.
+   - **Operating principle**: każdy substantial code change = audyt jakości po implementacji + flagowanie ryzyk userowi przed deploy. Komercjalizacja = brak tolerancji na „przejdzie i tak".
+
 ## 15. Znane problemy / uwagi
 
 - **Duplicate "style" attribute** warning w JSX (linia ~5479) — kontekst menu czatu ma dwa atrybuty `style`. Nie blokuje builda — do poprawienia przy okazji.
