@@ -295,14 +295,8 @@ function formatOrderForDriverCopy(fracht, vehicles = []) {
   const fmtT = (t) => t || "—";
   const lines = [];
 
-  const vehicle = vehicles.find(v => v.id === fracht.vehicleId);
-  const vehicleLabel = vehicle ? `${vehicle.plate || ""} ${vehicle.brand || ""}`.trim() : "";
-
-  // Nagłówek
-  lines.push(`🚛 ZLECENIE${fracht.nrRef ? ` #${fracht.nrRef}` : ""}${fracht.nrZlecenia ? ` (${fracht.nrZlecenia})` : ""}`);
-  if (vehicleLabel) lines.push(`Pojazd: ${vehicleLabel}`);
-  if (fracht.klient) lines.push(`Klient: ${fracht.klient}`);
-  lines.push("");
+  // Format dla kierowcy — tylko niezbędne info (bez nr zlecenia, klienta, vehicle, zleceniodawcy).
+  // Nazwa firmy doklejana per punkt Z#/R# gdy pole `*Firma*` ustawione.
 
   // ZAŁADUNEK — Z1 i Z2
   const zalPunkty = [];
@@ -311,18 +305,21 @@ function formatOrderForDriverCopy(fracht, vehicles = []) {
     idx: "Z1", addr: z1full || fracht.zaladunekKod || "",
     geo: fracht.zaladunekGeo, tel: fracht.zaladunekTelefon,
     data: fracht.dataZaladunku, godz: fracht.godzZaladunku,
+    firma: fracht.zaladunekFirma,
   });
   const z2full = [fracht.zaladunekAdres2, [fracht.zaladunekKodPocztowy2, fracht.zaladunekMiasto2].filter(Boolean).join(" ")].filter(Boolean).join(", ");
   if (z2full || fracht.zaladunekKod2) zalPunkty.push({
     idx: "Z2", addr: z2full || fracht.zaladunekKod2 || "",
     geo: fracht.zaladunekGeo2, tel: fracht.zaladunekTelefon2,
     data: fracht.dataZaladunku2, godz: fracht.godzZaladunku2,
+    firma: fracht.zaladunekFirma2,
   });
 
   if (zalPunkty.length > 0) {
     lines.push("📍 ZAŁADUNEK");
     zalPunkty.forEach(p => {
-      lines.push(`🚩 ${p.idx} — ${fmtD(p.data)} ${fmtT(p.godz)}`);
+      const firmaSuffix = p.firma ? ` — ${p.firma}` : "";
+      lines.push(`🚩 ${p.idx} — ${fmtD(p.data)} ${fmtT(p.godz)}${firmaSuffix}`);
       if (p.addr) lines.push(`   ${p.addr}`);
       const g = parseGeoString(p.geo);
       if (g) lines.push(`   GPS: ${g.lat.toFixed(6)}, ${g.lng.toFixed(6)}`);
@@ -348,13 +345,15 @@ function formatOrderForDriverCopy(fracht, vehicles = []) {
       tel: fracht[`rozladunekTelefon${sfx}`],
       data: fracht[`dataRozladunku${sfx}`],
       godz: fracht[`godzRozladunku${sfx}`],
+      firma: fracht[`rozladunekFirma${sfx}`],
     });
   }
 
   if (rozPunkty.length > 0) {
     lines.push("📦 ROZŁADUNEK");
     rozPunkty.forEach(p => {
-      lines.push(`📦 ${p.idx} — ${fmtD(p.data)} ${fmtT(p.godz)}`);
+      const firmaSuffix = p.firma ? ` — ${p.firma}` : "";
+      lines.push(`📦 ${p.idx} — ${fmtD(p.data)} ${fmtT(p.godz)}${firmaSuffix}`);
       if (p.addr) lines.push(`   ${p.addr}`);
       const g = parseGeoString(p.geo);
       if (g) lines.push(`   GPS: ${g.lat.toFixed(6)}, ${g.lng.toFixed(6)}`);
@@ -382,21 +381,6 @@ function formatOrderForDriverCopy(fracht, vehicles = []) {
     lines.push(`   ${fracht.uwagi}`);
     lines.push("");
   }
-
-  // ZLECENIODAWCA
-  const zlecLines = [];
-  if (fracht.zleceniodawcaFirma) zlecLines.push(fracht.zleceniodawcaFirma);
-  if (fracht.zleceniodawcaOsoba) zlecLines.push(`Osoba: ${fracht.zleceniodawcaOsoba}`);
-  if (fracht.zleceniodawcaTelefon) zlecLines.push(`Tel: ${fracht.zleceniodawcaTelefon}`);
-  if (fracht.zleceniodawcaEmail) zlecLines.push(`Email: ${fracht.zleceniodawcaEmail}`);
-  if (zlecLines.length) {
-    lines.push("🏢 ZLECENIODAWCA");
-    zlecLines.forEach(l => lines.push(`   ${l}`));
-    lines.push("");
-  }
-
-  // Uwaga: celowo NIE dodajemy km ani ceny — to info wewnętrzne
-  // (dla dyspozytora / księgowości), kierowca widzi tylko dane logistyczne.
 
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
@@ -20603,18 +20587,21 @@ Odpowiedz TYLKO w formacie JSON (bez markdown):
 {
   "nrZlecenia": "numer zlecenia lub null",
   "nrRef": "numer referencyjny lub skrócony identyfikator lub null",
+  "zaladunekFirma": "nazwa firmy w której odbywa się załadunek (np. VANKING) lub null",
   "zaladunekKodPocztowy": "sam kod pocztowy załadunku (np. ES 46720) lub null",
   "zaladunekMiasto": "samo miasto załadunku (np. Villalonga) lub null",
   "zaladunekAdres": "ulica i numer budynku załadunku lub null",
   "zaladunekTelefon": "telefon kontaktowy na załadunku lub null",
   "dataZaladunku": "YYYY-MM-DD lub null",
   "godzZaladunku": "HH:MM lub null",
+  "rozladunekFirma": "nazwa firmy 1. rozładunku lub null",
   "dokodPocztowy": "sam kod pocztowy 1. rozładunku (np. IT 34151) lub null",
   "dokodMiasto": "samo miasto 1. rozładunku (np. Trieste) lub null",
   "rozladunekAdres": "ulica i numer 1. rozładunku lub null",
   "rozladunekTelefon": "telefon kontaktowy na 1. rozładunku lub null",
   "dataRozladunku": "YYYY-MM-DD lub null",
   "godzRozladunku": "HH:MM lub null",
+  "rozladunekFirma2": "nazwa firmy 2. rozładunku lub null",
   "dokodPocztowy2": "kod pocztowy 2. rozładunku lub null",
   "dokodMiasto2": "miasto 2. rozładunku lub null",
   "rozladunekAdres2": "ulica 2. rozładunku lub null",
@@ -21090,25 +21077,25 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
   const initF = (rec) => {
     const base = {
       dataZlecenia:"", vehicleId: defaultVehicleId, skad:"",
-      zaladunekKodPocztowy:"", zaladunekMiasto:"", zaladunekKod:"",
+      zaladunekFirma:"", zaladunekKodPocztowy:"", zaladunekMiasto:"", zaladunekKod:"",
       zaladunekAdres:"", zaladunekTelefon:"", zaladunekGeo:"",
       dataZaladunku:"", godzZaladunku:"",
-      zaladunekKodPocztowy2:"", zaladunekMiasto2:"", zaladunekKod2:"",
+      zaladunekFirma2:"", zaladunekKodPocztowy2:"", zaladunekMiasto2:"", zaladunekKod2:"",
       zaladunekAdres2:"", zaladunekTelefon2:"", zaladunekGeo2:"",
       dataZaladunku2:"", godzZaladunku2:"",
-      dokodPocztowy:"", dokodMiasto:"", dokod:"",
+      rozladunekFirma:"", dokodPocztowy:"", dokodMiasto:"", dokod:"",
       rozladunekAdres:"", rozladunekTelefon:"", rozladunekGeo:"",
       dataRozladunku:"", godzRozladunku:"",
-      dokodPocztowy2:"", dokodMiasto2:"", dokod2:"",
+      rozladunekFirma2:"", dokodPocztowy2:"", dokodMiasto2:"", dokod2:"",
       rozladunekAdres2:"", rozladunekTelefon2:"", rozladunekGeo2:"",
       dataRozladunku2:"", godzRozladunku2:"",
-      dokodPocztowy3:"", dokodMiasto3:"", dokod3:"",
+      rozladunekFirma3:"", dokodPocztowy3:"", dokodMiasto3:"", dokod3:"",
       rozladunekAdres3:"", rozladunekTelefon3:"", rozladunekGeo3:"",
       dataRozladunku3:"", godzRozladunku3:"",
-      dokodPocztowy4:"", dokodMiasto4:"", dokod4:"",
+      rozladunekFirma4:"", dokodPocztowy4:"", dokodMiasto4:"", dokod4:"",
       rozladunekAdres4:"", rozladunekTelefon4:"", rozladunekGeo4:"",
       dataRozladunku4:"", godzRozladunku4:"",
-      dokodPocztowy5:"", dokodMiasto5:"", dokod5:"",
+      rozladunekFirma5:"", dokodPocztowy5:"", dokodMiasto5:"", dokod5:"",
       rozladunekAdres5:"", rozladunekTelefon5:"", rozladunekGeo5:"",
       dataRozladunku5:"", godzRozladunku5:"",
       zleceniodawcaFirma:"", zleceniodawcaOsoba:"", zleceniodawcaTelefon:"", zleceniodawcaEmail:"",
@@ -21237,6 +21224,7 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
           <div style={{border:"2px solid #a7f3d0",borderRadius:12,padding:"14px",background:"#f0fdf4"}}>
             <div className="text-xs font-semibold text-emerald-700 uppercase tracking-wider mb-3">📦 Z1 — Miejsce załadunku</div>
             <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2"><label className={lbl}>Nazwa firmy</label><input placeholder="np. VANKING" value={f.zaladunekFirma||""} onChange={e => set("zaladunekFirma",e.target.value)} className={inp} /></div>
               <div><label className={lbl}>Kod pocztowy</label><input placeholder="np. PL-44100" value={f.zaladunekKodPocztowy||""} onChange={e => set("zaladunekKodPocztowy",e.target.value)} className={inp} /></div>
               <div><label className={lbl}>Miasto</label><input placeholder="np. Gliwice" value={f.zaladunekMiasto||""} onChange={e => set("zaladunekMiasto",e.target.value)} className={inp} /></div>
               <div className="col-span-2"><label className={lbl}>Adres (ulica, nr)</label><input placeholder="ul. Przykładowa 1" value={f.zaladunekAdres||""} onChange={e => set("zaladunekAdres",e.target.value)} className={inp} />{geoBtn("z1")}</div>
@@ -21253,9 +21241,10 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
             <div style={{border:"2px solid #6ee7b7",borderRadius:12,padding:"14px",background:"#f0fdf4"}}>
               <div className="flex items-center justify-between mb-3">
                 <div className="text-xs font-semibold text-emerald-700 uppercase tracking-wider">📦 Z2 — Załadunek dodatkowy</div>
-                <button type="button" onClick={() => { setShowZ2(false); ["zaladunekKodPocztowy2","zaladunekMiasto2","zaladunekKod2","zaladunekAdres2","zaladunekTelefon2","zaladunekGeo2","dataZaladunku2","godzZaladunku2"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-600">✕ usuń Z2</button>
+                <button type="button" onClick={() => { setShowZ2(false); ["zaladunekFirma2","zaladunekKodPocztowy2","zaladunekMiasto2","zaladunekKod2","zaladunekAdres2","zaladunekTelefon2","zaladunekGeo2","dataZaladunku2","godzZaladunku2"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-600">✕ usuń Z2</button>
               </div>
               <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2"><label className={lbl}>Nazwa firmy</label><input value={f.zaladunekFirma2||""} onChange={e => set("zaladunekFirma2",e.target.value)} className={inp} /></div>
                 <div><label className={lbl}>Kod pocztowy</label><input placeholder="np. DE 40210" value={f.zaladunekKodPocztowy2||""} onChange={e => set("zaladunekKodPocztowy2",e.target.value)} className={inp} /></div>
                 <div><label className={lbl}>Miasto</label><input placeholder="np. Düsseldorf" value={f.zaladunekMiasto2||""} onChange={e => set("zaladunekMiasto2",e.target.value)} className={inp} /></div>
                 <div className="col-span-2"><label className={lbl}>Adres (ulica, nr)</label><input placeholder="ul. Przykładowa 2" value={f.zaladunekAdres2||""} onChange={e => set("zaladunekAdres2",e.target.value)} className={inp} />{geoBtn("z2")}</div>
@@ -21277,6 +21266,7 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
           <div style={{border:"2px solid #bfdbfe",borderRadius:12,padding:"14px",background:"#eff6ff"}}>
             <div className="text-xs font-semibold text-blue-700 uppercase tracking-wider mb-3">🏁 R1 — Miejsce rozładunku</div>
             <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2"><label className={lbl}>Nazwa firmy</label><input placeholder="np. LIFTING PIECES AUTO 94" value={f.rozladunekFirma||""} onChange={e => set("rozladunekFirma",e.target.value)} className={inp} /></div>
               <div><label className={lbl}>Kod pocztowy</label><input placeholder="np. FR 93000" value={f.dokodPocztowy||""} onChange={e => set("dokodPocztowy",e.target.value)} className={inp} /></div>
               <div><label className={lbl}>Miasto</label><input placeholder="np. Bobigny" value={f.dokodMiasto||""} onChange={e => set("dokodMiasto",e.target.value)} className={inp} /></div>
               <div className="col-span-2"><label className={lbl}>Adres (ulica, nr)</label><input placeholder="ul. Rozładunkowa 1" value={f.rozladunekAdres||""} onChange={e => set("rozladunekAdres",e.target.value)} className={inp} />{geoBtn("r1")}</div>
@@ -21293,9 +21283,10 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
             <div style={{border:"2px solid #93c5fd",borderRadius:12,padding:"14px",background:"#eff6ff"}}>
               <div className="flex items-center justify-between mb-3">
                 <div className="text-xs font-semibold text-blue-700 uppercase tracking-wider">🏁 R2 — Rozładunek 2</div>
-                <button type="button" onClick={() => { setShowR2(false); setShowR3(false); setShowR4(false); setShowR5(false); ["dokodPocztowy2","dokodMiasto2","dokod2","rozladunekAdres2","rozladunekTelefon2","rozladunekGeo2","dataRozladunku2","godzRozladunku2"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-600">✕ usuń R2</button>
+                <button type="button" onClick={() => { setShowR2(false); setShowR3(false); setShowR4(false); setShowR5(false); ["rozladunekFirma2","dokodPocztowy2","dokodMiasto2","dokod2","rozladunekAdres2","rozladunekTelefon2","rozladunekGeo2","dataRozladunku2","godzRozladunku2"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-600">✕ usuń R2</button>
               </div>
               <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2"><label className={lbl}>Nazwa firmy</label><input value={f.rozladunekFirma2||""} onChange={e => set("rozladunekFirma2",e.target.value)} className={inp} /></div>
                 <div><label className={lbl}>Kod pocztowy</label><input placeholder="np. BE 1000" value={f.dokodPocztowy2||""} onChange={e => set("dokodPocztowy2",e.target.value)} className={inp} /></div>
                 <div><label className={lbl}>Miasto</label><input placeholder="np. Bruxelles" value={f.dokodMiasto2||""} onChange={e => set("dokodMiasto2",e.target.value)} className={inp} /></div>
                 <div className="col-span-2"><label className={lbl}>Adres (ulica, nr)</label><input value={f.rozladunekAdres2||""} onChange={e => set("rozladunekAdres2",e.target.value)} className={inp} />{geoBtn("r2")}</div>
@@ -21315,9 +21306,10 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
             <div style={{border:"2px solid #93c5fd",borderRadius:12,padding:"14px",background:"#eff6ff"}}>
               <div className="flex items-center justify-between mb-3">
                 <div className="text-xs font-semibold text-blue-700 uppercase tracking-wider">🏁 R3 — Rozładunek 3</div>
-                <button type="button" onClick={() => { setShowR3(false); setShowR4(false); setShowR5(false); ["dokodPocztowy3","dokodMiasto3","dokod3","rozladunekAdres3","rozladunekTelefon3","rozladunekGeo3","dataRozladunku3","godzRozladunku3"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-600">✕ usuń R3</button>
+                <button type="button" onClick={() => { setShowR3(false); setShowR4(false); setShowR5(false); ["rozladunekFirma3","dokodPocztowy3","dokodMiasto3","dokod3","rozladunekAdres3","rozladunekTelefon3","rozladunekGeo3","dataRozladunku3","godzRozladunku3"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-600">✕ usuń R3</button>
               </div>
               <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2"><label className={lbl}>Nazwa firmy</label><input value={f.rozladunekFirma3||""} onChange={e => set("rozladunekFirma3",e.target.value)} className={inp} /></div>
                 <div><label className={lbl}>Kod pocztowy</label><input value={f.dokodPocztowy3||""} onChange={e => set("dokodPocztowy3",e.target.value)} className={inp} /></div>
                 <div><label className={lbl}>Miasto</label><input value={f.dokodMiasto3||""} onChange={e => set("dokodMiasto3",e.target.value)} className={inp} /></div>
                 <div className="col-span-2"><label className={lbl}>Adres</label><input value={f.rozladunekAdres3||""} onChange={e => set("rozladunekAdres3",e.target.value)} className={inp} />{geoBtn("r3")}</div>
@@ -21337,9 +21329,10 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
             <div style={{border:"2px solid #93c5fd",borderRadius:12,padding:"14px",background:"#eff6ff"}}>
               <div className="flex items-center justify-between mb-3">
                 <div className="text-xs font-semibold text-blue-700 uppercase tracking-wider">🏁 R4 — Rozładunek 4</div>
-                <button type="button" onClick={() => { setShowR4(false); setShowR5(false); ["dokodPocztowy4","dokodMiasto4","dokod4","rozladunekAdres4","rozladunekTelefon4","rozladunekGeo4","dataRozladunku4","godzRozladunku4"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-600">✕ usuń R4</button>
+                <button type="button" onClick={() => { setShowR4(false); setShowR5(false); ["rozladunekFirma4","dokodPocztowy4","dokodMiasto4","dokod4","rozladunekAdres4","rozladunekTelefon4","rozladunekGeo4","dataRozladunku4","godzRozladunku4"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-600">✕ usuń R4</button>
               </div>
               <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2"><label className={lbl}>Nazwa firmy</label><input value={f.rozladunekFirma4||""} onChange={e => set("rozladunekFirma4",e.target.value)} className={inp} /></div>
                 <div><label className={lbl}>Kod pocztowy</label><input value={f.dokodPocztowy4||""} onChange={e => set("dokodPocztowy4",e.target.value)} className={inp} /></div>
                 <div><label className={lbl}>Miasto</label><input value={f.dokodMiasto4||""} onChange={e => set("dokodMiasto4",e.target.value)} className={inp} /></div>
                 <div className="col-span-2"><label className={lbl}>Adres</label><input value={f.rozladunekAdres4||""} onChange={e => set("rozladunekAdres4",e.target.value)} className={inp} />{geoBtn("r4")}</div>
@@ -21359,9 +21352,10 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
             <div style={{border:"2px solid #93c5fd",borderRadius:12,padding:"14px",background:"#eff6ff"}}>
               <div className="flex items-center justify-between mb-3">
                 <div className="text-xs font-semibold text-blue-700 uppercase tracking-wider">🏁 R5 — Rozładunek 5</div>
-                <button type="button" onClick={() => { setShowR5(false); ["dokodPocztowy5","dokodMiasto5","dokod5","rozladunekAdres5","rozladunekTelefon5","rozladunekGeo5","dataRozladunku5","godzRozladunku5"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-600">✕ usuń R5</button>
+                <button type="button" onClick={() => { setShowR5(false); ["rozladunekFirma5","dokodPocztowy5","dokodMiasto5","dokod5","rozladunekAdres5","rozladunekTelefon5","rozladunekGeo5","dataRozladunku5","godzRozladunku5"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-600">✕ usuń R5</button>
               </div>
               <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2"><label className={lbl}>Nazwa firmy</label><input value={f.rozladunekFirma5||""} onChange={e => set("rozladunekFirma5",e.target.value)} className={inp} /></div>
                 <div><label className={lbl}>Kod pocztowy</label><input value={f.dokodPocztowy5||""} onChange={e => set("dokodPocztowy5",e.target.value)} className={inp} /></div>
                 <div><label className={lbl}>Miasto</label><input value={f.dokodMiasto5||""} onChange={e => set("dokodMiasto5",e.target.value)} className={inp} /></div>
                 <div className="col-span-2"><label className={lbl}>Adres</label><input value={f.rozladunekAdres5||""} onChange={e => set("rozladunekAdres5",e.target.value)} className={inp} />{geoBtn("r5")}</div>
@@ -21476,7 +21470,26 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
               📱 Wyślij na WhatsApp
             </button>
           )}
-          <button onClick={() => { if(!f.vehicleId){alert("Wybierz pojazd");return;} if(!f.cenaEur){alert("Wpisz cenę EUR");return;} onSave(f); }} className="px-5 py-2 rounded-lg text-sm font-semibold text-white" style={{background:"#111827"}}>{record ? "Zapisz zmiany" : "Dodaj fracht"}</button>
+          <button onClick={() => {
+            if(!f.vehicleId){alert("Wybierz pojazd");return;}
+            if(!f.cenaEur){alert("Wpisz cenę EUR");return;}
+            // Heurystyka: adres zawierający enumerację "1. ... 2. ..." prawdopodobnie skleja
+            // wiele punktów rozładunku w jedno pole — powinny być rozdzielone na R1/R2/...
+            const hasMulti = (addr) => addr && /(^|\n)\s*1\.\s/.test(addr) && /(^|\n)\s*2\.\s/.test(addr);
+            const multistopFields = [];
+            if (hasMulti(f.zaladunekAdres))   multistopFields.push("Załadunek Z1");
+            if (hasMulti(f.zaladunekAdres2))  multistopFields.push("Załadunek Z2");
+            if (hasMulti(f.rozladunekAdres))  multistopFields.push("Rozładunek R1");
+            if (hasMulti(f.rozladunekAdres2)) multistopFields.push("Rozładunek R2");
+            if (hasMulti(f.rozladunekAdres3)) multistopFields.push("Rozładunek R3");
+            if (hasMulti(f.rozladunekAdres4)) multistopFields.push("Rozładunek R4");
+            if (hasMulti(f.rozladunekAdres5)) multistopFields.push("Rozładunek R5");
+            if (multistopFields.length) {
+              const ok = confirm(`Uwaga: pole(a) ${multistopFields.join(", ")} wygląda jakby zawierało wiele adresów ("1. ... 2. ..."). Powinieneś rozdzielić je na osobne punkty (R1, R2, ...).\n\nZapisać mimo to?`);
+              if (!ok) return;
+            }
+            onSave(f);
+          }} className="px-5 py-2 rounded-lg text-sm font-semibold text-white" style={{background:"#111827"}}>{record ? "Zapisz zmiany" : "Dodaj fracht"}</button>
         </div>
       </div>
     </div>

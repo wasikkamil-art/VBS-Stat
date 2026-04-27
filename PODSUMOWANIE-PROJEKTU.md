@@ -846,6 +846,14 @@ Szczegoly w aplikacji FleetStat.
 - Weryfikacja kosztów sty–maj 2025 (netto/brutto)
 - Migracja Firestore Timestamp w czatach (fix chronologii wiadomości)
 
+### F. Pozostałe TODO — zgłoszone 2026-04-27
+
+1. **Pole „nazwa firmy" w formularzu zlecenia** — formularz ma zaczytywać nazwę firmy ze zlecenia (autofill z `zleceniodawcaFirma` istniejącego frachtu / kontrahenta).
+
+2. **Tracker auto-off po rozładunku + email podsumowania trasy** — po finalnym rozładunku (`dotarcie_rozladunek` lub `dotarcie_rozladunek_2` przy hasR2) Tracker `/t/{token}` ma się sam wyłączać (toggle off w `TrackerPill`), równolegle wysyłka email do zleceniodawcy z podsumowaniem trasy: km, czas, zdjęcia (CMR zał/roz, towar, uszkodzenia), status końcowy. Łączy się z istniejącym `SendTrackerLinkModal`/`trackerData` CF.
+
+3. **Model „giełda wolnych pojazdów"** — przygotować strukturę danych do wprowadzania aut innych firm (zewnętrzni przewoźnicy z wolną przestrzenią ładunkową). Kierunek: marketplace/giełda. Do przemyślenia: kolekcja Firestore (osobna od `vehicles` żeby nie mieszać floty własnej z zewnętrzną?), role i widoczność (kto może dodawać/przeglądać), kontakty do przewoźnika, cykl życia ogłoszenia.
+
 ## 15. Znane problemy / uwagi
 
 - **Duplicate "style" attribute** warning w JSX (linia ~5479) — kontekst menu czatu ma dwa atrybuty `style`. Nie blokuje builda — do poprawienia przy okazji.
