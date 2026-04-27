@@ -20080,11 +20080,14 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                               );
                             })()}
                             {/* Pozostałe eventy (zdjęcia, CMR, uwagi) — pogrupowane po fazie:
-                                Załadunek (ts < start_rozladunek.ts) vs Rozładunek (ts ≥ start_rozladunek.ts).
-                                Gdy brak start_rozladunek — wszystko traktujemy jako Załadunek. */}
+                                Załadunek (ts < dotarcie_rozladunek.ts) vs Rozładunek (ts ≥ dotarcie_rozladunek.ts).
+                                Dzielimy po DOTARCIU na rozładunek, nie po starcie z załadunku — bo kierowca
+                                często robi zdjęcia/CMR w trakcie jazdy do rozładunku, a to wciąż „faza załadunkowa"
+                                z punktu widzenia dokumentów (CMR załadunkowy, zdjęcia towaru).
+                                Gdy brak dotarcie_rozladunek — wszystko traktujemy jako Załadunek. */}
                             {(() => {
-                              const startRozEv = evts.find(e => e.type === "start_rozladunek");
-                              const phaseSplitTs = startRozEv ? (startRozEv.value || startRozEv.ts) : null;
+                              const dotRozEv = evts.find(e => e.type === "dotarcie_rozladunek");
+                              const phaseSplitTs = dotRozEv ? (dotRozEv.value || dotRozEv.ts) : null;
                               const isAfterUnload = (e) => phaseSplitTs && (e.value || e.ts) >= phaseSplitTs;
                               const otherEvts = evts.filter(e => !["dotarcie_zaladunek","start_rozladunek","dotarcie_rozladunek"].includes(e.type));
                               const beforeUnload = otherEvts.filter(e => !isAfterUnload(e));
