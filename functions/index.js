@@ -1981,15 +1981,30 @@ exports.trackerData = onRequest(
       // dotarcia do pierwszego punktu, niezależnie od finalnego celu w R2).
       let kmToR1 = null, kmTotalR1 = null, percentToR1 = null;
       if (hasR2 && destR2) {
-        const routeToR1 = await osrmMultiRoute([pos, destR1]);
-        if (routeToR1) {
-          kmToR1 = Math.round(routeToR1.distanceKm);
+        // Jeśli activeStep ≥ 3 → R1 jest już zrealizowany (kierowca pojechał do R2).
+        // OSRM nadal liczy odległość do R1 ale to wprowadza w błąd — auto już go
+        // minęło i jedzie do R2. Wymuszamy 100% / 0 km zamiast surowej kalkulacji.
+        if (activeStep >= 3) {
+          kmToR1 = 0;
+          percentToR1 = 100;
+          // kmTotalR1 zostaje obliczone niżej dla porównania (jeśli start dostępny)
           if (start) {
             const routeTotalR1 = await osrmMultiRoute([start, destR1]);
             if (routeTotalR1 && routeTotalR1.distanceKm > 0) {
               kmTotalR1 = Math.round(routeTotalR1.distanceKm);
-              const doneR1 = Math.max(0, kmTotalR1 - kmToR1);
-              percentToR1 = Math.min(100, Math.round((doneR1 / kmTotalR1) * 100));
+            }
+          }
+        } else {
+          const routeToR1 = await osrmMultiRoute([pos, destR1]);
+          if (routeToR1) {
+            kmToR1 = Math.round(routeToR1.distanceKm);
+            if (start) {
+              const routeTotalR1 = await osrmMultiRoute([start, destR1]);
+              if (routeTotalR1 && routeTotalR1.distanceKm > 0) {
+                kmTotalR1 = Math.round(routeTotalR1.distanceKm);
+                const doneR1 = Math.max(0, kmTotalR1 - kmToR1);
+                percentToR1 = Math.min(100, Math.round((doneR1 / kmTotalR1) * 100));
+              }
             }
           }
         }

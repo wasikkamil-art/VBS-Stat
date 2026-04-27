@@ -1674,26 +1674,37 @@ function TrackerPublicView({ token }) {
         {/* Paski postępu — dla 2 rozładunków dwa osobne, dla 1 rozładunku jeden główny */}
         {hasR2 && status === "w_trasie" && typeof d.percentToR1 === "number" ? (
           <div style={{ marginTop: 22 }}>
-            {/* R1 */}
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", letterSpacing: 0.3, textTransform: "uppercase" }}>Rozładunek 1</div>
-                {d.kmToR1 != null && (
-                  <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>
-                    <span style={{ color: "#111827", fontWeight: 700 }}>{d.kmToR1} km</span> · {d.percentToR1}%
+            {/* R1 — gdy activeStep >= 3 (R1 ukończony) pokazujemy pełen pasek + Rozładowano ✓ */}
+            {(() => {
+              const r1Done = (d.activeStep ?? 0) >= 3;
+              return (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", letterSpacing: 0.3, textTransform: "uppercase" }}>Rozładunek 1</div>
+                    {r1Done ? (
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#15803d" }}>
+                        ✅ Rozładowano
+                      </div>
+                    ) : d.kmToR1 != null && (
+                      <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>
+                        <span style={{ color: "#111827", fontWeight: 700 }}>{d.kmToR1} km</span> · {d.percentToR1}%
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-              <div style={{ height: 8, background: "#e2e8f0", borderRadius: 999, overflow: "hidden" }}>
-                <div style={{
-                  width: `${d.percentToR1}%`,
-                  height: "100%",
-                  background: "linear-gradient(90deg,#38bdf8,#0ea5e9)",
-                  borderRadius: 999,
-                  transition: "width 0.6s ease-out",
-                }} />
-              </div>
-            </div>
+                  <div style={{ height: 8, background: "#e2e8f0", borderRadius: 999, overflow: "hidden" }}>
+                    <div style={{
+                      width: `${r1Done ? 100 : d.percentToR1}%`,
+                      height: "100%",
+                      background: r1Done
+                        ? "linear-gradient(90deg,#22c55e,#15803d)"
+                        : "linear-gradient(90deg,#38bdf8,#0ea5e9)",
+                      borderRadius: 999,
+                      transition: "width 0.6s ease-out",
+                    }} />
+                  </div>
+                </div>
+              );
+            })()}
             {/* R2 — łącznie */}
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
