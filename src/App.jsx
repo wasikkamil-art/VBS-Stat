@@ -1367,7 +1367,7 @@ function TrackerPhotoCard({ title, urls }) {
   return (
     <div style={{ marginTop: 14, background: "#fff", borderRadius: 16, padding: 18, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
       <div style={{ fontSize: 12, fontWeight: 700, color: "#475569", letterSpacing: 0.3, marginBottom: 10 }}>
-        {title} <span style={{ color: "#94a3b8", fontWeight: 500 }}>· {urls.length}</span>
+        {title}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
         {urls.map((url, i) => (
