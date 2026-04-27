@@ -2,13 +2,113 @@
 
 > Dokument do przeniesienia do nowego chatu. Zawiera pełny kontekst: architektura, pliki, API, konwencje, co zrobiono, co w planie.
 
-*Ostatnia aktualizacja: 2026-04-24 (duża sesja: GPS 24/7 + breadcrumby + kropki + kopiuj dane + banner update + multi-foto)*
+*Ostatnia aktualizacja: 2026-04-27 (duża sesja: Tracker dla zleceniodawcy + Inbound CSV widziszwszystko + Performance + Admin status kierowcy)*
 
 ---
 
 ## 0. STAN AKTUALNY (TL;DR dla nowego chatu)
 
-**Co działa w produkcji (`fleetstat.pl`)** — stan 2026-04-24:
+**Co działa w produkcji (`fleetstat.pl`)** — stan 2026-04-27:
+
+### 🆕 Tracker dla zleceniodawcy — publiczna strona /t/{token}
+1. **Cloud Function `trackerData`** (HTTP, publiczna, CORS, region europe-west1):
+   - Input: `?token=xxx` (UUID zapisany w `fracht.trackerToken`).
+   - Wykrywanie 2 rozładunków (`hasR2`) po polach `dokod2/dokodMiasto2/rozladunekGeo2`.
+   - Najnowszy `gpsBreadcrumbs` jako pozycja (max 1 min stara dzięki `scheduledGpsPoll`).
+   - OSRM multi-waypoint dla 1 i 2 rozładunków (`pos → R1` lub `pos → R1 → R2`).
+   - **ETA z tacho** — iteracyjnie uwzględnia 45 min przerwy co 4.5h jazdy + 11h odpoczynku po limicie 9h dziennie (compliance z `driverActivities` ostatnie 7 dni).
+   - **activeStep 0..3 (lub 0..4 dla hasR2)**: Dojazd → Załadowano → W trasie/Rozładunek 1 → (Rozładunek 2 →) Dostarczono. Bazuje na eventach kierowcy: `dotarcie_zaladunek`, `start_rozladunek`, `dotarcie_rozladunek` (z respektem `cofnij_*`).
+   - **Toggle on/off** — pole `fracht.trackerEnabled` (default true). `false` → 403 `error: "disabled"` → klient widzi „Śledzenie wyłączone".
+   - **Photos respektujące `fracht.trackerShow`**: cmrZal / cmrRoz (lub cmrRozR1/cmrRozR2 dla hasR2 — split po ts drugiego `dotarcie_rozladunek`) / towar (z załadunku) / damage (uszkodzenia po rozładunku).
+   - Response: nrZlecenia, vehiclePlate, vehicleMaxWeight, hasR2, activeStep, lat/lng, kmTotal/kmRemaining/percentDone, etaMs, plannedMs, plannedR1Ms, plannedR2Ms, plannedLoadMs, kmToR1/kmTotalR1/percentToR1 (gdy hasR2), photos{cmrZal/cmrRoz/cmrRozR1/cmrRozR2/towar/damage}, delayMin, breakMinutes, updatedAt.
+
+2. **TrackerPublicView** (komponent w App.jsx, render gdy `pathname.startsWith("/t/")` w `Root`):
+   - Layout: logo FleetStat na górze + karta z logo VBS po prawej (`vbs-logo.png` wyciągnięty z brand_manual str. 8 — granatowe litery + żółty element).
+   - Header karty: „Zlecenie nr {nrZlecenia}" + badge auta `🚛 WGM 0475M · 3 000 kg`.
+   - **Stepper dynamiczny**: 4 kroki (Dojazd → Załadowano → W trasie → Dostarczono) lub 5 (Dojazd → Załadowano → Rozładunek 1 → Rozładunek 2 → Dostarczono) gdy hasR2.
+   - **Pasek postępu**: jeden % gdy 1 rozładunek; dla hasR2 dwa paski — Rozładunek 1 (jasnoniebieski) + Rozładunek 2 (ciemnoniebieski). Gdy `activeStep >= 3` pasek R1 wymuszany na 100% zielony „✅ Rozładowano" (OSRM dalej widzi km do R1, klamerka).
+   - **Karty dat** zmieniają się po realizacji etapu: Załadunek → „✅ Załadowano" gdy step≥1, Rozładunek 1 → „✅ Rozładowano" gdy step≥3, Rozładunek 2 → „✅ Dostarczono" gdy step≥4 (zielone tło zamiast szarego).
+   - **GPS link**: „📍 Aktualna pozycja: 50.8411, 6.1564 · Otwórz w mapach →" (Google Maps `?q=lat,lng`) — tylko dla `w_trasie`.
+   - **Status banner**: na czas / opóźnienie / w trasie (zielony/pomarańczowy/niebieski). Notka „Przewidywany czas dostawy uwzględnia wymagane przerwy kierowcy" + dla hasR2 dodatkowo „czas dotarcia do rozładunku 2 może ulec zmianie — zależy od czasu rozładunku przy pierwszym adresie".
+   - **Galerie zdjęć** (TrackerPhotoCard, kolejność wg drogi kierowcy, bez liczników po tytule):
+     - 📄 CMR z załadunku
+     - 📦 Zdjęcie towaru z załadunku
+     - 📄 CMR z rozładunku (lub osobno R1 + R2 dla hasR2 — split po ts drugiego `dotarcie_rozladunek`)
+     - ⚠️ Zdjęcie towaru po rozładunku (uszkodzenia, opcjonalne)
+   - Polling `fetch trackerData` co 30s. „Ostatnia aktualizacja: X min temu" z `tick` co 60s.
+   - Ekrany specjalne: `not_found` (link wygasł), `disabled` (Śledzenie wyłączone — nadawca zamknął dostęp), `przed_trasa` (Oczekiwanie na wyjazd), `zakonczony` (Dostawa zrealizowana).
+
+3. **`SendTrackerLinkModal`** w FrachtyModal (przycisk **🔗 Wyślij tracker** dla zapisanych frachtów):
+   - Generuje `trackerToken` (crypto.randomUUID) przy pierwszym otwarciu, persist przez `onPatch`.
+   - Status włączony/wyłączony z przyciskiem Wyłącz/Włącz (ten sam token dalej działa po włączeniu).
+   - 4 checkboxy „Co pokazać zleceniodawcy" (persist w `fracht.trackerShow`):
+     - 📄 CMR z załadunku
+     - 📦 Zdjęcie towaru z załadunku
+     - 📄 CMR z rozładunku
+     - ⚠️ Zdjęcie towaru po rozładunku
+   - Link: `https://fleetstat.pl/t/{token}` + przyciski Kopiuj / WhatsApp zleceniodawcy / Email zleceniodawcy (mailto:).
+
+4. **`TrackerPill`** badge w FrachtyTab (mobile + desktop) — tylko gdy `trackerToken` istnieje:
+   - 🟢 Tracker (zielony) = link działa | 🔴 Tracker off (czerwony) = wyłączony.
+   - Klik z confirm → toggle `trackerEnabled` przez `onUpdate`.
+
+5. **Routing `/t/*`**:
+   - W `Root` na początku: `if pathname.startsWith("/t/") return <TrackerPublicView token={...} />`.
+   - **`vercel.json`**: `{ "rewrites": [{ "source": "/t/:path*", "destination": "/" }] }` — wymagane dla SPA fallback (przy bezpośrednim wejściu z paska adresu Vercel zwracał 404 bez tego).
+
+### 🆕 Inbound CSV widziszwszystko — automatyczny import raportu „Karta drogowa szczegółowa"
+Po otrzymaniu pierwszego sample CSV (2026-04-27), zbudowany pełen pipeline auto-importu:
+
+1. **DNS MX** dla `inbox.fleetstat.pl` → `mx.sendgrid.net` (priorytet 10) — dodany w panelu home.pl.
+2. **SendGrid Inbound Parse** — Settings → Inbound Parse, hostname `inbox.fleetstat.pl`, destination URL `https://europe-west1-vbs-stats.cloudfunctions.net/wwReportInbound`. Spam check off, raw MIME off.
+3. **Cloud Function `wwReportInbound`** (HTTP, publiczna, multipart/form-data 512MiB / 120s):
+   - Parser multipart przez `busboy`.
+   - CSV przez `csv-parse/sync` (kolumny: `object,type,start,end,address,distance`).
+   - Match `object` (rejestracja) → `vehicle.id` (case-insensitive, strip whitespace, partial match).
+   - Match driver → `vehicle.driverHistory` aktywny w dniu raportu (lub fallback najnowszy bez `to`).
+   - Mapowanie typów: `Jazda → drive`, `Postój → rest`, `Brak danych → skip`, `Inna praca → work`, `Dyspozycyjność → avail`.
+   - **Dedup**: usuwa istniejące `auto_gps` i `ww_csv` segmenty w przedziale (CSV ma priorytet nad GPS). Wymaga composite index `driverEmail ASC + startTs ASC` — zdeployowany.
+   - Batch write 400 segmentów per commit. Source `ww_csv`. Pola: address, distanceKm, createdAt.
+   - Audit log do kolekcji `auditLog` z `action: ww_csv_import, source: email_inbound`.
+4. **`preferDddSegments`** rozszerzone — priorytet **DDD > ww_csv > manual > auto_gps**. Wyższe źródło wycina niższe z tych samych przedziałów czasowych.
+5. **Adres odbiorczy w widziszwszystko**: `imports@inbox.fleetstat.pl` — dodany jako Dodatkowy email #2, do wyboru w raportach cyklicznych.
+6. **Test end-to-end OK**: 8 segmentów (z 9-wierszowego CSV, 1 „Brak danych" pominięty) zaimportowanych do `driverActivities`.
+
+### 🆕 Performance — kasowanie wahań ładowania (1s vs 30s na iPhone)
+1. **Service Worker v3 → v4** (`public/sw.js`): hashed assets Vite (assets/*-HASH.js|css|woff2) **cache first** (były bypass cache). index.html jako stale-while-revalidate. Bundle ładuje się **instant z 2-giego otwarcia**.
+2. **Firestore IndexedDB persistence** (`initializeFirestore` z `persistentLocalCache + persistentMultipleTabManager`) — dane lokalnie, instant przy ponownym otwarciu, sync w tle, działa offline. Fallback do `getFirestore()` gdy IndexedDB niedostępny (Safari prywatne, niektóre webview).
+3. **`<link rel="preconnect">`** w index.html — handshake z `firestore.googleapis.com`, `firebaseinstallations`, `identitytoolkit`, `firebaseappcheck` + dns-prefetch dla storage/cloudfunctions. Skraca pierwszy fetch o 200-500 ms.
+
+### 🆕 Admin FrachtyTab expanded row — Status kierowcy z chronologią per faza
+- Eventy CMR/foto/uwagi **wcięte pod swoim nagłówkiem** (Załadunek/Rozładunek), bez sztucznych boksów „FAZA ZAŁADUNKU".
+- Mały bullet 6×6 px (vs 10×10 px głównych eventów), wcięcie 28 px.
+- **Split per faza po `dotarcie_rozladunek.ts`** (NIE po `start_rozladunek.ts` — kierowca często robi zdjęcia/CMR w trakcie jazdy do rozładunku, to wciąż faza załadunkowa).
+- **Dla 2 rozładunków** (`hasR2`): osobne sekcje „Rozładunek 1" / „Rozładunek 2", każda z własnym planem (`dataRozladunku` / `dataRozladunku2`). Eventy podzielone wg ts drugiego `dotarcie_rozladunek` (kierowca klika 2x — pierwszy = R1, drugi = R2). Edycja czasu dotarcia: dla R1 i pojedynczego rozładunku jak wcześniej (manualEv form), R2 read-only (TODO: rozszerzyć).
+- Nagłówki: dla 1 rozładunku „Rozładunek", dla hasR2 — „Rozładunek 1" + „Rozładunek 2".
+
+### Moduły GPS/Monitoring (działa 24/7 — bez zmian od 24.04)
+1. **`scheduledGpsPoll` Cloud Function** (cron `* * * * *` — co 1 minutę): fetch Atlas `positionsWithCanDetails` → `gpsBreadcrumbs/{vehicleId}/points/{ts}` + auto-detect driverActivities. Jedyny producent `auto_gps`.
+2. **`scheduledHistorySync` Cloud Function** (cron `0 3 * * *` — 3:00 CET): nocny sync Atlas `/history` → uzupełnia breadcrumby.
+3. **`cleanupBreadcrumbs` Cloud Function** (cron `30 2 * * *`): kasuje punkty > 7 dni.
+4. **Firestore composite indexes**: `driverActivities (driverEmail ASC + startTs DESC)` + `(driverEmail ASC + startTs ASC)` (drugi dla wwReportInbound dedup).
+
+### GpsTrasySection — czytelność (bez zmian od 24.04)
+- Czas faktycznej jazdy (speed > 3, gap < 15 min) zamiast doby. Pasek: km · hh:mm → hh:mm · Jazda · Postoje · pkt GPS.
+- Markery Start/Koniec jako kolorowe kropki 18 px z labelem czasu pod spodem (bez liter S/K — czyste).
+- OSRM map-matching dla wizualu, km z raw haversine, sanity check (matched > 3× raw → fallback raw), outlier filter > 200 km/h.
+
+### GpsMapSection (Mapa online) — bez zmian od 24.04
+- Ikona pojazdu: kółko ze strzałką wg `course/heading/bearing` Atlas; pamięć widoku (localStorage `gpsMapView`); breadcrumb 24h jako kropki canvas; outlier filter > 200 km/h.
+
+### DriverPanel (mobile kierowcy) — bez zmian od 24.04
+- CMR załadunek + rozładunek multi-foto z badge i delete; zdjęcia towaru/uszkodzeń bez `capture="environment"` (galeria + aparat).
+
+### FrachtyModal — rozbudowa (bez zmian od 24.04 + nowe „Wyślij tracker")
+- „📋 Kopiuj dane" → CopyOrderPreviewModal (Z1+Z2+R1-R5 bez km/ceny).
+- „🔗 Wyślij tracker" → SendTrackerLinkModal (NOWE, sekcja powyżej).
+- „📱 Wyślij na WhatsApp" → WhatsappSendPreviewModal (gdy kierowca ma whatsappNumber).
+
+### GeoPickerModal, Banner „Nowa wersja", GpsCzasPracySection manual, FrachtyTab fix SUMA, GpsMapSection buildPlanned multi-stop — bez zmian od 24.04.
 
 ### Moduły GPS/Monitoring (nowe, działa 24/7)
 1. **`scheduledGpsPoll` Cloud Function** (cron `* * * * *` — co 1 minutę, Europe/Warsaw): fetch Atlas `positionsWithCanDetails` dla floty → zapis do `gpsBreadcrumbs/{vehicleId}/points/{ts}` + auto-detect driverActivities (speed > 3 km/h = drive, else rest). Działa 24/7 niezależnie od sesji. **Jedyny producent auto_gps segmentów** — client-side auto-detect WYŁĄCZONY.
@@ -61,20 +161,19 @@
 - Teraz: `pickBest(geo, adres, kodPocztowy, miasto, compatKod)` — priorytet geo, fallback pełny string "adres, kod miasto", ostatecznie compat. Wszystkie R1-R5 + Z1-Z2 honorują geo.
 - Null-guard po każdym `await buildPlanned/buildReal` (przed `addTo(map)`) — zapobiega TypeError "Cannot read properties of null (reading 'addLayer')" gdy user zmieni zakładkę.
 
-**Integracja z widziszwszystko.eu — stan 2026-04-24**:
+**Integracja z widziszwszystko.eu — stan 2026-04-27**:
 - Atlas API (oficjalne, 12 endpointów) — używamy nadal: `devices`, `positionsWithCanDetails`, `/history`. Działa.
 - `/rest-api/` z panelu beta — **nie dotykamy** (nieudokumentowany, bez zgody; w memory `feedback_widziszwszystko_ethics.md`).
-- **Atlas `/history` pusty dla WGM 0475M za kwiecień 2026** — ich sync opóźniony / może nigdy nie uzupełnić (GPS dopiero zainstalowany).
-- **Raport cykliczny "Karta drogowa Szczegółowa"** — user skonfigurował w panelu widziszwszystko codziennie CSV na email. **CZEKA NA PIERWSZY SAMPLE** (jutro rano). Po otrzymaniu: napisać parser → import do `gpsBreadcrumbs` / `driverActivities`. Oficjalna droga eksportu, nie wymaga API.
+- ✅ **Raport cykliczny „Karta drogowa Szczegółowa"** — pełen pipeline auto-importu wdrożony (DNS MX + SendGrid Inbound + CF `wwReportInbound`). Adres `imports@inbox.fleetstat.pl`. Pierwszy test: 8 segmentów zaimportowanych do `driverActivities` z source `ww_csv`.
 - Widziszwszystko email support potwierdził: brak i nie planują API do DDD.
 - Panel widziszwszystko: Premium → Harmonogramy DDD → konfiguracja login/hasło dla API tachografu (VDO/TIS-Web/etc.) — żeby auto-pobierać DDD. Po skonfigurowaniu pliki trafiają do widziszwszystko → admin ręcznie pobiera → upload do FleetStat → `parseDddFile`.
 
 **Co dalej (priorytety)**:
-- **Czekamy na pierwszy CSV "Karta drogowa"** od widziszwszystko (jutro rano). Potem: parser + przycisk "📥 Importuj raport" w FleetStat, opcjonalnie Cloud Function z IMAP/SendGrid Inbound dla automatyzacji.
-- **Tracker dla zleceniodawcy** — publiczna strona "gdzie jest moja przesyłka" dla klienta. Dane: aktualna pinezka + 24h breadcrumb dla danego frachtu. Linki wysyłane przez WhatsApp/email.
-- **DDD** — pierwszy plik za ~28 dni (harmonogramy DDD widziszwszystko). Wtedy test end-to-end parsera.
+- **Tracker R2 fine-tuning** — gdy kierowca zacznie używać workflow z 2 rozładunkami, sprawdzić czy split po ts drugiego `dotarcie_rozladunek` działa poprawnie dla CMR rozładunkowych. Ewentualnie rozszerzyć DriverPanel o osobne przyciski „Dotarł na R1" / „Dotarł na R2" — nowe typy `dotarcie_rozladunek_1`/`dotarcie_rozladunek_2`. Migracja istniejących `dotarcie_rozladunek` → `_1`.
+- **DDD** — pierwszy plik za ~28 dni (harmonogramy DDD widziszwszystko). Test end-to-end parsera + dostosowanie heurystyk `findBlock()` w `readesm-js`.
 - **WhatsApp** — Firebase Secrets do ustawienia (WHATSAPP_TOKEN, WHATSAPP_PHONE_ID, WHATSAPP_APP_SECRET, WHATSAPP_VERIFY_TOKEN) + webhook URL w Meta Dev Console + zatwierdzenie szablonu `zlecenia_przydzielone`.
-- **Code splitting**: App.jsx dalej bundle ~1.9 MB (gzip ~460 KB).
+- **Czas pracy iter. 2** — kompensaty (skrócone odpoczynki + deadline), alerty banner (< 30 min do przerwy), timeline 7-dniowy (kolorowe paski 24h), push FCM 30 min przed obowiązkową przerwą.
+- **Code splitting**: App.jsx dalej bundle ~1.95 MB (gzip ~485 KB) — dla mobile dalej za duże mimo SW cache-first. Plan: `vite manualChunks` (vendor/charts/xlsx) + lazy load rzadkich tabów (TrendyTab, RentownoscTab, AuditLogTab, ImiTab).
 
 ---
 
@@ -664,6 +763,24 @@ driverActivities (z source="ddd", priorytet nad GPS)
     - Pamięć widoku: localStorage `gpsMapView` — lat/lng/zoom. Zapis na moveend/zoomend. Reload = zapamiętany widok zamiast Polska 7.
 38. ✅ **FrachtyTab — fix €/KM Ł w SUMA** (2026-04-24) — używał `totalKmWszAll` (= kmWszystkie || kmLadowne), mylnie równał się €/KM W. Teraz osobno `avgEurKmLad = totalCena / totalKmLad`.
 39. ✅ **Widziszwszystko: raport cykliczny Karta drogowa** (2026-04-24) — user skonfigurował w panelu widziszwszystko (Raporty → Raporty cykliczne → Karta drogowa Szczegółowa, codziennie, CSV, PL, email). **Czeka na pierwszy sample jutro** — parser + import do FleetStat po dostaniu pliku.
+40. ✅ **Tracker dla zleceniodawcy — pełen pipeline** (2026-04-27):
+    - **CF `trackerData`** (HTTP, publiczna, CORS, 30s): token w URL → fracht → najnowszy `gpsBreadcrumbs` → OSRM multi-waypoint → ETA z tacho compliance (45 min co 4.5h, 11h po limicie 9h). Zwraca activeStep, hasR2, vehiclePlate, vehicleMaxWeight, percentToR1, plannedR1Ms/plannedR2Ms, photos{cmrZal/cmrRoz/cmrRozR1/cmrRozR2/towar/damage}.
+    - **TrackerPublicView** w App.jsx (renderowany gdy `pathname.startsWith("/t/")` w `Root` — bypass auth): logo FleetStat + VBS, badge auta z plate+ładownością, stepper 4 lub 5 kroków (hasR2), pasek % (jeden lub dwa: R1+R2), karty dat zmieniające się na „✅ Załadowano/Rozładowano/Dostarczono" gdy etap done, GPS link Google Maps, status banner (na czas/opóźnienie), notki o tacho i niepewności R2, polling 30s.
+    - **`vercel.json`** rewrite `/t/:path*` → `/` (SPA fallback dla bezpośrednich wejść).
+    - **CF `wwReportInbound`** (HTTP, publiczna, multipart/form-data, 512 MiB / 120s): odbiera POST od SendGrid Inbound Parse (DNS MX `inbox.fleetstat.pl` → `mx.sendgrid.net`), parsuje CSV przez `csv-parse/sync`, match `object` (rejestracja) → vehicle, match driver z `driverHistory`, dedup po `auto_gps`/`ww_csv` w przedziale, batch write 400 segmentów. Pierwszy test 2026-04-27: 8 segmentów zaimportowanych z 9-wierszowego CSV (1 „Brak danych" pominięty).
+    - **`preferDddSegments`** rozszerzone — priorytet **DDD > ww_csv > manual > auto_gps**.
+    - **Composite index** `driverActivities (driverEmail ASC + startTs ASC)` dla dedup query (drugi obok DESC).
+    - **`SendTrackerLinkModal`** (przycisk „🔗 Wyślij tracker" w FrachtyModal): generuje `trackerToken` (UUID), zapis do `fracht.trackerToken` przez `onPatch`, status włączony/wyłączony (`fracht.trackerEnabled`), 4 checkboxy (cmrZal/towar/cmrRoz/damage → `fracht.trackerShow`), opcje wysyłki: kopiuj link / WhatsApp zleceniodawcy (`wa.me`) / email zleceniodawcy (`mailto:`).
+    - **`TrackerPill`** (badge w FrachtyTab mobile + desktop) — 🟢 Tracker / 🔴 Tracker off, klik z confirm → toggle.
+    - **Logo VBS** wyciągnięte z `brand_manual.pdf` str. 8 (PyMuPDF, 1371×479 px @ 300 DPI) → `public/vbs-logo.png`.
+41. ✅ **Performance fix iOS — wahania ładowania (1s vs 30s)** (2026-04-27):
+    - **SW v3 → v4**: hashed assets Vite (assets/*-HASH.js|css|woff2) **cache first** (były bypass cache). index.html jako stale-while-revalidate. Bundle ładuje się **instant z 2-giego otwarcia**.
+    - **Firestore IndexedDB persistence** (`initializeFirestore` z `persistentLocalCache + persistentMultipleTabManager`) — fallback do `getFirestore()` przy braku IndexedDB.
+    - **`<link rel="preconnect">`** dla `firestore.googleapis.com`, `firebaseinstallations`, `identitytoolkit`, `firebaseappcheck` + dns-prefetch dla storage/cloudfunctions w `index.html`.
+42. ✅ **Admin FrachtyTab — Status kierowcy chronologicznie per faza** (2026-04-27):
+    - Eventy CMR/foto/uwagi wcięte pod swoim nagłówkiem (Załadunek/Rozładunek), bez sztucznych boksów „FAZA". Bullet 6×6 px, wcięcie 28 px.
+    - Split fazowy po `dotarcie_rozladunek.ts` (NIE po `start_rozladunek.ts` — zdjęcia w trakcie jazdy do rozładunku zostają w fazie załadunkowej).
+    - Dla `hasR2` (frachty z 2 rozładunkami): osobne sekcje „Rozładunek 1" + „Rozładunek 2", split eventów po ts drugiego `dotarcie_rozladunek` (kierowca klika 2x).
 
 ## 14. Co w planie (NASTĘPNE ZADANIA)
 
