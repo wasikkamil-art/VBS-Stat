@@ -1846,13 +1846,16 @@ function TrackerPublicView({ token }) {
         )}
       </div>
 
-      {/* Galerie zdjęć — osobne karty per kategoria, w kolejności logicznej:
+      {/* Galerie zdjęć — osobne karty per kategoria, w kolejności drogi kierowcy:
           1. CMR z załadunku
-          2. CMR z rozładunku (lub R1 + R2 gdy fracht ma 2 rozładunki)
-          3. Zdjęcie towaru z załadunku
+          2. Zdjęcie towaru z załadunku
+          3. CMR z rozładunku (lub R1 + R2 gdy fracht ma 2 rozładunki)
           4. Zdjęcie towaru po rozładunku (uszkodzenia, opcjonalne) */}
       {d.photos?.cmrZal?.length > 0 && (
         <TrackerPhotoCard title="📄 CMR z załadunku" urls={d.photos.cmrZal} />
+      )}
+      {d.photos?.towar?.length > 0 && (
+        <TrackerPhotoCard title="📦 Zdjęcie towaru z załadunku" urls={d.photos.towar} />
       )}
       {d.photos?.cmrRoz?.length > 0 && (
         <TrackerPhotoCard title="📄 CMR z rozładunku" urls={d.photos.cmrRoz} />
@@ -1862,9 +1865,6 @@ function TrackerPublicView({ token }) {
       )}
       {d.photos?.cmrRozR2?.length > 0 && (
         <TrackerPhotoCard title="📄 CMR z rozładunku 2" urls={d.photos.cmrRozR2} />
-      )}
-      {d.photos?.towar?.length > 0 && (
-        <TrackerPhotoCard title="📦 Zdjęcie towaru z załadunku" urls={d.photos.towar} />
       )}
       {d.photos?.damage?.length > 0 && (
         <TrackerPhotoCard title="⚠️ Zdjęcie towaru po rozładunku" urls={d.photos.damage} />
