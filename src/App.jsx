@@ -1272,10 +1272,14 @@ function fmtTimeShort(ms) {
 // Hierarchia priorytetów (od najwyższego):
 //   1. `f.statusRozladunkuManual` (NEW po refactorze 2026-04-28) — admin świadomie
 //      nadpisał (np. "problem", "rozladowano" force-close, "w_trasie" cofnięcie).
-//   2. Compute z eventów: najnowszy `rozladowano` lub `cofnij_rozladowano` — driver
-//      źródłem prawdy dla statusu rozładunku.
-//   3. `f.statusRozladunku` LEGACY field (przed refactorem) — backward compat tylko
-//      gdy NIE MA żadnych eventów (stare frachty bez ani jednego klika kierowcy).
+//   2. `f.statusRozladunku` LEGACY field (przed refactorem) — TRAKTOWANY JAK IMPLICIT
+//      OVERRIDE. Admin lub driver kiedyś świadomie ustawił "rozladowano"/"problem".
+//      Ważne: szanujemy tę decyzję nawet jeśli w eventach jest nowszy cofnij — old
+//      cofnij eventy mogą być testowe/stale, legacy field to ostatnia "świadoma"
+//      decyzja widoczna w admin tabeli.
+//   3. Compute z eventów: najnowszy `rozladowano` (i nie cofnięty) → "rozladowano".
+//      Używane GDY legacy field jest puste — driver kliknął ale propagacja failed
+//      (race condition który był przyczyną buga 2454/2026).
 //   4. Default: "w_trasie".
 //
 // CO ROZWIĄZUJE: race condition desync — przed refactorem driver pisał event
@@ -1291,22 +1295,21 @@ function fmtTimeShort(ms) {
 //   const status = computeFrachtStatus(fracht);  // używa tylko legacy field
 function computeFrachtStatus(fracht, eventsForFracht = []) {
   if (!fracht) return "w_trasie";
-  // 1. Manual override admina — wygrywa wszystko
+  // 1. Manual override admina — wygrywa wszystko (NEW field po refactorze)
   if (fracht.statusRozladunkuManual) return fracht.statusRozladunkuManual;
-  // 2. Compute z driverEvents — najnowszy rozladowano vs cofnij_rozladowano
-  // (events biją legacy field żeby cofnij na starym fracht działał poprawnie)
+  // 2. Legacy field — implicit override (admin/driver kiedyś świadomie ustawił).
+  // Szanujemy tę decyzję nawet gdy w eventach jest nowszy cofnij (mogą być stale).
+  if (fracht.statusRozladunku === "rozladowano" || fracht.statusRozladunku === "problem") {
+    return fracht.statusRozladunku;
+  }
+  // 3. Compute z driverEvents — najnowszy rozladowano vs cofnij_rozladowano.
+  // Używane GDY legacy field puste — driver kliknął, propagacja failed (race condition
+  // przyczyna buga 2454/2026). Po refactorze new driver code pisze TYLKO event.
   if (Array.isArray(eventsForFracht) && eventsForFracht.length > 0) {
     const rozEvents = eventsForFracht
       .filter(e => e && (e.type === "rozladowano" || e.type === "cofnij_rozladowano"))
       .sort((a, b) => (b.ts || "").localeCompare(a.ts || ""));
-    if (rozEvents.length > 0) {
-      // Mamy event rozladunku — events są źródłem prawdy, ignoruj legacy field
-      return rozEvents[0].type === "rozladowano" ? "rozladowano" : "w_trasie";
-    }
-  }
-  // 3. Legacy field — backward compat tylko gdy brak eventów
-  if (fracht.statusRozladunku === "rozladowano" || fracht.statusRozladunku === "problem") {
-    return fracht.statusRozladunku;
+    if (rozEvents.length > 0 && rozEvents[0].type === "rozladowano") return "rozladowano";
   }
   // 4. Default
   return "w_trasie";
