@@ -45,6 +45,8 @@ scripts/
 !public/manifest.json
 !firestore.indexes.json
 !vercel.json
+!jsconfig.json
+!tsconfig.json
 *.csv
 *.xlsx
 

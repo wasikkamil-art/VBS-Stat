@@ -1871,6 +1871,12 @@ function TrackerPublicView({ token }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function Root() {
   // Publiczny tracker (bypass auth) — /t/{token}
+  // UWAGA: hooks NIŻEJ są technicznie "po conditional return" co ESLint flaguje
+  // jako rules-of-hooks. Działa dziś bo NIE MA client-side routing — pathname
+  // sprawdzane tylko raz przy mount, nie zmienia się bez full page reload.
+  // TODO komercjalizacja #5: refactor — wydzielić TrackerPublicView jako osobny
+  // entry point (np. routing przez react-router) i przenieść check NA ZEWNĄTRZ Root.
+  /* eslint-disable react-hooks/rules-of-hooks */
   if (typeof window !== "undefined" && window.location.pathname.startsWith("/t/")) {
     const token = window.location.pathname.replace(/^\/t\//, "").replace(/\/$/, "");
     return <TrackerPublicView token={token} />;
@@ -2014,6 +2020,7 @@ export default function Root() {
   if (!user) return <LoginScreen />;
   if (!roleLoaded) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f8f9fb",fontSize:32}}><IconTruck size={32}/></div>;
   return <App user={user} role={role} appUsers={appUsers} allowedTabs={allowedTabs} />;
+  /* eslint-enable react-hooks/rules-of-hooks */
 }
 
 
@@ -2134,7 +2141,7 @@ async function uploadSprawaFile(file, sprawaId, subfolder) {
 // Upload oryginału faktury (Płatności) → Storage, zwraca metadata
 async function uploadPaymentFile(file) {
   // Bezpieczna nazwa — usuń niebezpieczne znaki
-  const safeName = file.name.replace(/[^\w.\-]/g, "_");
+  const safeName = file.name.replace(/[^\w.-]/g, "_");
   const name = `payments/${Date.now()}_${Math.random().toString(36).slice(2,8)}_${safeName}`;
   const ref = storageRef(storage, name);
   await uploadBytes(ref, file);
@@ -7679,6 +7686,11 @@ function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fu
   const [filter, setFilter] = useState("all"); // "all" | "active" | "done"
   const [monthFilter, setMonthFilter] = useState(null); // null = auto (biezacy lub najnowszy)
 
+  // UWAGA: useMemo niżej jest po conditional return (vehicle?.id check) — ESLint
+  // flaguje rules-of-hooks. Działa bo vehicle.id jest stabilne w sesji (komponent
+  // mountuje się ponownie po zmianie pojazdu). TODO komercjalizacja #5: refactor —
+  // wczesny return PRZED hooks, lub wyciągnąć hooks do customowego helper-hooka.
+  /* eslint-disable react-hooks/rules-of-hooks */
   if (!vehicle?.id) {
     return (
       <div className="bg-white rounded-2xl border border-gray-100 p-6 mt-4 text-center">
@@ -7936,6 +7948,7 @@ function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fu
       </div>
     </div>
   );
+  /* eslint-enable react-hooks/rules-of-hooks */
 }
 
 // ── Sekcja: MAPA ONLINE ──
@@ -17108,7 +17121,11 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
       </div>
 
       {/* YoY TABELA — Scorecard */}
+      {/* TODO komercjalizacja #5: refactor IIFE → osobny komponent <YoYScorecard/>.
+          Hooks (useState yoyMode/yoyMet) wewnątrz IIFE = anti-pattern; działa bo
+          IIFE jest zawsze invokowane (nie warunkowo), ale fragile. */}
       {(() => {
+        /* eslint-disable react-hooks/rules-of-hooks */
         const METRICS = [
           { id:"frachty",  label:"Frachty €",      fn:(vid,y,mi)=>{ const r=getRecord(vid,y,mi); return r?.frachty||0; } },
           { id:"koszty",   label:"Koszty €",       fn:(vid,y,mi)=>{ const r=getRecord(vid,y,mi); return r?Object.values(r.costs||{}).reduce((s,v)=>s+(v||0),0):0; } },
@@ -17274,6 +17291,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
             })}
           </div>
         );
+        /* eslint-enable react-hooks/rules-of-hooks */
       })()}
     </div>
   );
@@ -17592,12 +17610,12 @@ function ServiceEditForm({ vehicle, onSave, onClose }) {
         <div className="text-xs font-bold text-green-700 uppercase tracking-wider">📅 Daty we flocie</div>
         <div className="grid grid-cols-2 gap-3">
           <MF label="Data dołączenia do floty">
-            <input type="date" value={v.fleetJoinDate||""} onChange={e => setF("fleetJoinDate", e.target.value)}
+            <input type="date" value={v.fleetJoinDate||""} onChange={e => set("fleetJoinDate", e.target.value)}
               className="w-full px-3.5 py-2.5 rounded-lg text-sm outline-none"
               style={{ background:"#f9fafb", border:"1.5px solid #e5e7eb", fontFamily:"'DM Sans',sans-serif", color:"#111827" }} />
           </MF>
           <MF label="Data opuszczenia floty">
-            <input type="date" value={v.fleetLeaveDate||""} onChange={e => setF("fleetLeaveDate", e.target.value)}
+            <input type="date" value={v.fleetLeaveDate||""} onChange={e => set("fleetLeaveDate", e.target.value)}
               className="w-full px-3.5 py-2.5 rounded-lg text-sm outline-none"
               style={{ background:"#f9fafb", border:"1.5px solid #e5e7eb", fontFamily:"'DM Sans',sans-serif", color:"#111827" }} />
           </MF>

@@ -72,11 +72,23 @@ firebase functions:log --only parseDddFile | tail -20  # logi
 # Firestore rules
 firebase use vbs-stats && firebase deploy --only firestore:rules
 
+# Lint (od 2026-04-28 — TODO #5a komercjalizacji)
+npm run lint                  # ESLint v9, flat config (eslint.config.mjs)
+npm run lint:fix              # auto-fix gdzie możliwe
+npm run lint:src              # tylko src/ (szybciej)
+
 # Gdy git lock blokuje
 rm -f .git/index.lock
 ```
 
-Brak konfiguracji lintera/testów w repo — nie uruchamiaj `npm test` (nie istnieje).
+**Lint config**:
+- `eslint.config.mjs` (flat config v9) + `jsconfig.json` (`checkJs: true`).
+- 3 sekcje: src/ (React+browser), functions/ (Node CommonJS), api/ (Node ESM).
+- `react-hooks/rules-of-hooks` = error (real bugs); inne hooks v7 reguły = warn (false positives w monolicie). `no-unused-vars` = warn (allow leading `_`). `allowEmptyCatch: true` (124 try/catch w kodzie, intentional silent catches).
+- **Cel**: 0 errors zawsze (build green); warnings to backlog do stopniowego cleanup.
+- Znane debt: 3 lokacje hooks po conditional return / w IIFE → `eslint-disable` z komentarzem TODO refactor (Root, VehicleOrdersSection, YoY IIFE).
+
+Testów brak — nie uruchamiaj `npm test` (nie istnieje).
 
 Przed `git push` **zawsze pytaj użytkownika** — push triggeruje auto-deploy na produkcję.
 
