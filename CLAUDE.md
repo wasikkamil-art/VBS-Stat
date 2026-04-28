@@ -88,6 +88,12 @@ rm -f .git/index.lock
 - **Cel**: 0 errors zawsze (build green); warnings to backlog do stopniowego cleanup.
 - Znane debt: 3 lokacje hooks po conditional return / w IIFE → `eslint-disable` z komentarzem TODO refactor (Root, VehicleOrdersSection, YoY IIFE).
 
+**Husky hooks (od 2026-04-28 — TODO #5b komercjalizacji)**:
+- `.husky/pre-commit` — `npx lint-staged` → ESLint --fix na zmienionych plikach `*.{js,jsx,mjs}`. Auto-fix gdzie można, **blokuje commit gdy errory**. Warnings przechodzą.
+- `.husky/pre-push` — `npm run lint` + `npm run build` → catch regresji których lint-staged przepuścił (np. usunięty plik z importem gdzie indziej). Blokuje broken main → produkcję.
+- Po `npm install` `prepare: husky` script automatycznie inicjalizuje hooks dla nowych klonujących.
+- Lint-staged config: `package.json` → `"lint-staged": { "*.{js,jsx,mjs}": "eslint --fix" }`.
+
 Testów brak — nie uruchamiaj `npm test` (nie istnieje).
 
 Przed `git push` **zawsze pytaj użytkownika** — push triggeruje auto-deploy na produkcję.
