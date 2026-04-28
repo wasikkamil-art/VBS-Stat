@@ -10982,18 +10982,20 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
   const daysUntil = (d) => d ? Math.ceil((new Date(d) - today) / 86400000) : null;
 
   // Cofnięcie statusu (załadunek / rozładunek)
-  const undoFrachtStatus = async (fracht, field) => {
+  const undoFrachtStatus = async (fracht, field, r = null) => {
     if (!window.confirm(field === "zaladowano" ? "Cofnąć potwierdzenie załadunku?" : "Cofnąć potwierdzenie rozładunku?")) return;
     try {
-      await addDoc(collection(db, "driverEvents"), {
+      const eventData = {
         type: `cofnij_${field}`,
         frachtId: fracht.id,
         vehicleId: vehicle?.id,
         driverEmail: user.email,
         driverName: user.displayName || user.email,
         ts: new Date().toISOString(),
-      });
-      logAction(`cofnij_${field}`, "driverEvents", { frachtId: fracht.id });
+      };
+      if (r != null) eventData.r = r;
+      await addDoc(collection(db, "driverEvents"), eventData);
+      logAction(`cofnij_${field}`, "driverEvents", { frachtId: fracht.id, r });
       showToast("↩️ Cofnięto potwierdzenie");
     } catch (e) {
       console.error("undo error", e);
@@ -11043,9 +11045,9 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
   };
 
   // Aktualizacja statusu frachtu (+ auto-capture km z CAN przy załadunku/rozładunku)
-  const updateFrachtStatus = async (fracht, field, value) => {
+  const updateFrachtStatus = async (fracht, field, value, r = null) => {
     try {
-      await addDoc(collection(db, "driverEvents"), {
+      const eventData = {
         type: field,
         frachtId: fracht.id,
         vehicleId: vehicle?.id,
@@ -11053,7 +11055,10 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
         driverEmail: user.email,
         driverName: user.displayName || user.email,
         ts: new Date().toISOString(),
-      });
+      };
+      // Multi-stop rozładunek: r=1 dla R1, r=2 dla R2. null gdy single-stop lub legacy event.
+      if (r != null) eventData.r = r;
+      await addDoc(collection(db, "driverEvents"), eventData);
       logAction(field, "driverEvents", { frachtId: fracht.id, vehicleId: vehicle?.id });
       // Propaguj status na fracht — żeby admin+home tile+filtry widziały poprawnie
       // (event zostaje w driverEvents jako log, statusRozladunku = single source of truth dla filtrów)
@@ -11103,7 +11108,7 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
   };
 
   // ── Upload zdjęcia (towar / CMR) ──
-  const uploadDriverPhoto = async (type, file) => {
+  const uploadDriverPhoto = async (type, file, r = null) => {
     if (!file || !selectedFracht) return;
     try {
       const path = `driverPhotos/${selectedFracht.id}/${type}_${Date.now()}_${file.name}`;
@@ -11115,7 +11120,7 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
         : type === "cmr_rozladunek" ? "cmr_rozladunek_photo"
         : type === "cmr" ? "cmr_photo"
         : `${type}_photo`;
-      await addDoc(collection(db, "driverEvents"), {
+      const eventData = {
         type: eventType,
         frachtId: selectedFracht.id,
         vehicleId: vehicle?.id,
@@ -11123,7 +11128,10 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
         driverEmail: user.email,
         driverName: user.displayName || user.email,
         ts: new Date().toISOString(),
-      });
+      };
+      // Multi-stop CMR: r=1 dla R1, r=2 dla R2 (tylko dla cmr_rozladunek_photo gdy hasR2).
+      if (r != null) eventData.r = r;
+      await addDoc(collection(db, "driverEvents"), eventData);
       showToast(type.includes("cmr") ? "✅ Zdjęcie CMR dodane" : "✅ Zdjęcie towaru dodane");
       return url;
     } catch (e) {
@@ -11173,15 +11181,18 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
   };
 
   // ── Helper: zapisz uwagi kierowcy ──
-  const saveDriverNote = async (fracht, type, text) => {
+  const saveDriverNote = async (fracht, type, text, r = null) => {
     if (!fracht || !text?.trim()) return;
     try {
-      // Znajdź istniejący event uwagi i zaktualizuj lub utwórz nowy
-      const existing = driverEvents.find(e => e.frachtId === fracht.id && e.type === type);
+      // Znajdź istniejący event uwagi (per R# gdy r podane) i zaktualizuj lub utwórz nowy
+      const existing = driverEvents.find(e =>
+        e.frachtId === fracht.id && e.type === type
+        && (r == null ? (e.r == null || e.r === 1) : e.r === r)
+      );
       if (existing?.id) {
         await updateDoc(doc(db, "driverEvents", existing.id), { note: text.trim(), ts: new Date().toISOString() });
       } else {
-        await addDoc(collection(db, "driverEvents"), {
+        const eventData = {
           type,
           frachtId: fracht.id,
           vehicleId: vehicle?.id,
@@ -11189,7 +11200,9 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
           driverEmail: user.email,
           driverName: user.displayName || user.email,
           ts: new Date().toISOString(),
-        });
+        };
+        if (r != null) eventData.r = r;
+        await addDoc(collection(db, "driverEvents"), eventData);
       }
       showToast("✅ Uwagi zapisane");
     } catch (e) {
@@ -11233,6 +11246,9 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     const kody = formatKody(f);
     // Sprawdź driverEvents dla tego frachtu (uwzględnij cofnięcia)
     const myEvents = driverEvents.filter(ev => ev.frachtId === f.id).sort((a,b) => (a.ts||"").localeCompare(b.ts||""));
+    // Multi-stop detection — fracht ma 2 rozładunki gdy są pola dla R2
+    const hasR2 = !!(f.dataRozladunku2 || (f.dokod2 && String(f.dokod2).trim()) || (f.rozladunekAdres2 && String(f.rozladunekAdres2).trim()));
+
     const zalEvent = myEvents.filter(e => e.type === "zaladowano").pop();
     const zalUndo = myEvents.filter(e => e.type === "cofnij_zaladowano").pop();
     const rozEvent = myEvents.filter(e => e.type === "rozladowano").pop();
@@ -11240,26 +11256,34 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     const towarPhotos = myEvents.filter(e => e.type === "towar_photo");
     const towarDmgPhotos = myEvents.filter(e => e.type === "towar_damage_photo");
     const cmrZalPhotos = myEvents.filter(e => e.type === "cmr_zaladunek_photo");
-    // cmr_photo = stary format (legacy, sprzed rozbicia na załadunek/rozładunek) — traktujemy jak rozładunek
-    const cmrRozPhotos = myEvents.filter(e => e.type === "cmr_rozladunek_photo" || e.type === "cmr_photo");
+    // cmr_photo = stary format (legacy, sprzed rozbicia na załadunek/rozładunek) — traktujemy jak rozładunek.
+    // Dla hasR2: r==null lub r===1 → R1, r===2 → R2 (backward compat: legacy bez r = R1).
+    const cmrRozPhotos = myEvents.filter(e => (e.type === "cmr_rozladunek_photo" || e.type === "cmr_photo") && (e.r == null || e.r === 1));
+    const cmrR2Photos = hasR2 ? myEvents.filter(e => e.type === "cmr_rozladunek_photo" && e.r === 2) : [];
     // Nowe statusy
     const dotarcieZalEvent = myEvents.filter(e => e.type === "dotarcie_zaladunek").pop();
     const dotarcieZalUndo = myEvents.filter(e => e.type === "cofnij_dotarcie_zaladunek").pop();
     const startRozEvent = myEvents.filter(e => e.type === "start_rozladunek").pop();
     const startRozUndo = myEvents.filter(e => e.type === "cofnij_start_rozladunek").pop();
-    const dotarcieRozEvent = myEvents.filter(e => e.type === "dotarcie_rozladunek").pop();
-    const dotarcieRozUndo = myEvents.filter(e => e.type === "cofnij_dotarcie_rozladunek").pop();
+    // dotarcie_rozladunek: r==null lub r===1 → R1, r===2 → R2 (backward compat).
+    const dotarcieRozEvent = myEvents.filter(e => e.type === "dotarcie_rozladunek" && (e.r == null || e.r === 1)).pop();
+    const dotarcieRozUndo = myEvents.filter(e => e.type === "cofnij_dotarcie_rozladunek" && (e.r == null || e.r === 1)).pop();
+    const dotarcieR2Event = hasR2 ? myEvents.filter(e => e.type === "dotarcie_rozladunek" && e.r === 2).pop() : null;
+    const dotarcieR2Undo = hasR2 ? myEvents.filter(e => e.type === "cofnij_dotarcie_rozladunek" && e.r === 2).pop() : null;
     // Cofnięcie anuluje jeśli nowsze
     const hasZal = (!!zalEvent && (!zalUndo || zalEvent.ts > zalUndo.ts)) || !!f._driverZaladowano;
     const hasRoz = (!!rozEvent && (!rozUndo || rozEvent.ts > rozUndo.ts)) || f.statusRozladunku === "rozladowano";
     const hasDotarcieZal = !!dotarcieZalEvent && (!dotarcieZalUndo || dotarcieZalEvent.ts > dotarcieZalUndo.ts);
     const hasStartRoz = !!startRozEvent && (!startRozUndo || startRozEvent.ts > startRozUndo.ts);
     const hasDotarcieRoz = !!dotarcieRozEvent && (!dotarcieRozUndo || dotarcieRozEvent.ts > dotarcieRozUndo.ts);
-    // Uwagi kierowcy
+    const hasDotarcieR2 = hasR2 && !!dotarcieR2Event && (!dotarcieR2Undo || dotarcieR2Event.ts > dotarcieR2Undo.ts);
+    // Uwagi kierowcy — per R# w hasR2
     const uwagiZalEvent = myEvents.filter(e => e.type === "uwagi_zaladunek").pop();
-    const uwagiRozEvent = myEvents.filter(e => e.type === "uwagi_rozladunek").pop();
+    const uwagiRozEvent = myEvents.filter(e => e.type === "uwagi_rozladunek" && (e.r == null || e.r === 1)).pop();
+    const uwagiR2Event = hasR2 ? myEvents.filter(e => e.type === "uwagi_rozladunek" && e.r === 2).pop() : null;
     const hasCmrZal = cmrZalPhotos.length > 0;
     const hasCmrRoz = cmrRozPhotos.length > 0;
+    const hasCmrR2 = cmrR2Photos.length > 0;
 
     return (
       <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", paddingTop: "env(safe-area-inset-top, 0px)", paddingBottom: 40, zoom: driverZoom === "large" ? 1.2 : 1 }}>
@@ -11531,22 +11555,29 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
             )}
           </div>); })()}
 
-          {/* ═══ KAFELEK 2: ROZŁADUNEK ═══ */}
-          {(() => { const rozDelay = calcDelay(f.dataRozladunku, f.godzRozladunku, dotarcieRozEvent?.value || dotarcieRozEvent?.ts); return (
+          {/* ═══ KAFELEK 2: ROZŁADUNEK (single-stop lub R1) ═══ */}
+          {(() => {
+            const rozDelay = calcDelay(f.dataRozladunku, f.godzRozladunku, dotarcieRozEvent?.value || dotarcieRozEvent?.ts);
+            const r1Param = hasR2 ? 1 : null;
+            const sectionTitle = hasR2 ? "📦 ROZŁADUNEK 1" : "📦 ROZŁADUNEK";
+            return (
           <div style={{background: "#fff", borderRadius: 16, border: `2px solid ${hasStartRoz ? "#a7f3d0" : "#e5e7eb"}`, padding: 16, opacity: hasStartRoz ? 1 : 0.4}}>
             <div className="flex items-center justify-between" style={{marginBottom: 8}}>
-              <div style={{fontSize: 13, fontWeight: 700, color: "#059669"}}>📦 ROZŁADUNEK</div>
+              <div style={{fontSize: 13, fontWeight: 700, color: "#059669"}}>{sectionTitle}</div>
               <span style={{fontSize: 11, color: "#9ca3af"}}>{fmtDate(f.dataRozladunku)}{f.godzRozladunku ? ` · ${f.godzRozladunku}` : ""}</span>
             </div>
+            {hasR2 && (f.rozladunekAdres || f.dokod) && (
+              <div style={{fontSize: 12, color: "#6b7280", marginBottom: 8, paddingLeft: 2}}>{f.rozladunekAdres || f.dokod}</div>
+            )}
             {hasDotarcieRoz && rozDelay && (
               <div style={{marginBottom: 10}}>{renderDelayBadge(rozDelay)}</div>
             )}
 
             {/* 1. Dotarcie na rozładunek */}
-            {renderStatusStep(hasDotarcieRoz, "Dotarcie na rozładunek", dotarcieRozEvent, hasStartRoz, () => updateFrachtStatus(f, "dotarcie_rozladunek", new Date().toISOString()), () => undoFrachtStatus(f, "dotarcie_rozladunek"))}
+            {renderStatusStep(hasDotarcieRoz, hasR2 ? "Dotarcie na rozładunek 1" : "Dotarcie na rozładunek", dotarcieRozEvent, hasStartRoz, () => updateFrachtStatus(f, "dotarcie_rozladunek", new Date().toISOString(), r1Param), () => undoFrachtStatus(f, "dotarcie_rozladunek", r1Param))}
 
-            {/* 1b. Stan licznika — koniec trasy (fallback gdy CAN nie zadziałał) */}
-            {hasDotarcieRoz && (
+            {/* 1b. Stan licznika — koniec trasy. TYLKO dla single-stop. Dla hasR2 licznik jest na R2 (ostatnim stopie). */}
+            {!hasR2 && hasDotarcieRoz && (
               <div style={{padding: 12, borderRadius: 12, marginBottom: 8, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
                 <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 4}}>🔢 Stan licznika — koniec trasy</div>
                 <div style={{fontSize: 11, color: "#9ca3af", marginBottom: 8}}>
@@ -11566,11 +11597,11 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
               </div>
             )}
 
-            {/* 2. CMR rozładunek — wiele zdjęć, z galerii lub aparatu */}
+            {/* 2. CMR rozładunek (R1 gdy hasR2) — wiele zdjęć */}
             {hasDotarcieRoz && (
               <div style={{padding: 12, borderRadius: 12, marginBottom: 8, background: hasCmrRoz ? "#f0fdf4" : "#f8fafc", border: `1px solid ${hasCmrRoz ? "#bbf7d0" : "#e5e7eb"}`}}>
                 <div style={{fontSize: 13, fontWeight: 600, color: hasCmrRoz ? "#15803d" : "#374151", marginBottom: 8}}>
-                  {hasCmrRoz ? "✅" : "📄"} CMR rozładunek {cmrRozPhotos.length > 1 && <span style={{fontSize: 11, color: "#6b7280", fontWeight: 400}}>({cmrRozPhotos.length})</span>}
+                  {hasCmrRoz ? "✅" : "📄"} CMR rozładunek{hasR2 ? " 1" : ""} {cmrRozPhotos.length > 1 && <span style={{fontSize: 11, color: "#6b7280", fontWeight: 400}}>({cmrRozPhotos.length})</span>}
                 </div>
                 {cmrRozPhotos.length > 0 && (
                   <div style={{display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8}}>
@@ -11591,25 +11622,25 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
                 <label style={{display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
                   padding: "10px", borderRadius: 10, border: "1px dashed #d1d5db", background: "#fff",
                   color: "#6b7280", fontSize: 13, fontWeight: 500, cursor: "pointer"}}>
-                  📷 {cmrRozPhotos.length > 0 ? "Dodaj kolejne CMR" : "Dodaj CMR rozładunek"}
+                  📷 {cmrRozPhotos.length > 0 ? "Dodaj kolejne CMR" : `Dodaj CMR rozładunek${hasR2 ? " 1" : ""}`}
                   <input type="file" accept="image/*" multiple className="hidden"
                     onChange={async (e) => {
                       const files = Array.from(e.target.files || []);
-                      for (const file of files) { await uploadDriverPhoto("cmr_rozladunek", file); }
+                      for (const file of files) { await uploadDriverPhoto("cmr_rozladunek", file, r1Param); }
                       e.target.value = "";
                     }} />
                 </label>
               </div>
             )}
 
-            {/* 3. Uwagi kierowcy — rozładunek */}
+            {/* 3. Uwagi kierowcy — rozładunek (R1 gdy hasR2) */}
             {hasDotarcieRoz && (
               <div style={{padding: 12, borderRadius: 12, marginBottom: 8, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
-                <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6}}>📝 Uwagi — rozładunek</div>
+                <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6}}>📝 Uwagi — rozładunek{hasR2 ? " 1" : ""}</div>
                 <textarea
                   defaultValue={uwagiRozEvent?.note || ""}
-                  placeholder="Wpisz uwagi z rozładunku..."
-                  onBlur={(e) => { if (e.target.value !== (uwagiRozEvent?.note || "")) saveDriverNote(f, "uwagi_rozladunek", e.target.value); }}
+                  placeholder={hasR2 ? "Wpisz uwagi z rozładunku 1..." : "Wpisz uwagi z rozładunku..."}
+                  onBlur={(e) => { if (e.target.value !== (uwagiRozEvent?.note || "")) saveDriverNote(f, "uwagi_rozladunek", e.target.value, r1Param); }}
                   style={{width: "100%", fontSize: 14, padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e7eb",
                     background: "#fff", resize: "vertical", minHeight: 60, fontFamily: "inherit"}} />
                 {uwagiRozEvent?.ts && <div style={{fontSize: 11, color: "#9ca3af", marginTop: 4}}>
@@ -11618,8 +11649,136 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
               </div>
             )}
 
-            {/* 4. Zdjęcie uszkodzonego towaru (opcjonalne) */}
-            {hasDotarcieRoz && (
+            {/* 4. Zdjęcie uszkodzonego towaru — TYLKO dla single-stop. Dla hasR2 damage photos są na R2 (ostatnim stopie) */}
+            {!hasR2 && hasDotarcieRoz && (
+              <div style={{padding: 12, borderRadius: 12, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
+                <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 4}}>📸 Zdjęcie uszkodzeń <span style={{fontSize: 11, color: "#9ca3af", fontWeight: 400}}>(opcjonalne)</span></div>
+                {towarDmgPhotos.length > 0 && (
+                  <div style={{display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8}}>
+                    {towarDmgPhotos.map((p, i) => (
+                      <div key={p.id || i} style={{display: "flex", alignItems: "center", gap: 2}}>
+                        <a href={p.photoUrl} target="_blank" rel="noopener noreferrer"
+                          style={{display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8,
+                            background: "#fef2f2", border: "1px solid #fecaca", fontSize: 12, color: "#dc2626",
+                            fontWeight: 500, textDecoration: "none"}}>
+                          ⚠️ Uszkodzenie {i + 1}
+                        </a>
+                        {p.id && <button onClick={() => deleteDriverPhoto(p.id)}
+                          style={{background: "none", border: "none", color: "#d1d5db", fontSize: 14, cursor: "pointer", padding: "4px"}}>✕</button>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <label style={{display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  padding: "10px", borderRadius: 10, border: "1px dashed #fecaca", background: "#fff",
+                  color: "#9ca3af", fontSize: 13, fontWeight: 500, cursor: "pointer"}}>
+                  📷 {towarDmgPhotos.length > 0 ? "Dodaj kolejne zdjęcie uszkodzenia" : "Dodaj zdjęcia uszkodzenia"}
+                  <input type="file" accept="image/*" multiple className="hidden"
+                    onChange={async (e) => {
+                      const files = Array.from(e.target.files || []);
+                      for (const file of files) { await uploadDriverPhoto("towar_damage", file); }
+                      e.target.value = "";
+                    }} />
+                </label>
+              </div>
+            )}
+          </div>); })()}
+
+          {/* ═══ KAFELEK 3: ROZŁADUNEK 2 (tylko dla multi-stop hasR2) ═══ */}
+          {hasR2 && (() => {
+            const r2Delay = calcDelay(f.dataRozladunku2, f.godzRozladunku2, dotarcieR2Event?.value || dotarcieR2Event?.ts);
+            const r2Enabled = hasDotarcieRoz; // R2 odblokowane gdy R1 dotarcie zrobione
+            return (
+          <div style={{background: "#fff", borderRadius: 16, border: `2px solid ${r2Enabled ? "#a7f3d0" : "#e5e7eb"}`, padding: 16, opacity: r2Enabled ? 1 : 0.4, marginTop: 16}}>
+            <div className="flex items-center justify-between" style={{marginBottom: 8}}>
+              <div style={{fontSize: 13, fontWeight: 700, color: "#059669"}}>📦 ROZŁADUNEK 2</div>
+              <span style={{fontSize: 11, color: "#9ca3af"}}>{fmtDate(f.dataRozladunku2)}{f.godzRozladunku2 ? ` · ${f.godzRozladunku2}` : ""}</span>
+            </div>
+            {(f.rozladunekAdres2 || f.dokod2) && (
+              <div style={{fontSize: 12, color: "#6b7280", marginBottom: 8, paddingLeft: 2}}>{f.rozladunekAdres2 || f.dokod2}</div>
+            )}
+            {hasDotarcieR2 && r2Delay && (
+              <div style={{marginBottom: 10}}>{renderDelayBadge(r2Delay)}</div>
+            )}
+
+            {/* 1. Dotarcie na rozładunek 2 */}
+            {renderStatusStep(hasDotarcieR2, "Dotarcie na rozładunek 2", dotarcieR2Event, r2Enabled, () => updateFrachtStatus(f, "dotarcie_rozladunek", new Date().toISOString(), 2), () => undoFrachtStatus(f, "dotarcie_rozladunek", 2))}
+
+            {/* 1b. Stan licznika — koniec trasy (na ostatnim stopie) */}
+            {hasDotarcieR2 && (
+              <div style={{padding: 12, borderRadius: 12, marginBottom: 8, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
+                <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 4}}>🔢 Stan licznika — koniec trasy</div>
+                <div style={{fontSize: 11, color: "#9ca3af", marginBottom: 8}}>
+                  {f.kmEnd ? "📡 Odczyt z CAN — skoryguj jeśli nieprawidłowy" : "⚠️ Auto nie zapisało — wpisz ręcznie"}
+                  {f.kmStart && f.kmEnd && Number(f.kmEnd) > Number(f.kmStart) && (
+                    <span style={{color: "#15803d", fontWeight: 600}}> · Trasa: {Number(f.kmEnd) - Number(f.kmStart)} km</span>
+                  )}
+                </div>
+                <input
+                  type="number"
+                  step="1"
+                  defaultValue={f.kmEnd || ""}
+                  placeholder="np. 234789"
+                  onBlur={(e) => { if (e.target.value) saveManualKm(f, "kmEnd", e.target.value); }}
+                  style={{width: "100%", fontSize: 16, padding: "10px 12px", borderRadius: 10,
+                    border: "1px solid #e5e7eb", background: "#fff", fontFamily: "inherit", boxSizing: "border-box"}} />
+              </div>
+            )}
+
+            {/* 2. CMR rozładunek 2 */}
+            {hasDotarcieR2 && (
+              <div style={{padding: 12, borderRadius: 12, marginBottom: 8, background: hasCmrR2 ? "#f0fdf4" : "#f8fafc", border: `1px solid ${hasCmrR2 ? "#bbf7d0" : "#e5e7eb"}`}}>
+                <div style={{fontSize: 13, fontWeight: 600, color: hasCmrR2 ? "#15803d" : "#374151", marginBottom: 8}}>
+                  {hasCmrR2 ? "✅" : "📄"} CMR rozładunek 2 {cmrR2Photos.length > 1 && <span style={{fontSize: 11, color: "#6b7280", fontWeight: 400}}>({cmrR2Photos.length})</span>}
+                </div>
+                {cmrR2Photos.length > 0 && (
+                  <div style={{display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8}}>
+                    {cmrR2Photos.map((p, i) => (
+                      <div key={p.id || i} style={{display: "flex", alignItems: "center", gap: 2}}>
+                        <a href={p.photoUrl} target="_blank" rel="noopener noreferrer"
+                          style={{display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8,
+                            background: "#eef2ff", border: "1px solid #c7d2fe", fontSize: 12, color: "#4338ca",
+                            fontWeight: 500, textDecoration: "none"}}>
+                          📄 CMR {i + 1} · {p.ts ? new Date(p.ts).toLocaleString("pl-PL", {hour:"2-digit",minute:"2-digit"}) : ""}
+                        </a>
+                        {p.id && <button onClick={() => deleteDriverPhoto(p.id)}
+                          style={{background: "none", border: "none", color: "#d1d5db", fontSize: 14, cursor: "pointer", padding: "4px"}}>✕</button>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <label style={{display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  padding: "10px", borderRadius: 10, border: "1px dashed #d1d5db", background: "#fff",
+                  color: "#6b7280", fontSize: 13, fontWeight: 500, cursor: "pointer"}}>
+                  📷 {cmrR2Photos.length > 0 ? "Dodaj kolejne CMR" : "Dodaj CMR rozładunek 2"}
+                  <input type="file" accept="image/*" multiple className="hidden"
+                    onChange={async (e) => {
+                      const files = Array.from(e.target.files || []);
+                      for (const file of files) { await uploadDriverPhoto("cmr_rozladunek", file, 2); }
+                      e.target.value = "";
+                    }} />
+                </label>
+              </div>
+            )}
+
+            {/* 3. Uwagi kierowcy — rozładunek 2 */}
+            {hasDotarcieR2 && (
+              <div style={{padding: 12, borderRadius: 12, marginBottom: 8, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
+                <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6}}>📝 Uwagi — rozładunek 2</div>
+                <textarea
+                  defaultValue={uwagiR2Event?.note || ""}
+                  placeholder="Wpisz uwagi z rozładunku 2..."
+                  onBlur={(e) => { if (e.target.value !== (uwagiR2Event?.note || "")) saveDriverNote(f, "uwagi_rozladunek", e.target.value, 2); }}
+                  style={{width: "100%", fontSize: 14, padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e7eb",
+                    background: "#fff", resize: "vertical", minHeight: 60, fontFamily: "inherit"}} />
+                {uwagiR2Event?.ts && <div style={{fontSize: 11, color: "#9ca3af", marginTop: 4}}>
+                  Zapisane: {new Date(uwagiR2Event.ts).toLocaleString("pl-PL", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
+                </div>}
+              </div>
+            )}
+
+            {/* 4. Zdjęcie uszkodzonego towaru (na ostatnim stopie = R2) */}
+            {hasDotarcieR2 && (
               <div style={{padding: 12, borderRadius: 12, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
                 <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 4}}>📸 Zdjęcie uszkodzeń <span style={{fontSize: 11, color: "#9ca3af", fontWeight: 400}}>(opcjonalne)</span></div>
                 {towarDmgPhotos.length > 0 && (
