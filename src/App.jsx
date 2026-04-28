@@ -3911,9 +3911,15 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                         .filter(r => r.dataZaladunku && r.dataZaladunku > todayISO)
                         .sort((a,b) => a.dataZaladunku.localeCompare(b.dataZaladunku))[0] || null;
 
-                      // Ostatni rozładowany (rozł < dziś) — do wyliczenia dni postoju
+                      // Ostatni rozładowany — do wyliczenia dni postoju.
+                      // Uwzględniamy też frachty rozładowane DZIŚ (date <= today), pod warunkiem
+                      // że są faktycznie zamknięte (computeFrachtStatus = rozladowano).
+                      // Bez tego: fracht zakończony dziś nie kwalifikuje → fallback do starszego
+                      // frachtu sprzed N dni → home tile pokazywał "Czeka na zlecenie · 14d"
+                      // zaraz po skończonej trasie.
                       const lastDoneF = vFrachty
-                        .filter(r => r.dataRozladunku && r.dataRozladunku < todayISO)
+                        .filter(r => r.dataRozladunku && r.dataRozladunku <= todayISO &&
+                                     isFrachtRozladowany(r, eventsByFrachtApp[r.id] || []))
                         .sort((a,b) => (b.dataRozladunku||"").localeCompare(a.dataRozladunku||""))[0] || null;
 
                       // Aktywna pauza dla tego pojazdu (z kolekcji pauzy)
