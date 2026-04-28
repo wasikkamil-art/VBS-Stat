@@ -1267,6 +1267,57 @@ function fmtTimeShort(ms) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// STATUS FRACHTU — single source of truth
+// ═══════════════════════════════════════════════════════════════════════════════
+// Hierarchia priorytetów (od najwyższego):
+//   1. `f.statusRozladunkuManual` (NEW po refactorze 2026-04-28) — admin świadomie
+//      nadpisał (np. "problem", "rozladowano" force-close, "w_trasie" cofnięcie).
+//   2. Compute z eventów: najnowszy `rozladowano` lub `cofnij_rozladowano` — driver
+//      źródłem prawdy dla statusu rozładunku.
+//   3. `f.statusRozladunku` LEGACY field (przed refactorem) — backward compat tylko
+//      gdy NIE MA żadnych eventów (stare frachty bez ani jednego klika kierowcy).
+//   4. Default: "w_trasie".
+//
+// CO ROZWIĄZUJE: race condition desync — przed refactorem driver pisał event
+// `rozladowano` ORAZ propagował status do `statusRozladunku`. Gdy admin patrzył
+// w tym samym czasie, jego React state mógł nadpisać status na default. Skutek:
+// fracht 2454/2026 (28.04.2026) — kierowca skończył trasę o 12:16, event w
+// Firestore istniał, ale dropdown w admin tabeli nadal pokazywał "→ W trasie".
+//
+// JAK UŻYWAĆ:
+//   const status = computeFrachtStatus(fracht, eventsByFracht[fracht.id]);
+//   if (computeFrachtStatus(f, evts) === "rozladowano") { ... }
+// W kontekstach gdzie events nie są dostępne (rzadkie, głównie modal helpers):
+//   const status = computeFrachtStatus(fracht);  // używa tylko legacy field
+function computeFrachtStatus(fracht, eventsForFracht = []) {
+  if (!fracht) return "w_trasie";
+  // 1. Manual override admina — wygrywa wszystko
+  if (fracht.statusRozladunkuManual) return fracht.statusRozladunkuManual;
+  // 2. Compute z driverEvents — najnowszy rozladowano vs cofnij_rozladowano
+  // (events biją legacy field żeby cofnij na starym fracht działał poprawnie)
+  if (Array.isArray(eventsForFracht) && eventsForFracht.length > 0) {
+    const rozEvents = eventsForFracht
+      .filter(e => e && (e.type === "rozladowano" || e.type === "cofnij_rozladowano"))
+      .sort((a, b) => (b.ts || "").localeCompare(a.ts || ""));
+    if (rozEvents.length > 0) {
+      // Mamy event rozladunku — events są źródłem prawdy, ignoruj legacy field
+      return rozEvents[0].type === "rozladowano" ? "rozladowano" : "w_trasie";
+    }
+  }
+  // 3. Legacy field — backward compat tylko gdy brak eventów
+  if (fracht.statusRozladunku === "rozladowano" || fracht.statusRozladunku === "problem") {
+    return fracht.statusRozladunku;
+  }
+  // 4. Default
+  return "w_trasie";
+}
+
+// Shortcut boolean — "czy rozładowany?". Używaj w filtrach gdzie potrzebny tylko bool.
+function isFrachtRozladowany(fracht, eventsForFracht = []) {
+  return computeFrachtStatus(fracht, eventsForFracht) === "rozladowano";
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -2505,6 +2556,18 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     }, (err) => console.error("driverEvents onSnapshot error", err));
     return () => unsub();
   }, []);
+
+  // Index events by frachtId — używane przez computeFrachtStatus (single source of truth).
+  // Memoizowane na poziomie App (jeden raz na cały tree).
+  const eventsByFrachtApp = useMemo(() => {
+    const map = {};
+    driverEvents.forEach(ev => {
+      if (!ev?.frachtId) return;
+      if (!map[ev.frachtId]) map[ev.frachtId] = [];
+      map[ev.frachtId].push(ev);
+    });
+    return map;
+  }, [driverEvents]);
 
   // ── FUEL ENTRIES — tankowania od kierowców ──
   useEffect(() => {
@@ -3836,7 +3899,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                       // Szukaj aktywnego frachtu (zał <= dziś <= rozł, nie rozładowany)
                       const activeF = vFrachty.find(r => {
                         if (!r.dataZaladunku || !r.dataRozladunku) return false;
-                        if (r.statusRozladunku === "rozladowano") return false;
+                        if (isFrachtRozladowany(r, eventsByFrachtApp[r.id] || [])) return false;
                         return r.dataZaladunku <= todayISO && todayISO <= r.dataRozladunku;
                       });
 
@@ -3918,7 +3981,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                       // Aktywny fracht do wyświetlenia na karcie
                       // Dla trasy: pokaż OSTATNI rozładunek w ciągu (nie pierwszy aktywny)
                       const pendingFF = vFrachty
-                        .filter(r => r.statusRozladunku !== "rozladowano" && r.dataRozladunku && r.dataRozladunku >= todayISO)
+                        .filter(r => !isFrachtRozladowany(r, eventsByFrachtApp[r.id] || []) && r.dataRozladunku && r.dataRozladunku >= todayISO)
                         .sort((a, b) => (b.dataRozladunku || "").localeCompare(a.dataRozladunku || ""));
                       const displayF = pendingFF[0] || activeF || nextF || lastF;
 
@@ -7646,6 +7709,7 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
                     allDevices={gpsDevices}
                     frachtyList={frachtyList}
                     vehicles={vehicles}
+                    driverEvents={driverEvents}
                     selectedFracht={selectedFracht}
                   />
                   <VehicleOrdersSection
@@ -7704,6 +7768,18 @@ function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fu
     .filter(f => f.vehicleId === vehicle.id)
     .sort((a, b) => (b.dataZaladunku || "").localeCompare(a.dataZaladunku || ""));
 
+  // Index events per frachtId — używane przez computeFrachtStatus (single source of truth).
+  const eventsByFracht = useMemo(() => {
+    const map = {};
+    driverEvents.forEach(ev => {
+      if (!ev?.frachtId) return;
+      if (!map[ev.frachtId]) map[ev.frachtId] = [];
+      map[ev.frachtId].push(ev);
+    });
+    return map;
+  }, [driverEvents]);
+  const evtsFor = (f) => eventsByFracht[f?.id] || [];
+
   // Dostepne miesiace (YYYY-MM) — z dat zaladunku, malejaco
   const availableMonths = useMemo(() => {
     const set = new Set();
@@ -7734,8 +7810,8 @@ function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fu
     : orders.filter(f => (f.dataZaladunku || "").slice(0, 7) === effectiveMonth);
 
   const filtered = ordersInMonth.filter(f => {
-    if (filter === "active") return f.statusRozladunku !== "rozladowano";
-    if (filter === "done") return f.statusRozladunku === "rozladowano";
+    if (filter === "active") return !isFrachtRozladowany(f, evtsFor(f));
+    if (filter === "done") return isFrachtRozladowany(f, evtsFor(f));
     return true;
   });
 
@@ -7749,8 +7825,9 @@ function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fu
   };
 
   const statusInfo = (f) => {
-    if (f.statusRozladunku === "rozladowano") return { bg: "#f0fdf4", color: "#166534", label: "Rozładowano", icon: "✅" };
-    if (f.statusRozladunku === "problem") return { bg: "#fef2f2", color: "#991b1b", label: "Problem", icon: "⚠️" };
+    const computed = computeFrachtStatus(f, evtsFor(f));
+    if (computed === "rozladowano") return { bg: "#f0fdf4", color: "#166534", label: "Rozładowano", icon: "✅" };
+    if (computed === "problem") return { bg: "#fef2f2", color: "#991b1b", label: "Problem", icon: "⚠️" };
     if (f.dataZaladunku && f.dataZaladunku <= todayStr && (!f.dataRozladunku || f.dataRozladunku >= todayStr)) {
       return { bg: "#eff6ff", color: "#1d4ed8", label: "W trasie", icon: "🚛" };
     }
@@ -7760,7 +7837,7 @@ function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fu
 
   // Kolor oceny ogólnej dla rozładowanych
   const ocenaPill = (f) => {
-    if (f.statusRozladunku !== "rozladowano") return null;
+    if (!isFrachtRozladowany(f, evtsFor(f))) return null;
     const stats = computeTripStats(f, vehicle, driverEvents, fuelEntries);
     if (!stats) return null;
     const palette = {
@@ -7802,8 +7879,8 @@ function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fu
           <div className="flex gap-1 bg-gray-50 rounded-xl p-1">
             {[
               { id: "all", label: "Wszystkie", count: ordersInMonth.length },
-              { id: "active", label: "Aktywne", count: ordersInMonth.filter(f => f.statusRozladunku !== "rozladowano").length },
-              { id: "done", label: "Zakończone", count: ordersInMonth.filter(f => f.statusRozladunku === "rozladowano").length },
+              { id: "active", label: "Aktywne", count: ordersInMonth.filter(f => !isFrachtRozladowany(f, evtsFor(f))).length },
+              { id: "done", label: "Zakończone", count: ordersInMonth.filter(f => isFrachtRozladowany(f, evtsFor(f))).length },
             ].map(b => (
               <button key={b.id} onClick={() => setFilter(b.id)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${filter === b.id ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"}`}>
@@ -7926,7 +8003,7 @@ function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fu
                   )}
 
                   {/* Trip Summary (jeśli rozładowano) */}
-                  {f.statusRozladunku === "rozladowano" && (
+                  {isFrachtRozladowany(f, evtsFor(f)) ? (
                     <TripSummaryPanel
                       fracht={f}
                       vehicle={vehicle}
@@ -7934,8 +8011,7 @@ function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fu
                       fuelEntries={fuelEntries}
                       variant="full"
                     />
-                  )}
-                  {f.statusRozladunku !== "rozladowano" && (
+                  ) : (
                     <div style={{ fontSize: 11, color: "#9ca3af", fontStyle: "italic", textAlign: "center", padding: 8 }}>
                       Podsumowanie trasy pojawi się po rozładunku
                     </div>
@@ -8046,7 +8122,17 @@ async function mapMatchRoute(points) {
   return null;
 }
 
-function GpsMapSection({ device, position, allPositions, allDevices, frachtyList = [], vehicles = [], selectedFracht = null }) {
+function GpsMapSection({ device, position, allPositions, allDevices, frachtyList = [], vehicles = [], driverEvents = [], selectedFracht = null }) {
+  // Index events per frachtId — używane przez computeFrachtStatus (single source of truth).
+  const eventsByFracht = useMemo(() => {
+    const map = {};
+    driverEvents.forEach(ev => {
+      if (!ev?.frachtId) return;
+      if (!map[ev.frachtId]) map[ev.frachtId] = [];
+      map[ev.frachtId].push(ev);
+    });
+    return map;
+  }, [driverEvents]);
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markersRef = useRef([]);
@@ -8207,7 +8293,7 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
       targetFracht = selectedFracht;
     } else {
       targetFracht = frachtyList
-        .filter(f => f.vehicleId === fleetVeh.id && f.statusRozladunku !== "rozladowano")
+        .filter(f => f.vehicleId === fleetVeh.id && !isFrachtRozladowany(f, eventsByFracht[f.id] || []))
         .sort((a, b) => (b.dataZaladunku || b.dataZlecenia || "").localeCompare(a.dataZaladunku || a.dataZlecenia || ""))
         .find(f => {
           const hasLoad = f.zaladunekGeo || f.zaladunekKod || f.zaladunekAdres;
@@ -8223,7 +8309,7 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
       return;
     }
 
-    const isDone = targetFracht.statusRozladunku === "rozladowano";
+    const isDone = isFrachtRozladowany(targetFracht, eventsByFracht[targetFracht.id] || []);
     const routeKey = `${targetFracht.id}_${isDone ? "real" : "planned"}`;
     // Jeśli klucz trasy się nie zmienił — nie przeliczaj
     if (lastRouteKeyRef.current === routeKey) return;
@@ -8483,7 +8569,7 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
     };
 
     buildRoute();
-  }, [device, frachtyList, selectedFracht?.id]);
+  }, [device, frachtyList, selectedFracht?.id, eventsByFracht]);
 
   // Cleanup map on unmount
   useEffect(() => {
@@ -8574,7 +8660,7 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
         <div className="flex items-center gap-2 px-5 py-2 bg-blue-50 border-t border-blue-100">
           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
           <span className="text-xs text-blue-600">
-            {selectedFracht?.statusRozladunku === "rozladowano" ? "Pobieranie rzeczywistej trasy z Atlas..." : "Wyznaczanie trasy zlecenia..."}
+            {selectedFracht && isFrachtRozladowany(selectedFracht, eventsByFracht[selectedFracht.id] || []) ? "Pobieranie rzeczywistej trasy z Atlas..." : "Wyznaczanie trasy zlecenia..."}
           </span>
         </div>
       )}
@@ -10928,14 +11014,10 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
   const todayStr = new Date().toISOString().slice(0, 10);
   const today = new Date();
 
-  // Helper: czy fracht jest rozładowany (status na fracht LUB driverEvent bez nowszego cofnięcia)
-  const isFrachtRozladowano = (f) => {
-    if (f.statusRozladunku === "rozladowano") return true;
-    const evts = driverEvents.filter(e => e.frachtId === f.id);
-    const rozEv = evts.filter(e => e.type === "rozladowano").sort((a,b) => (b.ts||"").localeCompare(a.ts||""))[0];
-    const undoEv = evts.filter(e => e.type === "cofnij_rozladowano").sort((a,b) => (b.ts||"").localeCompare(a.ts||""))[0];
-    return !!rozEv && (!undoEv || rozEv.ts > undoEv.ts);
-  };
+  // Helper: czy fracht jest rozładowany — delegujemy do global computeFrachtStatus
+  // (po refactorze 2026-04-28). Lokalny helper zostaje dla wstecznej kompatybilności
+  // z istniejącymi call sites poniżej.
+  const isFrachtRozladowano = (f) => isFrachtRozladowany(f, driverEvents.filter(e => e.frachtId === f.id));
 
   // Auto-archive: fracht starszy niż 7 dni bez dataRozladunku/statusu traktuj jak zamknięty
   // (zabezpieczenie przed legacy frachtami które nigdy nie zostały oznaczone jako rozładowane)
@@ -11075,18 +11157,13 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
       if (r != null) eventData.r = r;
       await addDoc(collection(db, "driverEvents"), eventData);
       logAction(field, "driverEvents", { frachtId: fracht.id, vehicleId: vehicle?.id });
-      // Propaguj status na fracht — żeby admin+home tile+filtry widziały poprawnie.
-      // Frachty nie sa w osobnej kolekcji, tylko w tablicy fleet/data.fleetv2_frachty —
-      // updateDoc(db, "frachty", id) by pisalo do nieistniejacego dokumentu. Zamiast tego
-      // przekazujemy update do parent komponentu przez onUpdateFracht, ktory updaje
-      // React state setFrachtyList → useEffect persistuje cala tablice do fleet/data.
-      const frachtStatusMap = {
-        rozladowano: "rozladowano",
-        cofnij_rozladowano: "", // cofnij czyści status
-      };
-      if (field in frachtStatusMap) {
-        onUpdateFracht(fracht.id, { statusRozladunku: frachtStatusMap[field] });
-      }
+      // PO REFACTORZE 2026-04-28: NIE propagujemy już statusu do `statusRozladunku`.
+      // Status jest computed z driverEvents (single source of truth) przez helper
+      // `computeFrachtStatus`. Driver tworzy event `rozladowano` lub `cofnij_rozladowano`,
+      // a admin/home tile/filtry odczytują computed status. To eliminuje race condition
+      // który był przyczyną buga 2026-04-28 (fracht 2454/2026 — kierowca skończył trasę,
+      // event istniał w Firestore, ale dropdown w admin tabeli nadal pokazywał W trasie
+      // bo propagacja była nadpisywana przez stale React state w admin panelu).
       const toastMap = {
         zaladowano: "✅ Załadunek potwierdzony",
         rozladowano: "✅ Rozładunek potwierdzony",
@@ -11287,7 +11364,7 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     const dotarcieR2Undo = hasR2 ? myEvents.filter(e => e.type === "cofnij_dotarcie_rozladunek" && e.r === 2).pop() : null;
     // Cofnięcie anuluje jeśli nowsze
     const hasZal = (!!zalEvent && (!zalUndo || zalEvent.ts > zalUndo.ts)) || !!f._driverZaladowano;
-    const hasRoz = (!!rozEvent && (!rozUndo || rozEvent.ts > rozUndo.ts)) || f.statusRozladunku === "rozladowano";
+    const hasRoz = isFrachtRozladowany(f, myEvents);
     const hasDotarcieZal = !!dotarcieZalEvent && (!dotarcieZalUndo || dotarcieZalEvent.ts > dotarcieZalUndo.ts);
     const hasStartRoz = !!startRozEvent && (!startRozUndo || startRozEvent.ts > startRozUndo.ts);
     const hasDotarcieRoz = !!dotarcieRozEvent && (!dotarcieRozUndo || dotarcieRozEvent.ts > dotarcieRozUndo.ts);
@@ -11908,10 +11985,10 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
 
   const renderFrachtCard = (f) => {
     const kody = formatKody(f);
-    const isDone = f.statusRozladunku === "rozladowano" || (f.dataRozladunku && f.dataRozladunku < todayStr);
     const myEvts = driverEvents.filter(ev => ev.frachtId === f.id);
+    const isDone = isFrachtRozladowany(f, myEvts) || (f.dataRozladunku && f.dataRozladunku < todayStr);
     const hasZal = myEvts.some(e => e.type === "zaladowano") || f._driverZaladowano;
-    const hasRoz = myEvts.some(e => e.type === "rozladowano") || isDone;
+    const hasRoz = isDone;
     return (
       <div key={f.id} onClick={() => setSelectedFracht(f)}
         style={{ background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", overflow: "hidden", cursor: "pointer", marginBottom: 8 }}>
@@ -19653,11 +19730,11 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
 
 
 // ─── KOMENTARZ BANER ─────────────────────────────────────────────────────────
-function KomentarzBaner({ frachtyList, vehicleId, onUpdate }) {
+function KomentarzBaner({ frachtyList, eventsByFracht = {}, vehicleId, onUpdate }) {
   const [open, setOpen] = useState(false);
   const doRemind = frachtyList.filter(r =>
     r.vehicleId === vehicleId &&
-    r.statusRozladunku === "rozladowano" &&
+    isFrachtRozladowany(r, eventsByFracht[r.id] || []) &&
     !r.komentarzKlienta
   );
 
@@ -19989,6 +20066,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                 </div>
                 <KomentarzBaner
                   frachtyList={frachtyList}
+                  eventsByFracht={eventsByFracht}
                   vehicleId={v.id}
                   onUpdate={onUpdate}
                 />
@@ -20048,7 +20126,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
         {rows.length === 0 && <div className="text-center py-8 text-gray-400 text-sm">Brak frachtów w tym miesiącu</div>}
         {rows.map((r, idx) => {
           const eurKmLad = (r.kmWszystkie||r.kmLadowne) && r.cenaEur ? (parseFloat(r.cenaEur)/(parseInt(r.kmWszystkie)||parseInt(r.kmLadowne))).toFixed(2) : null;
-          const stRozl = r.statusRozladunku || "w_trasie";
+          const stRozl = computeFrachtStatus(r, eventsByFracht[r.id] || []);
           const stColors = { rozladowano: ["#f0fdf4","#166534","✅"], w_trasie: ["#f0f9ff","#0369a1","→"], problem: ["#fef2f2","#991b1b","⚠️"] };
           const [stBg, stColor, stEmoji] = stColors[stRozl] || stColors.w_trasie;
           return (
@@ -20120,21 +20198,22 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                   <td className="px-1.5 py-1.5 whitespace-nowrap" style={{maxWidth:120,overflow:"hidden",textOverflow:"ellipsis"}}>{[r.dokod,r.dokod2,r.dokod3].filter(s=>s&&s.trim()).join(" / ")||"-"}</td>
                   <td className="px-2 py-2 whitespace-nowrap">
                     {(() => {
-                      const s = r.statusRozladunku || "w_trasie";
+                      const evts = eventsByFracht[r.id] || [];
+                      // Computed status (events > legacy field > manual override)
+                      const s = computeFrachtStatus(r, evts);
                       const cfg = {
                         rozladowano: { emoji:"✅", label:"Rozładowano", bg:"#f0fdf4", color:"#166534" },
                         w_trasie:    { emoji:"→", label:"W trasie",    bg:"#f0f9ff", color:"#0369a1" },
                         problem:     { emoji:"⚠️", label:"Problem",     bg:"#fef2f2", color:"#991b1b" },
                       };
                       const c = cfg[s] || cfg.w_trasie;
-                      const evts = eventsByFracht[r.id] || [];
                       const hasZal = evts.some(e => e.type === "zaladowano");
                       const hasRoz = evts.some(e => e.type === "rozladowano");
                       return (
                         <div className="flex items-center gap-1">
                           <select
                             value={s}
-                            onChange={e => onUpdate(r.id, { statusRozladunku: e.target.value })}
+                            onChange={e => onUpdate(r.id, { statusRozladunkuManual: e.target.value })}
                             onClick={ev => ev.stopPropagation()}
                             className="text-xs font-semibold rounded-lg px-2 py-1 cursor-pointer outline-none border-0"
                             style={{ background: c.bg, color: c.color, minWidth: 118 }}
@@ -20442,7 +20521,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                             );
                           })()}
                           {/* ── Trip Summary (tylko zakończone) ── */}
-                          {r.statusRozladunku === "rozladowano" && (
+                          {isFrachtRozladowany(r, eventsByFracht[r.id] || []) && (
                             <TripSummaryPanel
                               fracht={r}
                               vehicle={vehicles.find(v => v.id === r.vehicleId)}
@@ -21653,7 +21732,7 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
           </div>
 
           {/* PODSUMOWANIE TRASY */}
-          {record?.statusRozladunku === "rozladowano" && (() => {
+          {record && isFrachtRozladowany(record, driverEvents.filter(e => e.frachtId === record.id)) && (() => {
             const vehForSummary = vehicles.find(vv => vv.id === (record.vehicleId || f.vehicleId));
             return <TripSummaryPanel fracht={record} vehicle={vehForSummary} driverEvents={driverEvents} fuelEntries={fuelEntries} variant="full" />;
           })()}
