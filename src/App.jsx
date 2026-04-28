@@ -8045,6 +8045,27 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
     });
     return map;
   }, [driverEvents]);
+
+  // Stale fracht detection — fracht starszy niż 7 dni bez explicit zamknięcia traktujemy
+  // jak porzucony/zakończony (legacy/test data nigdy nie oznaczone jako rozladowano).
+  // Bez tego filtra GpsMapSection wybierał archiwalne frachty do narysowania trasy
+  // (case 2026-04-28: pokazywał trasę z lutego 2025 dla WGM 0475M bo żaden nowszy aktywny
+  // nie miał geo, a stary 2025-02 nigdy nie został oznaczony jako rozladowano).
+  const STALE_DAYS = 7;
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const staleThreshold = new Date(Date.now() - STALE_DAYS * 86400000).toISOString().slice(0, 10);
+  const isStaleUnfinished = (f) => {
+    if (!f.dataZaladunku) return false;
+    if (f.dataZaladunku >= staleThreshold) return false; // młody fracht — nie archiwizuj
+    if (!f.dataRozladunku) return true;
+    if (f.dataRozladunku < todayStr) return true;
+    return false;
+  };
+
+  // Toggle "Pokaż ostatnią zakończoną trasę" — gdy brak aktywnego frachtu, admin może
+  // jednym klikiem zobaczyć ostatnią rzeczywistą trasę (Atlas /history) zamiast pustej mapy.
+  const [showLastDoneRoute, setShowLastDoneRoute] = useState(false);
+
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markersRef = useRef([]);
@@ -8199,19 +8220,36 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
       return;
     }
 
-    // Wybierz fracht: (1) wybrany ręcznie z listy, (2) aktywny (domyślnie)
+    // Wybierz fracht do narysowania trasy. Priorytet:
+    // 1. Wybrany ręcznie z listy frachtów (selectedFracht prop) — admin klika fracht
+    // 2. Toggle "Pokaż ostatnią zakończoną trasę" (showLastDoneRoute) — najnowszy
+    //    rozladowano fracht z geo (Atlas /history pokaże rzeczywistą trasę)
+    // 3. Domyślny — najnowszy AKTYWNY fracht (nie rozladowano, nie stale, ma geo)
+    const hasGeo = (f) => {
+      const hasLoad = f.zaladunekGeo || f.zaladunekKod || f.zaladunekAdres;
+      const hasUnload = f.rozladunekGeo || f.dokod || f.rozladunekAdres;
+      return hasLoad && hasUnload;
+    };
+    const sortedDescByDate = (arr) => arr
+      .sort((a, b) => (b.dataZaladunku || b.dataZlecenia || "").localeCompare(a.dataZaladunku || a.dataZlecenia || ""));
+
     let targetFracht = null;
     if (selectedFracht && selectedFracht.vehicleId === fleetVeh.id) {
       targetFracht = selectedFracht;
+    } else if (showLastDoneRoute) {
+      // Toggle: pokaż ostatni rozładowany fracht (Atlas pokaże rzeczywistą trasę)
+      targetFracht = sortedDescByDate(
+        frachtyList.filter(f => f.vehicleId === fleetVeh.id && isFrachtRozladowany(f, eventsByFracht[f.id] || []))
+      ).find(hasGeo);
     } else {
-      targetFracht = frachtyList
-        .filter(f => f.vehicleId === fleetVeh.id && !isFrachtRozladowany(f, eventsByFracht[f.id] || []))
-        .sort((a, b) => (b.dataZaladunku || b.dataZlecenia || "").localeCompare(a.dataZaladunku || a.dataZlecenia || ""))
-        .find(f => {
-          const hasLoad = f.zaladunekGeo || f.zaladunekKod || f.zaladunekAdres;
-          const hasUnload = f.rozladunekGeo || f.dokod || f.rozladunekAdres;
-          return hasLoad && hasUnload;
-        });
+      // Domyślnie: aktywny fracht (nie rozladowano, nie stale, ma geo)
+      targetFracht = sortedDescByDate(
+        frachtyList.filter(f =>
+          f.vehicleId === fleetVeh.id &&
+          !isFrachtRozladowany(f, eventsByFracht[f.id] || []) &&
+          !isStaleUnfinished(f)
+        )
+      ).find(hasGeo);
     }
 
     if (!targetFracht) {
@@ -8481,7 +8519,7 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
     };
 
     buildRoute();
-  }, [device, frachtyList, selectedFracht?.id, eventsByFracht]);
+  }, [device, frachtyList, selectedFracht?.id, eventsByFracht, showLastDoneRoute]);
 
   // Cleanup map on unmount
   useEffect(() => {
@@ -8603,6 +8641,27 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
           </div>
         );
       })()}
+      {/* Brak aktywnej trasy — pokazujemy tylko gdy nie ma routeInfo ani routeLoading
+          ani selectedFracht. Toggle pozwala na podejrzenie ostatniej zakończonej trasy. */}
+      {!routeInfo && !routeLoading && !selectedFracht && device?.fleetVehicle && (
+        <div style={{ padding: "12px 20px", background: "#fafafa", borderTop: "1px solid #f3f4f6" }}>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <span className="text-xs text-gray-500">
+              {showLastDoneRoute ? "📭 Brak zakończonych tras z danymi GPS dla tego pojazdu." : "📭 Brak aktywnej trasy. Pojazd nie ma obecnie zaplanowanego zlecenia."}
+            </span>
+            <button
+              onClick={() => setShowLastDoneRoute(v => !v)}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all"
+              style={{
+                background: showLastDoneRoute ? "#1d4ed8" : "#fff",
+                color: showLastDoneRoute ? "#fff" : "#1d4ed8",
+                borderColor: "#bfdbfe",
+              }}>
+              {showLastDoneRoute ? "← Wróć do trybu aktywnego" : "🛣️ Pokaż ostatnią zakończoną trasę"}
+            </button>
+          </div>
+        </div>
+      )}
       {/* CAN data bar under map — dane mogą być w position.can.* lub position.* */}
       {position && (() => {
         const can = position.can || {};
