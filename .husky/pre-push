@@ -1,0 +1,9 @@
+#!/usr/bin/env sh
+# Pre-push: pełny build + lint check przed wypchnięciem do remote.
+# Łapie regresje które lint-staged przepuścił (np. import z innego pliku który zniknął).
+# Blokuje broken main → produkcję.
+echo "🔍 Pre-push: lint check..."
+npm run lint || { echo "❌ ESLint errors — naprawić przed push."; exit 1; }
+echo "🔨 Pre-push: build check..."
+npm run build || { echo "❌ Build failed — naprawić przed push."; exit 1; }
+echo "✅ Pre-push checks OK"

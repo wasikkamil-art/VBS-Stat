@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# Pre-commit: ESLint na zmodyfikowanych plikach (lint-staged)
+# Blokuje commit gdy są errory. Warnings przechodzą (debt do stopniowego cleanup).
+npx lint-staged
