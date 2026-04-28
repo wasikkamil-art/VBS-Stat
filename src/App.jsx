@@ -1,6 +1,12 @@
-import { useState, useEffect, useMemo, useRef, Fragment } from "react";
+import { useState, useEffect, useMemo, useRef, Fragment, lazy, Suspense } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, CartesianGrid } from "recharts";
 // v2025.03.31 — YoY Scorecard rebuild
+
+// Helpery formatowania zlecenia (wydzielone z monolitu 2026-04-28, TODO #5c)
+import { parseGeoString, formatOrderForDriverCopy } from "./utils/orderFormatters";
+
+// Lazy-loaded komponenty (code splitting — kierowca/zleceniodawca nie pobierają)
+const CopyOrderPreviewModal = lazy(() => import("./components/CopyOrderPreviewModal"));
 
 // ─── FIREBASE CONFIG ────────────────────────────────────────────────────────
 // 👇 WKLEJ TUTAJ SWÓJ firebaseConfig z Firebase Console
@@ -279,111 +285,8 @@ function fmtPLN(n) { return Number(n).toLocaleString("pl-PL", { minimumFractionD
 function fmtEUR(n) { return Number(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €"; }
 function fmtDate(d) { try { return new Date(d).toLocaleDateString("pl-PL"); } catch { return d; } }
 
-// ─── WHATSAPP — format zlecenia dla kierowcy (filtr widoczności: bez cen/marży) ───
-function parseGeoString(geo) {
-  if (!geo || typeof geo !== "string") return null;
-  const [latStr, lngStr] = geo.split(",").map(s => s.trim());
-  const lat = Number(latStr), lng = Number(lngStr);
-  if (isNaN(lat) || isNaN(lng)) return null;
-  return { lat, lng };
-}
-// Bogaty format zlecenia do skopiowania (Signal, SMS, email — poza WhatsApp który
-// używa templatu Meta). Obsługuje pełne Z1+Z2 + R1-R5 z GPS/telefonami per punkt.
-function formatOrderForDriverCopy(fracht, vehicles = []) {
-  if (!fracht) return "";
-  const fmtD = (d) => d ? d.split("-").reverse().join(".") : "—";
-  const fmtT = (t) => t || "—";
-  const lines = [];
-
-  // Format dla kierowcy — tylko niezbędne info (bez nr zlecenia, klienta, vehicle, zleceniodawcy).
-  // Nazwa firmy doklejana per punkt Z#/R# gdy pole `*Firma*` ustawione.
-
-  // ZAŁADUNEK — Z1 i Z2
-  const zalPunkty = [];
-  const z1full = [fracht.zaladunekAdres, [fracht.zaladunekKodPocztowy, fracht.zaladunekMiasto].filter(Boolean).join(" ")].filter(Boolean).join(", ");
-  if (z1full || fracht.zaladunekKod) zalPunkty.push({
-    idx: "Z1", addr: z1full || fracht.zaladunekKod || "",
-    geo: fracht.zaladunekGeo, tel: fracht.zaladunekTelefon,
-    data: fracht.dataZaladunku, godz: fracht.godzZaladunku,
-    firma: fracht.zaladunekFirma,
-  });
-  const z2full = [fracht.zaladunekAdres2, [fracht.zaladunekKodPocztowy2, fracht.zaladunekMiasto2].filter(Boolean).join(" ")].filter(Boolean).join(", ");
-  if (z2full || fracht.zaladunekKod2) zalPunkty.push({
-    idx: "Z2", addr: z2full || fracht.zaladunekKod2 || "",
-    geo: fracht.zaladunekGeo2, tel: fracht.zaladunekTelefon2,
-    data: fracht.dataZaladunku2, godz: fracht.godzZaladunku2,
-    firma: fracht.zaladunekFirma2,
-  });
-
-  if (zalPunkty.length > 0) {
-    lines.push("📍 ZAŁADUNEK");
-    zalPunkty.forEach(p => {
-      const firmaSuffix = p.firma ? ` — ${p.firma}` : "";
-      lines.push(`🚩 ${p.idx} — ${fmtD(p.data)} ${fmtT(p.godz)}${firmaSuffix}`);
-      if (p.addr) lines.push(`   ${p.addr}`);
-      const g = parseGeoString(p.geo);
-      if (g) lines.push(`   GPS: ${g.lat.toFixed(6)}, ${g.lng.toFixed(6)}`);
-      if (p.tel) lines.push(`   Tel: ${p.tel}`);
-      lines.push("");
-    });
-  }
-
-  // ROZŁADUNEK — R1 do R5
-  const rozPunkty = [];
-  for (let i = 1; i <= 5; i++) {
-    const sfx = i === 1 ? "" : String(i);
-    const kodPocztowy = fracht[`dokodPocztowy${sfx}`];
-    const miasto = fracht[`dokodMiasto${sfx}`];
-    const adres = fracht[`rozladunekAdres${sfx}`];
-    const kodCompat = fracht[`dokod${sfx}`];
-    const full = [adres, [kodPocztowy, miasto].filter(Boolean).join(" ")].filter(Boolean).join(", ");
-    const addr = full || kodCompat || "";
-    if (!addr) continue;
-    rozPunkty.push({
-      idx: `R${i}`, addr,
-      geo: fracht[`rozladunekGeo${sfx}`],
-      tel: fracht[`rozladunekTelefon${sfx}`],
-      data: fracht[`dataRozladunku${sfx}`],
-      godz: fracht[`godzRozladunku${sfx}`],
-      firma: fracht[`rozladunekFirma${sfx}`],
-    });
-  }
-
-  if (rozPunkty.length > 0) {
-    lines.push("📦 ROZŁADUNEK");
-    rozPunkty.forEach(p => {
-      const firmaSuffix = p.firma ? ` — ${p.firma}` : "";
-      lines.push(`📦 ${p.idx} — ${fmtD(p.data)} ${fmtT(p.godz)}${firmaSuffix}`);
-      if (p.addr) lines.push(`   ${p.addr}`);
-      const g = parseGeoString(p.geo);
-      if (g) lines.push(`   GPS: ${g.lat.toFixed(6)}, ${g.lng.toFixed(6)}`);
-      if (p.tel) lines.push(`   Tel: ${p.tel}`);
-      lines.push("");
-    });
-  }
-
-  // TOWAR
-  const towarLines = [];
-  if (fracht.towarIloscPalet || fracht.towarOpis) {
-    towarLines.push([fracht.towarIloscPalet, fracht.towarOpis].filter(Boolean).join(" × ") || fracht.towarOpis || `${fracht.towarIloscPalet} sztuk`);
-  }
-  if (fracht.towarPalety) towarLines.push(`Palety: ${fracht.towarPalety}`);
-  if (fracht.wagaLadunku) towarLines.push(`Waga: ${fracht.wagaLadunku} kg`);
-  if (fracht.zaladunekTyp) towarLines.push(`Załadunek: ${fracht.zaladunekTyp}`);
-  if (towarLines.length) {
-    lines.push("🧰 TOWAR");
-    towarLines.forEach(t => lines.push(`   ${t}`));
-    lines.push("");
-  }
-
-  if (fracht.uwagi) {
-    lines.push("📋 UWAGI");
-    lines.push(`   ${fracht.uwagi}`);
-    lines.push("");
-  }
-
-  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
-}
+// parseGeoString + formatOrderForDriverCopy wydzielone do src/utils/orderFormatters.js
+// (TODO #5c code splitting). Importowane na górze pliku.
 
 function formatOrderForWhatsapp(fracht) {
   if (!fracht) return { body: "", pickup: null, delivery: null };
@@ -21130,69 +21033,8 @@ function GeoPickerModal({ initialGeo, address, onSave, onClose }) {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// CopyOrderPreviewModal — podgląd sformatowanego zlecenia gotowego do przeklejenia
-// (Signal, SMS, email, Telegram — cokolwiek kierowca używa). Obsługuje Z1+Z2 +
-// R1-R5 z GPS per punkt. User może edytować treść przed skopiowaniem.
-// ═══════════════════════════════════════════════════════════════════════════
-function CopyOrderPreviewModal({ fracht, vehicles = [], showToast, onClose }) {
-  const initialText = useMemo(() => formatOrderForDriverCopy(fracht, vehicles), [fracht, vehicles]);
-  const [text, setText] = useState(initialText);
-  const [copied, setCopied] = useState(false);
-  const textareaRef = useRef(null);
-
-  const copyToClipboard = async () => {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        // Fallback dla starszych przeglądarek / niesafe context (HTTP)
-        textareaRef.current?.select();
-        document.execCommand("copy");
-      }
-      setCopied(true);
-      showToast?.("📋 Skopiowano do schowka");
-      setTimeout(() => setCopied(false), 2500);
-    } catch (e) {
-      console.error("Copy failed:", e);
-      showToast?.("Błąd kopiowania — zaznacz tekst ręcznie i kopiuj Ctrl+C");
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 flex items-center justify-center p-4" style={{background: "rgba(0,0,0,0.6)", zIndex: 10000}}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl flex flex-col" style={{maxHeight: "90vh"}}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <h3 className="text-base font-bold text-gray-900">📋 Skopiuj dane zlecenia</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
-        </div>
-        <div className="px-5 pt-3 pb-1 text-[11px] text-gray-500">
-          Sprawdź / edytuj treść przed kopiowaniem. Po skopiowaniu możesz wkleić np. w Signal, SMS, email.
-        </div>
-        <div className="px-5 pb-3 flex-1 overflow-hidden flex flex-col">
-          <textarea ref={textareaRef} value={text} onChange={e => setText(e.target.value)}
-            className="w-full h-80 px-3 py-2 rounded-lg border border-gray-200 text-xs font-mono resize-none"
-            style={{fontFamily: "'DM Mono', Menlo, monospace", whiteSpace: "pre", lineHeight: 1.5}} />
-        </div>
-        <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between gap-3 flex-wrap">
-          <button onClick={() => setText(initialText)}
-            className="px-3 py-2 rounded-lg text-xs font-medium text-gray-500 hover:bg-gray-100">
-            ↺ Przywróć oryginał
-          </button>
-          <div className="flex gap-2">
-            <button onClick={onClose}
-              className="px-4 py-2 rounded-lg text-sm font-medium text-gray-500 hover:bg-gray-100">Zamknij</button>
-            <button onClick={copyToClipboard}
-              className="px-5 py-2 rounded-lg text-sm font-bold text-white flex items-center gap-2"
-              style={{background: copied ? "#16a34a" : "#111827"}}>
-              {copied ? "✅ Skopiowano" : "📋 Kopiuj do schowka"}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+// CopyOrderPreviewModal wydzielone do src/components/CopyOrderPreviewModal.jsx
+// (TODO #5c code splitting). Lazy-loadowane przez `lazy()` na górze pliku.
 
 // ═══════════════════════════════════════════════════════════════════════════
 // WhatsappSendPreviewModal — podgląd treści przed wysłaniem zlecenia
@@ -21823,12 +21665,14 @@ function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], o
       />
     )}
     {showCopyPreview && (
-      <CopyOrderPreviewModal
-        fracht={f}
-        vehicles={vehicles}
-        showToast={showToast}
-        onClose={() => setShowCopyPreview(false)}
-      />
+      <Suspense fallback={<div className="fixed inset-0 flex items-center justify-center" style={{background:"rgba(0,0,0,0.4)", zIndex:10000}}><div className="bg-white rounded-xl px-6 py-4 text-sm text-gray-500">📋 Ładowanie…</div></div>}>
+        <CopyOrderPreviewModal
+          fracht={f}
+          vehicles={vehicles}
+          showToast={showToast}
+          onClose={() => setShowCopyPreview(false)}
+        />
+      </Suspense>
     )}
     {showTrackerModal && record?.id && (
       <SendTrackerLinkModal
