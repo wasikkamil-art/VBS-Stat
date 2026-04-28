@@ -20233,15 +20233,13 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                               (r.dataRozladunku2 && String(r.dataRozladunku2).trim())
                             );
 
-                            // Eventy 'dotarcie_rozladunek' chronologicznie — pierwszy = R1, drugi = R2 (gdy są dwa)
-                            const dotRozEvts = evts.filter(e => e.type === "dotarcie_rozladunek")
-                              .sort((a, b) => {
-                                const ta = a.value || a.ts || "";
-                                const tb = b.value || b.ts || "";
-                                return ta.localeCompare(tb);
-                              });
-                            const dotRoz1Ev = dotRozEvts[0];
-                            const dotRoz2Ev = dotRozEvts[1];
+                            // Eventy 'dotarcie_rozladunek' — preferuj nowe pole `r` (1 lub 2),
+                            // fallback do chronologii dla legacy events (bez `r`).
+                            // dotRoz1Ev: event z r==null lub r===1 (legacy bez r liczy się jako R1).
+                            // dotRoz2Ev: tylko event z r===2 (nowy format po fix multi-stop mobile).
+                            const sortByTs = (a, b) => (a.value || a.ts || "").localeCompare(b.value || b.ts || "");
+                            const dotRoz1Ev = evts.filter(e => e.type === "dotarcie_rozladunek" && (e.r == null || e.r === 1)).sort(sortByTs).pop();
+                            const dotRoz2Ev = hasR2 ? evts.filter(e => e.type === "dotarcie_rozladunek" && e.r === 2).sort(sortByTs).pop() : null;
 
                             const phaseR1Start = dotRoz1Ev ? (dotRoz1Ev.value || dotRoz1Ev.ts) : null;
                             const phaseR2Start = dotRoz2Ev ? (dotRoz2Ev.value || dotRoz2Ev.ts) : null;
@@ -20249,15 +20247,27 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                             const phaseSplitTs = phaseR1Start;
 
                             const otherEvts = evts.filter(e => !["dotarcie_zaladunek","start_rozladunek","dotarcie_rozladunek"].includes(e.type));
-                            const beforeUnload = otherEvts.filter(e => !phaseSplitTs || (e.value || e.ts) < phaseSplitTs);
-                            // Gdy hasR2: dziel afterUnload po phaseR2Start. Bez R2: wszystko jako afterUnload.
+                            // Splitting:
+                            // - Eventy z r===1 lub r===2: idą do underR1/underR2 (explicit). Legacy bez r: chronologia.
+                            // - beforeUnload: tylko legacy events (bez r) sprzed phaseSplitTs.
+                            const beforeUnload = otherEvts.filter(e => e.r == null && (!phaseSplitTs || (e.value || e.ts) < phaseSplitTs));
                             const underR1 = hasR2
-                              ? otherEvts.filter(e => phaseR1Start && (e.value || e.ts) >= phaseR1Start && (!phaseR2Start || (e.value || e.ts) < phaseR2Start))
+                              ? otherEvts.filter(e => {
+                                  if (e.r === 1) return true;
+                                  if (e.r === 2) return false; // explicit R2 nigdy w R1
+                                  // Legacy (no r): chronologia między R1 a R2
+                                  return phaseR1Start && (e.value || e.ts) >= phaseR1Start && (!phaseR2Start || (e.value || e.ts) < phaseR2Start);
+                                })
                               : [];
                             const underR2 = hasR2
-                              ? otherEvts.filter(e => phaseR2Start && (e.value || e.ts) >= phaseR2Start)
+                              ? otherEvts.filter(e => {
+                                  if (e.r === 2) return true;
+                                  if (e.r === 1) return false;
+                                  // Legacy (no r): po phaseR2Start
+                                  return phaseR2Start && (e.value || e.ts) >= phaseR2Start;
+                                })
                               : [];
-                            const afterUnload = hasR2 ? [] : otherEvts.filter(e => phaseSplitTs && (e.value || e.ts) >= phaseSplitTs);
+                            const afterUnload = hasR2 ? [] : otherEvts.filter(e => e.r == null && phaseSplitTs && (e.value || e.ts) >= phaseSplitTs);
 
                             return (
                           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
