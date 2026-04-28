@@ -11812,6 +11812,44 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
             )}
           </div>); })()}
 
+          {/* ═══ ZAKOŃCZ TRASĘ — przycisk Rozładowano (final action kierowcy) ═══ */}
+          {(() => {
+            // Single-stop: dotarcie do R1 wystarczy. Multi-stop: dotarcie do R2 (ostatni stop).
+            const canClose = hasR2 ? hasDotarcieR2 : hasDotarcieRoz;
+            if (!canClose) return null;
+            // Sprawdzenie kompletności CMR (warning gdy brak)
+            const cmrComplete = hasR2 ? (hasCmrRoz && hasCmrR2) : hasCmrRoz;
+            if (hasRoz) {
+              // Już zakończona — pokaż status + przycisk cofnij
+              return (
+                <div style={{marginTop: 16, padding: 14, borderRadius: 12, background: "#f0fdf4", border: "2px solid #bbf7d0", display: "flex", alignItems: "center", justifyContent: "space-between"}}>
+                  <div style={{fontSize: 15, fontWeight: 700, color: "#15803d"}}>✅ Trasa zakończona</div>
+                  <button onClick={() => undoFrachtStatus(f, "rozladowano")}
+                    style={{padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, background: "#fff", color: "#dc2626", border: "1px solid #fecaca", cursor: "pointer"}}>
+                    ↩️ Cofnij
+                  </button>
+                </div>
+              );
+            }
+            return (
+              <button onClick={async () => {
+                const msg = !cmrComplete
+                  ? `⚠️ Brak CMR rozładunku${hasR2 ? " (R1 lub R2)" : ""} — kontynuować zamykanie trasy mimo to?`
+                  : "Zamknąć trasę i oznaczyć jako rozładowane?";
+                if (!window.confirm(msg)) return;
+                await updateFrachtStatus(f, "rozladowano", new Date().toISOString());
+              }} style={{
+                marginTop: 16, width: "100%", padding: 16, borderRadius: 12,
+                fontSize: 16, fontWeight: 700, color: "#fff",
+                background: cmrComplete ? "#15803d" : "#d97706",
+                border: "none", cursor: "pointer", boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+              }}>
+                ✅ Zakończ trasę — Rozładowano
+                {!cmrComplete && <div style={{fontSize: 11, fontWeight: 500, marginTop: 4, opacity: 0.9}}>⚠️ Brak CMR rozładunku</div>}
+              </button>
+            );
+          })()}
+
           {/* ═══ PODSUMOWANIE TRASY (tylko po rozładunku, wariant kierowcy) ═══ */}
           {hasRoz && (
             <TripSummaryPanel
@@ -20141,24 +20179,22 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                   if (isZalActive) evts.push(lastZal);
                   // Zdjęcia towaru — wszystkie (nie cofane)
                   allEvts.filter(e => e.type === "towar_photo").forEach(e => evts.push(e));
-                  // CMR załadunek
-                  const cmrZal = allEvts.find(e => e.type === "cmr_zaladunek_photo");
-                  if (cmrZal) evts.push(cmrZal);
+                  // CMR załadunek — wszystkie zdjęcia (kierowca może dodać kilka)
+                  allEvts.filter(e => e.type === "cmr_zaladunek_photo").forEach(e => evts.push(e));
                   if (isRozActive) evts.push(lastRoz);
-                  // CMR rozładunek
-                  const cmrRoz = allEvts.find(e => e.type === "cmr_rozladunek_photo") || allEvts.find(e => e.type === "cmr_photo");
-                  if (cmrRoz) evts.push(cmrRoz);
-                  // Uwagi kierowcy
+                  // CMR rozładunek — WSZYSTKIE zdjęcia (multi-stop: R1 + R2 + ew. więcej, każde z polem r)
+                  allEvts.filter(e => e.type === "cmr_rozladunek_photo" || e.type === "cmr_photo").forEach(e => evts.push(e));
+                  // Uwagi kierowcy — wszystkie (per R# w multi-stop, każde z polem r)
                   allEvts.filter(e => e.type === "uwagi_zaladunek" || e.type === "uwagi_rozladunek").forEach(e => evts.push(e));
                   // Zdjęcia uszkodzeń
                   allEvts.filter(e => e.type === "towar_damage_photo").forEach(e => evts.push(e));
-                  // Nowe statusy
+                  // Nowe statusy — dotarcie_rozladunek wszystkie (R1 i R2 osobno gdy multi-stop)
                   const dotZal = allEvts.filter(e => e.type === "dotarcie_zaladunek").pop();
                   const startRoz = allEvts.filter(e => e.type === "start_rozladunek").pop();
-                  const dotRoz = allEvts.filter(e => e.type === "dotarcie_rozladunek").pop();
                   if (dotZal) evts.push(dotZal);
                   if (startRoz) evts.push(startRoz);
-                  if (dotRoz) evts.push(dotRoz);
+                  // dotarcie_rozladunek: dla multi-stop są dwa eventy (r=1 i r=2 lub legacy chronologicznie)
+                  allEvts.filter(e => e.type === "dotarcie_rozladunek").forEach(e => evts.push(e));
                   // Sortuj po czasie
                   evts.sort((a,b) => (a.ts||"").localeCompare(b.ts||""));
                   const typeLabels = {
