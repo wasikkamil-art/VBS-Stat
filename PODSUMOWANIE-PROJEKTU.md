@@ -872,6 +872,18 @@ Szczegoly w aplikacji FleetStat.
    - **e) Multi-tenant model** (gdy zbliżamy się do pierwszego klienta zewnętrznego) — kolekcja `tenants`, izolacja danych w `firestore.rules`, branding per tenant, custom domain support.
    - **Realizacja**: iteracyjnie równolegle z feature work (a→b w pierwszej kolejności, potem c→d w spokojnym tempie), NIE jako big-bang refactor. Każda zmiana musi być testowana ręcznie + smoke test po implementacji.
    - **Operating principle**: każdy substantial code change = audyt jakości po implementacji + flagowanie ryzyk userowi przed deploy. Komercjalizacja = brak tolerancji na „przejdzie i tak".
+   - **Status (2026-04-28)**: 5a ✅ ESLint + JSConfig + 3 realne bugi naprawione. 5b ✅ Husky pre-commit + pre-push (broken main impossible). 5c krok 1 ✅ wydzielenie `CopyOrderPreviewModal` + `src/utils/orderFormatters.js` (architektura folders). Następne lazy candidates: `DriverPanel` (mobile), `TrackerPublicView` (zleceniodawca), `GpsCzasPracySection` (admin) — duże oszczędności bundla per user type.
+
+6. **⏸️ Security MVP — DEFERRED do "wyjścia na zewnątrz"** (decyzja 2026-04-28). User świadomie odkłada cały blok security na moment przed launchem SaaS na zewnątrz, **razem z polityką prywatności RODO** jako spójną paczką. Logika: VBS wewnętrznie nie wymaga tego rygoru, ale klient zewnętrzny + wymogi GDPR (art. 5, 13, 14, 20, 32) wymagają jednoczesnego wdrożenia haseł + audit log + privacy policy + ToS jako jednego epica.
+   - **TRIGGER**: gdy user mówi „idziemy do pierwszego klienta zewnętrznego" / „launch SaaS" / „polityka prywatności" / „RODO compliance" / „due diligence". Wtedy realizacja a→h.
+   - **a) Polityka haseł**: min 12 znaków, mixed case + cyfra + znak. Frontend validation (real-time meter) + Cloud Function check (security boundary). zxcvbn (entropy) + Have I Been Pwned API (k-anonymity check przeciw leaked passwords).
+   - **b) Reset słabych haseł floty**: skrypt Admin SDK — listUsers(claim=kierowca) → HIBP+entropy check → generatePasswordResetLink → email z wymogiem nowego hasła zgodnego z policy.
+   - **c) Impersonation feature**: Cloud Function `adminImpersonateUser(uid)` (admin claim check + audit log + Custom Token). UI „Zaloguj jako" w admin panelu users list. Eliminuje potrzebę dzielenia się hasłami (incydent z `Siarhei123` 2026-04-28).
+   - **d) Audit log**: każde logowanie (success/fail z IP), zmiana hasła, impersonation, zmiana roli, zmiana danych pracownika. Kolekcja `auditLog` (już istnieje), Cloud Function trigger albo direct write.
+   - **e) 2FA dla adminów**: Firebase Auth MFA (TOTP). Admin = masowy dostęp do floty + danych kierowców → bez 2FA jeden phishing kompromituje wszystko.
+   - **f) HTTPS-only forsowanie + Service Worker security audit**: sprawdzić czy SW nie cache'uje response z Authorization header; CSP headers; HSTS preload.
+   - **g) Polityka prywatności + ToS** (RODO art. 13/14): dokumenty prawne, banner cookies, mechanizm zgód, **prawo do bycia zapomnianym** (delete user data flow), **data export** (art. 20), DPA dla klientów SaaS.
+   - **h) Multi-tenant izolacja** (powiązane z #5e): `firestore.rules` musi gwarantować że klient X nie zobaczy danych klienta Y nawet przy bug w kodzie. Test penetracyjny przed launchem.
 
 ## 15. Znane problemy / uwagi
 
