@@ -1314,6 +1314,7 @@ function LoginScreen() {
             <label style={{ display:"block", fontSize:12, fontWeight:600, color:"#6b7280", marginBottom:5, textTransform:"uppercase", letterSpacing:"0.5px" }}>Email</label>
             <input
               type="email" value={email} onChange={e => setEmail(e.target.value)} required
+              autoComplete="email" autoCapitalize="off" autoCorrect="off" spellCheck="false" inputMode="email"
               style={{ width:"100%", padding:"11px 14px", border:"1.5px solid #e5e7eb", borderRadius:10, fontSize:14, outline:"none", boxSizing:"border-box", background:"#f9fafb", transition:"border 0.2s" }}
               placeholder="twoj@email.com"
               onFocus={e => e.target.style.borderColor="#1d4ed8"}
@@ -1324,6 +1325,7 @@ function LoginScreen() {
             <label style={{ display:"block", fontSize:12, fontWeight:600, color:"#6b7280", marginBottom:5, textTransform:"uppercase", letterSpacing:"0.5px" }}>Hasło</label>
             <input
               type="password" value={password} onChange={e => setPassword(e.target.value)} required
+              autoComplete="current-password" autoCapitalize="off" autoCorrect="off" spellCheck="false"
               style={{ width:"100%", padding:"11px 14px", border:"1.5px solid #e5e7eb", borderRadius:10, fontSize:14, outline:"none", boxSizing:"border-box", background:"#f9fafb", transition:"border 0.2s" }}
               placeholder="••••••••"
               onFocus={e => e.target.style.borderColor="#1d4ed8"}
@@ -10934,13 +10936,17 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     return false;
   };
 
-  // Podział na aktywne / przyszłe / historia
+  // Podział na aktywne / przyszłe / historia.
+  // WAZNE: klasyfikacja "active vs history" opiera sie WYLACZNIE na fakcie
+  // rozladowania (isFrachtRozladowano) lub auto-archive (isStaleUnfinished).
+  // NIE uzywamy `dataRozladunku` (data PLANOWANA) jako wyznacznika zamkniecia —
+  // kierowca moze byc spozniony i jeszcze w trasie, mimo ze plan juz minal.
   const active = frachty
     .filter(f => {
       if (isFrachtRozladowano(f)) return false;
       if (!f.dataZaladunku) return false;
-      if (isStaleUnfinished(f)) return false; // auto-archive stare frachty bez statusu
-      return f.dataZaladunku <= todayStr && (!f.dataRozladunku || f.dataRozladunku >= todayStr);
+      if (isStaleUnfinished(f)) return false; // auto-archive stare frachty bez statusu (>STALE_DAYS)
+      return f.dataZaladunku <= todayStr;
     })
     // Sort DESC po dataZaladunku — najnowszy aktywny na pierwszym miejscu (mobile tile)
     .sort((a, b) => (b.dataZaladunku || "").localeCompare(a.dataZaladunku || ""));
@@ -10952,7 +10958,7 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     // Sort ASC po dataZaladunku — najbliższy nadchodzący pierwszy
     .sort((a, b) => (a.dataZaladunku || "").localeCompare(b.dataZaladunku || ""));
   const history = frachty.filter(f =>
-    isFrachtRozladowano(f) || isStaleUnfinished(f) || (f.dataRozladunku && f.dataRozladunku < todayStr)
+    isFrachtRozladowano(f) || isStaleUnfinished(f)
   );
 
   const formatKody = (f) => {
