@@ -3559,6 +3559,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
           fuelEntries={myFuelEntries}
           driverDocs={myDriverDocs}
           showToast={showToast}
+          onUpdateFracht={(id, data) => setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r))}
         />
       </>
     );
@@ -10898,7 +10899,7 @@ function PlanRow({ emoji, bg, border, color, title, sub }) {
 // ═══════════════════════════════════════════════════════════════════
 //  PANEL KIEROWCY — mobile-first, osobny layout
 // ═══════════════════════════════════════════════════════════════════
-function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEvents = [], driverActivities = [], fuelEntries = [], driverDocs = [], showToast }) {
+function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEvents = [], driverActivities = [], fuelEntries = [], driverDocs = [], showToast, onUpdateFracht = () => {} }) {
   const [selectedFracht, setSelectedFracht] = useState(null);
   const [driverTab, setDriverTab] = useState("home"); // "home" | "zlecenia" | "pojazd" | "serwis" | "spalanie" | "czas" | "dokumenty" | "mapa"
   const [fuelView, setFuelView] = useState("list"); // "list" | "form" | "stats"
@@ -11013,7 +11014,8 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
     // Jeśli wartość się nie zmieniła — nie rób nic
     if (Number(fracht[field]) === num) return;
     try {
-      await updateDoc(doc(db, "frachty", fracht.id), { [field]: num });
+      // Frachty są w tablicy fleet/data.fleetv2_frachty — zapisuj przez setFrachtyList
+      onUpdateFracht(fracht.id, { [field]: num });
       logAction(`manual_${field}`, "frachty", { frachtId: fracht.id, km: num });
       showToast("✅ Zapisano stan licznika");
     } catch (e) {
@@ -11060,18 +11062,17 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
       if (r != null) eventData.r = r;
       await addDoc(collection(db, "driverEvents"), eventData);
       logAction(field, "driverEvents", { frachtId: fracht.id, vehicleId: vehicle?.id });
-      // Propaguj status na fracht — żeby admin+home tile+filtry widziały poprawnie
-      // (event zostaje w driverEvents jako log, statusRozladunku = single source of truth dla filtrów)
+      // Propaguj status na fracht — żeby admin+home tile+filtry widziały poprawnie.
+      // Frachty nie sa w osobnej kolekcji, tylko w tablicy fleet/data.fleetv2_frachty —
+      // updateDoc(db, "frachty", id) by pisalo do nieistniejacego dokumentu. Zamiast tego
+      // przekazujemy update do parent komponentu przez onUpdateFracht, ktory updaje
+      // React state setFrachtyList → useEffect persistuje cala tablice do fleet/data.
       const frachtStatusMap = {
         rozladowano: "rozladowano",
         cofnij_rozladowano: "", // cofnij czyści status
       };
       if (field in frachtStatusMap) {
-        try {
-          await updateDoc(doc(db, "frachty", fracht.id), { statusRozladunku: frachtStatusMap[field] });
-        } catch (e) {
-          console.warn("statusRozladunku propagation failed:", e?.message || e);
-        }
+        onUpdateFracht(fracht.id, { statusRozladunku: frachtStatusMap[field] });
       }
       const toastMap = {
         zaladowano: "✅ Załadunek potwierdzony",
@@ -11094,7 +11095,8 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
           // Nie nadpisuj ręcznie wpisanej wartości (kierowca mógł już skorygować)
           if (fracht[kmField] && Math.abs(Number(fracht[kmField]) - km) < 5) return;
           try {
-            await updateDoc(doc(db, "frachty", fracht.id), { [kmField]: km });
+            // Frachty w tablicy fleet/data.fleetv2_frachty — zapisuj przez setFrachtyList parent
+            onUpdateFracht(fracht.id, { [kmField]: km });
             logAction(`can_${kmField}`, "frachty", { frachtId: fracht.id, km });
           } catch (e) {
             console.warn(`${kmField} save failed:`, e?.message || e);
