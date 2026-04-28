@@ -1991,9 +1991,15 @@ exports.trackerData = onRequest(
         start = await geocodeAddress(q || fracht.zaladunekKod);
       }
 
-      // 8. Routing — dla multi-rozładunku przez R1 jako waypoint do R2 (cel końcowy)
+      // 8. Routing — dla multi-rozładunku przez R1 jako waypoint do R2 (cel końcowy).
+      // Gdy kierowca juz zrealizowal R1 (activeStep >= 3), pomijamy go w waypoints —
+      // inaczej OSRM liczy detour wstecz przez R1 i daje fałszywy duzy dystans
+      // (np. 1400 km zamiast realnych 10 km gdy auto stoi tuz przed R2).
       const finalDest = hasR2 && destR2 ? destR2 : destR1;
-      const waypoints = hasR2 && destR2 ? [pos, destR1, destR2] : [pos, destR1];
+      const r1AlreadyDone = hasR2 && activeStep >= 3;
+      const waypoints = hasR2 && destR2
+        ? (r1AlreadyDone ? [pos, destR2] : [pos, destR1, destR2])
+        : [pos, destR1];
       const routeCurrent = await osrmMultiRoute(waypoints);
       if (!routeCurrent) return res.status(500).json({ error: "osrm_failed" });
 
