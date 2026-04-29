@@ -6,61 +6,28 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 import { parseGeoString, formatOrderForDriverCopy } from "./utils/orderFormatters";
 // Helpery statusu frachtu (single source of truth, wydzielone 2026-04-28 #5c krok 2)
 import { computeFrachtStatus, isFrachtRozladowany, isStaleUnfinished } from "./utils/frachtStatus";
+// Audit log helper (wydzielone 2026-04-28 #5c krok 2 — używane w 53+ miejscach)
+import { logAction } from "./utils/logAction";
 
 // Lazy-loaded komponenty (code splitting — kierowca/zleceniodawca nie pobierają)
 const CopyOrderPreviewModal = lazy(() => import("./components/CopyOrderPreviewModal"));
 
-// ─── FIREBASE CONFIG ────────────────────────────────────────────────────────
-// 👇 WKLEJ TUTAJ SWÓJ firebaseConfig z Firebase Console
-import { initializeApp } from "firebase/app";
-import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, where, orderBy, arrayUnion, serverTimestamp, writeBatch, limit as firestoreLimit } from "firebase/firestore";
-import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, browserLocalPersistence, setPersistence } from "firebase/auth";
-import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
-import { getMessaging, getToken, onMessage } from "firebase/messaging";
-import { getFunctions, httpsCallable } from "firebase/functions";
+// ─── FIREBASE ───────────────────────────────────────────────────────────────
+// Init wydzielony do src/firebase.js (2026-04-28 TODO #5c) — pozwala lazy-loaded
+// komponentom importować db/auth/storage/functions bez circular dependency z App.jsx.
+import { app, db, auth, storage, functions, messaging, pushDiag, reinitMessaging } from "./firebase";
+import { doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, where, orderBy, arrayUnion, serverTimestamp, writeBatch, limit as firestoreLimit } from "firebase/firestore";
+import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
+import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
+import { getToken, onMessage } from "firebase/messaging";
+import { httpsCallable } from "firebase/functions";
 
 // ─── STORAGE HELPERS (per-user, per-key documents) ───────────────────────────
 // Każdy klucz to osobny dokument: fleet/{uid}/{key}
 // Omija limit 1MB na dokument i izoluje dane per użytkownik
 
-const firebaseConfig = {
-  apiKey:            "AIzaSyBJ_1_i_OS3DQ7g0hjJyF6ZTgU9_7LkHcQ",
-  authDomain:        "vbs-stats.firebaseapp.com",
-  projectId:         "vbs-stats",
-  storageBucket:     "vbs-stats.firebasestorage.app",
-  messagingSenderId: "331217061974",
-  appId:             "1:331217061974:web:375c8931f0cda74ec413f7",
-  measurementId:     "G-EJTBVPYH1X",
-};
-
-const app = initializeApp(firebaseConfig);
-// initializeFirestore z persistent cache — dane w IndexedDB, instant load przy
-// kolejnym otwarciu, automatyczna synchronizacja w tle. Fallback do getFirestore
-// jeśli przeglądarka nie wspiera IndexedDB (Safari prywatne, niektóre webview).
-let db;
-try {
-  db = initializeFirestore(app, {
-    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
-  });
-} catch (e) {
-  console.warn("Firestore persistent cache niedostępny — fallback na in-memory:", e?.message);
-  db = getFirestore(app);
-}
-const auth      = getAuth(app);
-setPersistence(auth, browserLocalPersistence).catch(e => console.warn("setPersistence error", e));
-const storage   = getStorage(app);
-const functions = getFunctions(app, "europe-west1");
-
-// ─── FCM (Push Notifications) ───────────────────────────────────────────────
-let messaging = null;
-try { messaging = getMessaging(app); } catch (e) { console.warn("FCM init skip:", e.message); }
-
-// Diagnostyka push notifications
-const pushDiag = {
-  supported: "serviceWorker" in navigator && "PushManager" in window && "Notification" in window,
-  isIOS: /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.userAgent.includes("Mac") && "ontouchend" in document),
-  isStandalone: window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true,
-};
+// firebaseConfig + init przeniesione do src/firebase.js (2026-04-28).
+// `app`, `db`, `auth`, `storage`, `functions`, `messaging`, `pushDiag` importowane wyżej.
 
 // Rejestracja FCM token i zapis do Firestore
 // Zwraca obiekt z wynikiem diagnostyki
@@ -72,11 +39,11 @@ async function registerFCMToken(uid) {
   if (!("PushManager" in window)) { result.error = "Brak PushManager (iOS wymaga dodania do ekranu głównego)"; result.step = "push-check"; return result; }
   if (!("Notification" in window)) { result.error = "Brak Notification API"; result.step = "notif-check"; return result; }
 
-  // Krok 2: FCM messaging
-  if (!messaging) {
-    try { messaging = getMessaging(app); } catch (e) {
-      result.error = "FCM init error: " + e.message; result.step = "fcm-init"; return result;
-    }
+  // Krok 2: FCM messaging — reinitMessaging próbuje ponownie jeśli pierwsze init zfailowało
+  // (np. user dał zgodę na powiadomienia później).
+  const m = messaging || reinitMessaging();
+  if (!m) {
+    result.error = "FCM init failed"; result.step = "fcm-init"; return result;
   }
 
   try {
@@ -100,7 +67,7 @@ async function registerFCMToken(uid) {
 
     // Krok 5: Token
     result.step = "get-token";
-    const token = await getToken(messaging, {
+    const token = await getToken(m, {
       vapidKey: "BFS79b5DBeiWgH98Uzmw4nbdK4vn7ggvop2W4acNbPBgO9Q2QaChaxOH5u9sNEdmXnG9cf-7sXzRdRg_-l1OO8M",
       serviceWorkerRegistration: sw,
     });
@@ -199,20 +166,7 @@ async function dbSet(key, value) {
 // ── Audit log ──
 // Zapisuje każdą akcję CRUD do kolekcji auditLog.
 // Wywołanie fire-and-forget (nie blokuje UI, nie rzuca błędów).
-function logAction(action, module, details = {}) {
-  try {
-    const u = auth.currentUser;
-    addDoc(collection(db, "auditLog"), {
-      action,          // "add" | "update" | "delete" | "login" | "logout" | "toggleStatus" ...
-      module,          // "payments" | "sprawy" | "pauzy" | "chat" | "vehicles" | "users" | "config" ...
-      details,         // { id, name, ... } — dowolne kontekstowe dane
-      uid: u?.uid || null,
-      email: u?.email || null,
-      displayName: u?.displayName || u?.email || null,
-      ts: new Date().toISOString(),
-    }).catch(e => console.warn("auditLog write fail", e));
-  } catch(e) { console.warn("auditLog error", e); }
-}
+// logAction wydzielone do src/utils/logAction.js (2026-04-28 #5c krok 2).
 
 const SK = { vehicles: "fleetv2_vehicles", costs: "fleetv2_costs", categories: "fleetv2_categories", docs: "fleetv2_docs", imi: "fleetv2_imi", rent: "fleetv2_rent", frachty: "fleetv2_frachty" };
 
