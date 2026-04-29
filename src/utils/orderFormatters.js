@@ -116,3 +116,49 @@ export function formatOrderForDriverCopy(fracht /* , vehicles = [] */) {
 
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
+
+// ── formatOrderForWhatsapp ──
+// Format dla wysyłki do kierowcy przez WhatsApp Cloud API. Zwraca obiekt z
+// `body` (treść tekstowa, sygnowana dyspozytorem) + `pickup`/`delivery`
+// (pinezki GPS). 4 wiadomości w sumie (text + 2 pinezki + opcjonalny system reminder).
+//
+// UWAGA: WhatsApp template wymaga zatwierdzenia przez Meta, więc body nie ma
+// emoji w nagłówku (bezpieczne dla Cloud API).
+export function formatOrderForWhatsapp(fracht) {
+  if (!fracht) return { body: "", pickup: null, delivery: null };
+  const fmtD = (d) => d ? d.split("-").reverse().join(".") : "—";
+  const fmtT = (t) => t || "—";
+  const addrZal = (fracht.zaladunekAdres || [fracht.zaladunekKod, fracht.zaladunekKod2, fracht.zaladunekKod3].filter(Boolean).join(" / ") || "").trim();
+  const addrRoz = (fracht.rozladunekAdres || [fracht.dokod, fracht.dokod2, fracht.dokod3].filter(Boolean).join(" / ") || "").trim();
+  const pickupGeo = parseGeoString(fracht.zaladunekGeo);
+  const deliveryGeo = parseGeoString(fracht.rozladunekGeo);
+
+  const lines = [];
+  lines.push(`🚛 Nowe zlecenie${fracht.nrRef ? ` #${fracht.nrRef}` : ""}`);
+  lines.push("");
+  lines.push(`📍 ZAŁADUNEK — ${fmtD(fracht.dataZaladunku)} ${fmtT(fracht.godzZaladunku)}`);
+  if (addrZal) lines.push(addrZal);
+  if (pickupGeo) lines.push(`GPS: ${pickupGeo.lat.toFixed(5)}, ${pickupGeo.lng.toFixed(5)}`);
+  if (fracht.zaladunekTelefon) lines.push(`Tel: ${fracht.zaladunekTelefon}`);
+  lines.push("");
+  lines.push(`📍 ROZŁADUNEK — ${fmtD(fracht.dataRozladunku)} ${fmtT(fracht.godzRozladunku)}`);
+  if (addrRoz) lines.push(addrRoz);
+  if (deliveryGeo) lines.push(`GPS: ${deliveryGeo.lat.toFixed(5)}, ${deliveryGeo.lng.toFixed(5)}`);
+  if (fracht.rozladunekTelefon) lines.push(`Tel: ${fracht.rozladunekTelefon}`);
+  lines.push("");
+
+  const towarParts = [];
+  if (fracht.towarIloscPalet) towarParts.push(`${fracht.towarIloscPalet} ${fracht.towarOpis || "palet"}`);
+  else if (fracht.towarOpis) towarParts.push(fracht.towarOpis);
+  if (fracht.towarPalety) towarParts.push(fracht.towarPalety);
+  if (towarParts.length) lines.push(`📦 ${towarParts.join(", ")}`);
+  if (fracht.zaladunekTyp) lines.push(`Załadunek: ${fracht.zaladunekTyp}`);
+  if (fracht.wagaLadunku) lines.push(`Waga: ${fracht.wagaLadunku} kg`);
+  if (fracht.uwagi) { lines.push(""); lines.push(`ℹ️ ${fracht.uwagi}`); }
+
+  return {
+    body: lines.join("\n").trim(),
+    pickup: pickupGeo ? { ...pickupGeo, name: "Załadunek", address: addrZal || null } : null,
+    delivery: deliveryGeo ? { ...deliveryGeo, name: "Rozładunek", address: addrRoz || null } : null,
+  };
+}
