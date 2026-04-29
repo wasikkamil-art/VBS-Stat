@@ -15,7 +15,7 @@ import { httpsCallable } from "firebase/functions";
 
 import { db, auth, storage, functions } from "../firebase";
 import { logAction } from "../utils/logAction";
-import { isFrachtRozladowany, isStaleUnfinished } from "../utils/frachtStatus";
+import { isFrachtRozladowany, isStaleUnfinished, getMaxRouteIndex } from "../utils/frachtStatus";
 import {
   REGULATION, ACTIVITY_TYPES,
   fmtHM, fmtTimeShort,
@@ -518,6 +518,28 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
             console.warn(`${kmField} save failed:`, e?.message || e);
           }
         })();
+      }
+
+      // Trip finalization — po finalnym dotarcie_rozladunek (ostatni R w hierarchii)
+      // wywołaj CF finalizeTrip (idempotent): auto-off Tracker + email do zleceniodawcy.
+      // Nie blokujemy UX kierowcy — IIFE async + silent failover (admin może ręcznie
+      // wyłączyć tracker z TrackerPill jeśli CF się nie powiedzie).
+      if (field === "dotarcie_rozladunek") {
+        const eventR = r == null ? 1 : r;
+        const maxR = getMaxRouteIndex(fracht);
+        if (eventR === maxR && !fracht.tripFinalizedAt) {
+          (async () => {
+            try {
+              const finalizeTripCall = httpsCallable(functions, "finalizeTrip");
+              const res = await finalizeTripCall({ frachtId: fracht.id });
+              if (res?.data?.emailSent) {
+                showToast("📧 Podsumowanie wysłane do zleceniodawcy");
+              }
+            } catch (e) {
+              console.warn("finalizeTrip failed:", e?.message || e);
+            }
+          })();
+        }
       }
     } catch (e) {
       console.error("driverEvent error", e);

@@ -69,3 +69,26 @@ export function isStaleUnfinished(fracht, todayStr = new Date().toISOString().sl
   if (fracht.dataRozladunku < todayStr) return true;
   return false;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// getMaxRouteIndex — najwyższy zdefiniowany indeks rozładunku (1..5)
+// ═══════════════════════════════════════════════════════════════════════════
+// Schema FrachtyModal wspiera R1-R5 (suffix "" dla R1, "2"-"5" dla pozostałych).
+// Punkt liczy się jako "zdefiniowany" gdy ma którekolwiek z: kod pocztowy, miasto,
+// pełny adres `dokod`, lub geo. Helper potrzebny do logiki "ostatni rozładunek"
+// (np. trigger finalizeTrip CF po finalnym dotarcie_rozladunek).
+export function getMaxRouteIndex(fracht) {
+  if (!fracht) return 1;
+  const has = (i) => {
+    const sfx = i === 1 ? "" : String(i);
+    return !!(
+      (fracht[`dokodPocztowy${sfx}`] && String(fracht[`dokodPocztowy${sfx}`]).trim()) ||
+      (fracht[`dokodMiasto${sfx}`] && String(fracht[`dokodMiasto${sfx}`]).trim()) ||
+      (fracht[`dokod${sfx}`] && String(fracht[`dokod${sfx}`]).trim()) ||
+      (fracht[`rozladunekGeo${sfx}`] && String(fracht[`rozladunekGeo${sfx}`]).trim())
+    );
+  };
+  let max = 1;
+  for (let i = 2; i <= 5; i++) if (has(i)) max = i;
+  return max;
+}

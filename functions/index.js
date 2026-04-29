@@ -2348,3 +2348,248 @@ exports.wwReportInbound = onRequest(
     }
   }
 );
+
+// ═══════════════════════════════════════════════════════════════
+// TRIP FINALIZATION — auto-off Tracker + email do zleceniodawcy
+//   Trigger: onCall przez DriverPanel po finalnym dotarcie_rozladunek
+//   Idempotentny (sprawdza fracht.tripFinalizedAt przed akcją)
+// ═══════════════════════════════════════════════════════════════
+
+function getMaxRouteIndex(fracht) {
+  const has = (i) => {
+    const sfx = i === 1 ? "" : String(i);
+    return !!(
+      (fracht[`dokodPocztowy${sfx}`] && String(fracht[`dokodPocztowy${sfx}`]).trim()) ||
+      (fracht[`dokodMiasto${sfx}`] && String(fracht[`dokodMiasto${sfx}`]).trim()) ||
+      (fracht[`dokod${sfx}`] && String(fracht[`dokod${sfx}`]).trim()) ||
+      (fracht[`rozladunekGeo${sfx}`] && String(fracht[`rozladunekGeo${sfx}`]).trim())
+    );
+  };
+  let max = 1;
+  for (let i = 2; i <= 5; i++) if (has(i)) max = i;
+  return max;
+}
+
+function computeTripStats(fracht, events) {
+  const kmStart = Number(fracht.kmStart);
+  const kmEnd = Number(fracht.kmEnd);
+  const kmTotal = isFinite(kmStart) && isFinite(kmEnd) && kmEnd > kmStart
+    ? kmEnd - kmStart
+    : null;
+
+  const maxR = getMaxRouteIndex(fracht);
+
+  // Ostatni dotarcie_rozladunek — backward compat: dla maxR=1 akceptujemy r==null lub r===1
+  const lastDotarcieRoz = events
+    .filter(e => e.type === "dotarcie_rozladunek" && (
+      maxR === 1 ? (e.r == null || e.r === 1) : e.r === maxR
+    ))
+    .sort((a, b) => (a.ts || "").localeCompare(b.ts || ""))
+    .pop();
+
+  const firstDotarcieZal = events
+    .filter(e => e.type === "dotarcie_zaladunek")
+    .sort((a, b) => (a.ts || "").localeCompare(b.ts || ""))
+    .shift();
+
+  let tripDurationMin = null;
+  if (firstDotarcieZal?.ts && lastDotarcieRoz?.ts) {
+    const diffMs = new Date(lastDotarcieRoz.ts).getTime() - new Date(firstDotarcieZal.ts).getTime();
+    if (diffMs > 0) tripDurationMin = Math.round(diffMs / 60000);
+  }
+
+  let punctualityMin = null;
+  let punctualityText = null;
+  if (lastDotarcieRoz?.ts) {
+    const sfx = maxR === 1 ? "" : String(maxR);
+    const plannedDate = fracht[`dataRozladunku${sfx}`];
+    const plannedTime = fracht[`godzRozladunku${sfx}`];
+    if (plannedDate) {
+      const t = plannedTime || "00:00";
+      const plannedMs = Date.parse(`${plannedDate}T${t}:00+02:00`);
+      if (!isNaN(plannedMs)) {
+        const actualMs = new Date(lastDotarcieRoz.ts).getTime();
+        const diffMin = Math.round((actualMs - plannedMs) / 60000);
+        punctualityMin = diffMin;
+        if (Math.abs(diffMin) <= 15) punctualityText = "Na czas";
+        else if (diffMin > 0) punctualityText = `${diffMin} min spóźnienia`;
+        else punctualityText = `${Math.abs(diffMin)} min wcześniej`;
+      }
+    }
+  }
+
+  return {
+    kmTotal,
+    tripDurationMin,
+    punctualityMin,
+    punctualityText,
+    rozladunekTs: lastDotarcieRoz?.ts || null,
+    zaladunekTs: firstDotarcieZal?.ts || null,
+    maxR,
+  };
+}
+
+function fmtTripDurationServer(min) {
+  if (min == null || min < 0) return "—";
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return h > 0 ? `${h}h ${m}min` : `${m} min`;
+}
+
+function buildTripSummaryEmailHTML(fracht, vehicle, stats) {
+  const esc = (s) => String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+  const nrZlecenia = esc(fracht.nrZlecenia || fracht.nrRef || "—");
+  const klient = esc(fracht.klient || fracht.zleceniodawcaFirma || "—");
+  const plate = esc(vehicle?.plate || "—");
+
+  const fromCity = esc(fracht.zaladunekMiasto || fracht.zaladunekKod || "—");
+  const sfx = stats.maxR === 1 ? "" : String(stats.maxR);
+  const toCity = esc(fracht[`dokodMiasto${sfx}`] || fracht[`dokod${sfx}`] || "—");
+
+  const kmTotal = stats.kmTotal != null ? `${stats.kmTotal} km` : "—";
+  const tripDuration = stats.tripDurationMin != null ? fmtTripDurationServer(stats.tripDurationMin) : "—";
+  const punctuality = esc(stats.punctualityText || "—");
+
+  return `<!DOCTYPE html>
+<html lang="pl">
+<head><meta charset="UTF-8"><title>Trasa zakończona — ${nrZlecenia}</title></head>
+<body style="font-family: Arial, sans-serif; background:#f8f9fb; margin:0; padding:20px;">
+  <div style="max-width:600px; margin:0 auto; background:#fff; border-radius:12px; padding:24px; box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+    <h1 style="font-size:20px; color:#1e293b; margin:0 0 8px 0;">Trasa zakończona ✅</h1>
+    <p style="color:#64748b; margin:0 0 20px 0;">Zlecenie nr <strong>${nrZlecenia}</strong> dla <strong>${klient}</strong> zostało zrealizowane.</p>
+
+    <div style="background:#f1f5f9; border-radius:8px; padding:16px; margin-bottom:16px;">
+      <div style="font-size:18px; color:#1e293b; font-weight:600;">${fromCity} → ${toCity}</div>
+      <div style="font-size:13px; color:#64748b; margin-top:4px;">Pojazd: ${plate}</div>
+    </div>
+
+    <table style="width:100%; border-collapse:collapse; font-size:14px;">
+      <tr>
+        <td style="padding:10px 0; color:#64748b; border-bottom:1px solid #e2e8f0;">Kilometry</td>
+        <td style="padding:10px 0; text-align:right; font-weight:600; color:#1e293b; border-bottom:1px solid #e2e8f0;">${kmTotal}</td>
+      </tr>
+      <tr>
+        <td style="padding:10px 0; color:#64748b; border-bottom:1px solid #e2e8f0;">Czas trasy</td>
+        <td style="padding:10px 0; text-align:right; font-weight:600; color:#1e293b; border-bottom:1px solid #e2e8f0;">${tripDuration}</td>
+      </tr>
+      <tr>
+        <td style="padding:10px 0; color:#64748b;">Punktualność rozładunku</td>
+        <td style="padding:10px 0; text-align:right; font-weight:600; color:#1e293b;">${punctuality}</td>
+      </tr>
+    </table>
+
+    <p style="font-size:12px; color:#94a3b8; margin-top:24px; text-align:center;">
+      Wiadomość wygenerowana automatycznie przez FleetStat<br>
+      <a href="https://fleetstat.pl" style="color:#3b82f6; text-decoration:none;">fleetstat.pl</a>
+    </p>
+  </div>
+</body>
+</html>`;
+}
+
+exports.finalizeTrip = onCall(
+  { region: "europe-west1" },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Wymagane logowanie.");
+
+    const { frachtId } = request.data || {};
+    if (!frachtId || typeof frachtId !== "string") {
+      throw new HttpsError("invalid-argument", "Brak frachtId");
+    }
+
+    const db = getFirestore();
+
+    const fleetRef = db.doc("fleet/data");
+    const fleetSnap = await fleetRef.get();
+    if (!fleetSnap.exists) throw new HttpsError("not-found", "Brak fleet/data");
+
+    const fleetData = fleetSnap.data() || {};
+    const frachtyList = fleetData.fleetv2_frachty || [];
+    const fracht = frachtyList.find(f => f && f.id === frachtId);
+    if (!fracht) throw new HttpsError("not-found", "Fracht nie znaleziony");
+
+    if (fracht.tripFinalizedAt) {
+      console.log(`[finalizeTrip] Already finalized: ${frachtId}`);
+      return { ok: true, alreadyFinalized: true, emailSent: false };
+    }
+
+    const eventsSnap = await db.collection("driverEvents").where("frachtId", "==", frachtId).get();
+    const events = eventsSnap.docs.map(d => d.data());
+
+    const vehicles = fleetData.fleetv2_vehicles || [];
+    const vehicle = vehicles.find(v => v && v.id === fracht.vehicleId);
+    const stats = computeTripStats(fracht, events);
+
+    const finalizedAt = new Date().toISOString();
+    const newFrachtyList = frachtyList.map(f =>
+      f && f.id === frachtId
+        ? { ...f, trackerEnabled: false, tripFinalizedAt: finalizedAt }
+        : f
+    );
+    await fleetRef.update({ fleetv2_frachty: newFrachtyList });
+    console.log(`[finalizeTrip] Tracker auto-off: ${frachtId}`);
+
+    const recipientEmail = (fracht.zleceniodawcaEmail || "").trim();
+    if (!recipientEmail) {
+      console.log(`[finalizeTrip] No zleceniodawcaEmail, skipping email: ${frachtId}`);
+      await db.collection("emailLogs").add({
+        sentAt: finalizedAt,
+        type: "trip_summary",
+        frachtId,
+        status: "skipped_no_recipient",
+      });
+      return { ok: true, emailSent: false, reason: "no_recipient" };
+    }
+
+    const configSnap = await db.doc("config/email").get();
+    if (!configSnap.exists || !configSnap.data().sendgridApiKey) {
+      console.error("[finalizeTrip] No SendGrid config");
+      await db.collection("emailLogs").add({
+        sentAt: finalizedAt,
+        type: "trip_summary",
+        frachtId,
+        recipients: [recipientEmail],
+        status: "error",
+        error: "no_sendgrid_config",
+      });
+      return { ok: true, emailSent: false, reason: "no_sendgrid_config" };
+    }
+    const config = configSnap.data();
+    sgMail.setApiKey(config.sendgridApiKey);
+
+    const html = buildTripSummaryEmailHTML(fracht, vehicle, stats);
+    const nrZlecenia = fracht.nrZlecenia || fracht.nrRef || "—";
+
+    try {
+      await sgMail.send({
+        to: recipientEmail,
+        from: config.senderEmail || "fleetstat@fleetstat.pl",
+        subject: `🚛 Trasa zakończona — ${nrZlecenia}`,
+        html,
+      });
+      console.log(`[finalizeTrip] Email sent to ${recipientEmail}: ${frachtId}`);
+      await db.collection("emailLogs").add({
+        sentAt: finalizedAt,
+        type: "trip_summary",
+        frachtId,
+        recipients: [recipientEmail],
+        status: "sent",
+      });
+      return { ok: true, emailSent: true };
+    } catch (e) {
+      console.error(`[finalizeTrip] Email send failed: ${e.message}`);
+      await db.collection("emailLogs").add({
+        sentAt: finalizedAt,
+        type: "trip_summary",
+        frachtId,
+        recipients: [recipientEmail],
+        status: "error",
+        error: e.message,
+      });
+      return { ok: true, emailSent: false, reason: "send_failed", error: e.message };
+    }
+  }
+);
