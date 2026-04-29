@@ -4,6 +4,8 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 
 // Helpery formatowania zlecenia (wydzielone z monolitu 2026-04-28, TODO #5c)
 import { parseGeoString, formatOrderForDriverCopy } from "./utils/orderFormatters";
+// Helpery statusu frachtu (single source of truth, wydzielone 2026-04-28 #5c krok 2)
+import { computeFrachtStatus, isFrachtRozladowany, isStaleUnfinished } from "./utils/frachtStatus";
 
 // Lazy-loaded komponenty (code splitting — kierowca/zleceniodawca nie pobierają)
 const CopyOrderPreviewModal = lazy(() => import("./components/CopyOrderPreviewModal"));
@@ -1169,59 +1171,9 @@ function fmtTimeShort(ms) {
   return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")} ${hm}`;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// STATUS FRACHTU — single source of truth
-// ═══════════════════════════════════════════════════════════════════════════════
-// Hierarchia priorytetów (od najwyższego):
-//   1. `f.statusRozladunkuManual` (NEW po refactorze 2026-04-28) — admin świadomie
-//      nadpisał (np. "problem", "rozladowano" force-close, "w_trasie" cofnięcie).
-//   2. `f.statusRozladunku` LEGACY field (przed refactorem) — TRAKTOWANY JAK IMPLICIT
-//      OVERRIDE. Admin lub driver kiedyś świadomie ustawił "rozladowano"/"problem".
-//      Ważne: szanujemy tę decyzję nawet jeśli w eventach jest nowszy cofnij — old
-//      cofnij eventy mogą być testowe/stale, legacy field to ostatnia "świadoma"
-//      decyzja widoczna w admin tabeli.
-//   3. Compute z eventów: najnowszy `rozladowano` (i nie cofnięty) → "rozladowano".
-//      Używane GDY legacy field jest puste — driver kliknął ale propagacja failed
-//      (race condition który był przyczyną buga 2454/2026).
-//   4. Default: "w_trasie".
-//
-// CO ROZWIĄZUJE: race condition desync — przed refactorem driver pisał event
-// `rozladowano` ORAZ propagował status do `statusRozladunku`. Gdy admin patrzył
-// w tym samym czasie, jego React state mógł nadpisać status na default. Skutek:
-// fracht 2454/2026 (28.04.2026) — kierowca skończył trasę o 12:16, event w
-// Firestore istniał, ale dropdown w admin tabeli nadal pokazywał "→ W trasie".
-//
-// JAK UŻYWAĆ:
-//   const status = computeFrachtStatus(fracht, eventsByFracht[fracht.id]);
-//   if (computeFrachtStatus(f, evts) === "rozladowano") { ... }
-// W kontekstach gdzie events nie są dostępne (rzadkie, głównie modal helpers):
-//   const status = computeFrachtStatus(fracht);  // używa tylko legacy field
-function computeFrachtStatus(fracht, eventsForFracht = []) {
-  if (!fracht) return "w_trasie";
-  // 1. Manual override admina — wygrywa wszystko (NEW field po refactorze)
-  if (fracht.statusRozladunkuManual) return fracht.statusRozladunkuManual;
-  // 2. Legacy field — implicit override (admin/driver kiedyś świadomie ustawił).
-  // Szanujemy tę decyzję nawet gdy w eventach jest nowszy cofnij (mogą być stale).
-  if (fracht.statusRozladunku === "rozladowano" || fracht.statusRozladunku === "problem") {
-    return fracht.statusRozladunku;
-  }
-  // 3. Compute z driverEvents — najnowszy rozladowano vs cofnij_rozladowano.
-  // Używane GDY legacy field puste — driver kliknął, propagacja failed (race condition
-  // przyczyna buga 2454/2026). Po refactorze new driver code pisze TYLKO event.
-  if (Array.isArray(eventsForFracht) && eventsForFracht.length > 0) {
-    const rozEvents = eventsForFracht
-      .filter(e => e && (e.type === "rozladowano" || e.type === "cofnij_rozladowano"))
-      .sort((a, b) => (b.ts || "").localeCompare(a.ts || ""));
-    if (rozEvents.length > 0 && rozEvents[0].type === "rozladowano") return "rozladowano";
-  }
-  // 4. Default
-  return "w_trasie";
-}
-
-// Shortcut boolean — "czy rozładowany?". Używaj w filtrach gdzie potrzebny tylko bool.
-function isFrachtRozladowany(fracht, eventsForFracht = []) {
-  return computeFrachtStatus(fracht, eventsForFracht) === "rozladowano";
-}
+// computeFrachtStatus + isFrachtRozladowany wydzielone do src/utils/frachtStatus.js
+// 2026-04-28 (TODO #5c krok 2). Razem z isStaleUnfinished (przed konsolidacją
+// były 3 inline kopie — App.jsx, DriverPanel, GpsMapSection).
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN APP
@@ -8046,21 +7998,10 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
     return map;
   }, [driverEvents]);
 
-  // Stale fracht detection — fracht starszy niż 7 dni bez explicit zamknięcia traktujemy
-  // jak porzucony/zakończony (legacy/test data nigdy nie oznaczone jako rozladowano).
-  // Bez tego filtra GpsMapSection wybierał archiwalne frachty do narysowania trasy
-  // (case 2026-04-28: pokazywał trasę z lutego 2025 dla WGM 0475M bo żaden nowszy aktywny
-  // nie miał geo, a stary 2025-02 nigdy nie został oznaczony jako rozladowano).
-  const STALE_DAYS = 7;
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const staleThreshold = new Date(Date.now() - STALE_DAYS * 86400000).toISOString().slice(0, 10);
-  const isStaleUnfinished = (f) => {
-    if (!f.dataZaladunku) return false;
-    if (f.dataZaladunku >= staleThreshold) return false; // młody fracht — nie archiwizuj
-    if (!f.dataRozladunku) return true;
-    if (f.dataRozladunku < todayStr) return true;
-    return false;
-  };
+  // Stale fracht detection — używamy isStaleUnfinished z src/utils/frachtStatus.js
+  // (po konsolidacji 2026-04-28 #5c krok 2). Filter ignoruje archiwalne frachty
+  // (>7 dni od dataZaladunku) bez explicit zamknięcia — fix buga gdzie GpsMapSection
+  // pokazywał trasę z lutego 2025 dla WGM 0475M.
 
   // Toggle "Pokaż ostatnią zakończoną trasę" — gdy brak aktywnego frachtu, admin może
   // jednym klikiem zobaczyć ostatnią rzeczywistą trasę (Atlas /history) zamiast pustej mapy.
@@ -10985,23 +10926,10 @@ function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEve
   const todayStr = new Date().toISOString().slice(0, 10);
   const today = new Date();
 
-  // Helper: czy fracht jest rozładowany — delegujemy do global computeFrachtStatus
-  // (po refactorze 2026-04-28). Lokalny helper zostaje dla wstecznej kompatybilności
-  // z istniejącymi call sites poniżej.
+  // Helpery statusu — z src/utils/frachtStatus.js (po konsolidacji 2026-04-28 #5c krok 2).
+  // Lokalny `isFrachtRozladowano` shortcut zwraca tylko bool dla pojedynczego frachtu.
   const isFrachtRozladowano = (f) => isFrachtRozladowany(f, driverEvents.filter(e => e.frachtId === f.id));
-
-  // Auto-archive: fracht starszy niż 7 dni bez dataRozladunku/statusu traktuj jak zamknięty
-  // (zabezpieczenie przed legacy frachtami które nigdy nie zostały oznaczone jako rozładowane)
-  const STALE_DAYS = 7;
-  const staleThreshold = new Date(Date.now() - STALE_DAYS * 86400000).toISOString().slice(0, 10);
-  const isStaleUnfinished = (f) => {
-    if (!f.dataZaladunku) return false;
-    if (f.dataZaladunku >= staleThreshold) return false; // młody fracht — nie archiwizuj
-    // Stary + nie ma dataRozladunku w przyszłości = assume porzucony/dostarczony
-    if (!f.dataRozladunku) return true;
-    if (f.dataRozladunku < todayStr) return true;
-    return false;
-  };
+  // isStaleUnfinished przyjmuje todayStr jako 2nd arg — przekazujemy nasze (DriverPanel scope).
 
   // Podział na aktywne / przyszłe / historia.
   // WAZNE: klasyfikacja "active vs history" opiera sie WYLACZNIE na fakcie
