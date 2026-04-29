@@ -55,3 +55,8 @@ scripts/
 .env
 .env*.local
 firebase.json
+
+# Playwright (od 2026-04-29 — TODO #5d komercjalizacji)
+test-results/
+playwright-report/
+playwright/.cache/

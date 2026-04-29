@@ -94,7 +94,16 @@ rm -f .git/index.lock
 - Po `npm install` `prepare: husky` script automatycznie inicjalizuje hooks dla nowych klonujących.
 - Lint-staged config: `package.json` → `"lint-staged": { "*.{js,jsx,mjs}": "eslint --fix" }`.
 
-Testów brak — nie uruchamiaj `npm test` (nie istnieje).
+**Smoke E2E (od 2026-04-29 — TODO #5d komercjalizacji)**:
+- Playwright + Chromium (mobile + desktop) — `playwright.config.js`
+- `tests/smoke/` — 3 specfile: login, tracker, lazy-chunks (~9 testów łącznie, ~14s)
+- Testy chodzą przeciw produkcji `https://fleetstat.pl` (read-only smoke). NIE wymaga local dev server.
+- `npm run test:e2e` — wszystkie testy / `--ui` interactive / `--headed` widoczna przeglądarka
+- **NIE w pre-push hook** — testy zależą od internetu i prod, byłyby flaky. Uruchamiaj ręcznie przed dużym deploy.
+- Cel: złapać regresje typu (1) bug Tracker multi-stop (kmRem 1364 zamiast 10), (2) mobile keyboard login fix (autoCapitalize), (3) lazy chunks działają (DriverPanel nie ładuje się na login screen).
+- Test Pixel 5 + Desktop Chrome (mobile-chrome, desktop-chrome projekty).
+
+Testów unit/integration brak — nie uruchamiaj `npm test` (nie istnieje).
 
 Przed `git push` **zawsze pytaj użytkownika** — push triggeruje auto-deploy na produkcję.
 
