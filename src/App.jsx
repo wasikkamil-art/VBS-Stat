@@ -5,7 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 // Helpery formatowania zlecenia (wydzielone z monolitu 2026-04-28, TODO #5c)
 import { parseGeoString, formatOrderForDriverCopy } from "./utils/orderFormatters";
 // Helpery statusu frachtu (single source of truth, wydzielone 2026-04-28 #5c krok 2)
-import { computeFrachtStatus, isFrachtRozladowany, isStaleUnfinished } from "./utils/frachtStatus";
+import { computeFrachtStatus, isFrachtRozladowany, isStaleUnfinished, hasZaladunekActive } from "./utils/frachtStatus";
 // Audit log helper (wydzielone 2026-04-28 #5c krok 2 — używane w 53+ miejscach)
 import { logAction } from "./utils/logAction";
 // safeHref — sanityzacja URL (wydzielone 2026-04-29 #5c krok 6, 10 użyć)
@@ -16047,20 +16047,37 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                         problem:     { emoji:"⚠️", label:"Problem",     bg:"#fef2f2", color:"#991b1b" },
                       };
                       const c = cfg[s] || cfg.w_trasie;
-                      const hasZal = evts.some(e => e.type === "zaladowano");
-                      const hasRoz = evts.some(e => e.type === "rozladowano");
+                      // hasZal: po refactorze 2026-04-28 driver nie emit'uje `zaladowano` —
+                      // używamy hasZaladunekActive (pokrywa dotarcie_zaladunek + start_rozladunek + legacy).
+                      // hasRoz: isFrachtRozladowany uwzględnia cofnij_rozladowano, prosty .some() nie.
+                      const hasZal = hasZaladunekActive(evts);
+                      const hasRoz = isFrachtRozladowany(r, evts);
+                      // Manual override = admin świadomie wybrał status (statusRozladunkuManual set).
+                      // Reset przez wybór "Auto" — zapisujemy null, computed wraca do hierarchii.
+                      const isManualOverride = !!r.statusRozladunkuManual;
                       return (
                         <div className="flex items-center gap-1">
                           <select
-                            value={s}
-                            onChange={e => onUpdate(r.id, { statusRozladunkuManual: e.target.value })}
+                            value={r.statusRozladunkuManual || "auto"}
+                            onChange={e => {
+                              const v = e.target.value;
+                              onUpdate(r.id, { statusRozladunkuManual: v === "auto" ? null : v });
+                            }}
                             onClick={ev => ev.stopPropagation()}
-                            className="text-xs font-semibold rounded-lg px-2 py-1 cursor-pointer outline-none border-0"
-                            style={{ background: c.bg, color: c.color, minWidth: 118 }}
+                            className="text-xs font-semibold rounded-lg px-2 py-1 cursor-pointer outline-none"
+                            style={{
+                              background: c.bg,
+                              color: c.color,
+                              minWidth: 130,
+                              border: isManualOverride ? "2px solid #f59e0b" : "0",
+                              fontWeight: isManualOverride ? 800 : 600,
+                            }}
+                            title={isManualOverride ? "Status nadpisany ręcznie — wybierz 'Auto' żeby wrócić do automatyki" : "Status z eventów kierowcy"}
                           >
-                            <option value="w_trasie">→ W trasie</option>
-                            <option value="rozladowano">✅ Rozładowano</option>
-                            <option value="problem">⚠️ Problem</option>
+                            <option value="auto">↻ Auto ({c.label})</option>
+                            <option value="w_trasie">→ W trasie (manual)</option>
+                            <option value="rozladowano">✅ Rozładowano (manual)</option>
+                            <option value="problem">⚠️ Problem (manual)</option>
                           </select>
                           {evts.length > 0 && (
                             <button onClick={(ev) => { ev.stopPropagation(); setDriverStatusId(driverStatusId === r.id ? null : r.id); }}

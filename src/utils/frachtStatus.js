@@ -71,6 +71,41 @@ export function isStaleUnfinished(fracht, todayStr = new Date().toISOString().sl
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// hasActiveEvent — czy event danego typu istnieje i NIE został cofnięty
+// ═══════════════════════════════════════════════════════════════════════════
+// Driver app ma flow gdzie każdy event może być cofnięty przez `cofnij_<type>`.
+// Najnowszy event wygrywa. Bez tego helpera kod w wielu miejscach miał bug:
+// `evts.some(e => e.type === "rozladowano")` zwracał true nawet po cofnięciu.
+export function hasActiveEvent(events, type) {
+  if (!Array.isArray(events) || events.length === 0) return false;
+  const last = events.filter(e => e?.type === type).sort((a, b) => (a.ts || "").localeCompare(b.ts || "")).pop();
+  if (!last) return false;
+  const undo = events.filter(e => e?.type === `cofnij_${type}`).sort((a, b) => (a.ts || "").localeCompare(b.ts || "")).pop();
+  return !undo || (last.ts || "") > (undo.ts || "");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// hasZaladunekActive — czy załadunek aktywny (po refactorze 2026-04-28)
+// ═══════════════════════════════════════════════════════════════════════════
+// PRZED refactorem driver flow miał button "Załadowano" → event `zaladowano`.
+// PO refactorze button zastąpiony przez "Dotarcie na załadunek" + "Start do
+// rozładunku". Driver app NIGDY nie emit'uje już `zaladowano` event w nowym flow.
+//
+// Bez tego helpera `hasZal = evts.some(e => e.type === "zaladowano")` był ZAWSZE
+// false → driver UI badge skakał Oczekuje → Rozładowano (pomijając "W trasie").
+// Admin tabela też nigdy nie pokazywała ikony 📦 (załadunek potwierdzony).
+//
+// Backward compat: legacy frachty z eventem `zaladowano` (sprzed refactoru)
+// nadal się liczą.
+export function hasZaladunekActive(events) {
+  return (
+    hasActiveEvent(events, "zaladowano") ||
+    hasActiveEvent(events, "dotarcie_zaladunek") ||
+    hasActiveEvent(events, "start_rozladunek")
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // getMaxRouteIndex — najwyższy zdefiniowany indeks rozładunku (1..5)
 // ═══════════════════════════════════════════════════════════════════════════
 // Schema FrachtyModal wspiera R1-R5 (suffix "" dla R1, "2"-"5" dla pozostałych).

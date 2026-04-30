@@ -15,7 +15,7 @@ import { httpsCallable } from "firebase/functions";
 
 import { db, auth, storage, functions } from "../firebase";
 import { logAction } from "../utils/logAction";
-import { isFrachtRozladowany, isStaleUnfinished, getMaxRouteIndex } from "../utils/frachtStatus";
+import { isFrachtRozladowany, isStaleUnfinished, getMaxRouteIndex, hasZaladunekActive } from "../utils/frachtStatus";
 import {
   REGULATION, ACTIVITY_TYPES,
   fmtHM, fmtTimeShort,
@@ -710,8 +710,10 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
     const dotarcieRozUndo = myEvents.filter(e => e.type === "cofnij_dotarcie_rozladunek" && (e.r == null || e.r === 1)).pop();
     const dotarcieR2Event = hasR2 ? myEvents.filter(e => e.type === "dotarcie_rozladunek" && e.r === 2).pop() : null;
     const dotarcieR2Undo = hasR2 ? myEvents.filter(e => e.type === "cofnij_dotarcie_rozladunek" && e.r === 2).pop() : null;
-    // Cofnięcie anuluje jeśli nowsze
-    const hasZal = (!!zalEvent && (!zalUndo || zalEvent.ts > zalUndo.ts)) || !!f._driverZaladowano;
+    // Cofnięcie anuluje jeśli nowsze. Po refactorze 2026-04-28 driver flow nie
+    // emit'uje już eventu `zaladowano` (zastąpiony przez dotarcie_zaladunek + start_rozladunek)
+    // — `hasZaladunekActive` pokrywa wszystkie warianty + legacy backward compat.
+    const hasZal = hasZaladunekActive(myEvents) || !!f._driverZaladowano;
     const hasRoz = isFrachtRozladowany(f, myEvents);
     const hasDotarcieZal = !!dotarcieZalEvent && (!dotarcieZalUndo || dotarcieZalEvent.ts > dotarcieZalUndo.ts);
     const hasStartRoz = !!startRozEvent && (!startRozUndo || startRozEvent.ts > startRozUndo.ts);
@@ -1335,7 +1337,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
     const kody = formatKody(f);
     const myEvts = driverEvents.filter(ev => ev.frachtId === f.id);
     const isDone = isFrachtRozladowany(f, myEvts) || (f.dataRozladunku && f.dataRozladunku < todayStr);
-    const hasZal = myEvts.some(e => e.type === "zaladowano") || f._driverZaladowano;
+    const hasZal = hasZaladunekActive(myEvts) || f._driverZaladowano;
     const hasRoz = isDone;
     return (
       <div key={f.id} onClick={() => setSelectedFracht(f)}
