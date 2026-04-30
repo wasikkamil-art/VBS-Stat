@@ -2547,10 +2547,10 @@ function fmtTripDurationServer(min) {
 
 // Helper — render sekcję adresów (Z1+ewent. Z2, R1+ewent. R2-R5)
 function buildAddressSection(fracht, esc) {
-  const renderPoint = (label, kod, miasto, adres, telefon, data, godz) => {
+  const renderPoint = (label, kod, miasto, adres, telefon, data /*, godz - usunięte na user request */) => {
     const parts = [kod, miasto].filter(Boolean).map(esc).join(" ");
     if (!parts && !adres && !data) return "";
-    const dateStr = data ? `${esc(data)}${godz ? ` · ${esc(godz)}` : ""}` : "";
+    const dateStr = data ? esc(data) : "";
     return `
       <div style="margin-bottom:8px;">
         <div style="font-size:11px; color:#64748b; font-weight:700; text-transform:uppercase; margin-bottom:2px;">${label}</div>
@@ -2667,6 +2667,9 @@ function buildTripSummaryEmailHTML(fracht, vehicle, stats, opts = {}) {
 <head><meta charset="UTF-8"><title>Kółko zakończone — ${nrZlecenia}</title></head>
 <body style="font-family: Arial, sans-serif; background:#f8f9fb; margin:0; padding:20px;">
   <div style="max-width:600px; margin:0 auto; background:#fff; border-radius:12px; padding:24px; box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+    <div style="text-align:center; margin-bottom:16px;">
+      <img src="https://fleetstat.pl/vbs-logo.png" alt="VBS Transport" style="max-width:180px; height:auto; display:inline-block;">
+    </div>
     <h1 style="font-size:20px; color:#1e293b; margin:0 0 8px 0;">🔄 Kółko zakończone ✅</h1>
     <p style="color:#64748b; margin:0 0 20px 0;">Trasa okrężna dla <strong>${klient}</strong> została zrealizowana.<br>Pojazd: <strong>${plate}</strong></p>
 
@@ -2702,6 +2705,9 @@ function buildTripSummaryEmailHTML(fracht, vehicle, stats, opts = {}) {
 <head><meta charset="UTF-8"><title>Trasa zakończona — ${nrZlecenia}</title></head>
 <body style="font-family: Arial, sans-serif; background:#f8f9fb; margin:0; padding:20px;">
   <div style="max-width:600px; margin:0 auto; background:#fff; border-radius:12px; padding:24px; box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+    <div style="text-align:center; margin-bottom:16px;">
+      <img src="https://fleetstat.pl/vbs-logo.png" alt="VBS Transport" style="max-width:180px; height:auto; display:inline-block;">
+    </div>
     <h1 style="font-size:20px; color:#1e293b; margin:0 0 8px 0;">Trasa zakończona ✅</h1>
     <p style="color:#64748b; margin:0 0 20px 0;">Zlecenie nr <strong>${nrZlecenia}</strong> dla <strong>${klient}</strong> zostało zrealizowane.</p>
 
