@@ -74,12 +74,14 @@ service cloud.firestore {
 
     match /fleet/{docId} {
       allow read: if canRead();
-      // 🛑 EMERGENCY LOCK 2026-04-30 — array race condition w fleet/data.fleetv2_frachty.
-      // Bug: App.jsx:1235 useEffect writebackuje całą tablicę przy każdej zmianie state →
-      // multi-tab race condition nadpisuje świeże dodania (10 frachtów zaginęło 27-30.04).
-      // Lock zablokowany do czasu fixu kodu (zmienić useEffect żeby nie writebackował tablicy).
-      // Cloud Functions (admin SDK) bypass rules — finalizeTrip etc. działają normalnie.
-      allow create, update, delete: if false;
+      allow create: if canEdit();
+      // fleetDataSafe sprawdza tylko czy NOWE dane nie nadpisują istniejących pustą tablicą.
+      // Admin może zapisać zawsze (np. naprawa po awarii), inni muszą przejść guard.
+      // 2026-04-30: po fix array race condition — wszystkie writes przechodzą przez
+      // runTransaction (atomic read-modify-write). Stary anti-pattern (useEffect:1235
+      // writeback całej tablicy) usunięty.
+      allow update: if isAdmin() || (canEdit() && fleetDataSafe());
+      allow delete: if isAdmin();
     }
 
     // ═══════════════════════════════════════════════════════════════
