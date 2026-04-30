@@ -1899,6 +1899,39 @@ exports.trackerData = onRequest(
         console.warn("trackerData: events query failed:", e.message);
       }
 
+      // Round-trip linker: czy fracht jest częścią kółka? Jeśli tak, dorzuć info o partnerze.
+      // (linkedFrachtId set → ja jestem powrotem, partner = etap1 oryginał;
+      //  inny fracht ma linkedFrachtId === my id → ja jestem etap1, partner = powrót)
+      let linkedInfo = null;
+      const linkedId = fracht.linkedFrachtId
+        || frachtyList.find(o => o && o.linkedFrachtId === fracht.id)?.id;
+      if (linkedId) {
+        const linked = frachtyList.find(o => o && o.id === linkedId);
+        if (linked) {
+          let linkedRozladowano = linked.statusRozladunkuManual === "rozladowano"
+            || linked.statusRozladunku === "rozladowano";
+          if (!linkedRozladowano) {
+            try {
+              const linkedEvSnap = await db.collection("driverEvents").where("frachtId", "==", linkedId).get();
+              const linkedEvts = linkedEvSnap.docs.map(e => e.data());
+              const lastRoz = linkedEvts.filter(e => e.type === "rozladowano").sort((a,b) => (b.ts||"").localeCompare(a.ts||""))[0];
+              const lastRozUndo = linkedEvts.filter(e => e.type === "cofnij_rozladowano").sort((a,b) => (b.ts||"").localeCompare(a.ts||""))[0];
+              if (lastRoz && (!lastRozUndo || lastRoz.ts > lastRozUndo.ts)) linkedRozladowano = true;
+            } catch (e) { console.warn("trackerData linked events:", e.message); }
+          }
+          linkedInfo = {
+            role: fracht.linkedFrachtId ? "etap1" : "etap2",
+            // role = co partner reprezentuje względem aktualnego frachta
+            from: linked.zaladunekKod || linked.zaladunekMiasto || "—",
+            to: linked.dokod || linked.dokodMiasto || "—",
+            dataZaladunku: linked.dataZaladunku || null,
+            dataRozladunku: linked.dataRozladunku || null,
+            status: linkedRozladowano ? "zakonczony" : "w_trasie",
+            nrZlecenia: linked.nrZlecenia || linked.nrRef || null,
+          };
+        }
+      }
+
       // Aktywny krok:
       //   Dla 1 rozładunku (0..3): Dojazd, Załadowano, W trasie, Dostarczono
       //   Dla 2 rozładunków (0..4): Dojazd, Załadowano, Rozładunek 1, Rozładunek 2, Dostarczono
@@ -2512,10 +2545,14 @@ function fmtTripDurationServer(min) {
   return h > 0 ? `${h}h ${m}min` : `${m} min`;
 }
 
-function buildTripSummaryEmailHTML(fracht, vehicle, stats) {
+function buildTripSummaryEmailHTML(fracht, vehicle, stats, opts = {}) {
   const esc = (s) => String(s == null ? "" : s)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+  const { partner, partnerStats, partnerRole } = opts;
+  // partnerRole: "etap1" | "etap2" — co partner reprezentuje względem fracht.
+  // Etap 1 = oryginał (wyjazd), Etap 2 = powrotny.
 
   const nrZlecenia = esc(fracht.nrZlecenia || fracht.nrRef || "—");
   const klient = esc(fracht.klient || fracht.zleceniodawcaFirma || "—");
@@ -2529,6 +2566,68 @@ function buildTripSummaryEmailHTML(fracht, vehicle, stats) {
   const tripDuration = stats.tripDurationMin != null ? fmtTripDurationServer(stats.tripDurationMin) : "—";
   const punctuality = esc(stats.punctualityText || "—");
 
+  // Round-trip — render obu etapów + sumy
+  if (partner && partnerStats) {
+    const isCurrentReturn = partnerRole === "etap1"; // partner = etap1 → ja jestem powrotem (etap2)
+    const etap1Fracht = isCurrentReturn ? partner : fracht;
+    const etap1Stats = isCurrentReturn ? partnerStats : stats;
+    const etap2Fracht = isCurrentReturn ? fracht : partner;
+    const etap2Stats = isCurrentReturn ? stats : partnerStats;
+
+    const sumKm = (etap1Stats.kmTotal || 0) + (etap2Stats.kmTotal || 0);
+    const sumDurationMin = (etap1Stats.tripDurationMin || 0) + (etap2Stats.tripDurationMin || 0);
+
+    const renderEtap = (label, f, s, color) => {
+      const fSfx = s.maxR === 1 ? "" : String(s.maxR);
+      const fFrom = esc(f.zaladunekMiasto || f.zaladunekKod || "—");
+      const fTo = esc(f[`dokodMiasto${fSfx}`] || f[`dokod${fSfx}`] || "—");
+      const fNr = esc(f.nrZlecenia || f.nrRef || "—");
+      const fKm = s.kmTotal != null ? `${s.kmTotal} km` : "—";
+      const fDur = s.tripDurationMin != null ? fmtTripDurationServer(s.tripDurationMin) : "—";
+      const fPunct = esc(s.punctualityText || "—");
+      return `
+    <div style="background:${color}; border-radius:8px; padding:16px; margin-bottom:12px;">
+      <div style="font-size:11px; color:#64748b; font-weight:700; margin-bottom:4px;">${label} — zlecenie #${fNr}</div>
+      <div style="font-size:16px; color:#1e293b; font-weight:600; margin-bottom:8px;">${fFrom} → ${fTo}</div>
+      <div style="font-size:13px; color:#475569;">${fKm} · ${fDur} · ${fPunct}</div>
+    </div>`;
+    };
+
+    return `<!DOCTYPE html>
+<html lang="pl">
+<head><meta charset="UTF-8"><title>Kółko zakończone — ${nrZlecenia}</title></head>
+<body style="font-family: Arial, sans-serif; background:#f8f9fb; margin:0; padding:20px;">
+  <div style="max-width:600px; margin:0 auto; background:#fff; border-radius:12px; padding:24px; box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+    <h1 style="font-size:20px; color:#1e293b; margin:0 0 8px 0;">🔄 Kółko zakończone ✅</h1>
+    <p style="color:#64748b; margin:0 0 20px 0;">Trasa okrężna dla <strong>${klient}</strong> została zrealizowana.<br>Pojazd: <strong>${plate}</strong></p>
+
+    ${renderEtap("ETAP 1 (wyjazd)", etap1Fracht, etap1Stats, "#eff6ff")}
+    ${renderEtap("ETAP 2 (powrót)", etap2Fracht, etap2Stats, "#faf5ff")}
+
+    <div style="background:#f1f5f9; border-radius:8px; padding:16px; margin-top:16px;">
+      <div style="font-size:11px; color:#64748b; font-weight:700; margin-bottom:8px;">SUMA CAŁEGO KÓŁKA</div>
+      <table style="width:100%; border-collapse:collapse; font-size:14px;">
+        <tr>
+          <td style="padding:6px 0; color:#64748b;">Łączne kilometry</td>
+          <td style="padding:6px 0; text-align:right; font-weight:600; color:#1e293b;">${sumKm > 0 ? `${sumKm} km` : "—"}</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 0; color:#64748b;">Łączny czas trasy</td>
+          <td style="padding:6px 0; text-align:right; font-weight:600; color:#1e293b;">${sumDurationMin > 0 ? fmtTripDurationServer(sumDurationMin) : "—"}</td>
+        </tr>
+      </table>
+    </div>
+
+    <p style="font-size:12px; color:#94a3b8; margin-top:24px; text-align:center;">
+      Wiadomość wygenerowana automatycznie przez FleetStat<br>
+      <a href="https://fleetstat.pl" style="color:#3b82f6; text-decoration:none;">fleetstat.pl</a>
+    </p>
+  </div>
+</body>
+</html>`;
+  }
+
+  // Pojedyncza trasa (nie round-trip)
   return `<!DOCTYPE html>
 <html lang="pl">
 <head><meta charset="UTF-8"><title>Trasa zakończona — ${nrZlecenia}</title></head>
@@ -2613,14 +2712,68 @@ exports.finalizeTrip = onCall(
     const stats = computeTripStats(fracht, events);
     const nowIso = new Date().toISOString();
 
-    // Helper — write fleet/data z patch'em na fracht. Tracker auto-off zawsze
-    // (idempotent przez fallback do istniejącej wartości tripFinalizedAt).
-    const updateFracht = async (extraPatch = {}) => {
-      const newFrachtyList = frachtyList.map(f =>
-        f && f.id === frachtId
-          ? { ...f, trackerEnabled: false, tripFinalizedAt: f.tripFinalizedAt || nowIso, ...extraPatch }
-          : f
-      );
+    // ════════════════════════════════════════════════════════════════════════
+    // ROUND-TRIP detection — czy fracht jest częścią kółka (linkedFrachtId)?
+    // ════════════════════════════════════════════════════════════════════════
+    // Auto trigger po dotarcie_rozladunek: jeśli partner istnieje I jeszcze nie
+    // zakończony → CZEKAMY (nie wysyłamy email). Email wyjdzie dopiero gdy oba
+    // etapy ukończone — wtedy 1 email z podsumowaniem CAŁEGO kółka.
+    // Manual (force=true): omija waiting, wysyła z dostępnymi danymi.
+    const linkedId = fracht.linkedFrachtId
+      || frachtyList.find(o => o && o.linkedFrachtId === fracht.id)?.id;
+    const linkedFracht = linkedId ? frachtyList.find(o => o && o.id === linkedId) : null;
+    const partnerRole = fracht.linkedFrachtId ? "etap1" : "etap2";
+    let partnerStats = null;
+    let partnerRozladowano = false;
+
+    if (linkedFracht) {
+      let partnerEvents = [];
+      try {
+        const partnerEvSnap = await db.collection("driverEvents").where("frachtId", "==", linkedId).get();
+        partnerEvents = partnerEvSnap.docs.map(d => d.data());
+      } catch (e) { console.warn("[finalizeTrip] partner events query:", e.message); }
+
+      partnerRozladowano = linkedFracht.statusRozladunkuManual === "rozladowano"
+        || linkedFracht.statusRozladunku === "rozladowano";
+      if (!partnerRozladowano) {
+        const lastRoz = partnerEvents.filter(e => e.type === "rozladowano").sort((a,b) => (b.ts||"").localeCompare(a.ts||""))[0];
+        const lastRozUndo = partnerEvents.filter(e => e.type === "cofnij_rozladowano").sort((a,b) => (b.ts||"").localeCompare(a.ts||""))[0];
+        if (lastRoz && (!lastRozUndo || lastRoz.ts > lastRozUndo.ts)) partnerRozladowano = true;
+      }
+      partnerStats = computeTripStats(linkedFracht, partnerEvents);
+
+      // Auto trigger waiting: nadal trackerOff aktualnego, NIE wysyłamy email
+      if (!partnerRozladowano && source === "auto") {
+        console.log(`[finalizeTrip] Round-trip — partner ${linkedId} not unloaded, waiting (source=auto): ${frachtId}`);
+        const newFrachtyList = frachtyList.map(f =>
+          f && f.id === frachtId
+            ? { ...f, trackerEnabled: false, tripFinalizedAt: f.tripFinalizedAt || nowIso }
+            : f
+        );
+        await fleetRef.update({ fleetv2_frachty: newFrachtyList });
+        await db.collection("emailLogs").add({
+          sentAt: nowIso, type: "trip_summary_waiting", frachtId, source,
+          status: "waiting_partner", linkedFrachtId: linkedId,
+        });
+        return { ok: true, emailSent: false, reason: "waiting_for_partner", linkedFrachtId: linkedId };
+      }
+    }
+
+    const isRoundTripFinal = !!(linkedFracht && partnerRozladowano);
+
+    // Helper — write fleet/data. Plus przy round-trip success: synchronizuje
+    // tripEmailSentAt/tripEmailRecipient na PARTNERA też (idempotency block dla obu).
+    const updateFracht = async (extraPatch = {}, syncPartner = false) => {
+      const newFrachtyList = frachtyList.map(f => {
+        if (!f) return f;
+        if (f.id === frachtId) {
+          return { ...f, trackerEnabled: false, tripFinalizedAt: f.tripFinalizedAt || nowIso, ...extraPatch };
+        }
+        if (syncPartner && linkedId && f.id === linkedId) {
+          return { ...f, ...extraPatch };
+        }
+        return f;
+      });
       await fleetRef.update({ fleetv2_frachty: newFrachtyList });
     };
 
@@ -2647,22 +2800,32 @@ exports.finalizeTrip = onCall(
     const config = configSnap.data();
     sgMail.setApiKey(config.sendgridApiKey);
 
-    const html = buildTripSummaryEmailHTML(fracht, vehicle, stats);
+    const html = buildTripSummaryEmailHTML(fracht, vehicle, stats,
+      isRoundTripFinal ? { partner: linkedFracht, partnerStats, partnerRole } : {}
+    );
     const nrZlecenia = fracht.nrZlecenia || fracht.nrRef || "—";
+    const subject = isRoundTripFinal
+      ? `🔄 Kółko zakończone — ${nrZlecenia}${linkedFracht.nrZlecenia ? ` + ${linkedFracht.nrZlecenia}` : ""}`
+      : `🚛 Trasa zakończona — ${nrZlecenia}`;
 
     try {
       await sgMail.send({
         to: recipientEmail,
         from: config.senderEmail || "fleetstat@fleetstat.pl",
-        subject: `🚛 Trasa zakończona — ${nrZlecenia}`,
+        subject,
         html,
       });
-      console.log(`[finalizeTrip] Email sent to ${recipientEmail} (source=${source}): ${frachtId}`);
-      await updateFracht({ tripEmailSentAt: nowIso, tripEmailRecipient: recipientEmail });
+      console.log(`[finalizeTrip] Email sent to ${recipientEmail} (source=${source}, roundTrip=${isRoundTripFinal}): ${frachtId}`);
+      // Round-trip: tripEmailSentAt na obu frachtach (idempotency block dla partnera też,
+      // żeby gdy partner kliknie "Wyślij podsumowanie" manual nie wysłał drugiego maila).
+      await updateFracht({ tripEmailSentAt: nowIso, tripEmailRecipient: recipientEmail }, isRoundTripFinal);
       await db.collection("emailLogs").add({
-        sentAt: nowIso, type: "trip_summary", frachtId, source, recipients: [recipientEmail], status: "sent",
+        sentAt: nowIso,
+        type: isRoundTripFinal ? "round_trip_summary" : "trip_summary",
+        frachtId, source, recipients: [recipientEmail], status: "sent",
+        ...(isRoundTripFinal && { linkedFrachtId: linkedId }),
       });
-      return { ok: true, emailSent: true, sentAt: nowIso, recipient: recipientEmail };
+      return { ok: true, emailSent: true, sentAt: nowIso, recipient: recipientEmail, roundTrip: isRoundTripFinal };
     } catch (e) {
       console.error(`[finalizeTrip] Email send failed (source=${source}): ${e.message}`);
       // Tracker auto-off mimo to (admin może retry mailem; trasa zakończona niezależnie)
