@@ -2545,14 +2545,68 @@ function fmtTripDurationServer(min) {
   return h > 0 ? `${h}h ${m}min` : `${m} min`;
 }
 
+// Helper — render sekcję adresów (Z1+ewent. Z2, R1+ewent. R2-R5)
+function buildAddressSection(fracht, esc) {
+  const renderPoint = (label, kod, miasto, adres, telefon, data, godz) => {
+    const parts = [kod, miasto].filter(Boolean).map(esc).join(" ");
+    if (!parts && !adres && !data) return "";
+    const dateStr = data ? `${esc(data)}${godz ? ` · ${esc(godz)}` : ""}` : "";
+    return `
+      <div style="margin-bottom:8px;">
+        <div style="font-size:11px; color:#64748b; font-weight:700; text-transform:uppercase; margin-bottom:2px;">${label}</div>
+        <div style="font-size:14px; color:#1e293b; font-weight:600;">${parts || "—"}</div>
+        ${adres ? `<div style="font-size:12px; color:#475569;">${esc(adres)}</div>` : ""}
+        ${telefon ? `<div style="font-size:12px; color:#475569;">tel: ${esc(telefon)}</div>` : ""}
+        ${dateStr ? `<div style="font-size:11px; color:#94a3b8; margin-top:2px;">${dateStr}</div>` : ""}
+      </div>`;
+  };
+  let html = "";
+  // Załadunek Z1
+  html += renderPoint("Załadunek", fracht.zaladunekKod, fracht.zaladunekMiasto, fracht.zaladunekAdres, fracht.zaladunekTelefon, fracht.dataZaladunku, fracht.godzZaladunku);
+  // Z2 (opcjonalny)
+  if (fracht.zaladunekKod2 || fracht.zaladunekMiasto2) {
+    html += renderPoint("Załadunek 2", fracht.zaladunekKod2, fracht.zaladunekMiasto2, fracht.zaladunekAdres2, fracht.zaladunekTelefon2, fracht.dataZaladunku2, fracht.godzZaladunku2);
+  }
+  // Rozładunki R1-R5
+  for (let i = 1; i <= 5; i++) {
+    const sfx = i === 1 ? "" : String(i);
+    if (!fracht[`dokod${sfx}`] && !fracht[`dokodMiasto${sfx}`]) continue;
+    const labelR = i === 1 ? "Rozładunek" : `Rozładunek ${i}`;
+    html += renderPoint(labelR, fracht[`dokod${sfx}`], fracht[`dokodMiasto${sfx}`], fracht[`rozladunekAdres${sfx}`], fracht[`rozladunekTelefon${sfx}`], fracht[`dataRozladunku${sfx}`], fracht[`godzRozladunku${sfx}`]);
+  }
+  return html;
+}
+
+// Helper — render sekcję CMR z events (zdjęcia jako linki, max 6 per typ)
+function buildCmrSection(events, esc) {
+  if (!Array.isArray(events) || events.length === 0) return "";
+  const cmrZal = events.filter(e => e.type === "cmr_zaladunek_photo" && e.photoUrl).slice(0, 6);
+  const cmrRoz = events.filter(e => (e.type === "cmr_rozladunek_photo" || e.type === "cmr_photo") && e.photoUrl).slice(0, 6);
+  if (cmrZal.length === 0 && cmrRoz.length === 0) return "";
+
+  const renderLinks = (label, items) => {
+    if (items.length === 0) return "";
+    const links = items.map((e, i) => `<a href="${esc(e.photoUrl)}" style="color:#3b82f6; text-decoration:none; margin-right:8px;">📄 ${label} ${i + 1}</a>`).join("");
+    return `<div style="margin-bottom:6px;">${links}</div>`;
+  };
+
+  return `
+    <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:12px; margin-top:12px;">
+      <div style="font-size:11px; color:#92400e; font-weight:700; text-transform:uppercase; margin-bottom:8px;">📄 Dokumenty CMR</div>
+      ${renderLinks("CMR załadunek", cmrZal)}
+      ${renderLinks("CMR rozładunek", cmrRoz)}
+    </div>`;
+}
+
 function buildTripSummaryEmailHTML(fracht, vehicle, stats, opts = {}) {
   const esc = (s) => String(s == null ? "" : s)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
-  const { partner, partnerStats, partnerRole } = opts;
+  const { partner, partnerStats, partnerRole, events = [], partnerEvents = [] } = opts;
   // partnerRole: "etap1" | "etap2" — co partner reprezentuje względem fracht.
   // Etap 1 = oryginał (wyjazd), Etap 2 = powrotny.
+  // events / partnerEvents — driver events do sekcji CMR (zdjęcia).
 
   const nrZlecenia = esc(fracht.nrZlecenia || fracht.nrRef || "—");
   const klient = esc(fracht.klient || fracht.zleceniodawcaFirma || "—");
@@ -2577,7 +2631,10 @@ function buildTripSummaryEmailHTML(fracht, vehicle, stats, opts = {}) {
     const sumKm = (etap1Stats.kmTotal || 0) + (etap2Stats.kmTotal || 0);
     const sumDurationMin = (etap1Stats.tripDurationMin || 0) + (etap2Stats.tripDurationMin || 0);
 
-    const renderEtap = (label, f, s, color) => {
+    const etap1Events = (partnerRole === "etap1") ? partnerEvents : events;
+    const etap2Events = (partnerRole === "etap1") ? events : partnerEvents;
+
+    const renderEtap = (label, f, s, evts, color) => {
       const fSfx = s.maxR === 1 ? "" : String(s.maxR);
       const fFrom = esc(f.zaladunekMiasto || f.zaladunekKod || "—");
       const fTo = esc(f[`dokodMiasto${fSfx}`] || f[`dokod${fSfx}`] || "—");
@@ -2589,7 +2646,9 @@ function buildTripSummaryEmailHTML(fracht, vehicle, stats, opts = {}) {
     <div style="background:${color}; border-radius:8px; padding:16px; margin-bottom:12px;">
       <div style="font-size:11px; color:#64748b; font-weight:700; margin-bottom:4px;">${label} — zlecenie #${fNr}</div>
       <div style="font-size:16px; color:#1e293b; font-weight:600; margin-bottom:8px;">${fFrom} → ${fTo}</div>
-      <div style="font-size:13px; color:#475569;">${fKm} · ${fDur} · ${fPunct}</div>
+      ${buildAddressSection(f, esc)}
+      <div style="font-size:13px; color:#475569; margin-top:8px;">${fKm} · ${fDur} · ${fPunct}</div>
+      ${buildCmrSection(evts, esc)}
     </div>`;
     };
 
@@ -2601,8 +2660,8 @@ function buildTripSummaryEmailHTML(fracht, vehicle, stats, opts = {}) {
     <h1 style="font-size:20px; color:#1e293b; margin:0 0 8px 0;">🔄 Kółko zakończone ✅</h1>
     <p style="color:#64748b; margin:0 0 20px 0;">Trasa okrężna dla <strong>${klient}</strong> została zrealizowana.<br>Pojazd: <strong>${plate}</strong></p>
 
-    ${renderEtap("ETAP 1 (wyjazd)", etap1Fracht, etap1Stats, "#eff6ff")}
-    ${renderEtap("ETAP 2 (powrót)", etap2Fracht, etap2Stats, "#faf5ff")}
+    ${renderEtap("ETAP 1 (wyjazd)", etap1Fracht, etap1Stats, etap1Events, "#eff6ff")}
+    ${renderEtap("ETAP 2 (powrót)", etap2Fracht, etap2Stats, etap2Events, "#faf5ff")}
 
     <div style="background:#f1f5f9; border-radius:8px; padding:16px; margin-top:16px;">
       <div style="font-size:11px; color:#64748b; font-weight:700; margin-bottom:8px;">SUMA CAŁEGO KÓŁKA</div>
@@ -2637,8 +2696,9 @@ function buildTripSummaryEmailHTML(fracht, vehicle, stats, opts = {}) {
     <p style="color:#64748b; margin:0 0 20px 0;">Zlecenie nr <strong>${nrZlecenia}</strong> dla <strong>${klient}</strong> zostało zrealizowane.</p>
 
     <div style="background:#f1f5f9; border-radius:8px; padding:16px; margin-bottom:16px;">
-      <div style="font-size:18px; color:#1e293b; font-weight:600;">${fromCity} → ${toCity}</div>
-      <div style="font-size:13px; color:#64748b; margin-top:4px;">Pojazd: ${plate}</div>
+      <div style="font-size:18px; color:#1e293b; font-weight:600; margin-bottom:12px;">${fromCity} → ${toCity}</div>
+      <div style="font-size:13px; color:#64748b; margin-bottom:12px;">Pojazd: ${plate}</div>
+      ${buildAddressSection(fracht, esc)}
     </div>
 
     <table style="width:100%; border-collapse:collapse; font-size:14px;">
@@ -2655,6 +2715,8 @@ function buildTripSummaryEmailHTML(fracht, vehicle, stats, opts = {}) {
         <td style="padding:10px 0; text-align:right; font-weight:600; color:#1e293b;">${punctuality}</td>
       </tr>
     </table>
+
+    ${buildCmrSection(events, esc)}
 
     <p style="font-size:12px; color:#94a3b8; margin-top:24px; text-align:center;">
       Wiadomość wygenerowana automatycznie przez FleetStat<br>
@@ -2725,9 +2787,9 @@ exports.finalizeTrip = onCall(
     const partnerRole = fracht.linkedFrachtId ? "etap1" : "etap2";
     let partnerStats = null;
     let partnerRozladowano = false;
+    let partnerEvents = [];
 
     if (linkedFracht) {
-      let partnerEvents = [];
       try {
         const partnerEvSnap = await db.collection("driverEvents").where("frachtId", "==", linkedId).get();
         partnerEvents = partnerEvSnap.docs.map(d => d.data());
@@ -2801,7 +2863,9 @@ exports.finalizeTrip = onCall(
     sgMail.setApiKey(config.sendgridApiKey);
 
     const html = buildTripSummaryEmailHTML(fracht, vehicle, stats,
-      isRoundTripFinal ? { partner: linkedFracht, partnerStats, partnerRole } : {}
+      isRoundTripFinal
+        ? { partner: linkedFracht, partnerStats, partnerRole, events, partnerEvents }
+        : { events }
     );
     const nrZlecenia = fracht.nrZlecenia || fracht.nrRef || "—";
     const subject = isRoundTripFinal
