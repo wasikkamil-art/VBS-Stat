@@ -40,7 +40,7 @@ const FrachtyModal = lazy(() => import("./components/FrachtyModal"));
 // Init wydzielony do src/firebase.js (2026-04-28 TODO #5c) — pozwala lazy-loaded
 // komponentom importować db/auth/storage/functions bez circular dependency z App.jsx.
 import { app, db, auth, storage, functions, messaging, pushDiag, reinitMessaging } from "./firebase";
-import { doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, where, orderBy, arrayUnion, serverTimestamp, writeBatch, limit as firestoreLimit } from "firebase/firestore";
+import { doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, where, orderBy, arrayUnion, serverTimestamp, writeBatch, runTransaction, limit as firestoreLimit } from "firebase/firestore";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { getToken, onMessage } from "firebase/messaging";
@@ -178,6 +178,78 @@ async function dbSet(key, value) {
   } catch (e) {
     console.error("dbSet error", e);
     _pendingWrites.delete(key);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ATOMIC FRACHTY OPERATIONS — runTransaction żeby uniknąć array race condition
+// ═══════════════════════════════════════════════════════════════════════════
+// PRZED 2026-04-30: useEffect writebackował CAŁĄ tablicę fleetv2_frachty przy
+// każdej zmianie state. Multi-tab race condition: stary klient nadpisywał świeże
+// dodania innych klientów (10 frachtów zaginęło 27-30.04).
+//
+// FIX: każda mutacja przechodzi przez runTransaction, który atomic read-modify-
+// write na fleet/data. Firestore odrzuca write jeśli ktoś inny zmienił dokument
+// w trakcie transakcji (i transakcja retry). Race condition niemożliwe.
+async function dbAddFracht(newFracht) {
+  _pendingWrites.add(SK.frachty);
+  try {
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(DATA_REF());
+      const list = (snap.data() || {})[SK.frachty] || [];
+      tx.update(DATA_REF(), { [SK.frachty]: [newFracht, ...list] });
+    });
+    setTimeout(() => _pendingWrites.delete(SK.frachty), WRITE_COOLDOWN);
+  } catch (e) {
+    _pendingWrites.delete(SK.frachty);
+    throw e;
+  }
+}
+
+async function dbUpdateFracht(id, patch) {
+  _pendingWrites.add(SK.frachty);
+  try {
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(DATA_REF());
+      const list = (snap.data() || {})[SK.frachty] || [];
+      tx.update(DATA_REF(), {
+        [SK.frachty]: list.map(f => f && f.id === id ? { ...f, ...patch } : f),
+      });
+    });
+    setTimeout(() => _pendingWrites.delete(SK.frachty), WRITE_COOLDOWN);
+  } catch (e) {
+    _pendingWrites.delete(SK.frachty);
+    throw e;
+  }
+}
+
+async function dbDeleteFracht(id) {
+  _pendingWrites.add(SK.frachty);
+  try {
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(DATA_REF());
+      const list = (snap.data() || {})[SK.frachty] || [];
+      tx.update(DATA_REF(), { [SK.frachty]: list.filter(f => f && f.id !== id) });
+    });
+    setTimeout(() => _pendingWrites.delete(SK.frachty), WRITE_COOLDOWN);
+  } catch (e) {
+    _pendingWrites.delete(SK.frachty);
+    throw e;
+  }
+}
+
+async function dbBulkAddFrachty(newFrachty) {
+  _pendingWrites.add(SK.frachty);
+  try {
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(DATA_REF());
+      const list = (snap.data() || {})[SK.frachty] || [];
+      tx.update(DATA_REF(), { [SK.frachty]: [...list, ...newFrachty] });
+    });
+    setTimeout(() => _pendingWrites.delete(SK.frachty), WRITE_COOLDOWN);
+  } catch (e) {
+    _pendingWrites.delete(SK.frachty);
+    throw e;
   }
 }
 
@@ -1232,7 +1304,10 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   useEffect(() => { if (loaded && docs.length > 0) safeDbSet(SK.docs, docs); },                   [docs, loaded]);
   useEffect(() => { if (loaded && imiRecords.length > 0) safeDbSet(SK.imi, imiRecords); },        [imiRecords, loaded]);
   useEffect(() => { if (loaded && rentRecords.length > 0) safeDbSet(SK.rent, rentRecords); },     [rentRecords, loaded]);
-  useEffect(() => { if (loaded && frachtyList.length > 0) safeDbSet(SK.frachty, frachtyList); },  [frachtyList, loaded]);
+  // FIX 2026-04-30: USUNIĘTY useEffect który writebackował całą tablicę frachtyList do Firestore.
+  // Powodował race condition multi-tab — 10 frachtów zaginęło 27-30.04. Teraz każda mutacja
+  // przechodzi przez dbAddFracht/dbUpdateFracht/dbDeleteFracht/dbBulkAddFrachty (runTransaction).
+  // useEffect(() => { if (loaded && frachtyList.length > 0) safeDbSet(SK.frachty, frachtyList); }, [frachtyList, loaded]);
 
 
   // ── CSS INJECTION ──
@@ -2176,7 +2251,11 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             fuelEntries={myFuelEntries}
             driverDocs={myDriverDocs}
             showToast={showToast}
-            onUpdateFracht={(id, data) => setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r))}
+            onUpdateFracht={async (id, data) => {
+              setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r)); // optimistic
+              try { await dbUpdateFracht(id, data); }
+              catch (e) { console.warn("dbUpdateFracht (driver) failed:", e?.message || e); }
+            }}
           />
         </Suspense>
       </>
@@ -3425,14 +3504,49 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               currentUser={user}
               appUsers={appUsers}
               showToast={showToast}
-              onAdd={(r) => { const fid = uid(); setFrachtyList(p => [{ ...r, id: fid }, ...p]); logAction("add", "frachty", { id: fid, vehicleId: r.vehicleId, dokod: r.dokod }); }}
-              onDelete={(id) => { setFrachtyList(p => p.filter(r => r.id !== id)); logAction("delete", "frachty", { id }); }}
-              onUpdate={(id, data) => { setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r)); logAction("update", "frachty", { id }); }}
-              onBulkAdd={(rows) => {
+              onAdd={async (r) => {
+                const fid = uid();
+                const fracht = { ...r, id: fid };
+                setFrachtyList(p => [fracht, ...p]); // optimistic
+                try {
+                  await dbAddFracht(fracht);
+                  logAction("add", "frachty", { id: fid, vehicleId: r.vehicleId, dokod: r.dokod });
+                } catch (e) {
+                  setFrachtyList(p => p.filter(x => x.id !== fid));
+                  showToast("❌ Nie udało się dodać: " + (e?.message || ""));
+                }
+              }}
+              onDelete={async (id) => {
+                const old = frachtyList.find(r => r.id === id);
+                setFrachtyList(p => p.filter(r => r.id !== id)); // optimistic
+                try {
+                  await dbDeleteFracht(id);
+                  logAction("delete", "frachty", { id });
+                } catch (e) {
+                  if (old) setFrachtyList(p => [old, ...p]);
+                  showToast("❌ Nie udało się usunąć: " + (e?.message || ""));
+                }
+              }}
+              onUpdate={async (id, data) => {
+                setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r)); // optimistic
+                try {
+                  await dbUpdateFracht(id, data);
+                  logAction("update", "frachty", { id });
+                } catch (e) {
+                  showToast("❌ Nie udało się zapisać: " + (e?.message || ""));
+                }
+              }}
+              onBulkAdd={async (rows) => {
                 const withIds = rows.map(r => ({ ...r, id: uid() }));
-                setFrachtyList(p => [...p, ...withIds]);
-                logAction("bulkAdd", "frachty", { count: withIds.length });
-                showToast(`✅ Zaimportowano ${withIds.length} frachtów`);
+                setFrachtyList(p => [...p, ...withIds]); // optimistic
+                try {
+                  await dbBulkAddFrachty(withIds);
+                  logAction("bulkAdd", "frachty", { count: withIds.length });
+                  showToast(`✅ Zaimportowano ${withIds.length} frachtów`);
+                } catch (e) {
+                  setFrachtyList(p => p.filter(r => !withIds.find(n => n.id === r.id)));
+                  showToast("❌ Import nie udał się: " + (e?.message || ""));
+                }
               }}
             />
           )}
@@ -3440,7 +3554,11 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             <FVTab
               frachtyList={frachtyList}
               vehicles={vehicles}
-              onUpdate={(id, data) => setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r))}
+              onUpdate={async (id, data) => {
+                setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r)); // optimistic
+                try { await dbUpdateFracht(id, data); }
+                catch (e) { showToast("❌ Nie udało się zapisać: " + (e?.message || "")); }
+              }}
             />
           )}
           {tab === "imi" && canSeeTab("imi") && (
