@@ -727,6 +727,19 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
     const hasCmrRoz = cmrRozPhotos.length > 0;
     const hasCmrR2 = cmrR2Photos.length > 0;
 
+    // Round-trip linker: znajdź drugi etap kółka (jeśli istnieje)
+    const roundTripPartner = (() => {
+      if (f.linkedFrachtId) {
+        const orig = frachty.find(o => o.id === f.linkedFrachtId);
+        if (orig) return { fracht: orig, role: "powrót", partnerRole: "etap 1 (oryginał)" };
+      }
+      const ret = frachty.find(o => o && o.linkedFrachtId === f.id);
+      if (ret) return { fracht: ret, role: "etap 1", partnerRole: "etap 2 (powrót)" };
+      return null;
+    })();
+    const partnerEvents = roundTripPartner ? driverEvents.filter(e => e.frachtId === roundTripPartner.fracht.id) : [];
+    const partnerDone = roundTripPartner ? isFrachtRozladowany(roundTripPartner.fracht, partnerEvents) : false;
+
     return (
       <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#f8f9fb", minHeight: "100vh", paddingTop: "env(safe-area-inset-top, 0px)", paddingBottom: 40, zoom: driverZoom === "large" ? 1.2 : 1 }}>
         <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet"/>
@@ -736,6 +749,22 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
             style={{ minHeight: 44 }}>
             ← Powrót
           </button>
+
+          {/* Round-trip banner: gdy fracht jest częścią kółka */}
+          {roundTripPartner && (
+            <div onClick={() => setSelectedFracht(roundTripPartner.fracht)}
+              style={{ background: "#faf5ff", border: "1px solid #e9d5ff", borderRadius: 12, padding: 12, marginBottom: 12, cursor: "pointer" }}>
+              <div style={{ fontSize: 11, color: "#7e22ce", fontWeight: 700, marginBottom: 4 }}>
+                🔄 KÓŁKO — jesteś w {roundTripPartner.role === "powrót" ? "etapie 2 (powrotnym)" : "etapie 1 (oryginalnym)"}
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#581c87" }}>
+                {partnerDone ? "✅" : "⏳"} {roundTripPartner.partnerRole}: {(roundTripPartner.fracht.zaladunekKod || "—").split(" ").slice(0,2).join(" ")} → {(roundTripPartner.fracht.dokod || "—").split(" ").slice(0,2).join(" ")}
+              </div>
+              <div style={{ fontSize: 11, color: "#7e22ce", marginTop: 4, fontWeight: 500 }}>
+                → kliknij żeby przełączyć na drugi etap
+              </div>
+            </div>
+          )}
 
           {/* ═══ HEADER ═══ */}
           <div style={{background: "linear-gradient(135deg, #1e293b, #334155)", borderRadius: 16, padding: 20, marginBottom: 16}}>
@@ -1343,9 +1372,22 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
       <div key={f.id} onClick={() => setSelectedFracht(f)}
         style={{ background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", overflow: "hidden", cursor: "pointer", marginBottom: 8 }}>
         <div style={{ background: isDone ? "#f0fdf4" : hasZal ? "#eff6ff" : "#fffbeb", padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: isDone ? "#15803d" : hasZal ? "#2563eb" : "#92400e" }}>
-            {isDone ? "✅ Zakończone" : hasZal ? "🚛 W trasie" : "📋 Oczekuje"}
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: isDone ? "#15803d" : hasZal ? "#2563eb" : "#92400e" }}>
+              {isDone ? "✅ Zakończone" : hasZal ? "🚛 W trasie" : "📋 Oczekuje"}
+            </span>
+            {/* Round-trip badge: pokaż 🔄 gdy fracht jest częścią kółka */}
+            {(() => {
+              const isReturn = !!f.linkedFrachtId && frachty.some(o => o.id === f.linkedFrachtId);
+              const hasReturn = frachty.some(o => o && o.linkedFrachtId === f.id);
+              if (!isReturn && !hasReturn) return null;
+              return (
+                <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 6, background: "#f3e8ff", color: "#7e22ce", fontWeight: 700 }}>
+                  🔄 {isReturn ? "powrót" : "kółko"}
+                </span>
+              );
+            })()}
+          </div>
           {f.nrRef && <span style={{ fontSize: 11, color: "#9ca3af" }}>{f.nrRef}</span>}
         </div>
         <div style={{ padding: "12px 16px" }}>
