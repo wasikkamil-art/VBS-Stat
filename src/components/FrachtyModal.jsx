@@ -8,10 +8,13 @@
 //   - CopyOrderPreviewModal — tekst do Signal/SMS/email
 //   - WhatsappSendPreviewModal — wysyłka template do Meta WhatsApp Cloud API
 
-import { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
+import { httpsCallable } from "firebase/functions";
 
+import { functions } from "../firebase";
 import { safeHref } from "../utils/safeHref";
 import { isFrachtRozladowany } from "../utils/frachtStatus";
+import { logAction } from "../utils/logAction";
 import TripSummaryPanel from "./TripSummaryPanel";
 import ZlecenieUploadBtn from "./ZlecenieUploadBtn";
 
@@ -94,6 +97,56 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
   const [showR3, setShowR3] = useState(!!(record?.dokodPocztowy3 || record?.dokod3?.trim()));
   const [showR4, setShowR4] = useState(!!(record?.dokodPocztowy4));
   const [showR5, setShowR5] = useState(!!(record?.dokodPocztowy5));
+  const [sendingSummary, setSendingSummary] = useState(false);
+
+  // Eventy filtrowane do rozładowanego-check + isRozladowany dla przycisku "Wyślij podsumowanie".
+  // Inline filter (bez useMemo) — admin modal renders rzadko, mały koszt; useMemo z optional
+  // chaining w deps powodowało react-hooks/purity error "Compilation Skipped".
+  const myFrachtEvents = record?.id ? driverEvents.filter(e => e.frachtId === record.id) : [];
+  const isRozladowanyForSummary = !!record?.id && isFrachtRozladowany(record, myFrachtEvents);
+
+  // Manual send podsumowania — admin button "📧 Wyślij podsumowanie" w footerze.
+  // Wywołuje CF finalizeTrip z force=true (bypass email idempotency).
+  // Auto-trigger ma source="auto", manual ma source="manual" — rozróżnienie w emailLogs.
+  const sendTripSummary = async () => {
+    if (!record?.id) return;
+    const recipientEmail = (f.zleceniodawcaEmail || record.zleceniodawcaEmail || "").trim();
+    if (!recipientEmail) {
+      showToast("⚠️ Brak email zleceniodawcy");
+      return;
+    }
+    if (record.tripEmailSentAt) {
+      const sentDate = new Date(record.tripEmailSentAt).toLocaleString("pl-PL", { dateStyle: "short", timeStyle: "short" });
+      const ok = window.confirm(`Email z podsumowaniem wysłano: ${sentDate}\n\nWysłać ponownie?`);
+      if (!ok) return;
+    } else if (!window.confirm(`Wysłać podsumowanie trasy do:\n${recipientEmail}?`)) {
+      return;
+    }
+    setSendingSummary(true);
+    try {
+      const finalizeTripCall = httpsCallable(functions, "finalizeTrip");
+      const res = await finalizeTripCall({ frachtId: record.id, force: true, source: "manual" });
+      const data = res?.data || {};
+      logAction("manual_send_summary", "frachty", { frachtId: record.id, recipient: recipientEmail, ok: !!data.emailSent });
+      if (data.emailSent) {
+        showToast(`📧 Podsumowanie wysłane do ${recipientEmail}`);
+      } else if (data.reason === "no_recipient") {
+        showToast("⚠️ Brak email zleceniodawcy");
+      } else if (data.reason === "no_sendgrid_config") {
+        showToast("❌ Brak konfiguracji SendGrid");
+      } else if (data.reason === "send_failed") {
+        showToast(`❌ Błąd wysyłki: ${data.error || "nieznany"}`);
+      } else {
+        showToast("⚠️ Nie wysłano (sprawdź logi)");
+      }
+    } catch (e) {
+      console.error("sendTripSummary error:", e);
+      showToast(`❌ Błąd: ${e?.message || "nie udało się wysłać"}`);
+    } finally {
+      setSendingSummary(false);
+    }
+  };
+
   const inp = "w-full text-sm px-3 py-2 rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-gray-400";
   const lbl = "text-xs font-semibold text-gray-500 mb-1 block";
 
@@ -401,50 +454,79 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
           </div>
         </div>
 
-        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0 flex-wrap">
-          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-100">Anuluj</button>
-          <button onClick={() => setShowCopyPreview(true)}
-            className="px-4 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-2"
-            style={{background: "#6366f1"}}
-            title="Podgląd danych zlecenia gotowy do skopiowania (Signal / SMS / email / inny komunikator)">
-            📋 Kopiuj dane
-          </button>
-          {record?.id && (
-            <button onClick={() => setShowTrackerModal(true)}
-              className="px-4 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-2"
-              style={{background: "#0ea5e9"}}
-              title="Wyślij zleceniodawcy link do śledzenia trasy">
-              🔗 Wyślij tracker
-            </button>
+        <div className="px-6 py-4 border-t border-gray-100 flex-shrink-0">
+          {/* Status: email z podsumowaniem trasy — pokazuje datę wysyłki + odbiorcę */}
+          {record?.id && record?.tripEmailSentAt && (
+            <div className="text-xs text-gray-500 mb-2 flex items-center gap-1 justify-end flex-wrap">
+              <span>📧 Podsumowanie wysłane: {new Date(record.tripEmailSentAt).toLocaleString("pl-PL", { dateStyle: "short", timeStyle: "short" })}</span>
+              {(record.tripEmailRecipient || record.zleceniodawcaEmail) && (
+                <span className="text-gray-400">→ {record.tripEmailRecipient || record.zleceniodawcaEmail}</span>
+              )}
+            </div>
           )}
-          {canSendWhatsapp && (
-            <button onClick={() => setShowWhatsappPreview(true)}
+          <div className="flex justify-end gap-2 flex-wrap">
+            <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-100">Anuluj</button>
+            <button onClick={() => setShowCopyPreview(true)}
               className="px-4 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-2"
-              style={{background:"#25D366"}}
-              title={`Wyślij zlecenie na WhatsApp do: ${waDriver.displayName || waDriver.email}`}>
-              📱 Wyślij na WhatsApp
+              style={{background: "#6366f1"}}
+              title="Podgląd danych zlecenia gotowy do skopiowania (Signal / SMS / email / inny komunikator)">
+              📋 Kopiuj dane
             </button>
-          )}
-          <button onClick={() => {
-            if(!f.vehicleId){alert("Wybierz pojazd");return;}
-            if(!f.cenaEur){alert("Wpisz cenę EUR");return;}
-            // Heurystyka: adres zawierający enumerację "1. ... 2. ..." prawdopodobnie skleja
-            // wiele punktów rozładunku w jedno pole — powinny być rozdzielone na R1/R2/...
-            const hasMulti = (addr) => addr && /(^|\n)\s*1\.\s/.test(addr) && /(^|\n)\s*2\.\s/.test(addr);
-            const multistopFields = [];
-            if (hasMulti(f.zaladunekAdres))   multistopFields.push("Załadunek Z1");
-            if (hasMulti(f.zaladunekAdres2))  multistopFields.push("Załadunek Z2");
-            if (hasMulti(f.rozladunekAdres))  multistopFields.push("Rozładunek R1");
-            if (hasMulti(f.rozladunekAdres2)) multistopFields.push("Rozładunek R2");
-            if (hasMulti(f.rozladunekAdres3)) multistopFields.push("Rozładunek R3");
-            if (hasMulti(f.rozladunekAdres4)) multistopFields.push("Rozładunek R4");
-            if (hasMulti(f.rozladunekAdres5)) multistopFields.push("Rozładunek R5");
-            if (multistopFields.length) {
-              const ok = confirm(`Uwaga: pole(a) ${multistopFields.join(", ")} wygląda jakby zawierało wiele adresów ("1. ... 2. ..."). Powinieneś rozdzielić je na osobne punkty (R1, R2, ...).\n\nZapisać mimo to?`);
-              if (!ok) return;
-            }
-            onSave(f);
-          }} className="px-5 py-2 rounded-lg text-sm font-semibold text-white" style={{background:"#111827"}}>{record ? "Zapisz zmiany" : "Dodaj fracht"}</button>
+            {record?.id && (
+              <button onClick={() => setShowTrackerModal(true)}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-2"
+                style={{background: "#0ea5e9"}}
+                title="Wyślij zleceniodawcy link do śledzenia trasy">
+                🔗 Wyślij tracker
+              </button>
+            )}
+            {canSendWhatsapp && (
+              <button onClick={() => setShowWhatsappPreview(true)}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-2"
+                style={{background:"#25D366"}}
+                title={`Wyślij zlecenie na WhatsApp do: ${waDriver.displayName || waDriver.email}`}>
+                📱 Wyślij na WhatsApp
+              </button>
+            )}
+            {record?.id && (() => {
+              const recipient = (f.zleceniodawcaEmail || record.zleceniodawcaEmail || "").trim();
+              const noEmail = !recipient;
+              const notUnloaded = !isRozladowanyForSummary;
+              const disabled = sendingSummary || noEmail || notUnloaded;
+              const tooltip = noEmail ? "Brak email zleceniodawcy"
+                : notUnloaded ? "Fracht jeszcze nie rozładowany"
+                : record.tripEmailSentAt ? `Wyślij ponownie (poprzednio: ${new Date(record.tripEmailSentAt).toLocaleString("pl-PL", { dateStyle: "short", timeStyle: "short" })})`
+                : `Wyślij email z podsumowaniem trasy do: ${recipient}`;
+              return (
+                <button onClick={sendTripSummary} disabled={disabled}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                  style={{background: "#0891b2"}}
+                  title={tooltip}>
+                  {sendingSummary ? "⏳ Wysyłam..." : "📧 Wyślij podsumowanie"}
+                </button>
+              );
+            })()}
+            <button onClick={() => {
+              if(!f.vehicleId){alert("Wybierz pojazd");return;}
+              if(!f.cenaEur){alert("Wpisz cenę EUR");return;}
+              // Heurystyka: adres zawierający enumerację "1. ... 2. ..." prawdopodobnie skleja
+              // wiele punktów rozładunku w jedno pole — powinny być rozdzielone na R1/R2/...
+              const hasMulti = (addr) => addr && /(^|\n)\s*1\.\s/.test(addr) && /(^|\n)\s*2\.\s/.test(addr);
+              const multistopFields = [];
+              if (hasMulti(f.zaladunekAdres))   multistopFields.push("Załadunek Z1");
+              if (hasMulti(f.zaladunekAdres2))  multistopFields.push("Załadunek Z2");
+              if (hasMulti(f.rozladunekAdres))  multistopFields.push("Rozładunek R1");
+              if (hasMulti(f.rozladunekAdres2)) multistopFields.push("Rozładunek R2");
+              if (hasMulti(f.rozladunekAdres3)) multistopFields.push("Rozładunek R3");
+              if (hasMulti(f.rozladunekAdres4)) multistopFields.push("Rozładunek R4");
+              if (hasMulti(f.rozladunekAdres5)) multistopFields.push("Rozładunek R5");
+              if (multistopFields.length) {
+                const ok = confirm(`Uwaga: pole(a) ${multistopFields.join(", ")} wygląda jakby zawierało wiele adresów ("1. ... 2. ..."). Powinieneś rozdzielić je na osobne punkty (R1, R2, ...).\n\nZapisać mimo to?`);
+                if (!ok) return;
+              }
+              onSave(f);
+            }} className="px-5 py-2 rounded-lg text-sm font-semibold text-white" style={{background:"#111827"}}>{record ? "Zapisz zmiany" : "Dodaj fracht"}</button>
+          </div>
         </div>
       </div>
     </div>

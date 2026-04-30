@@ -2495,13 +2495,16 @@ exports.finalizeTrip = onCall(
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Wymagane logowanie.");
 
-    const { frachtId } = request.data || {};
+    // args:
+    //   frachtId — wymagany
+    //   force    — bypass email idempotency (manual resend przez dyspo)
+    //   source   — "auto" (DriverPanel post-dotarcie_rozladunek) | "manual" (admin button)
+    const { frachtId, force = false, source = "auto" } = request.data || {};
     if (!frachtId || typeof frachtId !== "string") {
       throw new HttpsError("invalid-argument", "Brak frachtId");
     }
 
     const db = getFirestore();
-
     const fleetRef = db.doc("fleet/data");
     const fleetSnap = await fleetRef.get();
     if (!fleetSnap.exists) throw new HttpsError("not-found", "Brak fleet/data");
@@ -2511,35 +2514,46 @@ exports.finalizeTrip = onCall(
     const fracht = frachtyList.find(f => f && f.id === frachtId);
     if (!fracht) throw new HttpsError("not-found", "Fracht nie znaleziony");
 
-    if (fracht.tripFinalizedAt) {
-      console.log(`[finalizeTrip] Already finalized: ${frachtId}`);
-      return { ok: true, alreadyFinalized: true, emailSent: false };
+    // Email idempotency: blokuj tylko gdy email już wysłany I caller nie wymaga force.
+    // (Auto trigger po dotarcie_rozladunek przekazuje force=false → block jest OK żeby
+    //  klient nie dostał drugiego maila przy cofnij+ponowny click.
+    //  Manual button dyspo przekazuje force=true → bypass żeby resend działał po fail-auto
+    //  lub gdy klient prosi o duplikat. tripFinalizedAt NIE blokuje — to idempotency
+    //  trackerOff, niezależna od email.)
+    if (fracht.tripEmailSentAt && !force) {
+      console.log(`[finalizeTrip] Email already sent, skip (source=${source}): ${frachtId}`);
+      return {
+        ok: true,
+        emailSent: false,
+        alreadySent: true,
+        previousSentAt: fracht.tripEmailSentAt,
+      };
     }
 
     const eventsSnap = await db.collection("driverEvents").where("frachtId", "==", frachtId).get();
     const events = eventsSnap.docs.map(d => d.data());
-
     const vehicles = fleetData.fleetv2_vehicles || [];
     const vehicle = vehicles.find(v => v && v.id === fracht.vehicleId);
     const stats = computeTripStats(fracht, events);
+    const nowIso = new Date().toISOString();
 
-    const finalizedAt = new Date().toISOString();
-    const newFrachtyList = frachtyList.map(f =>
-      f && f.id === frachtId
-        ? { ...f, trackerEnabled: false, tripFinalizedAt: finalizedAt }
-        : f
-    );
-    await fleetRef.update({ fleetv2_frachty: newFrachtyList });
-    console.log(`[finalizeTrip] Tracker auto-off: ${frachtId}`);
+    // Helper — write fleet/data z patch'em na fracht. Tracker auto-off zawsze
+    // (idempotent przez fallback do istniejącej wartości tripFinalizedAt).
+    const updateFracht = async (extraPatch = {}) => {
+      const newFrachtyList = frachtyList.map(f =>
+        f && f.id === frachtId
+          ? { ...f, trackerEnabled: false, tripFinalizedAt: f.tripFinalizedAt || nowIso, ...extraPatch }
+          : f
+      );
+      await fleetRef.update({ fleetv2_frachty: newFrachtyList });
+    };
 
     const recipientEmail = (fracht.zleceniodawcaEmail || "").trim();
     if (!recipientEmail) {
-      console.log(`[finalizeTrip] No zleceniodawcaEmail, skipping email: ${frachtId}`);
+      console.log(`[finalizeTrip] No zleceniodawcaEmail (source=${source}): ${frachtId}`);
+      await updateFracht();
       await db.collection("emailLogs").add({
-        sentAt: finalizedAt,
-        type: "trip_summary",
-        frachtId,
-        status: "skipped_no_recipient",
+        sentAt: nowIso, type: "trip_summary", frachtId, source, status: "skipped_no_recipient",
       });
       return { ok: true, emailSent: false, reason: "no_recipient" };
     }
@@ -2547,13 +2561,10 @@ exports.finalizeTrip = onCall(
     const configSnap = await db.doc("config/email").get();
     if (!configSnap.exists || !configSnap.data().sendgridApiKey) {
       console.error("[finalizeTrip] No SendGrid config");
+      await updateFracht();
       await db.collection("emailLogs").add({
-        sentAt: finalizedAt,
-        type: "trip_summary",
-        frachtId,
-        recipients: [recipientEmail],
-        status: "error",
-        error: "no_sendgrid_config",
+        sentAt: nowIso, type: "trip_summary", frachtId, source, recipients: [recipientEmail],
+        status: "error", error: "no_sendgrid_config",
       });
       return { ok: true, emailSent: false, reason: "no_sendgrid_config" };
     }
@@ -2570,24 +2581,19 @@ exports.finalizeTrip = onCall(
         subject: `🚛 Trasa zakończona — ${nrZlecenia}`,
         html,
       });
-      console.log(`[finalizeTrip] Email sent to ${recipientEmail}: ${frachtId}`);
+      console.log(`[finalizeTrip] Email sent to ${recipientEmail} (source=${source}): ${frachtId}`);
+      await updateFracht({ tripEmailSentAt: nowIso, tripEmailRecipient: recipientEmail });
       await db.collection("emailLogs").add({
-        sentAt: finalizedAt,
-        type: "trip_summary",
-        frachtId,
-        recipients: [recipientEmail],
-        status: "sent",
+        sentAt: nowIso, type: "trip_summary", frachtId, source, recipients: [recipientEmail], status: "sent",
       });
-      return { ok: true, emailSent: true };
+      return { ok: true, emailSent: true, sentAt: nowIso, recipient: recipientEmail };
     } catch (e) {
-      console.error(`[finalizeTrip] Email send failed: ${e.message}`);
+      console.error(`[finalizeTrip] Email send failed (source=${source}): ${e.message}`);
+      // Tracker auto-off mimo to (admin może retry mailem; trasa zakończona niezależnie)
+      await updateFracht();
       await db.collection("emailLogs").add({
-        sentAt: finalizedAt,
-        type: "trip_summary",
-        frachtId,
-        recipients: [recipientEmail],
-        status: "error",
-        error: e.message,
+        sentAt: nowIso, type: "trip_summary", frachtId, source, recipients: [recipientEmail],
+        status: "error", error: e.message,
       });
       return { ok: true, emailSent: false, reason: "send_failed", error: e.message };
     }
