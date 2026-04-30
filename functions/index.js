@@ -2562,17 +2562,16 @@ function buildAddressSection(fracht, esc) {
   };
   let html = "";
   // Załadunek Z1
-  html += renderPoint("Załadunek", fracht.zaladunekKod, fracht.zaladunekMiasto, fracht.zaladunekAdres, fracht.zaladunekTelefon, fracht.dataZaladunku, fracht.godzZaladunku);
+  html += renderPoint("Załadunek 1", fracht.zaladunekKod, fracht.zaladunekMiasto, fracht.zaladunekAdres, fracht.zaladunekTelefon, fracht.dataZaladunku, fracht.godzZaladunku);
   // Z2 (opcjonalny)
   if (fracht.zaladunekKod2 || fracht.zaladunekMiasto2) {
     html += renderPoint("Załadunek 2", fracht.zaladunekKod2, fracht.zaladunekMiasto2, fracht.zaladunekAdres2, fracht.zaladunekTelefon2, fracht.dataZaladunku2, fracht.godzZaladunku2);
   }
-  // Rozładunki R1-R5
+  // Rozładunki R1-R5 — zawsze z cyferką (Rozładunek 1, 2, ...)
   for (let i = 1; i <= 5; i++) {
     const sfx = i === 1 ? "" : String(i);
     if (!fracht[`dokod${sfx}`] && !fracht[`dokodMiasto${sfx}`]) continue;
-    const labelR = i === 1 ? "Rozładunek" : `Rozładunek ${i}`;
-    html += renderPoint(labelR, fracht[`dokod${sfx}`], fracht[`dokodMiasto${sfx}`], fracht[`rozladunekAdres${sfx}`], fracht[`rozladunekTelefon${sfx}`], fracht[`dataRozladunku${sfx}`], fracht[`godzRozladunku${sfx}`]);
+    html += renderPoint(`Rozładunek ${i}`, fracht[`dokod${sfx}`], fracht[`dokodMiasto${sfx}`], fracht[`rozladunekAdres${sfx}`], fracht[`rozladunekTelefon${sfx}`], fracht[`dataRozladunku${sfx}`], fracht[`godzRozladunku${sfx}`]);
   }
   return html;
 }
@@ -2587,9 +2586,12 @@ function buildCmrSection(events, esc, content = {}) {
   const damage = (content.damage) ? events.filter(e => e.type === "towar_damage_photo" && e.photoUrl).slice(0, 6) : [];
   if (cmrZal.length === 0 && cmrRoz.length === 0 && towar.length === 0 && damage.length === 0) return "";
 
+  // URL safe-encoding: tylko `"` (żeby zamknąć attr) — NIE escape `&` na `&amp;`
+  // bo niektóre klienty mailowe trzymają `&amp;` literalnie i token w URL ginie → 404.
+  const safeUrl = (url) => String(url).replace(/"/g, "%22");
   const renderLinks = (label, items) => {
     if (items.length === 0) return "";
-    const links = items.map((e, i) => `<a href="${esc(e.photoUrl)}" style="color:#3b82f6; text-decoration:none; margin-right:8px;">📄 ${label} ${i + 1}</a>`).join("");
+    const links = items.map((e, i) => `<a href="${safeUrl(e.photoUrl)}" style="color:#3b82f6; text-decoration:none; margin-right:8px;">📄 ${label} ${i + 1}</a>`).join("");
     return `<div style="margin-bottom:6px;">${links}</div>`;
   };
 
@@ -2704,25 +2706,9 @@ function buildTripSummaryEmailHTML(fracht, vehicle, stats, opts = {}) {
     <p style="color:#64748b; margin:0 0 20px 0;">Zlecenie nr <strong>${nrZlecenia}</strong> dla <strong>${klient}</strong> zostało zrealizowane.</p>
 
     <div style="background:#f1f5f9; border-radius:8px; padding:16px; margin-bottom:16px;">
-      <div style="font-size:18px; color:#1e293b; font-weight:600; margin-bottom:12px;">${fromCity} → ${toCity}</div>
       <div style="font-size:13px; color:#64748b; margin-bottom:12px;">Pojazd: ${plate}</div>
       ${showAdresy ? buildAddressSection(fracht, esc) : ""}
     </div>
-
-    <table style="width:100%; border-collapse:collapse; font-size:14px;">
-      <tr>
-        <td style="padding:10px 0; color:#64748b; border-bottom:1px solid #e2e8f0;">Kilometry</td>
-        <td style="padding:10px 0; text-align:right; font-weight:600; color:#1e293b; border-bottom:1px solid #e2e8f0;">${kmTotal}</td>
-      </tr>
-      <tr>
-        <td style="padding:10px 0; color:#64748b; border-bottom:1px solid #e2e8f0;">Czas trasy</td>
-        <td style="padding:10px 0; text-align:right; font-weight:600; color:#1e293b; border-bottom:1px solid #e2e8f0;">${tripDuration}</td>
-      </tr>
-      <tr>
-        <td style="padding:10px 0; color:#64748b;">Punktualność rozładunku</td>
-        <td style="padding:10px 0; text-align:right; font-weight:600; color:#1e293b;">${punctuality}</td>
-      </tr>
-    </table>
 
     ${buildCmrSection(events, esc, content)}
 
