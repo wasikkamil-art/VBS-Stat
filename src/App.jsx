@@ -16209,6 +16209,25 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                               <span className="text-[10px] text-gray-400">{driverStatusId === r.id ? "▲" : "▼"}</span>
                             </button>
                           )}
+                          {/* Round-trip badge: gdy fracht jest powrotny LUB ma swój powrotny */}
+                          {(() => {
+                            const isReturn = !!r.linkedFrachtId && frachtyList.some(o => o.id === r.linkedFrachtId);
+                            const hasReturn = frachtyList.some(o => o && o.linkedFrachtId === r.id);
+                            if (!isReturn && !hasReturn) return null;
+                            const targetId = isReturn ? r.linkedFrachtId : frachtyList.find(o => o && o.linkedFrachtId === r.id)?.id;
+                            const targetFracht = frachtyList.find(o => o.id === targetId);
+                            const targetLabel = targetFracht?.nrZlecenia || targetFracht?.nrRef || (targetId || "").slice(0, 6);
+                            return (
+                              <button onClick={(ev) => { ev.stopPropagation(); setEditId(targetId); setShowForm(true); }}
+                                className="text-xs px-1.5 py-0.5 rounded-lg cursor-pointer hover:opacity-80 transition-all"
+                                style={{ background: "#f3e8ff", color: "#7e22ce", fontWeight: 600 }}
+                                title={isReturn
+                                  ? `🔄 Fracht powrotny — kliknij żeby otworzyć oryginalny #${targetLabel}`
+                                  : `🔄 Ma fracht powrotny — kliknij żeby otworzyć powrotny #${targetLabel}`}>
+                                🔄 {isReturn ? "powrót" : "kółko"}
+                              </button>
+                            );
+                          })()}
                         </div>
                       );
                     })()}
