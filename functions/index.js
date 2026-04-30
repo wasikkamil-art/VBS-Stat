@@ -760,6 +760,82 @@ exports.scheduledHistorySync = onSchedule(
 );
 
 // ═══════════════════════════════════════════════════════════════
+// DAILY BACKUP — eksport fleet/data + driverEvents do GCS bucket
+// 3:00 CET, 30d retention. Druga warstwa obrony obok PITR (7d).
+// Po incident 2026-04-30 (10 frachtów wyparowało przez array race
+// condition) — backup pozwala zrekonstruować konkretne pola sprzed
+// problemu, nawet gdy PITR wygasł.
+// ═══════════════════════════════════════════════════════════════
+exports.dailyBackup = onSchedule(
+  { schedule: "0 3 * * *", timeZone: "Europe/Warsaw", region: "europe-west1" },
+  async () => {
+    const db = getFirestore();
+    const bucket = getStorage().bucket();
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+
+    try {
+      // 1. fleet/data — głowny dokument (pojazdy, frachty, koszty, kategorie, docs, imi, rent)
+      const fleetSnap = await db.doc("fleet/data").get();
+      const fleetData = fleetSnap.data() || {};
+      const fleetCount = (fleetData.fleetv2_frachty || []).length;
+      const vehCount = (fleetData.fleetv2_vehicles || []).length;
+      const fleetFile = bucket.file(`backups/${ts}_fleet-data.json`);
+      await fleetFile.save(JSON.stringify(fleetData), { contentType: "application/json" });
+      console.log(`✓ fleet backup: ${fleetCount} frachtów, ${vehCount} pojazdów → ${fleetFile.name}`);
+
+      // 2. driverEvents — ostatnie 90 dni (krytyczne dla audytu trasy)
+      const cutoff = new Date(Date.now() - 90 * 86400000).toISOString();
+      const evSnap = await db.collection("driverEvents").where("ts", ">=", cutoff).get();
+      const events = evSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const evFile = bucket.file(`backups/${ts}_driverEvents-90d.json`);
+      await evFile.save(JSON.stringify(events), { contentType: "application/json" });
+      console.log(`✓ driverEvents backup: ${events.length} eventów (90d)`);
+
+      // 3. auditLog — ostatnie 30 dni (po incident — żeby śledzić kto co zrobił)
+      const auditCutoff = new Date(Date.now() - 30 * 86400000).toISOString();
+      const auditSnap = await db.collection("auditLog").where("ts", ">=", auditCutoff).get();
+      const audit = auditSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const auditFile = bucket.file(`backups/${ts}_auditLog-30d.json`);
+      await auditFile.save(JSON.stringify(audit), { contentType: "application/json" });
+      console.log(`✓ auditLog backup: ${audit.length} wpisów (30d)`);
+
+      // 4. Cleanup — usuń backupy starsze niż 30 dni
+      const [files] = await bucket.getFiles({ prefix: "backups/" });
+      const cleanupCutoff = Date.now() - 30 * 86400000;
+      let deleted = 0;
+      for (const f of files) {
+        const created = new Date(f.metadata.timeCreated).getTime();
+        if (created < cleanupCutoff) {
+          await f.delete();
+          deleted++;
+        }
+      }
+      console.log(`✓ Cleanup: usunięto ${deleted} starych backupów (>30d)`);
+
+      // 5. Audit trail — zapisz w Firestore meta o backup (do monitoring)
+      await db.collection("backupLog").add({
+        ts: new Date().toISOString(),
+        fleetCount,
+        vehCount,
+        eventsCount: events.length,
+        auditCount: audit.length,
+        cleanedOldBackups: deleted,
+        status: "ok",
+      });
+    } catch (e) {
+      console.error("dailyBackup error:", e);
+      try {
+        await db.collection("backupLog").add({
+          ts: new Date().toISOString(),
+          status: "error",
+          error: e.message,
+        });
+      } catch {}
+    }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════
 // CLEANUP GPS BREADCRUMBS — kasuje punkty starsze niż 7 dni
 // Raz dziennie o 2:30 CET. Chroni przed niekontrolowanym wzrostem storage.
 // ═══════════════════════════════════════════════════════════════

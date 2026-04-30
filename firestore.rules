@@ -72,15 +72,30 @@ service cloud.firestore {
           && notEmptyIfPresent('fleetv2_rent');
     }
 
+    // 🛡️ ANTI-WIPE GUARD (po incident 2026-04-30 — utrata 10 frachtów)
+    // Odrzuca writes które zmniejszają tablicę o więcej niż 3 elementy w jednym write.
+    // Catch-all przed: array race condition, accidental delete-all, buggy bulk operation.
+    // Bulk delete (legitimate) musi przejść przez Cloud Function (admin SDK bypass rules).
+    function noBigShrink(field) {
+      return !(field in request.resource.data)
+          || !(field in resource.data)
+          || request.resource.data[field].size() >= resource.data[field].size() - 3;
+    }
+
+    function fleetNoMassWipe() {
+      return noBigShrink('fleetv2_frachty')
+          && noBigShrink('fleetv2_vehicles')
+          && noBigShrink('fleetv2_costs')
+          && noBigShrink('fleetv2_rent');
+    }
+
     match /fleet/{docId} {
       allow read: if canRead();
       allow create: if canEdit();
-      // fleetDataSafe sprawdza tylko czy NOWE dane nie nadpisują istniejących pustą tablicą.
-      // Admin może zapisać zawsze (np. naprawa po awarii), inni muszą przejść guard.
       // 2026-04-30: po fix array race condition — wszystkie writes przechodzą przez
-      // runTransaction (atomic read-modify-write). Stary anti-pattern (useEffect:1235
-      // writeback całej tablicy) usunięty.
-      allow update: if isAdmin() || (canEdit() && fleetDataSafe());
+      // runTransaction. Plus anti-wipe guard chroni przed mass-delete (max 3 elementy
+      // shrink per write). Bulk operations: przez Cloud Function (admin SDK bypass).
+      allow update: if (isAdmin() || (canEdit() && fleetDataSafe())) && fleetNoMassWipe();
       allow delete: if isAdmin();
     }
 
