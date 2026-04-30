@@ -22,7 +22,7 @@ import ZlecenieUploadBtn from "./ZlecenieUploadBtn";
 const CopyOrderPreviewModal = lazy(() => import("./CopyOrderPreviewModal"));
 const WhatsappSendPreviewModal = lazy(() => import("./WhatsappSendPreviewModal"));
 
-export default function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], onSave, onPatch = null, onClose, defaultVehicleId="", appUsers = [], currentUser = null, showToast = () => {} }) {
+export default function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], onSave, onPatch = null, onClose, onAddReturn = null, defaultVehicleId="", appUsers = [], currentUser = null, showToast = () => {} }) {
   // ── pomocnik: rozbij "PL 44-100 Gliwice" → ["PL 44-100", "Gliwice"] ──
   function splitKM(s) {
     if (!s?.trim()) return ['',''];
@@ -61,6 +61,8 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
       wagaLadunku:"", uwagi:"",
       klient:"", cenaEur:"", kmPodjazd:"", kmLadowne:"", kmWszystkie:"",
       dyspozytor:"", nrFV:"", dataWyslania:"", terminPlatnosci:"", urlZlecenie:"",
+      // Round-trip linker — jeśli set, ten fracht jest powrotnym dla linkedFrachtId
+      linkedFrachtId:"",
     };
     if (!rec) return base;
     const mg = {...base, ...rec};
@@ -144,6 +146,87 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
       showToast(`❌ Błąd: ${e?.message || "nie udało się wysłać"}`);
     } finally {
       setSendingSummary(false);
+    }
+  };
+
+  // 🔄 ROUND-TRIP — "Dodaj fracht powrotny": auto-fill nowego frachta jako odwrócona trasa
+  // (Z = ostatni R, R = pierwszy Z), z tym samym klientem + pojazdem + dyspo.
+  // Linkuje przez linkedFrachtId żeby tracker / driver app / email mógł grupować jako kółko.
+  const addReturnFracht = () => {
+    if (!record?.id) {
+      showToast("⚠️ Najpierw zapisz fracht (trzeba mieć ID do zlinkowania)");
+      return;
+    }
+    if (!f.dokod && !f.dokodMiasto && !f.dokod2 && !f.dokod3 && !f.dokod4 && !f.dokod5) {
+      showToast("⚠️ Wpisz adres rozładunku zanim dodasz powrotny");
+      return;
+    }
+    // Znajdź OSTATNI rozładunek (R5 → R4 → ... → R1) — punkt skąd kierowca rusza powrotem
+    const lastIdx = (() => {
+      for (let i = 5; i >= 2; i--) {
+        const sfx = String(i);
+        if (f[`dokodPocztowy${sfx}`] || f[`dokodMiasto${sfx}`] || f[`dokod${sfx}`]) return i;
+      }
+      return 1;
+    })();
+    const sfx = lastIdx === 1 ? "" : String(lastIdx);
+    const lastR = {
+      firma: f[`rozladunekFirma${sfx}`] || "",
+      kodPocztowy: f[`dokodPocztowy${sfx}`] || "",
+      miasto: f[`dokodMiasto${sfx}`] || "",
+      kod: f[`dokod${sfx}`] || "",
+      adres: f[`rozladunekAdres${sfx}`] || "",
+      telefon: f[`rozladunekTelefon${sfx}`] || "",
+      geo: f[`rozladunekGeo${sfx}`] || "",
+      data: f[`dataRozladunku${sfx}`] || "",
+      godz: f[`godzRozladunku${sfx}`] || "",
+    };
+
+    // Z1 powrotnego = ostatni R oryginalnego (kierowca załadowuje tam gdzie rozładował)
+    // R1 powrotnego = Z1 oryginalnego (zwrot do bazy)
+    const refLabel = record.nrZlecenia || record.nrRef || record.id.slice(0, 6);
+    const prefilled = {
+      // Pojazd + dyspo + klient (ten sam)
+      vehicleId: f.vehicleId,
+      dyspozytor: f.dyspozytor,
+      klient: f.klient,
+      zleceniodawcaFirma: f.zleceniodawcaFirma,
+      zleceniodawcaOsoba: f.zleceniodawcaOsoba,
+      zleceniodawcaTelefon: f.zleceniodawcaTelefon,
+      zleceniodawcaEmail: f.zleceniodawcaEmail,
+
+      // Z1 = ostatni R oryginalnego
+      zaladunekFirma: lastR.firma,
+      zaladunekKodPocztowy: lastR.kodPocztowy,
+      zaladunekMiasto: lastR.miasto,
+      zaladunekKod: lastR.kod,
+      zaladunekAdres: lastR.adres,
+      zaladunekTelefon: lastR.telefon,
+      zaladunekGeo: lastR.geo,
+      dataZaladunku: lastR.data, // editable
+      godzZaladunku: lastR.godz,
+
+      // R1 = Z1 oryginalnego (zwrot do A)
+      rozladunekFirma: f.zaladunekFirma,
+      dokodPocztowy: f.zaladunekKodPocztowy,
+      dokodMiasto: f.zaladunekMiasto,
+      dokod: f.zaladunekKod,
+      rozladunekAdres: f.zaladunekAdres,
+      rozladunekTelefon: f.zaladunekTelefon,
+      rozladunekGeo: f.zaladunekGeo,
+      // Daty + cenaEur do uzupełnienia ręcznie
+      dataRozladunku: "",
+      godzRozladunku: "",
+
+      // Linker
+      linkedFrachtId: record.id,
+      uwagi: `🔄 Fracht powrotny — kółko z #${refLabel}`,
+    };
+
+    if (typeof onAddReturn === "function") {
+      onAddReturn(prefilled);
+    } else {
+      showToast("❌ Brak handlera onAddReturn (bug konfiguracji)");
     }
   };
 
@@ -486,6 +569,14 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
                 style={{background:"#25D366"}}
                 title={`Wyślij zlecenie na WhatsApp do: ${waDriver.displayName || waDriver.email}`}>
                 📱 Wyślij na WhatsApp
+              </button>
+            )}
+            {record?.id && typeof onAddReturn === "function" && (
+              <button onClick={addReturnFracht}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-2"
+                style={{background: "#9333ea"}}
+                title="Auto-fill nowego frachtu jako odwrócona trasa (Z=R, R=Z) z tym samym klientem + pojazdem">
+                🔄 Dodaj fracht powrotny
               </button>
             )}
             {record?.id && (() => {

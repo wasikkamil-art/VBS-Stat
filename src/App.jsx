@@ -15827,6 +15827,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
+  const [prefillRecord, setPrefillRecord] = useState(null); // round-trip "fracht powrotny" prefill
   const [driverStatusId, setDriverStatusId] = useState(null); // rozwinięty panel statusów kierowcy
   // Inline editor dla recznego ustawienia czasu dotarcia (admin/dyspozytor)
   // { frachtId, type: "dotarcie_zaladunek"|"dotarcie_rozladunek", localDt: "YYYY-MM-DDTHH:MM", eventId?: string }
@@ -15911,7 +15912,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
     if (filterMonth !== null && d.getMonth() !== filterMonth) return false;
     return d.getFullYear() === filterYear;
   }).sort((a,b) => (a.dataZaladunku||a.dataZlecenia||"").localeCompare(b.dataZaladunku||b.dataZlecenia||""));
-  const editRecord = editId ? frachtyList.find(r => r.id === editId) : null;
+  const editRecord = editId ? frachtyList.find(r => r.id === editId) : prefillRecord;
 
   // Filtruje frachty po roku na overview
   const filterByYear = (list, year) => year === "all" ? list : list.filter(r => (r.dataZaladunku||r.dataZlecenia)?.startsWith(year));
@@ -16530,7 +16531,34 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
       </div>
       {showForm && (
         <Suspense fallback={<div className="fixed inset-0 flex items-center justify-center" style={{background:"rgba(0,0,0,0.4)", zIndex:9999}}><div className="bg-white rounded-xl px-6 py-4 text-sm text-gray-500">📋 Ładowanie formularza…</div></div>}>
-          <FrachtyModal record={editRecord} vehicles={vehicles} driverEvents={driverEvents} fuelEntries={fuelEntries} defaultVehicleId={selectedVehicle} appUsers={appUsers} currentUser={currentUser} showToast={showToast} onSave={(data) => { if(editId) onUpdate(editId,data); else onAdd(data); setShowForm(false); setEditId(null); }} onPatch={(id, partial) => onUpdate(id, partial)} onClose={() => { setShowForm(false); setEditId(null); }} />
+          <FrachtyModal
+            key={editId || (prefillRecord?.linkedFrachtId ? `return-${prefillRecord.linkedFrachtId}` : "new")}
+            record={editRecord}
+            vehicles={vehicles}
+            driverEvents={driverEvents}
+            fuelEntries={fuelEntries}
+            defaultVehicleId={selectedVehicle}
+            appUsers={appUsers}
+            currentUser={currentUser}
+            showToast={showToast}
+            onSave={(data) => {
+              if (editId) onUpdate(editId, data);
+              else onAdd(data);
+              setShowForm(false);
+              setEditId(null);
+              setPrefillRecord(null);
+            }}
+            onPatch={(id, partial) => onUpdate(id, partial)}
+            onClose={() => { setShowForm(false); setEditId(null); setPrefillRecord(null); }}
+            onAddReturn={(returnPrefilled) => {
+              // Round-trip: zachowaj modal otwarty, ale pod-mienione na nowy fracht z prefill.
+              // key zmieni się (przez prefillRecord.linkedFrachtId) → FrachtyModal re-mountuje
+              // z nowym record (initF wczyta auto-fillowane pola).
+              setEditId(null);
+              setPrefillRecord(returnPrefilled);
+              showToast("🔄 Auto-fillowano dane z poprzedniego frachtu — uzupełnij datę rozładunku i kwotę");
+            }}
+          />
         </Suspense>
       )}
     </div>
