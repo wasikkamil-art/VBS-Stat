@@ -2883,6 +2883,11 @@ exports.finalizeTrip = onCall(
         from: config.senderEmail || "fleetstat@fleetstat.pl",
         subject,
         html,
+        // WAŻNE: wyłącz SendGrid click tracking — przepisuje linki na sendgrid.net/ls/click?...
+        // co psuje token Firebase Storage w URL (token gubi się przy redirekcie) → 404 dla klienta.
+        trackingSettings: {
+          clickTracking: { enable: false, enableText: false },
+        },
       });
       console.log(`[finalizeTrip] Email sent to ${recipientEmail} (source=${source}, roundTrip=${isRoundTripFinal}): ${frachtId}`);
       // Round-trip: tripEmailSentAt na obu frachtach (idempotency block dla partnera też,
