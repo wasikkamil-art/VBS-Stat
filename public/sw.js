@@ -1,6 +1,10 @@
 // FleetStat Service Worker — PWA support
 // CACHE_VERSION zmienia się z każdym buildem — wymusza pobranie nowych plików
-const CACHE_NAME = 'fleetstat-v4';
+// v5 (2026-04-30): emergency bump — wymusza świeży bundle u wszystkich klientów
+// po fixie array race condition (useEffect:1235 utrata 10 frachtów 27-30.04).
+// Klienci z otwartymi zakładkami muszą dostać nowy kod zanim odblokuję
+// firestore.rules na fleet/data — inaczej znów nadpisaliby tablicę.
+const CACHE_NAME = 'fleetstat-v5';
 
 // Install — od razu przejmij kontrolę
 self.addEventListener('install', (e) => {
