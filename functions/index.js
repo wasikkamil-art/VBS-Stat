@@ -2577,12 +2577,15 @@ function buildAddressSection(fracht, esc) {
   return html;
 }
 
-// Helper — render sekcję CMR z events (zdjęcia jako linki, max 6 per typ)
-function buildCmrSection(events, esc) {
+// Helper — render sekcję dokumentów/zdjęć z events (max 6 per typ).
+// Respektuje content flags: cmrZal, cmrRoz, towar, damage. Jeśli wszystko false/empty, zwraca "".
+function buildCmrSection(events, esc, content = {}) {
   if (!Array.isArray(events) || events.length === 0) return "";
-  const cmrZal = events.filter(e => e.type === "cmr_zaladunek_photo" && e.photoUrl).slice(0, 6);
-  const cmrRoz = events.filter(e => (e.type === "cmr_rozladunek_photo" || e.type === "cmr_photo") && e.photoUrl).slice(0, 6);
-  if (cmrZal.length === 0 && cmrRoz.length === 0) return "";
+  const cmrZal = (content.cmrZal !== false) ? events.filter(e => e.type === "cmr_zaladunek_photo" && e.photoUrl).slice(0, 6) : [];
+  const cmrRoz = (content.cmrRoz !== false) ? events.filter(e => (e.type === "cmr_rozladunek_photo" || e.type === "cmr_photo") && e.photoUrl).slice(0, 6) : [];
+  const towar  = (content.towar) ? events.filter(e => e.type === "towar_photo" && e.photoUrl).slice(0, 6) : [];
+  const damage = (content.damage) ? events.filter(e => e.type === "towar_damage_photo" && e.photoUrl).slice(0, 6) : [];
+  if (cmrZal.length === 0 && cmrRoz.length === 0 && towar.length === 0 && damage.length === 0) return "";
 
   const renderLinks = (label, items) => {
     if (items.length === 0) return "";
@@ -2592,9 +2595,11 @@ function buildCmrSection(events, esc) {
 
   return `
     <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:12px; margin-top:12px;">
-      <div style="font-size:11px; color:#92400e; font-weight:700; text-transform:uppercase; margin-bottom:8px;">📄 Dokumenty CMR</div>
+      <div style="font-size:11px; color:#92400e; font-weight:700; text-transform:uppercase; margin-bottom:8px;">📄 Dokumenty i zdjęcia</div>
       ${renderLinks("CMR załadunek", cmrZal)}
       ${renderLinks("CMR rozładunek", cmrRoz)}
+      ${renderLinks("Towar (załadunek)", towar)}
+      ${renderLinks("Uszkodzenia", damage)}
     </div>`;
 }
 
@@ -2607,6 +2612,9 @@ function buildTripSummaryEmailHTML(fracht, vehicle, stats, opts = {}) {
   // partnerRole: "etap1" | "etap2" — co partner reprezentuje względem fracht.
   // Etap 1 = oryginał (wyjazd), Etap 2 = powrotny.
   // events / partnerEvents — driver events do sekcji CMR (zdjęcia).
+  // emailContent — flags z fracht: { adresy, cmrZal, cmrRoz, towar, damage }. Defaults gdy brak.
+  const content = opts.emailContent || { adresy: true, cmrZal: true, cmrRoz: true, towar: false, damage: false };
+  const showAdresy = content.adresy !== false;
 
   const nrZlecenia = esc(fracht.nrZlecenia || fracht.nrRef || "—");
   const klient = esc(fracht.klient || fracht.zleceniodawcaFirma || "—");
@@ -2646,9 +2654,9 @@ function buildTripSummaryEmailHTML(fracht, vehicle, stats, opts = {}) {
     <div style="background:${color}; border-radius:8px; padding:16px; margin-bottom:12px;">
       <div style="font-size:11px; color:#64748b; font-weight:700; margin-bottom:4px;">${label} — zlecenie #${fNr}</div>
       <div style="font-size:16px; color:#1e293b; font-weight:600; margin-bottom:8px;">${fFrom} → ${fTo}</div>
-      ${buildAddressSection(f, esc)}
+      ${showAdresy ? buildAddressSection(f, esc) : ""}
       <div style="font-size:13px; color:#475569; margin-top:8px;">${fKm} · ${fDur} · ${fPunct}</div>
-      ${buildCmrSection(evts, esc)}
+      ${buildCmrSection(evts, esc, content)}
     </div>`;
     };
 
@@ -2698,7 +2706,7 @@ function buildTripSummaryEmailHTML(fracht, vehicle, stats, opts = {}) {
     <div style="background:#f1f5f9; border-radius:8px; padding:16px; margin-bottom:16px;">
       <div style="font-size:18px; color:#1e293b; font-weight:600; margin-bottom:12px;">${fromCity} → ${toCity}</div>
       <div style="font-size:13px; color:#64748b; margin-bottom:12px;">Pojazd: ${plate}</div>
-      ${buildAddressSection(fracht, esc)}
+      ${showAdresy ? buildAddressSection(fracht, esc) : ""}
     </div>
 
     <table style="width:100%; border-collapse:collapse; font-size:14px;">
@@ -2716,7 +2724,7 @@ function buildTripSummaryEmailHTML(fracht, vehicle, stats, opts = {}) {
       </tr>
     </table>
 
-    ${buildCmrSection(events, esc)}
+    ${buildCmrSection(events, esc, content)}
 
     <p style="font-size:12px; color:#94a3b8; margin-top:24px; text-align:center;">
       Wiadomość wygenerowana automatycznie przez FleetStat<br>
@@ -2862,10 +2870,15 @@ exports.finalizeTrip = onCall(
     const config = configSnap.data();
     sgMail.setApiKey(config.sendgridApiKey);
 
+    // emailContent flags z fracht (z defaults gdy legacy/brak)
+    const emailContent = (fracht.emailContent && typeof fracht.emailContent === "object")
+      ? fracht.emailContent
+      : { adresy: true, cmrZal: true, cmrRoz: true, towar: false, damage: false };
+
     const html = buildTripSummaryEmailHTML(fracht, vehicle, stats,
       isRoundTripFinal
-        ? { partner: linkedFracht, partnerStats, partnerRole, events, partnerEvents }
-        : { events }
+        ? { partner: linkedFracht, partnerStats, partnerRole, events, partnerEvents, emailContent }
+        : { events, emailContent }
     );
     const nrZlecenia = fracht.nrZlecenia || fracht.nrRef || "—";
     const subject = isRoundTripFinal

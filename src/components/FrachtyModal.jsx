@@ -63,9 +63,13 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
       dyspozytor:"", nrFV:"", dataWyslania:"", terminPlatnosci:"", urlZlecenie:"",
       // Round-trip linker — jeśli set, ten fracht jest powrotnym dla linkedFrachtId
       linkedFrachtId:"",
+      // Email podsumowanie — co wysłać klientowi (defaults: adresy + CMR tak, zdjęcia wewnętrzne nie)
+      emailContent: { adresy: true, cmrZal: true, cmrRoz: true, towar: false, damage: false },
     };
     if (!rec) return base;
     const mg = {...base, ...rec};
+    // emailContent — merge z defaults gdy rec ma niepełną/legacy strukturę
+    mg.emailContent = { ...base.emailContent, ...((rec.emailContent && typeof rec.emailContent === "object") ? rec.emailContent : {}) };
     if (!mg.zaladunekKodPocztowy && !mg.zaladunekMiasto && mg.zaladunekKod) { const [k,m] = splitKM(mg.zaladunekKod); mg.zaladunekKodPocztowy=k; mg.zaladunekMiasto=m; }
     if (!mg.zaladunekKodPocztowy2 && !mg.zaladunekMiasto2 && mg.zaladunekKod2?.trim()) { const [k,m] = splitKM(mg.zaladunekKod2); mg.zaladunekKodPocztowy2=k; mg.zaladunekMiasto2=m; }
     if (!mg.dokodPocztowy && !mg.dokodMiasto && mg.dokod) { const [k,m] = splitKM(mg.dokod); mg.dokodPocztowy=k; mg.dokodMiasto=m; }
@@ -487,6 +491,37 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
               <div><label className={lbl}>Osoba kontaktowa</label><input placeholder="Jan Kowalski" value={f.zleceniodawcaOsoba||""} onChange={e => set("zleceniodawcaOsoba",e.target.value)} className={inp} /></div>
               <div><label className={lbl}>Telefon</label><input placeholder="+48..." value={f.zleceniodawcaTelefon||""} onChange={e => set("zleceniodawcaTelefon",e.target.value)} className={inp} /></div>
               <div><label className={lbl}>Email</label><input type="email" placeholder="kontakt@firma.pl" value={f.zleceniodawcaEmail||""} onChange={e => set("zleceniodawcaEmail",e.target.value)} className={inp} /></div>
+            </div>
+          </div>
+
+          {/* ══ EMAIL PODSUMOWANIE ══ */}
+          <div className="text-xs font-bold text-blue-600 uppercase tracking-widest pt-2">📧 Email podsumowanie</div>
+          <div style={{border:"1px solid #bfdbfe",borderRadius:12,padding:"14px",background:"#eff6ff"}}>
+            <div className="text-xs text-blue-500 mb-3">Co wysłać klientowi po zakończeniu trasy (zawsze: nr zlecenia, klient, pojazd, km, czas, punktualność)</div>
+            <div className="space-y-1.5">
+              {[
+                { k: "adresy", label: "📍 Pełne adresy załadunku/rozładunku", sub: "kody, miasta, pełne adresy, telefony kontaktowe" },
+                { k: "cmrZal", label: "📄 CMR załadunkowe (linki)", sub: "linki do zdjęć dokumentów z załadunku" },
+                { k: "cmrRoz", label: "📄 CMR rozładunkowe (linki)", sub: "linki do zdjęć z pieczątkami po dostawie" },
+                { k: "towar", label: "📦 Zdjęcia towaru z załadunku", sub: "jak towar został zapakowany — zwykle wewnętrzne" },
+                { k: "damage", label: "⚠️ Zdjęcia uszkodzeń", sub: "ewentualne uszkodzenia stwierdzone u odbiorcy" },
+              ].map(opt => {
+                const isOn = !!(f.emailContent && f.emailContent[opt.k]);
+                return (
+                  <label key={opt.k} className="flex items-start gap-2.5 cursor-pointer p-2 rounded-lg hover:bg-blue-100 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={isOn}
+                      onChange={() => set("emailContent", { ...(f.emailContent || {}), [opt.k]: !isOn })}
+                      className="mt-0.5 w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <div className="flex-1">
+                      <div className="text-sm font-semibold text-gray-800">{opt.label}</div>
+                      <div className="text-[11px] text-gray-500">{opt.sub}</div>
+                    </div>
+                  </label>
+                );
+              })}
             </div>
           </div>
 
