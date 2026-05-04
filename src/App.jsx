@@ -3804,11 +3804,23 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               costs={costs}
               updateCost={updateCost}
               currentUser={user}
+              role={role}
               appUsers={appUsers}
               eurRate={eurRate}
               eurRateDate={eurRateDate}
               showToast={showToast}
-              onAdd={async (s) => { try { const ref = await addDoc(collection(db, "sprawy"), { ...s, dataUtworzenia: new Date().toISOString() }); logAction("add", "sprawy", { id: ref.id, typ: s.typ, kierowca: s.kierowca }); showToast("✅ Sprawa dodana"); } catch(e) { console.error("onAdd sprawa", e); showToast("❌ Błąd dodawania sprawy"); } }}
+              onAdd={async (s) => {
+                try {
+                  // Auto-add autora do przypisani gdy lista pusta — żeby autor zawsze widział
+                  // swoją sprawę w sidebar badge / alertach (admin/dyspo widzą wszystko przez canSeeAllSprawy).
+                  const autoPrzypisani = (Array.isArray(s.przypisani) && s.przypisani.length > 0)
+                    ? s.przypisani
+                    : [user.email];
+                  const ref = await addDoc(collection(db, "sprawy"), { ...s, przypisani: autoPrzypisani, dataUtworzenia: new Date().toISOString() });
+                  logAction("add", "sprawy", { id: ref.id, typ: s.typ, kierowca: s.kierowca });
+                  showToast("✅ Sprawa dodana");
+                } catch(e) { console.error("onAdd sprawa", e); showToast("❌ Błąd dodawania sprawy"); }
+              }}
               onUpdate={async (id, data) => {
                 try {
                   if (data._addZdarzenie) {
@@ -5593,7 +5605,7 @@ function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUse
   );
 }
 
-function SprawyTab({ sprawyList, vehicles, costs, updateCost, currentUser, appUsers, eurRate, eurRateDate, showToast, onAdd, onUpdate, onDelete }) {
+function SprawyTab({ sprawyList, vehicles, costs, updateCost, currentUser, role, appUsers, eurRate, eurRateDate, showToast, onAdd, onUpdate, onDelete }) {
   const [view, setView] = useState("lista");
   const [selectedId, setSelectedId] = useState(null);
   const [showNewSprawa, setShowNewSprawa] = useState(false);
@@ -5612,10 +5624,14 @@ function SprawyTab({ sprawyList, vehicles, costs, updateCost, currentUser, appUs
   const dzisiaj = sprawyList.filter(s => s.status !== "zamknieta" && s.status !== "wygrana" && s.status !== "przegrana" && s.przypomnienie && s.przypomnienie <= today);
 
   const CLOSED_STATUSES = ["zamknieta", "wygrana", "przegrana"];
-  const isAdminUser = appUsers.find(u => u.email === currentUser.email)?.role === "admin";
+  // Admin i dyspozytor widzą WSZYSTKIE sprawy (nawet nieprzypisane do nich).
+  // Inni (podglad/kierowca) widzą tylko te w których są w `przypisani`.
+  // Bug-fix 2026-05-04: wcześniej używaliśmy appUsers.find(...) co było zawodne
+  // gdy appUsers nie były jeszcze załadowane → admin nie widział nieprzypisanych spraw.
+  const canSeeAllSprawy = role === "admin" || role === "dyspozytor";
 
   const allFiltered = sprawyList.filter(s => {
-    if (!isAdminUser && !(s.przypisani||[]).includes(currentUser.email)) return false;
+    if (!canSeeAllSprawy && !(s.przypisani||[]).includes(currentUser.email)) return false;
     if (filterStatus !== "all" && s.status !== filterStatus) return false;
     if (filterTyp !== "all" && s.typ !== filterTyp) return false;
     if (filterMoje && !(s.przypisani||[]).includes(currentUser.email)) return false;
