@@ -105,7 +105,35 @@ rm -f .git/index.lock
 
 Testów unit/integration brak — nie uruchamiaj `npm test` (nie istnieje).
 
-Przed `git push` **zawsze pytaj użytkownika** — push triggeruje auto-deploy na produkcję.
+Przed `git push` **na main** zawsze pytaj użytkownika — to triggeruje Vercel auto-deploy na produkcję. Push do remote feature branch (`origin <branch>`) to tylko backup, można robić proaktywnie po każdej sesji (patrz Backup workflow).
+
+## Backup workflow
+
+Folder pracy `*.nosync` jest **wykluczony z iCloud sync** (konwencja iCloud Drive: extension `.nosync` blokuje synchronizację). Bez świadomej dyscypliny utrata MacBooka = utrata danych.
+
+**Po każdej sesji** (lub gdy długa sesja, lub gdy user zgłasza że limit się kończy):
+1. `git status -sb` — sprawdź ile niepushed commits
+2. `git push -u origin <branch>` — backup do remote feature branch (NIE bezpośrednio na main)
+3. Merge do main przez PR robisz manualnie gdy chcesz deploy (Vercel auto-deploy po merge)
+
+**Zabezpieczone przez `git push`** ✅: kod, dokumentacja (`PODSUMOWANIE-PROJEKTU.md`, `SESJA-LOG.md`, `CLAUDE.md`, `ZASADY-VBS-STAT.md`), Cloud Functions, configs w repo.
+
+**TYLKO LOKALNIE** ⚠️ (do osobnego backupu):
+- Memory Claude `~/.claude/projects/-Users-kamilwasik-Desktop-VBS-Stat-nosync/memory/` — 60 KB, 14 plików (preferencje + recovery procedures + TODO context). **TBD: skrypt backup do iCloud Drive (Krok 2 z 2026-05-04).**
+- `.env.local` — Firebase / Anthropic credentials (do password managera)
+- `.git/config` — zawiera GitHub PAT w plain text
+- `node_modules/`, `dist/`, `.vite/` — odtwarzalne z `npm install` + `npm run build`, NIE backupować
+- `2026-*.json`, `import-*.json`, `frachty_*.json` — dane historyczne migracji (jednorazowe, ale warto skopiować raz)
+
+**Time Machine + external SSD** (~$80-150) = najmocniejszy fail-safe — backup wszystkiego automat, point-in-time recovery. Rekomendowane gdy nie ma się dyscypliny push'a.
+
+**Security PAT**: GitHub Personal Access Token siedzi w `.git/config` w plain text. Jeśli MacBook utracony, PAT wycieknie do publicznego transcript chatu (np. przez `git remote -v`), lub komputer jest udostępniony — natychmiast:
+```bash
+# 1. GitHub Settings → Developer settings → Personal access tokens → Revoke stary
+# 2. Wygeneruj nowy PAT (scope: repo, workflow)
+# 3. Zaktualizuj remote:
+git remote set-url origin https://{NEW_PAT}@github.com/wasikkamil-art/VBS-Stat.git
+```
 
 ## Konwencje kodu (obserwowane)
 
