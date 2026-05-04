@@ -760,6 +760,49 @@ exports.scheduledHistorySync = onSchedule(
 );
 
 // ═══════════════════════════════════════════════════════════════
+// CLOSE STALE DRIVER ACTIVITIES — auto-close segmentów otwartych >24h
+// 1:00 CET codziennie. Bug 2026-05-04: kierowca/admin kliknął "Jazda"
+// w driver app i zapomniał zamknąć — segment rósł 5 dni → 121h fałszywej jazdy.
+// Auto-close ustawia endTs = startTs + 5 min (token close — segment nie liczy czasu).
+// ═══════════════════════════════════════════════════════════════
+exports.closeStaleActivities = onSchedule(
+  { schedule: "0 1 * * *", timeZone: "Europe/Warsaw", region: "europe-west1" },
+  async () => {
+    const db = getFirestore();
+    const cutoff24h = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    try {
+      // Wszystkie open segments (endTs == null)
+      const snap = await db.collection("driverActivities").where("endTs", "==", null).get();
+      let closed = 0;
+      for (const doc of snap.docs) {
+        const a = doc.data();
+        if (!a.startTs || a.startTs >= cutoff24h) continue; // świeży, OK
+        // Token close: endTs = startTs + 5 min (segment nie liczy realnego czasu jazdy)
+        const tokenEnd = new Date(new Date(a.startTs).getTime() + 5 * 60 * 1000).toISOString();
+        await doc.ref.update({
+          endTs: tokenEnd,
+          autoClosedAt: new Date().toISOString(),
+          autoCloseReason: "stale_>24h_no_close",
+        });
+        closed++;
+        console.log(`[closeStaleActivities] Closed ${doc.id}: ${a.driverEmail} ${a.type} from ${a.startTs}`);
+      }
+      console.log(`[closeStaleActivities] Total closed: ${closed} (z ${snap.size} open)`);
+      if (closed > 0) {
+        await db.collection("auditLog").add({
+          ts: new Date().toISOString(),
+          action: "auto_close_stale",
+          module: "driverActivities",
+          details: { count: closed, totalOpen: snap.size },
+        });
+      }
+    } catch (e) {
+      console.error("[closeStaleActivities] error:", e.message);
+    }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════
 // DAILY BACKUP — eksport fleet/data + driverEvents do GCS bucket
 // 3:00 CET, 30d retention. Druga warstwa obrony obok PITR (7d).
 // Po incident 2026-04-30 (10 frachtów wyparowało przez array race
