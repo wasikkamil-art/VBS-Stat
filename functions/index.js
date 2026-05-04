@@ -540,16 +540,39 @@ exports.scheduledGpsPoll = onSchedule(
     const cfg = configSnap.data() || {};
     if (!cfg.username || !cfg.password) { console.error("scheduledGpsPoll: brak credentials Atlas w config/gps"); return; }
 
-    // 3. Fetch positions z Atlas
+    const authHeader = "Basic " + Buffer.from(`${cfg.username}:${cfg.password}`).toString("base64");
+
+    // 3a. Fetch device list (mapowanie deviceId → deviceName).
+    // Atlas zmienił format response ~28.04.2026 — positions teraz mają tylko `deviceId`
+    // zamiast zagnieżdżonego `dev.deviceName`. Trzymamy lookup po obu.
+    const deviceMap = {};
+    try {
+      const devUrl = `https://widziszwszystko.eu/atlas/${cfg.group}/${cfg.username}/devices`;
+      const devResp = await fetch(devUrl, {
+        method: "GET",
+        headers: { "Accept": "application/json", "Authorization": authHeader },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (devResp.ok) {
+        const devBody = await devResp.json();
+        const devList = devBody?.deviceList || devBody?.data?.deviceList || [];
+        for (const d of devList) {
+          if (d?.deviceId) deviceMap[String(d.deviceId)] = String(d.deviceName || d.plate || "");
+        }
+      } else {
+        console.warn(`scheduledGpsPoll: /devices ${devResp.status}`);
+      }
+    } catch (e) {
+      console.warn("scheduledGpsPoll: /devices fetch error:", e.message);
+    }
+
+    // 3b. Fetch positions z Atlas
     let positions = [];
     try {
       const url = `https://widziszwszystko.eu/atlas/${cfg.group}/${cfg.username}/positionsWithCanDetails`;
       const resp = await fetch(url, {
         method: "GET",
-        headers: {
-          "Accept": "application/json",
-          "Authorization": "Basic " + Buffer.from(`${cfg.username}:${cfg.password}`).toString("base64"),
-        },
+        headers: { "Accept": "application/json", "Authorization": authHeader },
         signal: AbortSignal.timeout(15000),
       });
       if (!resp.ok) { console.error(`scheduledGpsPoll: Atlas ${resp.status}`); return; }
@@ -570,7 +593,8 @@ exports.scheduledGpsPoll = onSchedule(
 
     // 4. Per-pozycja: match + breadcrumb + activity
     for (const pos of positions) {
-      const devPlate = String(pos?.dev?.deviceName || pos?.dev?.plate || pos?.deviceName || pos?.plate || "")
+      const devNameFromMap = pos?.deviceId ? deviceMap[String(pos.deviceId)] : "";
+      const devPlate = String(pos?.dev?.deviceName || pos?.dev?.plate || pos?.deviceName || pos?.plate || devNameFromMap || "")
         .replace(/\s+/g, "").toUpperCase();
       const vehicle = vehicles.find(v => {
         const fp = String(v.plate || "").replace(/\s+/g, "").toUpperCase();
@@ -684,16 +708,35 @@ exports.scheduledHistorySync = onSchedule(
     const cfg = configSnap.data() || {};
     if (!cfg.username || !cfg.password) { console.error("scheduledHistorySync: brak credentials"); return; }
 
+    const authHeader = "Basic " + Buffer.from(`${cfg.username}:${cfg.password}`).toString("base64");
+
+    // Cache deviceId → deviceName (Atlas zmienił format ~28.04.2026)
+    const deviceMap = {};
+    try {
+      const devUrl = `https://widziszwszystko.eu/atlas/${cfg.group}/${cfg.username}/devices`;
+      const devResp = await fetch(devUrl, {
+        method: "GET",
+        headers: { "Accept": "application/json", "Authorization": authHeader },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (devResp.ok) {
+        const devBody = await devResp.json();
+        const devList = devBody?.deviceList || devBody?.data?.deviceList || [];
+        for (const d of devList) {
+          if (d?.deviceId) deviceMap[String(d.deviceId)] = String(d.deviceName || d.plate || "");
+        }
+      }
+    } catch (e) {
+      console.warn("scheduledHistorySync: /devices fetch error:", e.message);
+    }
+
     // Fetch /history dla roku+miesiąca
     let items = [];
     try {
       const url = `https://widziszwszystko.eu/atlas/${cfg.group}/${cfg.username}/history?year=${year}&month=${month}`;
       const resp = await fetch(url, {
         method: "GET",
-        headers: {
-          "Accept": "application/json",
-          "Authorization": "Basic " + Buffer.from(`${cfg.username}:${cfg.password}`).toString("base64"),
-        },
+        headers: { "Accept": "application/json", "Authorization": authHeader },
         signal: AbortSignal.timeout(60000),
       });
       if (!resp.ok) { console.error(`scheduledHistorySync: Atlas ${resp.status}`); return; }
@@ -720,7 +763,8 @@ exports.scheduledHistorySync = onSchedule(
       // Filter punkty dla tego pojazdu + wczorajszego dnia
       const matches = [];
       for (const p of items) {
-        const pPlate = String(p?.dev?.deviceName || p?.dev?.plate || p?.deviceName || p?.plate || "")
+        const devNameFromMap = p?.deviceId ? deviceMap[String(p.deviceId)] : "";
+        const pPlate = String(p?.dev?.deviceName || p?.dev?.plate || p?.deviceName || p?.plate || devNameFromMap || "")
           .replace(/\s+/g, "").toUpperCase();
         if (pPlate && !(pPlate === vPlate || pPlate.includes(vPlate) || vPlate.includes(pPlate))) continue;
 
