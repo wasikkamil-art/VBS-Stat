@@ -1078,7 +1078,15 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
   // ── LOAD — real-time onSnapshot ──
   useEffect(() => {
-    const unsub = onSnapshot(DATA_REF(), (snap) => {
+    let currentUnsub = null;
+    let retryCount = 0;
+    const MAX_RETRIES = 5;
+    const RETRY_DELAY_MS = 3000;
+    let retryTimer = null;
+
+    const subscribe = () => {
+      currentUnsub = onSnapshot(DATA_REF(), (snap) => {
+        retryCount = 0; // reset przy sukcesie
       if (!snap.exists()) { setLoaded(true); return; }
       const data = snap.data();
 
@@ -1142,13 +1150,27 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
       setLoaded(true);
     }, (err) => {
-      console.error("onSnapshot error", err);
-      // ⚠️ NIE ustawiaj loaded=true przy błędzie!
-      // To zapobiegnie nadpisaniu danych pustymi tablicami przez efekty zapisu.
-      // Zamiast tego pokaż komunikat o błędzie połączenia.
-      showToast("⚠️ Błąd połączenia z bazą danych. Odśwież stronę.");
+      console.error(`[onSnapshot fleet/data] error (try ${retryCount + 1}/${MAX_RETRIES})`, err.code || "", err.message || err);
+      // Auto-retry przy chwilowych disconnects (token refresh po wyloguj+zaloguj,
+      // Firestore reconnect po deploy rules, słabe łącze etc.) zanim pokażemy
+      // alarmujący toast. Każdy retry tworzy nowy listener (poprzedni już dead).
+      if (retryCount < MAX_RETRIES) {
+        retryCount++;
+        if (currentUnsub) { try { currentUnsub(); } catch {} currentUnsub = null; }
+        retryTimer = setTimeout(subscribe, RETRY_DELAY_MS);
+      } else {
+        // Wyczerpane próby — pokaż komunikat i NIE ustawiaj loaded=true
+        // (zapobiega nadpisaniu danych pustymi tablicami przez efekty zapisu).
+        showToast("⚠️ Błąd połączenia z bazą danych. Odśwież stronę.");
+      }
     });
-    return () => unsub(); // cleanup przy odmontowaniu
+    };
+
+    subscribe();
+    return () => {
+      if (retryTimer) clearTimeout(retryTimer);
+      if (currentUnsub) { try { currentUnsub(); } catch {} }
+    };
   }, []);
 
   // ── OPERACYJNE — osobna kolekcja ──
