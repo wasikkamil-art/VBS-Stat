@@ -214,6 +214,55 @@ export function preferDddSegments(segments) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// TACHOGRAF VIEW HELPERS (Webfleet style)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Najpóźniejszy moment zakończenia bieżącej zmiany (Pakiet Mobilności).
+// Limit "okres pracy" = 13h od końca ostatniego dziennego odpoczynku.
+export function shiftLatestEndMs(shiftStartMs) {
+  return shiftStartMs + 13 * 3600000;
+}
+
+// Najwcześniejszy moment rozpoczęcia kolejnej zmiany.
+// Wymagany 11h regularny dzienny odpoczynek po zakończeniu zmiany.
+export function nextShiftEarliestStartMs(shiftEndMs) {
+  return shiftEndMs + REGULATION.DAILY_REST_REGULAR * 60000;
+}
+
+// Limit jazdy w bieżącym tygodniu uwzględniający 90h biweekly cap (art. 6 ust. 2 561/2006).
+// = min(WEEKLY_DRIVE, BIWEEKLY_DRIVE - drive_w_poprzednim_tygodniu)
+export function effectiveWeeklyDriveLimit(segments, weekStartMs) {
+  const prevWeekStart = weekStartMs - 7 * 24 * 3600000;
+  const prevWeekSums = sumByType(segments, prevWeekStart, weekStartMs);
+  const remaining = REGULATION.BIWEEKLY_DRIVE - prevWeekSums.drive;
+  return Math.min(REGULATION.WEEKLY_DRIVE, Math.max(0, remaining));
+}
+
+// Liczba zmniejszonych odpoczynków dziennych (≥9h, <11h) w bieżącym tygodniu.
+// Limit: max 3 między dwoma odpoczynkami tygodniowymi (art. 8 ust. 4).
+export function reducedDailyRestsThisWeek(segments, weekStartMs, nowMs) {
+  return segments.filter(s =>
+    s.type === "rest" &&
+    s.durMin >= REGULATION.DAILY_REST_REDUCED &&
+    s.durMin < REGULATION.DAILY_REST_REGULAR &&
+    s.startMs >= weekStartMs &&
+    s.startMs < nowMs
+  ).length;
+}
+
+// Liczba "wydłużonych" dni jazdy (>9h, ≤10h) w bieżącym tygodniu.
+// Limit: max 2 razy w tygodniu (art. 6 ust. 1).
+export function extendedDailyDrivesThisWeek(segments, weekStartMs, nowMs) {
+  let count = 0;
+  const dayMs = 24 * 3600000;
+  for (let t = weekStartMs; t < nowMs; t += dayMs) {
+    const dSums = sumByType(segments, t, Math.min(t + dayMs, nowMs));
+    if (dSums.drive > 9 * 60) count++;
+  }
+  return count;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // GŁÓWNE FUNKCJE: computeDriverCompliance + computeDriverPlan
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -297,6 +346,12 @@ export function computeDriverCompliance(rawSegments = [], periodStart = null, no
       extendedDaysAllowed: REGULATION.EXTENDED_PER_WEEK,
       start: dayStart,
     },
+    // NEW: zmiana (Pakiet Mobilności — okres pracy max 13h)
+    shift: {
+      startMs: dayStart,
+      latestEndMs: shiftLatestEndMs(dayStart),
+      nextStartMs: nextShiftEarliestStartMs(shiftLatestEndMs(dayStart)),
+    },
     weekly: {
       drive: weekSums.drive,
       work: weekSums.work,
@@ -304,6 +359,12 @@ export function computeDriverCompliance(rawSegments = [], periodStart = null, no
       limit: REGULATION.WEEKLY_DRIVE,
       limitWorkTime: REGULATION.WORK_TIME_WEEKLY_AVG,
       start: weekStart,
+      // NEW: efektywny limit z biweekly cap + countery dni
+      effectiveDriveLimit: effectiveWeeklyDriveLimit(segments, weekStart),
+      reducedDailyRests: reducedDailyRestsThisWeek(segments, weekStart, nowMs),
+      reducedDailyRestsAllowed: REGULATION.DAILY_REST_REDUCED_PER_WEEK,
+      extendedDailyDrives: extendedDailyDrivesThisWeek(segments, weekStart, nowMs),
+      extendedDailyDrivesAllowed: REGULATION.EXTENDED_PER_WEEK,
     },
     biweekly: {
       drive: biweekSums.drive,

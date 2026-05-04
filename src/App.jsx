@@ -32,6 +32,7 @@ import {
 const DriverPanel = lazy(() => import("./components/DriverPanel"));
 const TrackerPublicView = lazy(() => import("./components/TrackerPublicView"));
 const GpsCzasPracySection = lazy(() => import("./components/GpsCzasPracySection"));
+const TachografComplianceSection = lazy(() => import("./components/TachografComplianceSection"));
 // FrachtyModal — admin modal zlecenia (~480 linii) + SendTrackerLinkModal (~220 linii).
 // Lazy — admin pobiera dopiero gdy „+ Dodaj fracht" lub edytuje.
 const FrachtyModal = lazy(() => import("./components/FrachtyModal"));
@@ -6289,6 +6290,7 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
     { id: "karta", label: "Karta kierowcy", icon: "💳" },
     { id: "ddd", label: "Pliki DDD", icon: "💾" },
     { id: "czas-pracy", label: "Czas pracy", icon: "⏱️" },
+    { id: "tachograf", label: "Tachograf", icon: "📋" },
   ];
 
   if (loading) {
@@ -6440,6 +6442,11 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
             {subTab === "czas-pracy" && (
               <Suspense fallback={<div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-sm text-gray-500">⏱ Ładowanie czasu pracy…</div>}>
                 <GpsCzasPracySection device={selectedDev} position={selectedPos} driverActivities={driverActivities} showToast={showToast} />
+              </Suspense>
+            )}
+            {subTab === "tachograf" && (
+              <Suspense fallback={<div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-sm text-gray-500">📋 Ładowanie compliance tachografu…</div>}>
+                <TachografComplianceSection device={selectedDev} position={selectedPos} driverActivities={driverActivities} />
               </Suspense>
             )}
           </>
