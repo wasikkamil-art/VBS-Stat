@@ -594,14 +594,23 @@ export default function Root() {
             _justLoggedIn = false;
           }
           const tokenResult = await u.getIdTokenResult();
-          let tokenRole = tokenResult.claims.role;
+          const claimRole = tokenResult.claims.role;
+          let tokenRole = claimRole;
 
-          // 2. Zawsze sprawdź Firestore — jest source of truth (Cloud Function może mieć opóźnienie)
+          // 2. Custom Claim z token Auth = source of truth (JWT podpisany przez Firebase Auth,
+          // nie da się pisać z client-side — tylko CF/Admin SDK). Firestore /users tylko jako
+          // fallback gdy token jeszcze nie ma claim (np. nowy user, CF onRoleChange opóźnienie).
+          // Naprawione 2026-05-04 po incydencie kiedy Firestore role była niezgodna z claim.
           const userSnap = await getDoc(doc(db, "users", u.uid));
           if (userSnap.exists()) {
             const firestoreRole = userSnap.data().role;
-            if (firestoreRole) {
-              tokenRole = firestoreRole; // Firestore wygrywa
+            if (!claimRole && firestoreRole) {
+              // Token bez claim — fallback (CF onRoleChange może mieć opóźnienie)
+              tokenRole = firestoreRole;
+              console.warn(`[role] Token bez Custom Claim, fallback do Firestore: ${firestoreRole}`);
+            } else if (claimRole && firestoreRole && claimRole !== firestoreRole) {
+              // Niezgodność: claim ≠ Firestore. Zaufaj claim (security), ale loguj.
+              console.warn(`[role] Niezgodność claim="${claimRole}" vs firestore="${firestoreRole}". Używam claim.`);
             }
           } else {
             // Dokument z UID nie istnieje — szukaj po emailu (mógł być dodany z losowym ID)

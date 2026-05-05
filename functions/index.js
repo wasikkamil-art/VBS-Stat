@@ -33,7 +33,27 @@ exports.onRoleChange = onDocumentWritten(
   { document: "users/{uid}", region: "europe-west1" },
   async (event) => {
     const uid = event.params.uid;
+    const before = event.data?.before?.data();
     const after = event.data?.after?.data();
+    const beforeRole = before?.role || null;
+    const afterRole = after?.role || null;
+
+    // Audit log: każda zmiana roli zapisana (kto/kiedy/co). Pominę jeśli rola się nie zmieniła.
+    if (beforeRole !== afterRole) {
+      try {
+        await getFirestore().collection("auditLog").add({
+          action: "role_change",
+          ts: new Date().toISOString(),
+          targetUid: uid,
+          targetEmail: after?.email || before?.email || null,
+          before: beforeRole,
+          after: afterRole,
+          source: "onRoleChange_trigger",
+        });
+      } catch (e) {
+        console.warn(`auditLog write failed for ${uid}:`, e.message);
+      }
+    }
 
     // Dokument usunięty — usuń claims
     if (!after) {
