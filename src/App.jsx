@@ -14043,13 +14043,16 @@ function CzasPracyModal({ vehicle, entries, onSave, onDelete, onClose }) {
   const fmtDate = (y, m, d) => `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
   const today = new Date().toISOString().slice(0,10);
 
-  // Map entries by date
+  // Map entries by date.
+  // Anchor na noon ("T12:00:00") + toLocaleDateString("sv-SE") = format ISO YYYY-MM-DD
+  // w LOCAL timezone. Wcześniej: T00:00:00 + toISOString() konwertował na UTC i tracił 1 dzień
+  // dla PL timezone (UTC+1/+2) — kropki w kalendarzu pokazywały się o dzień wcześniej niż wpis.
   const entryMap = {};
   entries.forEach(e => {
-    const start = new Date(e.start + "T00:00:00");
-    const end = new Date(e.end + "T00:00:00");
+    const start = new Date(e.start + "T12:00:00");
+    const end = new Date(e.end + "T12:00:00");
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      entryMap[d.toISOString().slice(0,10)] = e;
+      entryMap[d.toLocaleDateString("sv-SE")] = e;
     }
   });
 
