@@ -1205,35 +1205,34 @@ exports.setGpsConfig = onCall(
 // PARSER DDD — odczyt plików .ddd z tachografu / karty kierowcy
 //   Trigger: onCall (client wywołuje po uploadzie do Storage)
 //   Flow: client → Storage → wywołuje parseDddFile → Cloud Function
-//         → pobiera plik → readesm-js.convertToJson → Firestore
+//         → readesm-js.convertToJson → ekstrakcja → dddFiles (Firestore)
+//
+// UWAGA: dane DDD NIE trafiają do driverActivities (live state Czas pracy).
+//   DDD = archive snapshot per kierowca (do 365 dni historii). Wpisanie
+//   do driverActivities zaburzyłoby compliance bieżącego tygodnia.
+//   Surowe segmenty + summary zapisane w dddFiles, raport per kierowca
+//   generowany w UI z compact daily ribbons.
+//
+// readesm-js v1.x zwraca obiekt z kluczami top-level per block class
+// (Identification, CardDriverActivity, CardVehiclesUsed, ...) — NIE
+// tablicę `blocks[]` jak zakładała poprzednia implementacja.
 // ═══════════════════════════════════════════════════════════════
 
-// Helper: znajduje blok po nazwie klasy lub wybranych polach
-function findBlock(blocks, predicate) {
-  if (!Array.isArray(blocks)) return null;
-  for (const b of blocks) {
-    try { if (predicate(b)) return b; } catch {}
-  }
-  return null;
-}
-
-// Helper: konwertuje TimeReal / BcdDate z readesm-js na ISO string
+// TimeReal / BcdDate → ISO string (fallback gdy readesm-js zwraca raw)
 function timeRealToIso(tr) {
   if (!tr) return null;
-  // Różne formaty jakie zwraca readesm-js
   if (typeof tr === "string") return tr;
   if (typeof tr === "number") return new Date(tr * 1000).toISOString();
   if (tr.timestamp) return new Date(tr.timestamp * 1000).toISOString();
-  if (tr.date && tr.date instanceof Date) return tr.date.toISOString();
+  if (tr.date instanceof Date) return tr.date.toISOString();
   if (tr.year && tr.month) {
-    try {
-      return new Date(tr.year, (tr.month || 1) - 1, tr.day || 1).toISOString();
-    } catch {}
+    try { return new Date(tr.year, (tr.month || 1) - 1, tr.day || 1).toISOString(); }
+    catch { return null; }
   }
   return null;
 }
 
-// Helper: wyciąga metadane ze sparsowanego DDD
+// Wyciąga metadane karty kierowcy / pliku VU
 function extractDddMetadata(parsed) {
   const meta = {
     fileType: "unknown",
@@ -1249,100 +1248,189 @@ function extractDddMetadata(parsed) {
   };
   if (!parsed) return meta;
 
-  const blocks = parsed.blocks || [];
-
-  // Identification — plik karty kierowcy
-  const ident = findBlock(blocks, b =>
-    (b.className && /Identification/i.test(b.className)) ||
-    (b.cardNumber && b.cardHolderName));
-  if (ident) {
+  const appId = parsed.DriverCardApplicationIdentification;
+  if (appId?.typeOfTachographCardId === "Driver Card") {
     meta.fileType = "card";
+  } else if (parsed.VuOverview || parsed.VuIdentification) {
+    meta.fileType = "vu";
+  }
+
+  const ident = parsed.Identification;
+  if (ident) {
     meta.cardNumber = ident.cardNumber || null;
     if (ident.cardHolderName) {
-      meta.driverFirstName = ident.cardHolderName.firstName || ident.cardHolderName.holderFirstNames || null;
-      meta.driverSurname = ident.cardHolderName.surname || ident.cardHolderName.holderSurname || null;
+      meta.driverFirstName = ident.cardHolderName.firstNames || null;
+      meta.driverSurname = ident.cardHolderName.surname || null;
       meta.driverName = [meta.driverFirstName, meta.driverSurname].filter(Boolean).join(" ") || null;
     }
-    meta.cardValidityBegin = timeRealToIso(ident.cardValidityBegin);
-    meta.cardExpiryDate = timeRealToIso(ident.cardExpiryDate);
+    meta.cardValidityBegin = typeof ident.cardValidityBegin === "string"
+      ? ident.cardValidityBegin : timeRealToIso(ident.cardValidityBegin);
+    meta.cardExpiryDate = typeof ident.cardExpiryDate === "string"
+      ? ident.cardExpiryDate : timeRealToIso(ident.cardExpiryDate);
   }
 
-  // VuOverview — plik pamięci tachografu (vehicle unit)
-  const vu = findBlock(blocks, b =>
-    (b.className && /VuOverview/i.test(b.className)) ||
-    b.vehicleRegistrationNumber || b.vehicleIdentificationNumber);
-  if (vu) {
-    if (meta.fileType === "unknown") meta.fileType = "vu";
-    meta.vehicleVrn = vu.vehicleRegistrationNumber?.vehicleRegistrationNumber ||
-                      vu.vehicleRegistrationNumber || null;
-    if (typeof meta.vehicleVrn === "object") meta.vehicleVrn = null;
+  // VRN: VuOverview (pliki VU) → CardVehiclesUsed last record (karta kierowcy)
+  if (parsed.VuOverview?.vehicleRegistrationNumber) {
+    const vrn = parsed.VuOverview.vehicleRegistrationNumber;
+    meta.vehicleVrn = vrn?.vehicleRegistrationNumber || (typeof vrn === "string" ? vrn : null);
+  } else {
+    const recs = parsed.CardVehiclesUsed?.CardVehicleRecord?.records;
+    if (Array.isArray(recs) && recs.length > 0) {
+      meta.vehicleVrn = recs[recs.length - 1]?.registration?.vehicleRegistrationNumber || null;
+    }
   }
 
-  // Zakres dat — z CardDriverActivity lub VuActivities
-  const activity = findBlock(blocks, b =>
-    (b.className && /DriverActivity|VuActivities/i.test(b.className)));
-  if (activity) {
-    meta.periodStart = timeRealToIso(activity.activityPointerOldestDayRecord) ||
-                       timeRealToIso(activity.oldestDayRecord);
-    meta.periodEnd = timeRealToIso(activity.activityPointerNewestDayRecord) ||
-                     timeRealToIso(activity.newestDayRecord);
+  // periodStart/End — z dailyRecords keys (deterministyczne, daty już ISO)
+  const dailyRecords = parsed.CardDriverActivity?.CardActivityDailyRecord?.dailyRecords;
+  if (dailyRecords && typeof dailyRecords === "object") {
+    const dates = Object.keys(dailyRecords).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
+    if (dates.length > 0) {
+      meta.periodStart = dates[0];
+      meta.periodEnd = dates[dates.length - 1];
+    }
   }
 
   return meta;
 }
 
-// Helper: wyciąga segmenty aktywności ze sparsowanego DDD
-// Mapowanie typów tachografu → naszych:
-//   0 = rest       → "rest"
-//   1 = available  → "avail"
-//   2 = work       → "work"
-//   3 = driving    → "drive"
-function extractDddActivities(parsed, context = {}) {
-  const activities = [];
-  if (!parsed) return activities;
-  const blocks = parsed.blocks || [];
+// Lista pojazdów używanych przez kierowcę (CardVehiclesUsed)
+// Każdy record: { vehicleVrn, vehicleId, country, from, to, odometerBegin, odometerEnd }
+function extractDddVehicleRecords(parsed, vehicles = []) {
+  const records = parsed?.CardVehiclesUsed?.CardVehicleRecord?.records;
+  if (!Array.isArray(records)) return [];
+  const plateToId = new Map();
+  for (const v of vehicles) {
+    const p = String(v.plate || "").replace(/\s+/g, "").toUpperCase();
+    if (p && v.id) plateToId.set(p, v.id);
+  }
+  const out = [];
+  for (const vr of records) {
+    const vrn = vr?.registration?.vehicleRegistrationNumber || null;
+    if (!vrn) continue;
+    const m = String(vr.vehicleUse || "").match(/From (\d{4}-\d{2}-\d{2})[^T]*To (\d{4}-\d{2}-\d{2})/);
+    const odoBegin = parseInt(String(vr.vehicleOdometerBegin || "").replace(/[^\d]/g, ""), 10);
+    const odoEnd = parseInt(String(vr.vehicleOdometerEnd || "").replace(/[^\d]/g, ""), 10);
+    out.push({
+      vehicleVrn: vrn,
+      vehicleId: plateToId.get(vrn.replace(/\s+/g, "").toUpperCase()) || null,
+      country: vr?.registration?.vehicleRegistrationNation || null,
+      from: m ? m[1] : null,
+      to: m ? m[2] : null,
+      odometerBegin: Number.isFinite(odoBegin) ? odoBegin : null,
+      odometerEnd: Number.isFinite(odoEnd) ? odoEnd : null,
+    });
+  }
+  return out;
+}
 
+// Buduje raport dzienny: compact segments (do narysowania 24h ribbon w UI)
+// + sumy minut per dzień + km + total summary.
+//
+// Format compact (fromMin/durMin zamiast ISO timestamps) żeby cały dokument
+// dddFiles zmieścił się w limicie Firestore 1 MB. Dla pliku 365-dniowego
+// ~4500 segmentów × ~30 bytes = ~140 KB.
+//
+// Mapowanie kodów tachografu → naszych typów:
+//   activityCode 0 = break/rest → "rest"
+//   activityCode 1 = available  → "avail"
+//   activityCode 2 = work       → "work"
+//   activityCode 3 = driving    → "drive"
+//
+// Czas Gen2 tachografu jest w UTC. Lokalny PL = UTC+1 zima / UTC+2 lato.
+function computeDddDailyReport(parsed, vehicles = []) {
   const typeMap = { 0: "rest", 1: "avail", 2: "work", 3: "drive" };
+  const dailyRecords = parsed?.CardDriverActivity?.CardActivityDailyRecord?.dailyRecords;
+  const dailyTotals = {};
 
-  // Szukamy CardDriverActivity → cardActivityDailyRecords → changeInfo[]
-  const cardActivity = findBlock(blocks, b =>
-    b.cardActivityDailyRecords || (b.className && /CardDriverActivity/i.test(b.className)));
-  if (cardActivity?.cardActivityDailyRecords) {
-    const records = cardActivity.cardActivityDailyRecords.subblocks ||
-                    cardActivity.cardActivityDailyRecords.items ||
-                    cardActivity.cardActivityDailyRecords || [];
-    for (const rec of Array.isArray(records) ? records : []) {
-      const dayDate = timeRealToIso(rec.activityRecordDate || rec.dayDate);
-      const changes = rec.activityChangeInfos || rec.changes || rec.changeInfo || [];
-      if (!Array.isArray(changes) || changes.length === 0) continue;
-      // Zamień listę zmian stanu → segmenty
-      for (let i = 0; i < changes.length; i++) {
-        const ch = changes[i];
-        const nextCh = changes[i + 1];
-        const type = typeMap[ch.activity ?? ch.type] || "avail";
-        const startMinutes = ch.timeOfChange ?? ch.minute ?? 0;
-        const endMinutes = nextCh ? (nextCh.timeOfChange ?? nextCh.minute ?? 1440) : 1440;
-        if (dayDate && endMinutes > startMinutes) {
-          const startTs = new Date(new Date(dayDate).getTime() + startMinutes * 60000).toISOString();
-          const endTs = new Date(new Date(dayDate).getTime() + endMinutes * 60000).toISOString();
-          activities.push({
-            driverCardNumber: context.cardNumber || null,
-            driverName: context.driverName || null,
-            type,
-            startTs,
-            endTs,
-            source: "ddd",
-            dddFileId: context.dddFileId || null,
-          });
-        }
+  // Map: data → który pojazd kierowca prowadził (z CardVehiclesUsed)
+  const vehicleRecords = extractDddVehicleRecords(parsed, vehicles);
+  const vehicleByDate = {};
+  for (const vr of vehicleRecords) {
+    if (!vr.from || !vr.to || !vr.vehicleVrn) continue;
+    let cur = new Date(vr.from + "T00:00:00Z");
+    const end = new Date(vr.to + "T00:00:00Z");
+    while (cur <= end) {
+      const day = cur.toISOString().slice(0, 10);
+      if (!vehicleByDate[day]) {
+        vehicleByDate[day] = { vehicleVrn: vr.vehicleVrn, vehicleId: vr.vehicleId };
       }
+      cur.setUTCDate(cur.getUTCDate() + 1);
     }
   }
 
-  // TODO: Dla plików VU (pamięć tachografu) też możemy wyciągać aktywności,
-  // ale struktura jest inna — dodamy gdy zobaczymy pierwszy prawdziwy plik
+  // Walk daily activity records
+  if (dailyRecords && typeof dailyRecords === "object") {
+    for (const [day, rec] of Object.entries(dailyRecords)) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+      const segs = rec?.ActivityChangeInfo?.records;
+      if (!Array.isArray(segs)) continue;
 
-  return activities;
+      const veh = vehicleByDate[day] || { vehicleVrn: null, vehicleId: null };
+      const slot = {
+        drive: 0, work: 0, rest: 0, avail: 0, km: 0,
+        vehicleVrn: veh.vehicleVrn,
+        vehicleId: veh.vehicleId,
+        segments: [],
+      };
+
+      for (const r of segs) {
+        const type = typeMap[r.activityCode];
+        if (!type) continue;
+        const fromStr = r.from;
+        const durStr = r.duration;
+        if (!fromStr || !durStr) continue;
+        const [fH, fM] = fromStr.split(":").map(Number);
+        const [dH, dM] = durStr.split(":").map(Number);
+        if (![fH, fM, dH, dM].every(Number.isFinite)) continue;
+        const fromMin = fH * 60 + fM;
+        const durMin = dH * 60 + dM;
+        if (durMin === 0) continue;
+        slot[type] += durMin;
+        slot.segments.push({ type, fromMin, durMin });
+      }
+
+      dailyTotals[day] = slot;
+    }
+  }
+
+  // km per dzień z vehicleRecords (single-day records — typowe dla kart)
+  for (const vr of vehicleRecords) {
+    if (vr.from && vr.from === vr.to && vr.odometerBegin != null && vr.odometerEnd != null) {
+      const day = vr.from;
+      const km = vr.odometerEnd - vr.odometerBegin;
+      if (km <= 0) continue;
+      if (!dailyTotals[day]) {
+        dailyTotals[day] = { drive: 0, work: 0, rest: 0, avail: 0, km: 0,
+                             vehicleVrn: vr.vehicleVrn, vehicleId: vr.vehicleId, segments: [] };
+      }
+      dailyTotals[day].km += km;
+      if (!dailyTotals[day].vehicleVrn) dailyTotals[day].vehicleVrn = vr.vehicleVrn;
+      if (!dailyTotals[day].vehicleId) dailyTotals[day].vehicleId = vr.vehicleId;
+    }
+  }
+
+  // Total summary
+  const summary = {
+    totalDriveMin: 0, totalWorkMin: 0, totalRestMin: 0, totalAvailMin: 0,
+    totalKm: 0, daysWorked: 0, daysWithCard: 0, vehiclesUsed: [],
+  };
+  const vrnSet = new Set();
+  let totalSegments = 0;
+  for (const day of Object.keys(dailyTotals)) {
+    const d = dailyTotals[day];
+    summary.totalDriveMin += d.drive;
+    summary.totalWorkMin += d.work;
+    summary.totalRestMin += d.rest;
+    summary.totalAvailMin += d.avail;
+    summary.totalKm += d.km;
+    summary.daysWithCard++;
+    if (d.drive > 0) summary.daysWorked++;
+    if (d.vehicleVrn) vrnSet.add(d.vehicleVrn);
+    totalSegments += d.segments.length;
+  }
+  summary.vehiclesUsed = Array.from(vrnSet);
+
+  return { dailyTotals, vehicleRecords, summary, totalSegments };
 }
 
 exports.parseDddFile = onCall(
@@ -1355,7 +1443,6 @@ exports.parseDddFile = onCall(
     if (!["admin", "dyspozytor"].includes(callerRole)) {
       throw new HttpsError("permission-denied", "Brak dostepu do parsera DDD.");
     }
-
     const { storagePath, originalFileName } = request.data || {};
     if (!storagePath) {
       throw new HttpsError("invalid-argument", "Wymagany: storagePath");
@@ -1363,32 +1450,38 @@ exports.parseDddFile = onCall(
 
     console.log(`[DDD parse] Starting for ${storagePath}`);
 
-    // Pobierz plik ze Storage
     const bucket = getStorage().bucket();
     const file = bucket.file(storagePath);
     const [exists] = await file.exists();
     if (!exists) {
       throw new HttpsError("not-found", `Plik nie istnieje: ${storagePath}`);
     }
-
     const [buffer] = await file.download();
     const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
 
-    // Parsuj przez readesm-js
+    // readesm-js czasem rzuca RangeError przy końcowym BlockParseError, ale
+    // parsed obiekt zawiera już większość bloków. Próbujemy czytać dalej.
     let parsed;
     try {
       const { convertToJson } = require("readesm-js");
       parsed = convertToJson(arrayBuffer);
     } catch (e) {
-      console.error("[DDD parse] readesm-js error:", e);
-      throw new HttpsError("internal", `Blad parsowania DDD: ${e.message}`);
+      console.warn(`[DDD parse] readesm-js threw (continuing if parsed partial): ${e.message}`);
+    }
+    if (!parsed) {
+      throw new HttpsError("internal", "Nie udało się sparsować pliku DDD.");
     }
 
-    // Wyciągnij metadane i aktywności
-    const metadata = extractDddMetadata(parsed);
     const db = getFirestore();
+    const fleetSnap = await db.doc("fleet/data").get();
+    const vehicles = fleetSnap.data()?.fleetv2_vehicles || [];
 
-    // Zapisz dokument pliku
+    const metadata = extractDddMetadata(parsed);
+    const { dailyTotals, vehicleRecords, summary, totalSegments } =
+      computeDddDailyReport(parsed, vehicles);
+
+    // Zapisz dokument z pełnymi danymi raportu w jednym dddFiles document
+    // UWAGA: NIE zapisujemy do driverActivities — DDD = archive per kierowca.
     const dddDoc = {
       storagePath,
       originalFileName: originalFileName || storagePath.split("/").pop(),
@@ -1396,38 +1489,22 @@ exports.parseDddFile = onCall(
       uploadedAt: new Date().toISOString(),
       fileSize: buffer.length,
       ...metadata,
-      blockCount: (parsed?.blocks || []).length,
+      activitiesCount: totalSegments,
+      vehicleRecords,
+      dailyTotals,
+      summary,
       parseStatus: "success",
     };
     const dddRef = await db.collection("dddFiles").add(dddDoc);
 
-    const activities = extractDddActivities(parsed, {
-      cardNumber: metadata.cardNumber,
-      driverName: metadata.driverName,
-      dddFileId: dddRef.id,
-    });
-
-    // Zapisz aktywności w batchach (max 500 per batch)
-    const batchSize = 400;
-    for (let i = 0; i < activities.length; i += batchSize) {
-      const batch = db.batch();
-      for (const act of activities.slice(i, i + batchSize)) {
-        const ref = db.collection("driverActivities").doc();
-        batch.set(ref, { ...act, createdAt: new Date().toISOString() });
-      }
-      await batch.commit();
-    }
-
-    // Uaktualnij dokument o liczbę aktywności
-    await dddRef.update({ activitiesCount: activities.length });
-
-    console.log(`[DDD parse] Saved ${activities.length} activities, fileId=${dddRef.id}, type=${metadata.fileType}`);
+    console.log(`[DDD parse] OK fileId=${dddRef.id} type=${metadata.fileType} segments=${totalSegments} days=${summary.daysWithCard} drive=${summary.totalDriveMin}min km=${summary.totalKm}`);
 
     return {
       success: true,
       fileId: dddRef.id,
       metadata,
-      activitiesCount: activities.length,
+      activitiesCount: totalSegments,
+      summary,
     };
   }
 );
