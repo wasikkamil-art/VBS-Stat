@@ -147,3 +147,110 @@ Append-only dziennik. Każda sesja = nowa sekcja z datą i opisem.
 - **Krok 3** (opcjonalne, $$$): Time Machine + external SSD — najmocniejszy fail-safe (backup wszystkiego automat)
 - **TODO feature work** wracamy gdy user gotowy:
   A WhatsApp / **B alerty banner Czas pracy** (rekomendacja moja) / C AI chat / D Giełda / E Tachograf refinement / F inne
+
+### Rotacja GitHub PAT — zrobione w ramach sesji
+- Stary token "token kopii zapasowej vbs-stat" (ostatnio używany w VBS-Stat repo) — REVOKED
+- Nowy token: Fine-grained, scope: `Contents: Read and write` + `Metadata: Read`, repo: tylko `wasikkamil-art/VBS-Stat`, expiration: 2027-05-05
+- `git remote set-url` w obu repos (main + worktree) — user wykonał lokalnie (token NIE w transcript)
+- Test `git push --dry-run` — OK w obu repos
+
+### CF onRoleChange — deploy P3 audit log
+- Wcześniej tylko code w `functions/index.js` w main, ale CF live nie był updated (Vercel deployuje frontend, NIE Functions)
+- `firebase deploy --only functions:onRoleChange` z main repo — Successful update, region europe-west1, Node 22
+- Odtąd każda zmiana roli → entry `action: "role_change"` w `auditLog` collection (z polami `before`, `after`, `targetUid`, `targetEmail`)
+- Test pending: user zmieni rolę backup admin Admin→Dyspozytor + z powrotem → 2 nowe entries w auditLog
+
+### Drugi incydent admin "Podgląd" 2026-05-05 — naprawiony re-loginem
+- ~14:00 user zalogował się do fleetstat.pl, sidebar pokazał "Podgląd" (brak admin tabs)
+- F12 Console: `permission-denied` dla wszystkich kolekcji + `Bład ladowania roli`
+- Hipoteza: stary cache/SW lub stary bundle (sprzed P1 deploy)
+- Fix: re-login (wylogowanie + ponowne zalogowanie) → admin sidebar + zakładki wróciły
+- **POTWIERDZA że P1 fix (Custom Claim wygrywa nad Firestore) działa na produkcji** — fresh login zaciąga claim z token Auth poprawnie
+- Errors w console po re-login = stare (sprzed re-login), Cmd+K w console + F5 wyczyściło
+
+---
+
+## 2026-05-05 (popołudnie) — Bug raport Czas pracy + 2 bugi znalezione
+
+**Kontekst**: User pokazał kafle pojazdów w Przeglądzie:
+- WGM 5367K i WGM 0507M oboje rozładowani 04.05
+- Oboje mają wbitą bazę (przez modal CzasPracyModal) z planowanym wyjazdem 08.05
+- Oboje pokazują **"Czeka na zlecenie · 1d"** zamiast "Baza"
+- ⚠️ User flag: emaile do klientów zawierają info "kiedy auta będą dostępne" — bug = błędne info do zleceniodawców
+
+### Bug A — Calendar marker offset by 1 day (timezone) — ✅ NAPRAWIONY (commit 268890c)
+
+**Lokalizacja**: `src/App.jsx:14049-14053` w `CzasPracyModal.entryMap`
+
+**Przyczyna**:
+```javascript
+const start = new Date(e.start + "T00:00:00");  // local midnight
+entryMap[d.toISOString().slice(0,10)] = e;       // toISOString() konwertuje na UTC
+```
+- `new Date("2026-05-05T00:00:00")` = local midnight (PL UTC+2 latem) = 5 maja 00:00 PL
+- `d.toISOString()` = "2026-05-04T22:00:00.000Z" (UTC)
+- `.slice(0,10)` = "2026-05-04" — kropka pojawia się o dzień wcześniej niż wpis
+
+**Fix** (commit `268890c`):
+```javascript
+const start = new Date(e.start + "T12:00:00");  // noon anchor — bezpieczne dla DST/UTC offset
+entryMap[d.toLocaleDateString("sv-SE")] = e;     // sv-SE = ISO YYYY-MM-DD w LOCAL timezone
+```
+
+**Wdrożone**: worktree → main → push main → Vercel auto-deploy (~3 min do fleetstat.pl)
+
+**Sam zapis był OK** (handleSaveRange używa stringów YYYY-MM-DD bez Date object) — tylko display kropek.
+
+### Bug B — Home tile pokazuje "Czeka na zlecenie" mimo aktywnej bazy — ⏳ DIAGNOZA W TOKU
+
+**Symptom**:
+- WGM 0507M ma w `pauzy` collection: `start: "2026-05-04"`, `end: "2026-05-07"`, `status: "baza"`, `vehicleId: "v5"`
+- Home tile filter (App.jsx:2582): `pauzy.find(p => p.vehicleId === v.id && p.status !== "jazda" && p.start <= todayISO && p.end >= todayISO)`
+- Dla today `"2026-05-05"`: filter powinien match (`"2026-05-04" <= "2026-05-05" <= "2026-05-07"` ✅)
+- ALE home tile pokazuje "Czeka na zlecenie" → filter FAIL
+
+**Hipoteza**: `pauzy` state w React jest pusty (subscription nie wyładowała się po re-login) lub home tile nie re-renderuje po update'cie pauzy. Wcześniej (jako "Podgląd") `pauzy onSnapshot error FirebaseError: Missing or insufficient permissions` — być może subscription pozostała "broken" po claim recovery.
+
+**Czeka na user diagnostykę** (po Vercel deploy Bug A ~16:30):
+1. Hard refresh fleetstat.pl
+2. Sprawdź sidebar **"Czas pracy — Statusy kierowców"** — czy widać wpisy "Baza" dla 0507M?
+   - **Jeśli TAK** → `pauzy` jest załadowany, bug w home tile filter (mało prawdopodobne — filter prosty)
+   - **Jeśli NIE** → `pauzy` nie załadowany w state, problem subscription/permissions
+3. F12 Console — czy są nowe errors `pauzy onSnapshot...`?
+
+**Możliwe rozwiązania (po diagnozie)**:
+- Naprawa subscription auto-retry (jak `fleet/data` onSnapshot ma już)
+- Reload `pauzy` subscription on auth change
+- Defensywnie: home tile czyta też `driverActivities` (status="baza") jako fallback gdy `pauzy` puste
+
+**Też do sprawdzenia**: czy email do klienta z info "kiedy auta dostępne" używa `pauzy` (i ma ten sam bug), czy innego źródła. **Jeśli dotknięty → priorytet wysoki dla SaaS bar 10/10**.
+
+### Stan końcowy 2026-05-05 (zamknięcie sesji ~16:00)
+
+**Origin/main commits (najnowsze)**:
+- `268890c` — fix(czas-pracy): Bug A — calendar marker offset by 1 day (timezone)
+- `671df63` — Merge worktree branch (docs + scripts)
+- `900c070` — chore(lint): wyklucz .claude/ z ESLint scope
+- `2c1924f` — fix(security): P1+P3 (FAKTYCZNE wdrożenie security do produkcji)
+- `6d1c500` — Merge PR #1 (Tachograf)
+
+**Backup discipline aktywne**:
+- Repo: push po sesji do GitHub
+- Memory + .env.local: launchd codziennie 22:00 → iCloud Drive `FleetStat-backup/`
+- PAT zrotowany 2026-05-05, expires 2027-05-05
+
+**Otwarte (do następnej sesji)**:
+1. ⏳ **Bug B diagnoza** — user testuje po Vercel deploy (~3 min od ostatniego push)
+2. ⏳ **P3 audit log test** — user zmienia rolę backup admin (Admin→Dyspozytor→Admin) + sprawdza auditLog czy są nowe entries `role_change`
+3. ⏳ **Sprawdzenie email do klienta** — czy używa `pauzy` (bug B impact?) lub innego źródła
+4. ⏳ **TODO feature work** (gdy gotowy):
+   - **B alerty banner Czas pracy iter. 2** ⭐ rekomendacja moja
+   - A WhatsApp / C AI chat / D Giełda / E Tachograf refinement
+5. **Opcjonalnie**: credential helper macOS Keychain (token z `.git/config` → encrypted Keychain)
+6. **Opcjonalnie**: Time Machine + external SSD (Krok 3 backup)
+
+**Jak wznowić w nowej sesji**:
+1. Przeczytaj `CLAUDE.md` (zasady projektu)
+2. Przeczytaj ten wpis (gdzie skończyliśmy + co otwarte)
+3. Sprawdź `git log --oneline -10` (czy weszło coś między sesjami)
+4. Pierwszy komunikat: "Wznawiamy z 2026-05-05 — co dalej z Bug B diagnoza / P3 test / TODO B / inne?"
