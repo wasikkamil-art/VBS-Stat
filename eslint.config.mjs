@@ -15,6 +15,8 @@ export default [
       "public/**",
       ".vercel/**",
       ".firebase/**",
+      // Claude Code workspace — porzucone worktrees mogą mieć JSX w .js (lint scope wykluczony)
+      ".claude/**",
       // Skrypty utility/one-shot (zgodnie z .gitignore)
       "fix_*.js",
       "import_*.js",
