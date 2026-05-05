@@ -2367,7 +2367,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
       <div className="flex min-h-screen">
 
         {/* ── SIDEBAR ───────────────────────────────────────────────────── */}
-        <aside className="hidden md:flex flex-col w-56 bg-white border-r border-gray-100 py-7 px-4 sticky top-0 h-screen">
+        <aside className="hidden md:flex flex-col w-56 bg-white border-r border-gray-100 py-7 px-4 sticky top-0 h-screen print:hidden">
           <div className="px-2 mb-8">
             <div className="flex items-center gap-2.5">
               <img src="/icon-192.png" alt="FS" className="w-10 h-10 rounded-xl" />
@@ -8020,6 +8020,8 @@ function GpsDddSection({ device, showToast }) {
   const [dddFiles, setDddFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [parsingId, setParsingId] = useState(null);
+  const [selectedDddFileId, setSelectedDddFileId] = useState(null);
+  const selectedDddFile = selectedDddFileId ? dddFiles.find(f => f.id === selectedDddFileId) : null;
 
   // Listener na Firestore — pliki DDD tego pojazdu (po VRN lub wszystkie jeśli brak dopasowania)
   useEffect(() => {
@@ -8073,6 +8075,10 @@ function GpsDddSection({ device, showToast }) {
     catch { return ts; }
   };
 
+  if (selectedDddFile) {
+    return <DddReportView dddFile={selectedDddFile} onClose={() => setSelectedDddFileId(null)} />;
+  }
+
   return (
     <div>
       {/* Upload area */}
@@ -8110,7 +8116,11 @@ function GpsDddSection({ device, showToast }) {
               const typeBg = f.fileType === "card" ? "#eff6ff" : f.fileType === "vu" ? "#f5f3ff" : "#f9fafb";
               const typeColor = f.fileType === "card" ? "#1d4ed8" : f.fileType === "vu" ? "#7c3aed" : "#6b7280";
               return (
-                <div key={f.id} className="p-3 rounded-xl" style={{ background: "#fafafa", border: "1px solid #f3f4f6" }}>
+                <div key={f.id}
+                  onClick={() => setSelectedDddFileId(f.id)}
+                  className="p-3 rounded-xl cursor-pointer hover:bg-violet-50 hover:border-violet-200 transition-colors"
+                  style={{ background: "#fafafa", border: "1px solid #f3f4f6" }}
+                  title="Kliknij aby otworzyć raport">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-start gap-3 flex-1 min-w-0">
                       <div style={{ padding: "4px 8px", borderRadius: 6, background: typeBg, color: typeColor, fontSize: 10, fontWeight: 700, flexShrink: 0 }}>
@@ -8157,9 +8167,342 @@ function GpsDddSection({ device, showToast }) {
       </div>
 
       <div className="mt-4 p-4 bg-blue-50 rounded-xl text-xs text-blue-700">
-        <strong>🔗 Integracja:</strong> Sparsowane aktywności z DDD automatycznie trafiają do modułu <code className="bg-blue-100 px-1 rounded">Czas pracy</code> z priorytetem nad auto-wykrywaniem GPS.
-        Dane z tachografu są <strong>prawnie wiążące</strong> — zastępują szacowania z prędkości GPS.
+        <strong>🔗 Archiwum DDD:</strong> Każdy plik to osobny <strong>raport per kierowca</strong> (do 365 dni historii z karty).
+        Kliknij na plik powyżej aby otworzyć raport z timeline aktywności, sumami i listą pojazdów —
+        oraz wydrukować jako PDF. Dane tachografu są <strong>prawnie wiążące</strong> w audycie ITD.
       </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DDD REPORT VIEW — raport per kierowca (header + summary + lista pojazdów)
+//   Dane czytane z dddFiles document (zapisanego przez CF parseDddFile):
+//   - metadata (driverName, cardNumber, periodStart/End, ...)
+//   - vehicleRecords (lista użyć pojazdów z CardVehiclesUsed)
+//   - dailyTotals (per dzień: sumy minut + km + segments)
+//   - summary (total period)
+// ═══════════════════════════════════════════════════════════════════════════════
+// Kolory pasków aktywności w timeline (zgodne z konwencją tachograficzną)
+const DDD_COLORS = {
+  drive: "#16a34a", // zielony
+  work:  "#f59e0b", // amber
+  avail: "#9ca3af", // gray
+  rest:  "#3b82f6", // blue
+};
+const DDD_TYPE_LABEL = { drive: "Jazda", work: "Praca", avail: "Dyspozycyjność", rest: "Odpoczynek" };
+
+// Format minute (0-1439) → "HH:MM" w lokalnym czasie PL
+// Tachograf zapisuje UTC; konwersja do PL: +60 min (zima) / +120 min (lato).
+// Heurystyka DST: ostatnia niedziela marca → ostatnia niedziela października = +120.
+function dddIsDST(dateStr) {
+  // dateStr "YYYY-MM-DD" — zwraca true gdy lokalny PL jest w czasie letnim
+  const [y, m, d] = dateStr.split("-").map(Number);
+  if (m > 3 && m < 10) return true;
+  if (m < 3 || m > 10) return false;
+  const date = new Date(Date.UTC(y, m - 1, d));
+  const lastSundayOfMonth = (year, month) => {
+    const last = new Date(Date.UTC(year, month, 0));
+    return last.getUTCDate() - last.getUTCDay();
+  };
+  if (m === 3) return d >= lastSundayOfMonth(y, 3);
+  // m === 10
+  return d < lastSundayOfMonth(y, 10);
+}
+function dddUtcMinToLocalHHMM(utcMin, dateStr) {
+  const offset = dddIsDST(dateStr) ? 120 : 60;
+  const total = (utcMin + offset) % 1440;
+  const h = Math.floor(total / 60);
+  const mm = total % 60;
+  return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+function dddDayOfWeek(dateStr) {
+  try {
+    return new Date(dateStr + "T12:00:00").toLocaleDateString("pl-PL", { weekday: "long" });
+  } catch { return ""; }
+}
+
+function DddReportView({ dddFile, onClose }) {
+  const f = dddFile || {};
+  const summary = f.summary || {};
+  const vehicleRecords = Array.isArray(f.vehicleRecords) ? f.vehicleRecords : [];
+  const dailyTotals = f.dailyTotals && typeof f.dailyTotals === "object" ? f.dailyTotals : {};
+
+  const [showAllDays, setShowAllDays] = useState(false);
+
+  // Sortowanie dat malejąco (najnowsze na górze)
+  const sortedDays = useMemo(() => {
+    return Object.keys(dailyTotals)
+      .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d))
+      .sort((a, b) => b.localeCompare(a));
+  }, [dailyTotals]);
+
+  const visibleDays = useMemo(() => {
+    if (showAllDays) return sortedDays;
+    return sortedDays.filter(d => (dailyTotals[d]?.drive || 0) > 0);
+  }, [sortedDays, dailyTotals, showAllDays]);
+
+  // Grupowanie pojazdów po VRN (jedna karta zwykle = jeden pojazd, ale może być więcej)
+  const vehicleStats = useMemo(() => {
+    const groups = new Map();
+    for (const vr of vehicleRecords) {
+      const vrn = vr.vehicleVrn || "—";
+      if (!groups.has(vrn)) {
+        groups.set(vrn, {
+          vehicleVrn: vrn, vehicleId: vr.vehicleId || null, country: vr.country || null,
+          dayCount: 0, totalKm: 0, firstDay: vr.from, lastDay: vr.to,
+        });
+      }
+      const g = groups.get(vrn);
+      g.dayCount += 1;
+      if (vr.odometerBegin != null && vr.odometerEnd != null) {
+        g.totalKm += Math.max(0, vr.odometerEnd - vr.odometerBegin);
+      }
+      if (vr.from && (!g.firstDay || vr.from < g.firstDay)) g.firstDay = vr.from;
+      if (vr.to && (!g.lastDay || vr.to > g.lastDay)) g.lastDay = vr.to;
+    }
+    return Array.from(groups.values()).sort((a, b) => (b.totalKm || 0) - (a.totalKm || 0));
+  }, [vehicleRecords]);
+
+  return (
+    <div>
+      {/* Toolbar — ukryty w drukowanym PDF */}
+      <div className="flex items-center justify-between mb-4 print:hidden">
+        <button onClick={onClose}
+          className="text-sm font-semibold text-violet-600 hover:text-violet-700 hover:underline">
+          ← Wróć do listy plików
+        </button>
+        <button onClick={() => window.print()}
+          className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-sm font-bold">
+          🖨️ Drukuj jako PDF
+        </button>
+      </div>
+
+      {/* Header — kierowca + karta + okres */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-6 mb-4">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <div className="text-xs uppercase tracking-wide text-gray-400 mb-1">
+              {f.fileType === "card" ? "Karta kierowcy" : f.fileType === "vu" ? "Pamięć tachografu" : "Plik DDD"}
+            </div>
+            <h2 className="text-2xl font-bold text-gray-900">{f.driverName || "—"}</h2>
+            <div className="text-sm font-mono text-gray-600 mt-1">#{f.cardNumber || "—"}</div>
+          </div>
+          <div className="text-right text-sm text-gray-600">
+            <div>Wystawiona: <strong>{f.cardValidityBegin ? fmtDate(f.cardValidityBegin) : "—"}</strong></div>
+            <div>Ważna do: <strong>{f.cardExpiryDate ? fmtDate(f.cardExpiryDate) : "—"}</strong></div>
+          </div>
+        </div>
+        <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500 flex-wrap gap-2">
+          <div>📅 Okres raportu: <strong>{f.periodStart ? fmtDate(f.periodStart) : "—"} → {f.periodEnd ? fmtDate(f.periodEnd) : "—"}</strong> ({summary.daysWithCard || 0} dni)</div>
+          <div>Wgrany: {f.uploadedAt ? fmtDate(f.uploadedAt) : "—"} przez {f.uploadedBy || "—"}</div>
+        </div>
+      </div>
+
+      {/* Podsumowanie okresu */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-6 mb-4">
+        <h3 className="text-sm font-bold text-gray-800 mb-4">📊 Podsumowanie okresu</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <DddSummaryCard label="🚛 Jazda" value={fmtHM(summary.totalDriveMin || 0)} color="#15803d" bg="#f0fdf4" />
+          <DddSummaryCard label="🔧 Praca" value={fmtHM(summary.totalWorkMin || 0)} color="#b45309" bg="#fffbeb" />
+          <DddSummaryCard label="⚪ Dyspozycyjność" value={fmtHM(summary.totalAvailMin || 0)} color="#4b5563" bg="#f9fafb" />
+          <DddSummaryCard label="😴 Odpoczynek" value={fmtHM(summary.totalRestMin || 0)} color="#1d4ed8" bg="#eff6ff" />
+        </div>
+        <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+          <div>
+            <div className="text-xs text-gray-500">Łącznie km</div>
+            <div className="font-bold text-lg">{(summary.totalKm || 0).toLocaleString("pl-PL")} km</div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-500">Dni z jazdą</div>
+            <div className="font-bold text-lg">
+              {summary.daysWorked || 0}
+              <span className="text-gray-400 text-sm font-normal"> / {summary.daysWithCard || 0}</span>
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-500">Pojazdy</div>
+            <div className="font-bold text-lg">{(summary.vehiclesUsed || []).length}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Lista pojazdów */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-6 mb-4">
+        <h3 className="text-sm font-bold text-gray-800 mb-4">🚛 Pojazdy używane</h3>
+        {vehicleStats.length === 0 ? (
+          <div className="text-xs italic text-gray-400">Brak danych pojazdów w pliku.</div>
+        ) : (
+          <div className="space-y-3">
+            {vehicleStats.map((vs, i) => (
+              <div key={i} className="p-3 rounded-xl border border-gray-100 bg-gray-50">
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div>
+                    <div className="font-bold text-gray-800">
+                      {vs.vehicleVrn}
+                      {vs.country && <span className="text-xs font-normal text-gray-500"> ({vs.country})</span>}
+                    </div>
+                    {vs.vehicleId && (
+                      <div className="text-[11px] text-violet-600 mt-0.5">
+                        📌 Pojazd w systemie: <code className="bg-violet-50 px-1 rounded">{vs.vehicleId}</code>
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-right text-sm">
+                    <div className="font-bold">{vs.totalKm.toLocaleString("pl-PL")} km</div>
+                    <div className="text-xs text-gray-500">{vs.dayCount} {vs.dayCount === 1 ? "dzień" : "dni"}</div>
+                  </div>
+                </div>
+                <div className="mt-2 text-xs text-gray-500">
+                  {vs.firstDay && <span>Pierwsza jazda: {fmtDate(vs.firstDay)}</span>}
+                  {vs.firstDay && vs.lastDay && vs.firstDay !== vs.lastDay && <span> · Ostatnia: {fmtDate(vs.lastDay)}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Aktywność dzienna — daily ribbons */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-6 mb-4">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <h3 className="text-sm font-bold text-gray-800">📅 Aktywność dzienna</h3>
+          <div className="flex items-center gap-2 text-xs print:hidden">
+            <button
+              onClick={() => setShowAllDays(false)}
+              className={`px-3 py-1 rounded-lg font-semibold ${!showAllDays ? "bg-violet-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+              Tylko z jazdą ({sortedDays.filter(d => (dailyTotals[d]?.drive || 0) > 0).length})
+            </button>
+            <button
+              onClick={() => setShowAllDays(true)}
+              className={`px-3 py-1 rounded-lg font-semibold ${showAllDays ? "bg-violet-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+              Wszystkie dni ({sortedDays.length})
+            </button>
+          </div>
+        </div>
+
+        {/* Legenda + skala */}
+        <div className="mb-3 flex items-center justify-between flex-wrap gap-2 text-[11px]">
+          <div className="flex items-center gap-3">
+            {Object.entries(DDD_COLORS).map(([type, color]) => (
+              <div key={type} className="flex items-center gap-1">
+                <span style={{ display: "inline-block", width: 12, height: 12, background: color, borderRadius: 2 }} />
+                <span className="text-gray-600">{DDD_TYPE_LABEL[type]}</span>
+              </div>
+            ))}
+          </div>
+          <div className="text-gray-400 italic">Skala: czas lokalny PL (UTC+1 zima / UTC+2 lato)</div>
+        </div>
+
+        {visibleDays.length === 0 ? (
+          <div className="text-xs italic text-gray-400 text-center py-6">
+            Brak dni do wyświetlenia.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {visibleDays.map(day => (
+              <DddDailyRow key={day} day={day} data={dailyTotals[day]} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Pojedynczy wiersz dnia: header (data + pojazd + km) + 24h ribbon + sumy
+function DddDailyRow({ day, data }) {
+  const d = data || {};
+  const segments = Array.isArray(d.segments) ? d.segments : [];
+  const dow = dddDayOfWeek(day);
+
+  return (
+    <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 ddd-daily-row">
+      {/* Header dnia */}
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-2 text-xs">
+        <div className="font-semibold text-gray-800">
+          {fmtDate(day)} <span className="text-gray-500 font-normal capitalize">({dow})</span>
+          {d.vehicleVrn && (
+            <span className="ml-2 text-violet-700">
+              · {d.vehicleVrn}
+              {d.vehicleId && <span className="text-gray-400 ml-1">[{d.vehicleId}]</span>}
+            </span>
+          )}
+        </div>
+        <div className="text-gray-600">
+          {(d.km || 0) > 0 && <span className="font-semibold">{(d.km || 0).toLocaleString("pl-PL")} km · </span>}
+          <span style={{ color: DDD_COLORS.drive }}>🚛 {fmtHM(d.drive || 0)}</span>
+          {(d.work || 0) > 0 && <span style={{ color: DDD_COLORS.work }}> · 🔧 {fmtHM(d.work || 0)}</span>}
+          {(d.avail || 0) > 0 && <span style={{ color: DDD_COLORS.avail }}> · ⚪ {fmtHM(d.avail || 0)}</span>}
+          {(d.rest || 0) > 0 && <span style={{ color: DDD_COLORS.rest }}> · 😴 {fmtHM(d.rest || 0)}</span>}
+        </div>
+      </div>
+
+      {/* 24h ribbon */}
+      <div
+        className="ddd-ribbon"
+        style={{
+          position: "relative",
+          width: "100%",
+          height: 22,
+          background: "#e5e7eb",
+          borderRadius: 4,
+          overflow: "hidden",
+        }}>
+        {segments.map((s, i) => {
+          const color = DDD_COLORS[s.type] || "#9ca3af";
+          const left = (s.fromMin / 1440) * 100;
+          const width = (s.durMin / 1440) * 100;
+          const startStr = dddUtcMinToLocalHHMM(s.fromMin, day);
+          const endStr = dddUtcMinToLocalHHMM(s.fromMin + s.durMin, day);
+          return (
+            <div
+              key={i}
+              style={{
+                position: "absolute",
+                left: `${left}%`,
+                width: `${width}%`,
+                height: "100%",
+                background: color,
+              }}
+              title={`${DDD_TYPE_LABEL[s.type]}: ${startStr} → ${endStr} (${fmtHM(s.durMin)})`}
+            />
+          );
+        })}
+        {/* Pionowe linie godzinowe co 6h jako wizualne ticki */}
+        {[0.25, 0.5, 0.75].map(frac => (
+          <div
+            key={frac}
+            style={{
+              position: "absolute",
+              left: `${frac * 100}%`,
+              top: 0,
+              width: 1,
+              height: "100%",
+              background: "rgba(255,255,255,0.4)",
+              pointerEvents: "none",
+            }}
+          />
+        ))}
+      </div>
+
+      {/* Skala godzinowa */}
+      <div className="flex justify-between text-[9px] text-gray-400 mt-0.5 px-0.5 select-none">
+        <span>00</span>
+        <span>06</span>
+        <span>12</span>
+        <span>18</span>
+        <span>24</span>
+      </div>
+    </div>
+  );
+}
+
+function DddSummaryCard({ label, value, color, bg }) {
+  return (
+    <div className="p-3 rounded-xl" style={{ background: bg, border: "1px solid #f3f4f6" }}>
+      <div className="text-xs font-semibold mb-1" style={{ color }}>{label}</div>
+      <div className="text-lg font-bold" style={{ color }}>{value}</div>
     </div>
   );
 }

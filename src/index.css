@@ -5,3 +5,29 @@
 * {
   box-sizing: border-box;
 }
+
+/* === Print stylesheet — DddReportView (Etap 3 raportu DDD) === */
+@media print {
+  /* Force kolory pasków activity ribbons (Chrome / Safari) */
+  .ddd-ribbon,
+  .ddd-ribbon * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Każdy daily row jako spójny blok — nie łam między drukowanymi stronami */
+  .ddd-daily-row {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Tło białe, marginesy A4 */
+  body {
+    background: white !important;
+  }
+
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+}
