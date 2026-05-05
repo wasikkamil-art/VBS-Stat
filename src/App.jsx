@@ -8229,18 +8229,56 @@ function DddReportView({ dddFile, onClose }) {
   const dailyTotals = f.dailyTotals && typeof f.dailyTotals === "object" ? f.dailyTotals : {};
 
   const [showAllDays, setShowAllDays] = useState(false);
+  const [dateFrom, setDateFrom] = useState(f.periodStart || "");
+  const [dateTo, setDateTo] = useState(f.periodEnd || "");
 
-  // Sortowanie dat malejąco (najnowsze na górze)
+  // Sortowanie chronologicznie rosnąco (od najstarszego do najnowszego — naturalna
+  // kolejność jak czyta się tachograf i raporty Inelo/TachoSafe)
   const sortedDays = useMemo(() => {
     return Object.keys(dailyTotals)
       .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d))
-      .sort((a, b) => b.localeCompare(a));
+      .sort((a, b) => a.localeCompare(b));
   }, [dailyTotals]);
 
   const visibleDays = useMemo(() => {
-    if (showAllDays) return sortedDays;
-    return sortedDays.filter(d => (dailyTotals[d]?.drive || 0) > 0);
-  }, [sortedDays, dailyTotals, showAllDays]);
+    let out = sortedDays;
+    if (dateFrom) out = out.filter(d => d >= dateFrom);
+    if (dateTo) out = out.filter(d => d <= dateTo);
+    if (!showAllDays) out = out.filter(d => (dailyTotals[d]?.drive || 0) > 0);
+    return out;
+  }, [sortedDays, dailyTotals, showAllDays, dateFrom, dateTo]);
+
+  // Total dni w obecnym zakresie (filtr daty) — do labelek przycisków
+  const daysInRange = useMemo(() => {
+    let out = sortedDays;
+    if (dateFrom) out = out.filter(d => d >= dateFrom);
+    if (dateTo) out = out.filter(d => d <= dateTo);
+    return out;
+  }, [sortedDays, dateFrom, dateTo]);
+  const drivingDaysInRange = useMemo(() =>
+    daysInRange.filter(d => (dailyTotals[d]?.drive || 0) > 0).length
+  , [daysInRange, dailyTotals]);
+
+  // Sumy dla zaznaczonego zakresu (zamiast total z całego pliku)
+  const rangeSummary = useMemo(() => {
+    const out = { totalDriveMin: 0, totalWorkMin: 0, totalRestMin: 0, totalAvailMin: 0,
+                  totalKm: 0, daysWithCard: daysInRange.length, daysWorked: 0, vehiclesUsed: [] };
+    const vrnSet = new Set();
+    for (const day of daysInRange) {
+      const d = dailyTotals[day] || {};
+      out.totalDriveMin += d.drive || 0;
+      out.totalWorkMin += d.work || 0;
+      out.totalRestMin += d.rest || 0;
+      out.totalAvailMin += d.avail || 0;
+      out.totalKm += d.km || 0;
+      if ((d.drive || 0) > 0) out.daysWorked++;
+      if (d.vehicleVrn) vrnSet.add(d.vehicleVrn);
+    }
+    out.vehiclesUsed = Array.from(vrnSet);
+    return out;
+  }, [daysInRange, dailyTotals]);
+
+  const isFullRange = (!dateFrom || dateFrom === f.periodStart) && (!dateTo || dateTo === f.periodEnd);
 
   // Grupowanie pojazdów po VRN (jedna karta zwykle = jeden pojazd, ale może być więcej)
   const vehicleStats = useMemo(() => {
@@ -8299,30 +8337,39 @@ function DddReportView({ dddFile, onClose }) {
         </div>
       </div>
 
-      {/* Podsumowanie okresu */}
+      {/* Podsumowanie — sumy dla wybranego zakresu (lub pełnego okresu) */}
       <div className="bg-white rounded-2xl border border-gray-100 p-6 mb-4">
-        <h3 className="text-sm font-bold text-gray-800 mb-4">📊 Podsumowanie okresu</h3>
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <h3 className="text-sm font-bold text-gray-800">
+            📊 {isFullRange ? "Podsumowanie okresu" : "Podsumowanie zakresu"}
+          </h3>
+          {!isFullRange && (
+            <div className="text-[11px] text-violet-600 font-semibold">
+              {fmtDate(dateFrom)} → {fmtDate(dateTo)} ({rangeSummary.daysWithCard} dni)
+            </div>
+          )}
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <DddSummaryCard label="🚛 Jazda" value={fmtHM(summary.totalDriveMin || 0)} color="#15803d" bg="#f0fdf4" />
-          <DddSummaryCard label="🔧 Praca" value={fmtHM(summary.totalWorkMin || 0)} color="#b45309" bg="#fffbeb" />
-          <DddSummaryCard label="⚪ Dyspozycyjność" value={fmtHM(summary.totalAvailMin || 0)} color="#4b5563" bg="#f9fafb" />
-          <DddSummaryCard label="😴 Odpoczynek" value={fmtHM(summary.totalRestMin || 0)} color="#1d4ed8" bg="#eff6ff" />
+          <DddSummaryCard label="🚛 Jazda" value={fmtHM(rangeSummary.totalDriveMin)} color="#15803d" bg="#f0fdf4" />
+          <DddSummaryCard label="🔧 Praca" value={fmtHM(rangeSummary.totalWorkMin)} color="#b45309" bg="#fffbeb" />
+          <DddSummaryCard label="⚪ Dyspozycyjność" value={fmtHM(rangeSummary.totalAvailMin)} color="#4b5563" bg="#f9fafb" />
+          <DddSummaryCard label="😴 Odpoczynek" value={fmtHM(rangeSummary.totalRestMin)} color="#1d4ed8" bg="#eff6ff" />
         </div>
         <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
           <div>
             <div className="text-xs text-gray-500">Łącznie km</div>
-            <div className="font-bold text-lg">{(summary.totalKm || 0).toLocaleString("pl-PL")} km</div>
+            <div className="font-bold text-lg">{rangeSummary.totalKm.toLocaleString("pl-PL")} km</div>
           </div>
           <div>
             <div className="text-xs text-gray-500">Dni z jazdą</div>
             <div className="font-bold text-lg">
-              {summary.daysWorked || 0}
-              <span className="text-gray-400 text-sm font-normal"> / {summary.daysWithCard || 0}</span>
+              {rangeSummary.daysWorked}
+              <span className="text-gray-400 text-sm font-normal"> / {rangeSummary.daysWithCard}</span>
             </div>
           </div>
           <div>
             <div className="text-xs text-gray-500">Pojazdy</div>
-            <div className="font-bold text-lg">{(summary.vehiclesUsed || []).length}</div>
+            <div className="font-bold text-lg">{rangeSummary.vehiclesUsed.length}</div>
           </div>
         </div>
       </div>
@@ -8365,20 +8412,70 @@ function DddReportView({ dddFile, onClose }) {
 
       {/* Aktywność dzienna — daily ribbons */}
       <div className="bg-white rounded-2xl border border-gray-100 p-6 mb-4">
-        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <h3 className="text-sm font-bold text-gray-800">📅 Aktywność dzienna</h3>
           <div className="flex items-center gap-2 text-xs print:hidden">
             <button
               onClick={() => setShowAllDays(false)}
               className={`px-3 py-1 rounded-lg font-semibold ${!showAllDays ? "bg-violet-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
-              Tylko z jazdą ({sortedDays.filter(d => (dailyTotals[d]?.drive || 0) > 0).length})
+              Tylko z jazdą ({drivingDaysInRange})
             </button>
             <button
               onClick={() => setShowAllDays(true)}
               className={`px-3 py-1 rounded-lg font-semibold ${showAllDays ? "bg-violet-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
-              Wszystkie dni ({sortedDays.length})
+              Wszystkie dni ({daysInRange.length})
             </button>
           </div>
+        </div>
+
+        {/* Zakres dat */}
+        <div className="mb-3 flex items-center gap-2 flex-wrap text-xs print:hidden">
+          <span className="text-gray-500">Zakres:</span>
+          <input
+            type="date"
+            value={dateFrom}
+            min={f.periodStart || ""}
+            max={f.periodEnd || ""}
+            onChange={e => setDateFrom(e.target.value)}
+            className="px-2 py-1 border border-gray-200 rounded-lg text-xs"
+          />
+          <span className="text-gray-400">→</span>
+          <input
+            type="date"
+            value={dateTo}
+            min={f.periodStart || ""}
+            max={f.periodEnd || ""}
+            onChange={e => setDateTo(e.target.value)}
+            className="px-2 py-1 border border-gray-200 rounded-lg text-xs"
+          />
+          <button
+            onClick={() => { setDateFrom(f.periodStart || ""); setDateTo(f.periodEnd || ""); }}
+            className="px-2 py-1 text-violet-600 hover:text-violet-700 hover:underline font-semibold">
+            Reset
+          </button>
+          {/* Quick presets */}
+          <span className="text-gray-300 mx-1">·</span>
+          <span className="text-gray-500">Szybko:</span>
+          <button onClick={() => {
+            const end = f.periodEnd || "";
+            if (!end) return;
+            const d = new Date(end);
+            d.setUTCDate(d.getUTCDate() - 6);
+            setDateFrom(d.toISOString().slice(0, 10));
+            setDateTo(end);
+          }} className="px-2 py-1 bg-gray-100 hover:bg-violet-50 rounded-lg font-semibold">
+            Ostatnie 7 dni
+          </button>
+          <button onClick={() => {
+            const end = f.periodEnd || "";
+            if (!end) return;
+            const d = new Date(end);
+            d.setUTCDate(d.getUTCDate() - 27);
+            setDateFrom(d.toISOString().slice(0, 10));
+            setDateTo(end);
+          }} className="px-2 py-1 bg-gray-100 hover:bg-violet-50 rounded-lg font-semibold">
+            Ostatnie 28 dni
+          </button>
         </div>
 
         {/* Legenda + skala */}
