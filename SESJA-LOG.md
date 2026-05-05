@@ -254,3 +254,43 @@ entryMap[d.toLocaleDateString("sv-SE")] = e;     // sv-SE = ISO YYYY-MM-DD w LOC
 2. Przeczytaj ten wpis (gdzie skończyliśmy + co otwarte)
 3. Sprawdź `git log --oneline -10` (czy weszło coś między sesjami)
 4. Pierwszy komunikat: "Wznawiamy z 2026-05-05 — co dalej z Bug B diagnoza / P3 test / TODO B / inne?"
+
+---
+
+## 2026-05-06 — Bug B resolved (nie kod, stuck subscription)
+
+**Kontekst**: Wznowienie pracy. User zostawił wczoraj otwartą diagnostykę Bug B (home tile pokazuje "Czeka na zlecenie" mimo aktywnej bazy w `pauzy`). Pierwszy task = weryfikacja czy bug nadal istnieje po Vercel deploy + re-login.
+
+### Bug B — RESOLVED
+
+User otworzył fleetstat.pl po hard refresh (screenshot Przegląd):
+- Kafel WGM 5367K → "Baza · do 7 maj" ✅
+- Kafel WGM 0507M → "Baza · do 8 maj" ✅
+- Sidebar "Czas pracy — Statusy kierowców" → wpisy "Baza" widoczne ✅
+- F12 Console → bez errors (tylko `FCM token saved` standardowy log) ✅
+
+**Root cause**: stuck subscription state. Podczas incydentu admin "Podgląd" (2026-05-05 ~14:00) `pauzy onSnapshot` rzucił `permission-denied`. Firestore SDK nie auto-reconnect'uje po permission error. Re-login Custom Claim wrócił, ALE subscription `pauzy` pozostała broken aż do fresh page load po Vercel deploy (2026-05-05 wieczór).
+
+**Lekcja architektoniczna**: `fleet/data` ma już auto-retry (`4176b4c`), inne `onSnapshot` (jak `pauzy`) — nie. Defense layer (backlog, NIE pilne): retry wrapper na permission errors lub force-reload subscriptions na `onIdTokenChanged`. Edge-case po claim recovery, ale przy SaaS bar 10/10 warto.
+
+Memory `project_bug_czas_pracy_2026_05_05.md` zaktualizowana — Bug B status → resolved + lekcja architektoniczna.
+
+### Stan repo
+
+- Worktree: `claude/eager-rhodes-513624`
+- Origin/main najnowsze: `23feb44` (z wczoraj — finalne podsumowanie sesji 2026-05-05)
+- Bez code changes w tej części sesji (tylko docs/memory)
+
+### Otwarte (nadal)
+
+1. ⏳ **Email do klienta** — quick research czy używa `pauzy` (impact gdyby Bug B-pattern się powtórzył) lub innego źródła
+2. ⏳ **P3 audit log test** — user zmienia rolę backup admin Admin→Dyspozytor→Admin → sprawdzenie `auditLog` collection w Firestore (czy są nowe entries `role_change`)
+3. 📋 **Defensive auto-retry dla `pauzy`/innych subscription** — backlog, niska pilność (edge-case)
+4. 📋 **TODO feature work** (rekomendacja: B alerty banner Czas pracy iter. 2):
+   - A WhatsApp / **B alerty banner** ⭐ / C AI chat / D Giełda / E Tachograf refinement
+
+### Operacyjne (user, nie Claude)
+
+- **2026-05-06 (dzisiaj)** — pierwszy raport CSV z widziszwszystko (SendGrid Inbound Parse → wwReportInbound CF). Sprawdzić czy działa end-to-end.
+- Przed 2026-06-01 — upgrade SendGrid (trial kończy się)
+- Decyzja E3 (merge Tachograf + Czas pracy) — czekamy 1-2 tyg na user feedback (od 2026-05-04)
