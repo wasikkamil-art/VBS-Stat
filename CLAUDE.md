@@ -119,8 +119,8 @@ Folder pracy `*.nosync` jest **wykluczony z iCloud sync** (konwencja iCloud Driv
 **Zabezpieczone przez `git push`** ✅: kod, dokumentacja (`PODSUMOWANIE-PROJEKTU.md`, `SESJA-LOG.md`, `CLAUDE.md`, `ZASADY-VBS-STAT.md`), Cloud Functions, configs w repo.
 
 **TYLKO LOKALNIE** ⚠️ (do osobnego backupu):
-- Memory Claude `~/.claude/projects/-Users-kamilwasik-Desktop-VBS-Stat-nosync/memory/` — 60 KB, 14 plików (preferencje + recovery procedures + TODO context). **TBD: skrypt backup do iCloud Drive (Krok 2 z 2026-05-04).**
-- `.env.local` — Firebase / Anthropic credentials (do password managera)
+- Memory Claude `~/.claude/projects/-Users-kamilwasik-Desktop-VBS-Stat-nosync/memory/` — 60 KB, 14 plików (preferencje + recovery procedures + TODO context). **Backup: `./scripts/backup-claude-memory.sh`** (versioned snapshot do iCloud `FleetStat-backup/memory/YYYY-MM-DD/`, retention 30 dni). TBD Krok 2b: launchd auto-run codziennie 22:00.
+- `.env.local` — Firebase / Anthropic credentials (backup razem ze skryptem `backup-claude-memory.sh` → `FleetStat-backup/env/.env.local`)
 - `.git/config` — zawiera GitHub PAT w plain text
 - `node_modules/`, `dist/`, `.vite/` — odtwarzalne z `npm install` + `npm run build`, NIE backupować
 - `2026-*.json`, `import-*.json`, `frachty_*.json` — dane historyczne migracji (jednorazowe, ale warto skopiować raz)

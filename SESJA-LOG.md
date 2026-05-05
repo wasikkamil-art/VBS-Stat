@@ -70,6 +70,36 @@ Append-only dziennik. Każda sesja = nowa sekcja z datą i opisem.
 
 - **Worktree**: `claude/awesome-bouman-ca02a5` (folder `.claude/worktrees/awesome-bouman-ca02a5/`)
 - **Last commit przed sesją**: `6d1c500` (Merge PR #1 — security fix P1+P3)
-- **Last commit po sesji**: ten commit (utworzenie SESJA-LOG.md)
 - **Produkcja**: fleetstat.pl (Vercel auto-deploy z main)
 - **App.jsx**: 16,944 linii. `functions/index.js`: 3,001 linii.
+
+---
+
+## 2026-05-05 — Backup discipline (Krok 1 + Krok 2)
+
+**Kontekst**: User zgłosił ryzyko utraty MacBooka (folder `*.nosync` wykluczony z iCloud). Zaplanowane 3 warstwy obrony — wykonane Krok 1 i Krok 2.
+
+### Krok 1 — Push discipline + dokumentacja
+- Commit `340a0d0` — utworzenie `SESJA-LOG.md` (mechanizm persystencji kontekstu)
+- Commit `d25fd45` — `CLAUDE.md` sekcja "Backup workflow" + rozróżnienie `git push` na main (zawsze pytaj — deploy) vs feature branch (proaktywnie po sesji — backup)
+- Push do remote: `origin/claude/awesome-bouman-ca02a5` (oba commits)
+- Pre-push hook (lint + build) PASSED
+
+### Krok 2 — Skrypt backup memory
+- Plik `scripts/backup-claude-memory.sh` — bash, kopia memory + `.env.local` do iCloud Drive
+- Cel: `~/Library/Mobile Documents/com~apple~CloudDocs/FleetStat-backup/`
+  - `memory/YYYY-MM-DD/` — versioned snapshot per dzień (retention 30 dni)
+  - `env/.env.local` — single copy overwrite
+  - `manifest.txt` — append-only log (timestamp + file count)
+- `.gitignore` zaktualizowany — whitelist `!scripts/backup-claude-memory.sh` (folder `scripts/` nadal blokowany dla utility scripts)
+- Testy: dry-run + live run OK (2026-05-05 10:07, 14 plików memory / 60 KB)
+- Auto-run: TBD Krok 2b (launchd plist codziennie 22:00) — czeka na user feedback
+
+### Otwarte (security + dalsze warstwy)
+- ⚠️ **Rotacja GitHub PAT** — wyciekł do transcript chatu przez `git remote -v`. User musi: GitHub Settings → Developer settings → PAT → Revoke + nowy + `git remote set-url origin https://{NEW_PAT}@github.com/wasikkamil-art/VBS-Stat.git`. Instrukcja w `CLAUDE.md` sekcja Backup workflow.
+- **Krok 2b** (opcjonalne): launchd plist auto-run skryptu codziennie 22:00 — bez tego trzeba ręcznie odpalać `./scripts/backup-claude-memory.sh`
+- **Krok 3** (opcjonalne, $$$): Time Machine + external SSD — najmocniejszy fail-safe (backup wszystkiego automat)
+
+### Wracamy do TODO feature work (po backup setup)
+Lista otwartych TODO bez zmian od 2026-05-04 (patrz wpis powyżej):
+A WhatsApp / **B alerty banner Czas pracy** (rekomendacja moja) / C AI chat / D Giełda / E Tachograf refinement / F inne / G pre-check przed jutrzejszym CSV (nie aktualne — dziś już 2026-05-05).

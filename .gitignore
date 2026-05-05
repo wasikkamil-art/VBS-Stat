@@ -32,7 +32,9 @@ reimport_*.js
 reimport-*.js
 gen_*.js
 update_vehicles.js
-scripts/
+scripts/*
+# Whitelistowane reusable scripts (świadomie commituj — patrz CLAUDE.md sekcja Backup workflow)
+!scripts/backup-claude-memory.sh
 
 # Images - working files
 *.png
