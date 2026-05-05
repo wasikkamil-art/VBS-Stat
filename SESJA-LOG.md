@@ -95,11 +95,55 @@ Append-only dziennik. Każda sesja = nowa sekcja z datą i opisem.
 - Testy: dry-run + live run OK (2026-05-05 10:07, 14 plików memory / 60 KB)
 - Auto-run: TBD Krok 2b (launchd plist codziennie 22:00) — czeka na user feedback
 
-### Otwarte (security + dalsze warstwy)
-- ⚠️ **Rotacja GitHub PAT** — wyciekł do transcript chatu przez `git remote -v`. User musi: GitHub Settings → Developer settings → PAT → Revoke + nowy + `git remote set-url origin https://{NEW_PAT}@github.com/wasikkamil-art/VBS-Stat.git`. Instrukcja w `CLAUDE.md` sekcja Backup workflow.
-- **Krok 2b** (opcjonalne): launchd plist auto-run skryptu codziennie 22:00 — bez tego trzeba ręcznie odpalać `./scripts/backup-claude-memory.sh`
-- **Krok 3** (opcjonalne, $$$): Time Machine + external SSD — najmocniejszy fail-safe (backup wszystkiego automat)
+### Krok 2b — launchd auto-run (~30 min razem z TCC fix)
+- **Plist**: `~/Library/LaunchAgents/com.fleetstat.backup-claude-memory.plist`
+  - Codziennie 22:00 (StartCalendarInterval Hour=22 Minute=0)
+  - Skrypt: `/Users/kamilwasik/Desktop/VBS-Stat.nosync/scripts/backup-claude-memory.sh` (po merge worktree→main, trwała ścieżka)
+  - Logi: `~/Library/Logs/fleetstat-backup.log`
+- **macOS TCC blocker**: pierwszy test launchd dał "Operation not permitted" — `/bin/bash` uruchamiany przez launchd nie miał uprawnień do czytania folderu `Desktop/`. Rozwiązanie: user dodał `/bin/bash` do **System Settings → Prywatność i ochrona → Pełny dostęp do dysku** (Cmd+Shift+G w file picker → `/bin/bash` → Open → toggle ON). Dodanie samej aplikacji "claude" NIE wystarczyło (launchd to osobny system process).
+- **Test po TCC fix**: ✅ działa (2026-05-05 11:18:02 — 14 plików memory + .env.local zsynchronizowane)
 
-### Wracamy do TODO feature work (po backup setup)
-Lista otwartych TODO bez zmian od 2026-05-04 (patrz wpis powyżej):
-A WhatsApp / **B alerty banner Czas pracy** (rekomendacja moja) / C AI chat / D Giełda / E Tachograf refinement / F inne / G pre-check przed jutrzejszym CSV (nie aktualne — dziś już 2026-05-05).
+### KRYTYCZNE odkrycie podczas sync main repo (Krok 2b ścieżka)
+
+**Discovery 2026-05-05**: PR #1 (`6d1c500`) zmergował tylko Tachograf (`ae8f904`) z brancha `claude/priceless-easley-dd47b8`, **NIE security fix `3023f13`**. Briefing user'a (z poprzedniej sesji) twierdził że PR security został zmergowany — to było nieprawda. Memory `reference_admin_recovery.md` też mylnie twierdzała "P1+P3 wdrożone (commit 3023f13)".
+
+**Dowód**: `git merge-base --is-ancestor 3023f13 origin/main` → "NO". Plus `git show origin/main:src/App.jsx` nie zawierał odwróconej priority logic (Custom Claim wygrywa).
+
+**Stan na 2026-05-05 przed fix**:
+- Lokalne working dir w main repo trzymał security fix code jako uncommitted (user pracował na main repo, kod siedział, nigdy nie został commitnięty)
+- Produkcja `fleetstat.pl` przez ~24h (od PR #1 merge 4 maja wieczorem) miała stary kod — Firestore nadal wygrywała nad Custom Claim, audit log nie działał
+- Backup admin (P2) działał ale recovery scenario zakładał działający P1+P3
+
+**Fix 2026-05-05**:
+- `2c1924f` — fix(security): role priority — Custom Claim wygrywa nad Firestore + audit log (commit do main)
+- `900c070` — chore(lint): wyklucz .claude/ z ESLint scope (fix pre-push hook — porzucone worktrees miały JSX w .js)
+- Push main OK, Vercel auto-deploy do `fleetstat.pl`
+- Memory `reference_admin_recovery.md` zaktualizowana (commit `2c1924f` zamiast `3023f13`, dodana lekcja: zawsze weryfikuj `git merge-base --is-ancestor` zamiast zakładać że "PR #X = feature X")
+
+**Lekcja**: nigdy nie zakładaj że PR przez nazwę = wdrożona feature. Zawsze sprawdź historię gita. Briefing user'a może być nieprecyzyjny — czytaj git log + sprawdzaj kod.
+
+### Stan końcowy 2026-05-05
+
+**Origin/main commits (najnowsze)**:
+- `671df63` — Merge worktree branch (docs + scripts) do main
+- `900c070` — chore(lint): wyklucz .claude/ z ESLint scope
+- `2c1924f` — fix(security): P1+P3 (FAKTYCZNE wdrożenie do produkcji)
+- `6d1c500` — Merge PR #1 (Tachograf — wcześniejszy fałszywy "security PR")
+
+**Backup discipline aktywne**:
+- Repo: zsynchronizowany z origin (push po sesji = backup)
+- Memory + .env.local: launchd codziennie 22:00 → iCloud Drive `FleetStat-backup/`
+- Manual run gdy chcesz: `./scripts/backup-claude-memory.sh` (z dowolnego miejsca repo)
+
+### Otwarte (do osobnej akcji user'a)
+
+- ⚠️ **Rotacja GitHub PAT** — wyciekł do transcript chatu przez `git remote -v`. Procedura w `CLAUDE.md` sekcja Backup workflow → "Security PAT".
+- **C — Verify Vercel deploy** security fix:
+  1. Otwórz `fleetstat.pl`
+  2. F12 (DevTools) → Console
+  3. Zaloguj się
+  4. Szukaj `[role]` warning w console (pojawi się gdy Custom Claim ≠ Firestore — potwierdza że nowa logika P1 działa)
+  5. (alt) Firebase Console → Firestore → `auditLog` collection — czy są nowe `action: "role_change"` documents (P3)
+- **Krok 3** (opcjonalne, $$$): Time Machine + external SSD — najmocniejszy fail-safe (backup wszystkiego automat)
+- **TODO feature work** wracamy gdy user gotowy:
+  A WhatsApp / **B alerty banner Czas pracy** (rekomendacja moja) / C AI chat / D Giełda / E Tachograf refinement / F inne
