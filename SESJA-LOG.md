@@ -257,40 +257,92 @@ entryMap[d.toLocaleDateString("sv-SE")] = e;     // sv-SE = ISO YYYY-MM-DD w LOC
 
 ---
 
-## 2026-05-06 — Bug B resolved (nie kod, stuck subscription)
+## 2026-05-05 (kontynuacja popołudniowa, ~13:30-15:00) — Bug B resolved + CSV verify + DDD parser fix + raport view
 
-**Kontekst**: Wznowienie pracy. User zostawił wczoraj otwartą diagnostykę Bug B (home tile pokazuje "Czeka na zlecenie" mimo aktywnej bazy w `pauzy`). Pierwszy task = weryfikacja czy bug nadal istnieje po Vercel deploy + re-login.
+**Kontekst**: Druga część sesji 2026-05-05 po przerwie. User zostawił otwartą diagnostykę Bug B + chciał zweryfikować pierwszy raport CSV z widziszwszystko + sprawdzić jak działa parser DDD na pierwszym realnym pliku karty kierowcy. (Wpis poniżej był wcześniej błędnie nagłówkowany jako "2026-05-06" — naprawione: dziś jest 2026-05-05, sesja kontynuowana tego samego dnia.)
 
-### Bug B — RESOLVED
+### Bug B — RESOLVED (nie kod, stuck subscription)
 
-User otworzył fleetstat.pl po hard refresh (screenshot Przegląd):
-- Kafel WGM 5367K → "Baza · do 7 maj" ✅
-- Kafel WGM 0507M → "Baza · do 8 maj" ✅
-- Sidebar "Czas pracy — Statusy kierowców" → wpisy "Baza" widoczne ✅
-- F12 Console → bez errors (tylko `FCM token saved` standardowy log) ✅
+User otworzył fleetstat.pl po hard refresh: kafle pojazdów pokazują "Baza · do X maj" poprawnie, sidebar Czas pracy widzi wpisy, F12 Console bez errors.
 
-**Root cause**: stuck subscription state. Podczas incydentu admin "Podgląd" (2026-05-05 ~14:00) `pauzy onSnapshot` rzucił `permission-denied`. Firestore SDK nie auto-reconnect'uje po permission error. Re-login Custom Claim wrócił, ALE subscription `pauzy` pozostała broken aż do fresh page load po Vercel deploy (2026-05-05 wieczór).
+**Root cause**: stuck subscription state. Podczas incydentu admin "Podgląd" (~14:00 wcześniejsza sesja) `pauzy onSnapshot` rzucił `permission-denied`. Firestore SDK nie auto-reconnect'uje po permission error. Re-login Custom Claim wrócił, ALE subscription `pauzy` pozostała broken aż do fresh page load po Vercel deploy.
 
-**Lekcja architektoniczna**: `fleet/data` ma już auto-retry (`4176b4c`), inne `onSnapshot` (jak `pauzy`) — nie. Defense layer (backlog, NIE pilne): retry wrapper na permission errors lub force-reload subscriptions na `onIdTokenChanged`. Edge-case po claim recovery, ale przy SaaS bar 10/10 warto.
+**Lekcja architektoniczna**: `fleet/data` ma już auto-retry (`4176b4c`), inne `onSnapshot` (jak `pauzy`) — nie. Defense layer (backlog, NIE pilne): retry wrapper na permission errors lub force-reload subscriptions na `onIdTokenChanged`.
 
-Memory `project_bug_czas_pracy_2026_05_05.md` zaktualizowana — Bug B status → resolved + lekcja architektoniczna.
+### Email do klienta — bezpieczny ✅ (zweryfikowane)
 
-### Stan repo
+Grep w `functions/index.js`: CF `sendStatusEmail` (linia 234, 456-461) używa `pauzy` collection ALE przez `db.collection("pauzy").get()` — fresh fetch, NIE onSnapshot. Bug B-pattern NIE wpływa na email. Filter logic identyczny do home tile (App.jsx:2582). Email pokazuje `"Dostępny od: {pauzy.end} · {locationKod}"`. Caveat: gdy decyzja E3 (merge Tachograf + Czas pracy → driverActivities) zostanie wdrożona, trzeba zsynchronizować email też.
 
-- Worktree: `claude/eager-rhodes-513624`
-- Origin/main najnowsze: `23feb44` (z wczoraj — finalne podsumowanie sesji 2026-05-05)
-- Bez code changes w tej części sesji (tylko docs/memory)
+### CSV widziszwszystko — DZIAŁA ✅ (pierwszy raport zaimportowany)
 
-### Otwarte (nadal)
+Logi CF `wwReportInbound` z dziś **02:04 CEST**:
+```
+[wwInbound] from=WidziszWszystko <admin@widziszwszystko.eu> subject="Twój raport został wygenerowany" csvFiles=1
+[wwInbound] OK imported=21 replaced=15
+```
 
-1. ⏳ **Email do klienta** — quick research czy używa `pauzy` (impact gdyby Bug B-pattern się powtórzył) lub innego źródła
-2. ⏳ **P3 audit log test** — user zmienia rolę backup admin Admin→Dyspozytor→Admin → sprawdzenie `auditLog` collection w Firestore (czy są nowe entries `role_change`)
-3. 📋 **Defensive auto-retry dla `pauzy`/innych subscription** — backlog, niska pilność (edge-case)
-4. 📋 **TODO feature work** (rekomendacja: B alerty banner Czas pracy iter. 2):
-   - A WhatsApp / **B alerty banner** ⭐ / C AI chat / D Giełda / E Tachograf refinement
+Pierwszy realny raport CSV przyszedł z widziszwszystko o 02:04, CF zaimportowała **21 segmentów** do `driverActivities`, zastąpiła 15 starych auto_gps tym samym przedziałem (DDD/CSV priorytet nad auto_gps, jak zaplanowano). Następny raport spodziewany **2026-05-06 ~02:04** za zakres 2026-05-05.
+
+### DDD parser — FIX + Raport view ⭐ kluczowy progres dziś
+
+**Punkt wyjścia**: User dostał plik `.ddd` od kierowcy WGM 5367K (Siarhei Kolabau, 121 KB karta kierowcy) — pierwszy realny test parsera. Upload przez UI → CF zwróciła `success` ale **0 aktywności + fileType=unknown**.
+
+**Diagnoza**: pobrałem plik z Storage przez `gcloud storage cp`, lokalnie sparsował przez readesm-js v1.0.12 i znalazłem **root cause**: parser zakładał `parsed.blocks[].className` (tablica), a readesm-js v1.x zwraca **obiekt z kluczami top-level per block class** (parsed.Identification, parsed.CardDriverActivity, parsed.CardVehiclesUsed itp). Wszystkie selektory pól w starych extractorach nigdy niczego nie znajdowały. Plus plik zawierał **CardVehiclesUsed.records** z VRN per pojazd + okres + km (wbudowane mapowanie kierowca→pojazd) — niewykorzystane.
+
+**Fix** (`functions/index.js`, commit `550670a`, deployed do produkcji):
+- `extractDddMetadata` — czyta `parsed.Identification`, `parsed.DriverCardApplicationIdentification` (typeOfTachographCardId), `parsed.CardVehiclesUsed.CardVehicleRecord.records` (last → `meta.vehicleVrn`); periodStart/End z `dailyRecords` keys
+- `extractDddVehicleRecords` (nowa) — lista pojazdów + okresy + km z CardVehiclesUsed, mapowanie VRN→vehicleId z fleet/data
+- `computeDddDailyReport` (nowa) — buduje `dailyTotals` z compact segments `{type, fromMin, durMin}` + sumy minut + km per dzień + total summary (~140 KB dla 365 dni, mieści się w 1 MB Firestore)
+- `parseDddFile` — usuwa batch save do `driverActivities`. **DDD = archive snapshot per kierowca**, nie live state. Cały raport zapisany w jednym `dddFiles` document (decyzja architektoniczna user'a)
+
+**Pre-test na pliku Siarheia** (lokalnie + produkcja):
+- 4350 segmentów (drive 1843, work 1465, rest 973, avail 69) z 397 dni / 240 z aktywną jazdą
+- 1587.5 h jazdy, 329.8 h pracy, 69 244 km przez 13 mc (2025-04-04 → 2026-05-05)
+- vehicleVrn=WGM 5367K mapowane na vehicleId=v2 (z 200 vehicleRecords)
+- Document size 253 KB / 1 MB Firestore limit (75% margin)
+
+**Raport DDD UI** (`src/App.jsx`, commit `32818f9` + `7aa40e9`, deployed):
+- Klik na entry w "Pliki wgrane" → otwiera `DddReportView` (nowy komponent ~250 linii)
+- Header (kierowca + karta + okres + uploader)
+- Podsumowanie zakresu — 4 kafelki (jazda/praca/dyspo/odpoczynek) + km + dni + pojazdy. Sumy **dynamicznie** dla wybranego zakresu (nie zawsze totals).
+- Lista pojazdów grouped per VRN (suma km, dni, period używania, mapowanie vehicleId)
+- **Daily ribbons** — chronologicznie rosnąco (najstarsze → najnowsze, jak czyta się tachograf), 24h kolorowy pasek per dzień (zielony/żółty/szary/niebieski), hover tooltip z czasem **lokalnym PL** (auto DST detection: ostatnia niedziela marca → ostatnia niedziela października = +120, inaczej +60)
+- Filtr **zakresu dat** (Od/Do input + presety "Ostatnie 7 dni" / "Ostatnie 28 dni" / "Reset")
+- Toggle "Tylko z jazdą" (default) / "Wszystkie dni"
+- **Print PDF** — `window.print()` + print stylesheet (`src/index.css`): A4, force-color ribbons (`-webkit-print-color-adjust: exact`), `page-break-inside: avoid` per dzień, sidebar `print:hidden`
+
+### Decyzje architektoniczne
+
+1. **DDD = archive per kierowca, nie live Czas pracy** — wpisanie 4350 segmentów do `driverActivities` zaburzyłoby compliance bieżącego tygodnia (`computeDriverCompliance` widziałby 13 mc starych danych). Cały raport siedzi w `dddFiles`, generowany w UI per kliknięcie pliku.
+2. **Tablet kierowcy = przyszłość** — user pisze "tablet to przyszłość, jednak musimy mieć w pamięci że kiedy je zakupimy będzie miejsce w kodzie". Czyli Etap 6 (widok obecnego wyjazdu z compliance live) buduje się **teraz tylko jako admin widok w FleetStat**, ale architekturze: pure function compliance w `czasPracy.js` + komponent `CurrentTripView` standalone — żeby DriverPanel mógł reuse 1:1 gdy kupimy tablety.
+
+### Stan repo na koniec sesji
+
+- Origin/main najnowsze: **`7aa40e9`** — feat ulepszenia raportu DDD (sortowanie + filtr dat + range summary)
+- `32818f9` — feat DddReportView (3 etapy)
+- `550670a` — fix parsera DDD (deployed CF)
+- `1883ecf` — docs SESJA-LOG Bug B
+- `23feb44` — docs SESJA-LOG koniec sesji porannej
+
+Worktree branch `claude/eager-rhodes-513624` zsynchronizowany z origin (push backup OK).
+
+### Otwarte (do następnej sesji)
+
+1. ⭐ **Etap 6 — Widok obecnego wyjazdu kierowcy z compliance live** (admin widok w FleetStat, NIE DriverPanel jeszcze):
+   - Mieszane źródła: DDD (28d historii, precyzja tachografu) + driverActivities live (auto_gps + ww_csv) dla bieżącego dnia. Wykorzystać już istniejący `preferDddSegments` z `czasPracy.js`.
+   - Pure function `computeCurrentTrip` w `czasPracy.js` — compliance live: ile jeszcze może jechać dziś (9h/10h dzienny limit), kiedy obowiązkowa przerwa (4.5h ciągłej jazdy → 45 min), ile do daily rest 11h, weekly rest 45h, dwa-tygodniowy 90h
+   - Standalone komponent `CurrentTripView` — przyjmuje propsami, reużywalny. Architektura przewiduje tablet kierowcy (DriverPanel) w przyszłości.
+   - ~3-4h pracy. Wymaga sesji dedykowanej z planem na początku.
+2. 📋 **Delete button** w UI dla `dddFiles` — wymaga sprawdzenia storage rules + dodania do GpsDddSection. Obecnie 2 entry obok siebie (stary 0 act + nowy 4350 act) — czyste artifact testu, nie blokuje.
+3. ⏳ **P3 audit log test** — user zmienia rolę backup admin Admin→Dyspozytor→Admin → sprawdzenie `auditLog` collection w Firestore.
+4. 📋 **Defensive auto-retry dla `pauzy`/innych subscription** — backlog, niska pilność.
+5. 📋 **TODO feature work** (oprócz Etap 6): A WhatsApp / B alerty banner Czas pracy iter. 2 / C AI chat / D Giełda / E Tachograf refinement.
+6. 🐛 **Drobiazg**: hardcoded text w `GpsDddSection` "Pierwszy odczyt karty kierowcy dla WGM 0475M oczekiwany za ~28 dni" — pokazuje się tylko gdy `dddFiles` puste, ale user już ma plik więc to nie widać. Update tekstu kiedyś.
+7. 🐛 **Drobiazg**: `dist/index.html` jest tracked w git mimo `dist/` w .gitignore (historyczne) — przy każdym build pokazuje się jako modified. Untrack przy okazji.
 
 ### Operacyjne (user, nie Claude)
 
-- **2026-05-06 (dzisiaj)** — pierwszy raport CSV z widziszwszystko (SendGrid Inbound Parse → wwReportInbound CF). Sprawdzić czy działa end-to-end.
+- 2026-05-06 (jutro) ~02:04 — drugi raport CSV widziszwszystko (zakres 2026-05-05). Sprawdzić czy nadal działa.
 - Przed 2026-06-01 — upgrade SendGrid (trial kończy się)
 - Decyzja E3 (merge Tachograf + Czas pracy) — czekamy 1-2 tyg na user feedback (od 2026-05-04)
+- Tablet dla kierowców = decyzja zakupowa user'a (przyszłość, brak harmonogramu)
