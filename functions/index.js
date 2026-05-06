@@ -2562,11 +2562,24 @@ async function importWWForVehicle(db, vehicles, plate, segments) {
   };
 }
 
+// Auto-detect separator z headera. Widziszwszystko ma 2 raporty:
+// - "Karta drogowa" (auto-email codzienny) — separator "," , per kierowca, 4 typy
+// - "Czas pracy" (manual download) — separator ";", per pojazd, 3 typy + address
+function detectWwDelimiter(content) {
+  const firstLine = content.split(/\r?\n/)[0] || "";
+  const semi = (firstLine.match(/;/g) || []).length;
+  const comma = (firstLine.match(/,/g) || []).length;
+  return semi > comma ? ";" : ",";
+}
+
 async function processWWCsv(db, vehicles, file) {
   let rows;
   try {
-    // Toleruj BOM, skip empty, columns z nagłówka
-    rows = csvParse(file.content.replace(/^\uFEFF/, ""), {
+    // Toleruj BOM, skip empty, columns z nagłówka, auto-detect separator (",", ";")
+    const content = file.content.replace(/^\uFEFF/, "");
+    const delimiter = detectWwDelimiter(content);
+    rows = csvParse(content, {
+      delimiter,
       columns: true,
       skip_empty_lines: true,
       trim: true,
