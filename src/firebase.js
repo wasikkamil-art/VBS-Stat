@@ -11,8 +11,7 @@ import { initializeApp } from "firebase/app";
 import {
   getFirestore,
   initializeFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
+  memoryLocalCache,
 } from "firebase/firestore";
 import { getAuth, browserLocalPersistence, setPersistence } from "firebase/auth";
 import { getStorage } from "firebase/storage";
@@ -31,16 +30,22 @@ const firebaseConfig = {
 
 export const app = initializeApp(firebaseConfig);
 
-// initializeFirestore z persistent cache — dane w IndexedDB, instant load przy
-// kolejnym otwarciu, automatyczna synchronizacja w tle. Fallback do getFirestore
-// jeśli przeglądarka nie wspiera IndexedDB (Safari prywatne, niektóre webview).
+// initializeFirestore z MEMORY-ONLY cache (bez IndexedDB persistence).
+//
+// Dlaczego: persistent IndexedDB cache + multiple-tab manager generował
+// stale cache emits w onSnapshot listenerach. Po visibilitychange recovery
+// (commit 9f94410) re-subscribe → cache emit z pre-write state → setVehicles
+// nadpisywało świeże dane → "Reset Tacho wraca", "OC Przewoźnika znika",
+// "Pauza Baza znika" (incident 2026-05-06 × 3).
+//
+// Trade-off: brak instant-load przy ponownym otwarciu (cold network start).
+// fleetstat.pl wymaga internetu (Atlas API, login, Firebase Auth) — offline
+// mode i tak był nieużywalny. Memory cache = świeże dane zawsze.
 let _db;
 try {
-  _db = initializeFirestore(app, {
-    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
-  });
+  _db = initializeFirestore(app, { localCache: memoryLocalCache() });
 } catch (e) {
-  console.warn("Firestore persistent cache niedostępny — fallback na in-memory:", e?.message);
+  console.warn("Firestore memoryLocalCache niedostępny — fallback na getFirestore default:", e?.message);
   _db = getFirestore(app);
 }
 export const db = _db;
