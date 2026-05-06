@@ -2466,7 +2466,23 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
           vehicle={czV}
           entries={czEntries}
           onSave={async (data) => {
-            try { await addDoc(collection(db, "pauzy"), data); logAction("add", "pauzy", { vehicleId: data.vehicleId, status: data.status, start: data.start, end: data.end }); showToast("Zapisano"); } catch(e) { console.error("addPauza", e); }
+            try {
+              // Unique check — blokuj duplikaty (same vehicleId + status + start + end)
+              const dup = pauzy.find(p =>
+                p.vehicleId === data.vehicleId &&
+                p.status === data.status &&
+                p.start === data.start &&
+                p.end === data.end
+              );
+              if (dup) {
+                const range = data.start === data.end ? data.start : `${data.start} → ${data.end}`;
+                showToast(`⚠️ Pauza już istnieje (${data.status} ${range})`);
+                return;
+              }
+              await addDoc(collection(db, "pauzy"), data);
+              logAction("add", "pauzy", { vehicleId: data.vehicleId, status: data.status, start: data.start, end: data.end });
+              showToast("Zapisano");
+            } catch(e) { console.error("addPauza", e); }
           }}
           onDelete={async (id) => {
             try { await deleteDoc(doc(db, "pauzy", id)); logAction("delete", "pauzy", { id }); } catch(e) { console.error("delPauza", e); }
@@ -2724,6 +2740,11 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                         p.end >= todayISO
                       );
 
+                      // Pauza zaplanowana w przyszłości (najwcześniejsza)
+                      const futurePauza = pauzy
+                        .filter(p => p.vehicleId === v.id && p.status !== "jazda" && p.start > todayISO)
+                        .sort((a, b) => a.start.localeCompare(b.start))[0] || null;
+
                       // Ile dni stoi (od ostatniego rozładunku)
                       const daysSinceUnload = lastDoneF
                         ? Math.round((todayMs - new Date(lastDoneF.dataRozladunku + "T00:00:00").getTime()) / 86400000)
@@ -2765,6 +2786,21 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                           statusLabel = `Załadunek za ${diffDays}d (${dateStr})`;
                         }
                         statusIcon = "📋";
+                        statusColor = "#1d4ed8";
+                        statusBg = "#eff6ff";
+                      }
+                      // PRIORYTET 3.5: Pauza zaplanowana w przyszłości (np. baza za 2d)
+                      else if (futurePauza) {
+                        const startMs = new Date(futurePauza.start + "T00:00:00").getTime();
+                        const diffDays = Math.round((startMs - todayMs) / 86400000);
+                        const startDate = new Date(futurePauza.start + "T00:00:00").toLocaleDateString("pl-PL", { day: "numeric", month: "short" });
+                        const fpLabels = { pauza9: "Pauza 9h", pauza11: "Pauza 11h", pauza24: "Pauza 24h", pauza45: "Pauza 45h", pauzaInne: "Pauza", baza: "Baza" };
+                        const baseLabel = fpLabels[futurePauza.status] || "Pauza";
+                        status = "planowany";
+                        if (diffDays === 0) statusLabel = `${baseLabel} dziś (${startDate})`;
+                        else if (diffDays === 1) statusLabel = `${baseLabel} jutro (${startDate})`;
+                        else statusLabel = `${baseLabel} za ${diffDays}d (${startDate})`;
+                        statusIcon = futurePauza.status === "baza" ? "🏠" : "🛏️";
                         statusColor = "#1d4ed8";
                         statusBg = "#eff6ff";
                       }
