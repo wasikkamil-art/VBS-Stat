@@ -7,7 +7,7 @@ import { parseGeoString, formatOrderForDriverCopy } from "./utils/orderFormatter
 // Helpery statusu frachtu (single source of truth, wydzielone 2026-04-28 #5c krok 2)
 import { computeFrachtStatus, isFrachtRozladowany, isStaleUnfinished, hasZaladunekActive } from "./utils/frachtStatus";
 // Audit log helper (wydzielone 2026-04-28 #5c krok 2 — używane w 53+ miejscach)
-import { logAction } from "./utils/logAction";
+import { logAction, logFleetWrite } from "./utils/logAction";
 // safeHref — sanityzacja URL (wydzielone 2026-04-29 #5c krok 6, 10 użyć)
 import { safeHref } from "./utils/safeHref";
 // ZlecenieUploadBtn — przycisk uploadu PDF zlecenia (wydzielone 2026-04-29 #5c krok 6)
@@ -1257,7 +1257,10 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
       // 🛡️ Zapamiętaj ilości z snapshot — używane przez safeDbSet
       Object.values(SK).forEach(key => {
         const arr = data[key];
-        if (Array.isArray(arr)) snapshotCounts.current[key] = arr.length;
+        if (Array.isArray(arr)) {
+          snapshotCounts.current[key] = arr.length;
+          _lastFleetValuesRef.current[key] = arr;
+        }
       });
 
       setLoaded(true);
@@ -1478,6 +1481,10 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   // pure cache emits (visibilitychange recovery / offline persistence) bo są stale.
   const _serverSnapReceivedRef = useRef(false);
 
+  // Last known server value per fleet/data field — używane do diff w logFleetWrite.
+  // Aktualizowany przy onSnapshot, czytany przez safeDbSet przed write.
+  const _lastFleetValuesRef = useRef({});
+
   const safeDbSet = (key, value) => {
     const prevCount = snapshotCounts.current[key] || 0;
     const newCount = Array.isArray(value) ? value.length : 0;
@@ -1494,6 +1501,13 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
       showToast(`⚠️ Zablokowano nadpisanie ${key} (anomalia ${prevCount}→${newCount}). Hard refresh.`);
       return;
     }
+    // 🔍 AUDIT: oblicz diff vs ostatni server value i zaloguj (helps debug data loss/regresja)
+    try {
+      const prev = _lastFleetValuesRef.current[key];
+      logFleetWrite(key, prev, value, "safeDbSet/useEffect");
+    } catch (e) { console.warn("logFleetWrite error", e); }
+    _lastFleetValuesRef.current[key] = value;
+
     // 🛡️ Mark _pendingWrites SYNCHRONICZNIE (przed debounce 300ms), żeby onSnapshot
     // ignorował stale snapshots w oknie debounce. Bez tego Reset Tacho i podobne
     // single-field updates "wracały do poprzedniego stanu" — fresh snapshot
