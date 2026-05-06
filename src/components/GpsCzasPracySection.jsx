@@ -107,6 +107,11 @@ export default function GpsCzasPracySection({ device, position, driverActivities
     : compliance.continuousDrive > REGULATION.CONTINUOUS_DRIVE * 0.85 ? "yellow"
     : "blue";
 
+  // Kolor dla paska czasu pracy (48h/tydz średnia, jazda + inna praca)
+  const workTimeColor = compliance.weekly.workTime > REGULATION.WORK_TIME_WEEKLY_AVG ? "red"
+    : compliance.weekly.workTime > REGULATION.WORK_TIME_WEEKLY_AVG * 0.85 ? "yellow"
+    : "blue";
+
   return (
     <div className="space-y-4">
       {/* HEADER */}
@@ -445,9 +450,9 @@ export default function GpsCzasPracySection({ device, position, driverActivities
           <div>
             <div className="flex items-center justify-between text-xs mb-1">
               <span className="font-semibold text-gray-700">Czas pracy (48h/tydz śr., jazda + inna praca)</span>
-              <span className="font-bold text-amber-700">{fmtHM(compliance.weekly.workTime)} / {fmtHM(REGULATION.WORK_TIME_WEEKLY_AVG)}</span>
+              <span className="font-bold" style={{ color: workTimeColor === "red" ? "#b91c1c" : workTimeColor === "yellow" ? "#a16207" : "#1d4ed8" }}>{fmtHM(compliance.weekly.workTime)} / {fmtHM(REGULATION.WORK_TIME_WEEKLY_AVG)}</span>
             </div>
-            <Bar val={compliance.weekly.workTime} max={REGULATION.WORK_TIME_WEEKLY_AVG} color="yellow" />
+            <Bar val={compliance.weekly.workTime} max={REGULATION.WORK_TIME_WEEKLY_AVG} color={workTimeColor} />
           </div>
         </div>
       </div>
