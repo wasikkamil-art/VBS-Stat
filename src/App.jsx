@@ -6398,6 +6398,7 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
     { id: "karta", label: "Karta kierowcy", icon: "💳" },
     { id: "ddd", label: "Pliki DDD", icon: "💾" },
     { id: "czas-pracy", label: "Czas pracy", icon: "⏱️" },
+    { id: "aktywnosc", label: "Aktywność", icon: "📅" },
     { id: "tachograf", label: "Tachograf", icon: "📋" },
   ];
 
@@ -6551,6 +6552,13 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
               <Suspense fallback={<div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-sm text-gray-500">⏱ Ładowanie czasu pracy…</div>}>
                 <GpsCzasPracySection device={selectedDev} position={selectedPos} driverActivities={driverActivities} showToast={showToast} />
               </Suspense>
+            )}
+            {subTab === "aktywnosc" && (
+              <MultiDayActivityView
+                key={selectedDev?.fleetVehicle?.id}
+                vehicle={selectedDev?.fleetVehicle}
+                driverActivities={driverActivities}
+              />
             )}
             {subTab === "tachograf" && (
               <Suspense fallback={<div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-sm text-gray-500">📋 Ładowanie compliance tachografu…</div>}>
@@ -8681,7 +8689,7 @@ function DddDailyRow({ day, data }) {
                 height: "100%",
                 background: color,
               }}
-              title={`${DDD_TYPE_LABEL[s.type]}: ${startStr} → ${endStr} (${fmtHM(s.durMin)})`}
+              title={`${DDD_TYPE_LABEL[s.type]}: ${startStr} → ${endStr} (${fmtHM(s.durMin)})${s.address ? ` · ${s.address}` : ""}`}
             />
           );
         })}
@@ -8719,6 +8727,253 @@ function DddSummaryCard({ label, value, color, bg }) {
     <div className="p-3 rounded-xl" style={{ background: bg, border: "1px solid #f3f4f6" }}>
       <div className="text-xs font-semibold mb-1" style={{ color }}>{label}</div>
       <div className="text-lg font-bold" style={{ color }}>{value}</div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MULTI-DAY ACTIVITY VIEW — widok wielodniowy aktywności pojazdu z driverActivities
+// (zasilony z CSV widziszwszystko + auto_gps). Render ribbons jak DDD raport,
+// per pojazd (wielu kierowców łącznie). Cross-day split aktywności.
+// ═══════════════════════════════════════════════════════════════════════════════
+function MultiDayActivityView({ vehicle, driverActivities = [] }) {
+  const vehicleId = vehicle?.id || "__none__";
+
+  const vehicleActivities = useMemo(
+    () => driverActivities.filter(a => a.vehicleId === vehicleId),
+    [driverActivities, vehicleId]
+  );
+
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const sevenAgoIso = useMemo(() => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - 6);
+    return d.toISOString().slice(0, 10);
+  }, []);
+
+  const [dateFrom, setDateFrom] = useState(sevenAgoIso);
+  const [dateTo, setDateTo] = useState(todayIso);
+  const [showAllDays, setShowAllDays] = useState(false);
+
+  // Build dailyTotals z aktywności (cross-day split — np. odpoczynek 22:00→08:00 idzie do 2 dni)
+  const { dailyTotals, allDays, periodStart, periodEnd } = useMemo(() => {
+    if (vehicleActivities.length === 0) {
+      return { dailyTotals: {}, allDays: [], periodStart: null, periodEnd: null };
+    }
+    const totals = {};
+    const ensureDay = (dateStr) => {
+      if (!totals[dateStr]) {
+        totals[dateStr] = { drive: 0, work: 0, avail: 0, rest: 0, km: 0, segments: [], drivers: new Set() };
+      }
+      return totals[dateStr];
+    };
+    let firstMs = null, lastMs = null;
+    for (const a of vehicleActivities) {
+      const sMs = Date.parse(a.startTs);
+      const eMs = Date.parse(a.endTs);
+      if (isNaN(sMs) || isNaN(eMs) || eMs <= sMs) continue;
+      if (firstMs === null || sMs < firstMs) firstMs = sMs;
+      if (lastMs === null || eMs > lastMs) lastMs = eMs;
+      let cur = sMs;
+      while (cur < eMs) {
+        const d = new Date(cur);
+        const dayStartUtc = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+        const nextDayStartUtc = dayStartUtc + 86400000;
+        const segEnd = Math.min(eMs, nextDayStartUtc);
+        const dateStr = new Date(dayStartUtc).toISOString().slice(0, 10);
+        const fromMin = Math.floor((cur - dayStartUtc) / 60000);
+        const durMin = Math.floor((segEnd - cur) / 60000);
+        if (durMin > 0) {
+          const day = ensureDay(dateStr);
+          day[a.type] = (day[a.type] || 0) + durMin;
+          day.segments.push({ type: a.type, fromMin, durMin, address: a.address || null });
+          if (cur === sMs && a.distanceKm) day.km += a.distanceKm;
+          if (a.driverName) day.drivers.add(a.driverName);
+        }
+        cur = segEnd;
+      }
+    }
+    Object.values(totals).forEach(t => { t.drivers = Array.from(t.drivers); });
+    const days = Object.keys(totals).sort();
+    return {
+      dailyTotals: totals,
+      allDays: days,
+      periodStart: firstMs ? new Date(firstMs).toISOString().slice(0, 10) : null,
+      periodEnd: lastMs ? new Date(lastMs).toISOString().slice(0, 10) : null,
+    };
+  }, [vehicleActivities]);
+
+  const visibleDays = useMemo(() => {
+    return allDays.filter(d => {
+      if (dateFrom && d < dateFrom) return false;
+      if (dateTo && d > dateTo) return false;
+      const dt = dailyTotals[d];
+      if (!showAllDays && (!dt.drive || dt.drive === 0)) return false;
+      return true;
+    });
+  }, [allDays, dateFrom, dateTo, showAllDays, dailyTotals]);
+
+  const drivingDaysInRange = allDays.filter(d => {
+    if (dateFrom && d < dateFrom) return false;
+    if (dateTo && d > dateTo) return false;
+    return (dailyTotals[d]?.drive || 0) > 0;
+  }).length;
+  const allDaysInRange = allDays.filter(d => {
+    if (dateFrom && d < dateFrom) return false;
+    if (dateTo && d > dateTo) return false;
+    return true;
+  }).length;
+
+  const periodSums = useMemo(() => {
+    let drive = 0, work = 0, avail = 0, rest = 0, km = 0;
+    visibleDays.forEach(d => {
+      const dt = dailyTotals[d];
+      drive += dt.drive || 0;
+      work += dt.work || 0;
+      avail += dt.avail || 0;
+      rest += dt.rest || 0;
+      km += dt.km || 0;
+    });
+    return { drive, work, avail, rest, km };
+  }, [visibleDays, dailyTotals]);
+
+  if (!vehicle?.id) {
+    return (
+      <div className="bg-white rounded-2xl border border-gray-100 p-6 text-center text-xs text-gray-400">
+        Brak przypisanego pojazdu do tego urządzenia.
+      </div>
+    );
+  }
+
+  if (vehicleActivities.length === 0) {
+    return (
+      <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center">
+        <span className="text-4xl mb-4 block">📅</span>
+        <p className="text-gray-500 text-sm font-semibold">Brak aktywności dla {vehicle.plate}</p>
+        <p className="text-xs text-gray-400 mt-2 max-w-md mx-auto">
+          Dane pochodzą z driverActivities (auto_gps + ww_csv). Codzienny raport CSV widziszwszystko trafia ~02:04 PL na <code>imports@inbox.fleetstat.pl</code>.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* Header */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-4 mb-3">
+        <div>
+          <h3 className="text-base font-bold text-gray-800">📅 Aktywność wielodniowa</h3>
+          <div className="text-xs text-gray-500 mt-1">
+            Pojazd: <span className="font-semibold text-gray-700">{vehicle.plate}</span>
+            {periodStart && periodEnd && (
+              <span className="ml-2">· Dane od {fmtDate(periodStart)} do {fmtDate(periodEnd)}</span>
+            )}
+            <span className="ml-2">· {allDays.length} {allDays.length === 1 ? "dzień" : "dni"}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Sumy okresu */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-4 mb-3">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          <DddSummaryCard label="🚛 Jazda" value={fmtHM(periodSums.drive)} color={DDD_COLORS.drive} bg="#f0fdf4" />
+          <DddSummaryCard label="🔧 Praca" value={fmtHM(periodSums.work)} color={DDD_COLORS.work} bg="#fffbeb" />
+          <DddSummaryCard label="⚪ Dyspo" value={fmtHM(periodSums.avail)} color={DDD_COLORS.avail} bg="#f9fafb" />
+          <DddSummaryCard label="😴 Odpoczynek" value={fmtHM(periodSums.rest)} color={DDD_COLORS.rest} bg="#eff6ff" />
+          <DddSummaryCard label="📍 Kilometry" value={`${periodSums.km.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} km`} color="#7c3aed" bg="#faf5ff" />
+        </div>
+      </div>
+
+      {/* Aktywność dzienna */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-6 mb-4">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <h3 className="text-sm font-bold text-gray-800">📅 Aktywność dzienna</h3>
+          <div className="flex items-center gap-2 text-xs print:hidden">
+            <button
+              onClick={() => setShowAllDays(false)}
+              className={`px-3 py-1 rounded-lg font-semibold ${!showAllDays ? "bg-violet-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+              Tylko z jazdą ({drivingDaysInRange})
+            </button>
+            <button
+              onClick={() => setShowAllDays(true)}
+              className={`px-3 py-1 rounded-lg font-semibold ${showAllDays ? "bg-violet-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+              Wszystkie dni ({allDaysInRange})
+            </button>
+          </div>
+        </div>
+
+        {/* Zakres dat */}
+        <div className="mb-3 flex items-center gap-2 flex-wrap text-xs print:hidden">
+          <span className="text-gray-500">Zakres:</span>
+          <input
+            type="date"
+            value={dateFrom}
+            min={periodStart || ""}
+            max={periodEnd || ""}
+            onChange={e => setDateFrom(e.target.value)}
+            className="px-2 py-1 border border-gray-200 rounded-lg text-xs"
+          />
+          <span className="text-gray-400">→</span>
+          <input
+            type="date"
+            value={dateTo}
+            min={periodStart || ""}
+            max={periodEnd || ""}
+            onChange={e => setDateTo(e.target.value)}
+            className="px-2 py-1 border border-gray-200 rounded-lg text-xs"
+          />
+          <button
+            onClick={() => { setDateFrom(periodStart || ""); setDateTo(periodEnd || ""); }}
+            className="px-2 py-1 text-violet-600 hover:text-violet-700 hover:underline font-semibold">
+            Reset
+          </button>
+          <span className="text-gray-300 mx-1">·</span>
+          <span className="text-gray-500">Szybko:</span>
+          <button onClick={() => {
+            const end = periodEnd || todayIso;
+            const d = new Date(end);
+            d.setUTCDate(d.getUTCDate() - 6);
+            setDateFrom(d.toISOString().slice(0, 10));
+            setDateTo(end);
+          }} className="px-2 py-1 bg-gray-100 hover:bg-violet-50 rounded-lg font-semibold">
+            Ostatnie 7 dni
+          </button>
+          <button onClick={() => {
+            const end = periodEnd || todayIso;
+            const d = new Date(end);
+            d.setUTCDate(d.getUTCDate() - 27);
+            setDateFrom(d.toISOString().slice(0, 10));
+            setDateTo(end);
+          }} className="px-2 py-1 bg-gray-100 hover:bg-violet-50 rounded-lg font-semibold">
+            Ostatnie 28 dni
+          </button>
+        </div>
+
+        {/* Legenda */}
+        <div className="mb-3 flex items-center justify-between flex-wrap gap-2 text-[11px]">
+          <div className="flex items-center gap-3">
+            {Object.entries(DDD_COLORS).map(([type, color]) => (
+              <div key={type} className="flex items-center gap-1">
+                <span style={{ display: "inline-block", width: 12, height: 12, background: color, borderRadius: 2 }} />
+                <span className="text-gray-600">{DDD_TYPE_LABEL[type]}</span>
+              </div>
+            ))}
+          </div>
+          <div className="text-gray-400 italic">Skala: czas lokalny PL (UTC+1 zima / UTC+2 lato)</div>
+        </div>
+
+        {visibleDays.length === 0 ? (
+          <div className="text-xs italic text-gray-400 text-center py-6">
+            Brak dni do wyświetlenia.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {visibleDays.map(day => (
+              <DddDailyRow key={day} day={day} data={dailyTotals[day]} />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
