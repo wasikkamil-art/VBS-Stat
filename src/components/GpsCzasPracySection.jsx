@@ -112,6 +112,17 @@ export default function GpsCzasPracySection({ device, position, driverActivities
     : compliance.weekly.workTime > REGULATION.WORK_TIME_WEEKLY_AVG * 0.85 ? "yellow"
     : "blue";
 
+  // Kolor dla pasków jazdy tygodniowej (56h) i dwutygodniowej (90h, Pakiet Mobilności art. 6.3)
+  const weeklyDriveColor = compliance.weekly.drive > REGULATION.WEEKLY_DRIVE ? "red"
+    : compliance.weekly.drive > REGULATION.WEEKLY_DRIVE * 0.85 ? "yellow"
+    : "blue";
+  const biweeklyDriveColor = compliance.biweekly.drive > REGULATION.BIWEEKLY_DRIVE ? "red"
+    : compliance.biweekly.drive > REGULATION.BIWEEKLY_DRIVE * 0.85 ? "yellow"
+    : "blue";
+
+  // Pomocnik: kolor tekstu dla zmiennej koloru paska
+  const colorToTextHex = (c) => c === "red" ? "#b91c1c" : c === "yellow" ? "#a16207" : "#1d4ed8";
+
   return (
     <div className="space-y-4">
       {/* HEADER */}
@@ -436,16 +447,16 @@ export default function GpsCzasPracySection({ device, position, driverActivities
           <div>
             <div className="flex items-center justify-between text-xs mb-1">
               <span className="font-semibold text-gray-700">Jazda tygodniowa (bieżący tydzień)</span>
-              <span className="font-bold text-blue-700">{fmtHM(compliance.weekly.drive)} / {fmtHM(compliance.weekly.limit)}</span>
+              <span className="font-bold" style={{ color: colorToTextHex(weeklyDriveColor) }}>{fmtHM(compliance.weekly.drive)} / {fmtHM(compliance.weekly.limit)}</span>
             </div>
-            <Bar val={compliance.weekly.drive} max={compliance.weekly.limit} color="blue" />
+            <Bar val={compliance.weekly.drive} max={compliance.weekly.limit} color={weeklyDriveColor} />
           </div>
           <div>
             <div className="flex items-center justify-between text-xs mb-1">
               <span className="font-semibold text-gray-700">Jazda dwutygodniowa</span>
-              <span className="font-bold text-blue-700">{fmtHM(compliance.biweekly.drive)} / {fmtHM(compliance.biweekly.limit)}</span>
+              <span className="font-bold" style={{ color: colorToTextHex(biweeklyDriveColor) }}>{fmtHM(compliance.biweekly.drive)} / {fmtHM(compliance.biweekly.limit)}</span>
             </div>
-            <Bar val={compliance.biweekly.drive} max={compliance.biweekly.limit} color="blue" />
+            <Bar val={compliance.biweekly.drive} max={compliance.biweekly.limit} color={biweeklyDriveColor} />
           </div>
           <div>
             <div className="flex items-center justify-between text-xs mb-1">

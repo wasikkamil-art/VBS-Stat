@@ -152,17 +152,11 @@ export function lastDailyRestEnd(segments, now) {
   return nowMs - 24 * 3600000;
 }
 
-// Granica "tygodnia" — od ostatniego 24h+ odpoczynku lub poniedziałek
+// Granica "tygodnia" — tydzień kalendarzowy wg 561/2006 art. 4(i):
+// pn 00:00 → nd 24:00 (lokalny czas PL).
+// segments zostaje w sygnaturze dla backward compat — nieużywane.
 export function lastWeeklyRestEnd(segments, now) {
-  const nowMs = now.getTime();
-  for (let i = segments.length - 1; i >= 0; i--) {
-    const s = segments[i];
-    if (s.type === "rest" && s.durMin >= REGULATION.WEEKLY_REST_REDUCED && s.endMs <= nowMs) {
-      return s.endMs;
-    }
-  }
-  // fallback: ostatni poniedziałek 00:00
-  const d = new Date(nowMs);
+  const d = new Date(now.getTime());
   const day = d.getDay(); // 0=nd, 1=pn
   const diffToMonday = day === 0 ? 6 : day - 1;
   d.setHours(0, 0, 0, 0);
@@ -284,12 +278,17 @@ export function computeDriverCompliance(rawSegments = [], periodStart = null, no
   const dayStart = lastDailyRestEnd(segments, now);
   const daySums = sumByType(segments, dayStart, nowMs);
 
-  // Zakres tygodniowy — od ostatniego odpoczynku tygodniowego
+  // Zakres tygodniowy — tydzień kalendarzowy 561/2006 art. 4(i): pn 00:00 → nd 24:00
   const weekStart = lastWeeklyRestEnd(segments, now);
   const weekSums = sumByType(segments, weekStart, nowMs);
 
-  // Dwutygodniowy — 14 dni w tył
-  const biweekStart = nowMs - 14 * 24 * 3600000;
+  // Dwutygodniowy — 2 kolejne tygodnie kalendarzowe (Pakiet Mobilności art. 6.3):
+  // poprzedni poniedziałek 00:00 → teraz. setDate cofa o 7 dni bezpiecznie na DST.
+  const biweekStart = (() => {
+    const d = new Date(weekStart);
+    d.setDate(d.getDate() - 7);
+    return d.getTime();
+  })();
   const biweekSums = sumByType(segments, biweekStart, nowMs);
 
   // Jazda ciągła od ostatniej przerwy
