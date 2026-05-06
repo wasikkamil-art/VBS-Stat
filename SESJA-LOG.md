@@ -398,3 +398,106 @@ Origin/main: `ae6dcc4` (Reset Tacho race fix). 7 commitów dziś:
 - Przed 2026-06-01 — upgrade SendGrid (trial)
 - Decyzja E3 merge Tachograf + Czas pracy — od 2026-05-04, czekamy ~1-2 tyg
 - Tablet dla kierowców = decyzja zakupowa, brak harmonogramu
+
+---
+
+## 2026-05-06 (popołudnie/wieczór) — Mega sesja: CSV widziszwszystko + Reset Tacho saga + ROOT CAUSE memory cache
+
+**Kontekst**: Sesja kontynuowana. User chciał 1) nowy CSV widziszwszystko (worktime z address) 2) widok wielodniowy w Czas pracy 3) ostatecznie znaleźć Reset Tacho race + nawracający data loss.
+
+### Część 1 — CSV widziszwszystko + Aktywność wielodniowa (~3h)
+
+User pokazał worktime CSV z panelu (różny format od auto-email roadcard CSV):
+- Worktime per pojazd, separator `;`, 3 typy (Jazda/Postój/Brak danych) + address
+- Roadcard per kierowca, separator `,`, 4 typy (Jazda/Praca/Dyspo/Odpoczynek)
+
+Commits:
+- `1bcf9e7` Heurystyka C w `wwReportInbound` CF: Postój ≥9h → rest, 45min-9h → avail, <45min → work
+- `e6b9de1` Widok wielodniowy "Aktywność" w GPS/Monitoring (między Czas pracy a Tachograf). Reuse `DddDailyRow` + helpery z DddReportView. Cross-day split, filtr dat, presety 7/28d, tooltip address.
+- `7747f45` Auto-detect separator CSV (",`/`;`) w `wwReportInbound` — worktime CSV failował z missing_column bo csv-parse default ",".
+
+**Backfill historyczny**: user zmailował szczegółowy CSV (od 23.04 do dziś) na imports@inbox.fleetstat.pl → CF imported=136 replaced=213. Heurystyka C zastąpiła stare auto_gps + ww_csv segmenty.
+
+### Część 2 — Compliance refactor (~1h)
+
+User (z linku https://dlafirm.pracuj.pl/blog/czas-pracy-kierowcy potwierdzonego przez Read) zauważył że **tygodnie liczone błędnie** w `czasPracy.js`. `lastWeeklyRestEnd` primary path zwracał koniec ostatniego rest 45h zamiast pn 00:00 (nie zgodne z 561/2006 art. 4(i)).
+
+Plus pasek "Czas pracy 48h" miał zawsze stały żółty kolor (mylące — wyglądało jak ostrzeżenie nawet przy 45%).
+
+Commits:
+- `f9537bc` Dynamic color workTime 48h (>limit red, >85% yellow, else blue)
+- `374e53f` Tydzień kalendarzowy 561/2006 (zawsze pn 00:00) + biweekly = 2 tyg kalendarzowe (poprzedni pn 00:00 → teraz, nie rolling 14×24h). Plus dynamic color dla weekly + biweekly drive bar.
+
+Na WGM 0475M biweekly spadło z 89h 52min (rolling) → ~66h (kalendarzowy) — bezpieczniej, zgodnie z prawem ITD.
+
+### Część 3 — Imię kierowcy w UI (~30 min)
+
+User chciał imię kierowcy przy rejestracji pojazdu w Frachty/Pojazdy/Dokumenty. Wybrał format A (append do "{brand} · {year}").
+
+- `93fa520` `activeDriverName(v)` + `vehicleSubtitle(v)` helpery globalne. 6 lokalizacji zaktualizowanych (Frachty per pojazd, Frachty after select, Pojazdy tab, Pojazdy detail z type, Pojazdy archived, Dokumenty grouping).
+
+### Część 4 — Reset Tacho race condition (5 podejść!)
+
+User zgłosił że Reset Tacho **nadal wraca**, mimo wczorajszego fix `_pendingWrites synchronicznie` (commit `ae6dcc4`).
+
+**Podejście 1** (`e4c4143`): atomic Firestore transaction `dbUpdateVehicleField(id, patch)` zamiast setVehicles → useEffect → safeDbSet → debounce. Race-free przez Firestore retry. **Nie pomogło dostatecznie** — Reset wciąż wracał po visibilitychange.
+
+**Podejście 2** (`d5f1a61`): cache filter w onSnapshot fleet/data: `if (snap.metadata.fromCache && !snap.metadata.hasPendingWrites) return;`. **PSUŁO** — strona zawisła "Ładowanie danych" bo initial cache emit był blokowany.
+
+**Podejście 3** (`4a40251`): naprawa #2 — `_serverSnapReceivedRef` (useRef boolean). Initial cache emit przepuszczony. Po pierwszym server snap → ref=true → blokuj kolejne pure cache emits. Działało dla fleet/data, ale **inne kolekcje (pauzy, dddFiles)** podatne.
+
+**Podejście 4 — ROOT CAUSE** (`f39a199`): user widział że "OC zniknął znowu, pauza Bazy znikła w innej przeglądarce". Memory cache fix. **`src/firebase.js`** używał `persistentLocalCache + persistentMultipleTabManager`. To był GŁÓWNY sprawca: persistent IndexedDB cache emit + multi-tab share generuje stale cache emits przy visibility recovery. Zmiana na `memoryLocalCache()` — cache RAM tylko per session. Bundle spadł 1822 → 1727 kB.
+
+### Część 5 — Pauzy UX
+
+Audit log pokazał: `2026-05-06T17:55:55 delete mod=pauzy wasik.kamil@gmail.com`. **User sam przypadkowo kliknął ✕** w CzasPracyModal podczas testów Reset Tacho. Brak confirm dialog.
+
+Commits:
+- `6780602` Confirm dialog przed delete pauzy (`window.confirm("Usunąć pauzę baza 4 maj → 8 maj?")`).
+- `0312288` Unique check pauzy w `onSave` — block addDoc gdy duplicate (vehicleId+status+start+end). Plus PRIORYTET 3.5 home tile dla pauzy zaplanowanej "Baza za Xd".
+- `3c7392a` Smart baza: gdy kierowca rozładował się + ma pauzę "baza" w przyszłości + brak nextF → traktuj jako aktywną bazę "Baza · do X" (nie "Baza za Xd"). User logiczny argument: kierowca po rozładunku JEST na bazie, nie "za 2 dni będzie".
+
+### Recovery OC Przewoźnika 2× w jednym dniu
+
+- Rano: PITR snapshot 2026-05-06T08:35Z → 2 docs. Recovery + 4 fixy reliability (e538dad, ae6dcc4, 9f94410, 43c8975).
+- Wieczór: znów zniknął. PITR sprawdzenie pokazało docs count history: 8h temu=2, 6h=2, 4h=2, **2h=1, 1h=1**. Zniknął między 14:17-16:17 UTC, w oknie testów Reset Tacho 17:53. PITR 14:17 snapshot → wyciągnąłem `id=ikfnwup4` → PATCH fleet/data?updateMask=fleetv2_docs → 2 docs ✅.
+
+**LEKCJA: PITR readTime musi być whole minute** (sekundy=00). Inaczej `FAILED_PRECONDITION` "read_time is not a whole minute".
+
+### Stan repo na koniec sesji
+
+13 commitów dziś (od `ad7c3f1` base):
+- `3c7392a` smart baza
+- `0312288` unique check pauzy + Baza za Xd
+- `6780602` confirm dialog delete pauzy
+- `f39a199` **memory-only Firestore cache** ⭐ ROOT CAUSE
+- `4a40251` cache filter initial load fix
+- `d5f1a61` cache filter (broken→fixed)
+- `93fa520` imię kierowcy 6 miejsc
+- `e4c4143` Reset Tacho atomic transaction
+- `374e53f` tydzień kalendarzowy + dynamic color
+- `f9537bc` dynamic color workTime 48h
+- `7747f45` auto-detect separator CSV
+- `e6b9de1` widok wielodniowy Aktywność
+- `1bcf9e7` heurystyka C dla Postój
+
+Plus OC Przewoźnika odzyskany manualnie z PITR (poza commit, REST API PATCH).
+
+### Otwarte (na obserwację — czeka na user verdict)
+
+User: "widać jedno i drugie poczekam czy za jakis czas nie zginie" — testuje memory cache fix przez czas. Jeśli problem WRACA, robimy:
+1. **Granularny audit log** per fleet/data sub-field — diff per write z user.email + clientId. Wtedy gdy znów zniknie, dokładnie wiemy kto/kiedy/co.
+2. **Field-level shrink protection** w `safeDbSet` — wykrycie gdy field znika z elementu array bez `markIntentionalDelete`.
+
+Plus zawsze w backlogu:
+- ⭐ **Etap 6** (widok obecnego wyjazdu kierowcy + compliance live) — plan w memory `project_ddd_etap6_plan.md`. ~3-4h, sesja dedykowana.
+- Visibilitychange recovery dla pozostałych onSnapshot (operacyjne, driverActivities, emailRecipients, fuelEntries, chatRooms, sprawy, rentownosc) — backlog niska pilność po memory cache fix.
+- Loud error handling w BulkUpload (toast gdy AI fails)
+- Delete button dla dddFiles w UI
+
+### Operacyjne (user)
+
+- 2026-05-07 (jutro) ~02:04 — kolejny raport CSV widziszwszystko, sprawdzić w logach
+- Czeka na fix verdict (memory cache) — może 1-2 dni
+- 2026-06-01 deadline — upgrade SendGrid (trial)
+- Etap 6 — gdy gotowy
