@@ -256,59 +256,46 @@ async function dbBulkAddFrachty(newFrachty) {
 
 // Atomic single-field update vehicle (Reset Tacho i podobne) — eliminuje race
 // state→useEffect→safeDbSet→debounce→dbSet. Firestore odrzuca write jeśli ktoś
-// inny zmienił dokument w trakcie (transaction retry). Po update onSnapshot
-// dostarczy fresh data i state aktualizuje się sam.
+// inny zmienił dokument w trakcie (transaction retry).
+//
+// UWAGA: NIE używamy _pendingWrites.add — atomic transaction sam jest race-safe.
+// Wcześniejszy fix BLOKOWAŁ server emit z naszym writem przez 2s cooldown,
+// przez co state lokalnie zostawał stary aż user nie zrobił hard refresh
+// (Reset Tacho "wracał" wizualnie). Wraz z onSnapshot bez _pendingWrites.has check
+// dla atomic writes, fresh data ląduje w state natychmiast po commit.
 async function dbUpdateVehicleField(vehicleId, patch) {
-  _pendingWrites.add(SK.vehicles);
-  try {
-    await runTransaction(db, async (tx) => {
-      const snap = await tx.get(DATA_REF());
-      const list = (snap.data() || {})[SK.vehicles] || [];
-      tx.update(DATA_REF(), {
-        [SK.vehicles]: list.map(v => v && v.id === vehicleId ? { ...v, ...patch } : v),
-      });
-    });
-    setTimeout(() => _pendingWrites.delete(SK.vehicles), WRITE_COOLDOWN);
-  } catch (e) {
-    _pendingWrites.delete(SK.vehicles);
-    throw e;
-  }
+  let prev, next;
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(DATA_REF());
+    prev = (snap.data() || {})[SK.vehicles] || [];
+    next = prev.map(v => v && v.id === vehicleId ? { ...v, ...patch } : v);
+    tx.update(DATA_REF(), { [SK.vehicles]: next });
+  });
+  try { logFleetWrite(SK.vehicles, prev, next, "atomic/dbUpdateVehicleField"); } catch {}
 }
 
 // Atomic delete z array field w fleet/data (imi, docs, rent, costs).
-// User zgłosił "usuwam X wracają z powrotem" dla IMI — race state→useEffect→
-// safeDbSet→debounce overwrite z stale snap. Atomic delete eliminuje to:
-// Firestore odrzuca write przy konflikcie, retry. State aktualizuje się przez
-// onSnapshot z fresh data — bez setX(filter).
 async function dbDeleteFromArrayField(fieldKey, id) {
-  _pendingWrites.add(fieldKey);
-  try {
-    await runTransaction(db, async (tx) => {
-      const snap = await tx.get(DATA_REF());
-      const list = (snap.data() || {})[fieldKey] || [];
-      tx.update(DATA_REF(), { [fieldKey]: list.filter(r => r && r.id !== id) });
-    });
-    setTimeout(() => _pendingWrites.delete(fieldKey), WRITE_COOLDOWN);
-  } catch (e) {
-    _pendingWrites.delete(fieldKey);
-    throw e;
-  }
+  let prev, next;
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(DATA_REF());
+    prev = (snap.data() || {})[fieldKey] || [];
+    next = prev.filter(r => r && r.id !== id);
+    tx.update(DATA_REF(), { [fieldKey]: next });
+  });
+  try { logFleetWrite(fieldKey, prev, next, "atomic/dbDeleteFromArrayField"); } catch {}
 }
 
 // Atomic add do array field w fleet/data (imi, docs, rent, costs).
 async function dbAddToArrayField(fieldKey, item) {
-  _pendingWrites.add(fieldKey);
-  try {
-    await runTransaction(db, async (tx) => {
-      const snap = await tx.get(DATA_REF());
-      const list = (snap.data() || {})[fieldKey] || [];
-      tx.update(DATA_REF(), { [fieldKey]: [...list, item] });
-    });
-    setTimeout(() => _pendingWrites.delete(fieldKey), WRITE_COOLDOWN);
-  } catch (e) {
-    _pendingWrites.delete(fieldKey);
-    throw e;
-  }
+  let prev, next;
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(DATA_REF());
+    prev = (snap.data() || {})[fieldKey] || [];
+    next = [...prev, item];
+    tx.update(DATA_REF(), { [fieldKey]: next });
+  });
+  try { logFleetWrite(fieldKey, prev, next, "atomic/dbAddToArrayField"); } catch {}
 }
 
 // ── Audit log ──
