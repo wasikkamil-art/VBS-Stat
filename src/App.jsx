@@ -3714,9 +3714,15 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                     docToSave = { ...docToSave, fileData: null };
                   }
                 }
-                setDocs((p) => [...p, docToSave]);
+                await dbAddToArrayField(SK.docs, docToSave).catch(e => {
+                  console.error("doc save", e);
+                  showToast("⚠️ Błąd zapisu dokumentu");
+                });
               }}
-              onDelete={(id) => { markIntentionalDelete(SK.docs); setDocs((p) => p.filter((d) => d.id !== id)); }}
+              onDelete={(id) => dbDeleteFromArrayField(SK.docs, id).catch(e => {
+                console.error("doc del", e);
+                showToast("⚠️ Błąd usuwania dokumentu");
+              })}
               onEdit={(id, data) => setDocs((p) => p.map((d) => d.id === id ? { ...d, ...data } : d))}
             />
           )}
