@@ -2444,16 +2444,24 @@ function parseMultipartReq(req) {
 }
 
 // Mapowanie typów segmentu z widziszwszystko na nasze
+// "Postój" / "Postoj" obsługiwane przez heurystykę długości — patrz mapWwPostojToType
 const WW_TYPE_MAP = {
   "Jazda": "drive",
-  "Postój": "rest",
-  "Postoj": "rest",
   "Brak danych": null,    // ignoruj — to są szumy
   "Inna praca": "work",
   "Praca": "work",
   "Dyspozycyjność": "avail",
   "Dyspozycyjnosc": "avail",
 };
+
+// CSV widziszwszystko nie rozróżnia rest/work/avail dla "Postój" (per pojazd, brak tachografu).
+// Heurystyka C: ≥9h = daily/weekly rest, 45min-9h = niejasny postój (avail), <45min = krótka pauza/manewry (work).
+function mapWwPostojToType(durMs) {
+  const durMin = durMs / 60000;
+  if (durMin >= 540) return "rest";
+  if (durMin >= 45) return "avail";
+  return "work";
+}
 
 async function importWWForVehicle(db, vehicles, plate, segments) {
   const cleanPlate = String(plate || "").replace(/\s+/g, "").toUpperCase();
@@ -2515,11 +2523,17 @@ async function importWWForVehicle(db, vehicles, plate, segments) {
   for (let i = 0; i < segments.length; i += 400) {
     const batch = db.batch();
     for (const seg of segments.slice(i, i + 400)) {
-      const type = WW_TYPE_MAP[String(seg.type || "").trim()];
-      if (!type) { skipped++; continue; }
+      const segType = String(seg.type || "").trim();
       const sMs = Date.parse(seg.start);
       const eMs = Date.parse(seg.end);
       if (isNaN(sMs) || isNaN(eMs) || eMs <= sMs) { skipped++; continue; }
+      let type;
+      if (segType === "Postój" || segType === "Postoj") {
+        type = mapWwPostojToType(eMs - sMs);
+      } else {
+        type = WW_TYPE_MAP[segType];
+      }
+      if (!type) { skipped++; continue; }
       const ref = db.collection("driverActivities").doc();
       batch.set(ref, {
         driverEmail: driver.email,
