@@ -1155,13 +1155,15 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
       currentUnsub = onSnapshot(DATA_REF(), { includeMetadataChanges: false }, (snap) => {
         retryCount = 0; // reset przy sukcesie
       if (!snap.exists()) { setLoaded(true); return; }
-      // 🛡️ Skip stale cache emit (po visibilitychange recovery / Firestore offline persistence).
-      // Reset Tacho "wracał" bo cache emit z pre-write state nadpisywał świeżą wartość po
-      // _pendingWrites cooldown wygasł. fromCache=true + !hasPendingWrites = pure stale cache.
-      if (snap.metadata.fromCache && !snap.metadata.hasPendingWrites) {
-        console.log("[fleet/data] skip stale cache snap (fromCache=true, no pending writes)");
+      // 🛡️ Skip stale cache emit TYLKO po pierwszym server-confirmed snap.
+      // Initial load: cache emit przepuszczony (żeby pokazać dane offline / przed server connection).
+      // Po pierwszym !fromCache = mamy server data, kolejne pure cache emits (visibilitychange
+      // recovery / offline persistence) są stale — blokuj. Reset Tacho "wracał" przez te stale.
+      if (_serverSnapReceivedRef.current && snap.metadata.fromCache && !snap.metadata.hasPendingWrites) {
+        console.log("[fleet/data] skip stale cache snap (after server confirmed)");
         return;
       }
+      if (!snap.metadata.fromCache) _serverSnapReceivedRef.current = true;
       const data = snap.data();
 
       // Aktualizuj tylko te klucze, które NIE mają aktywnego zapisu
@@ -1434,6 +1436,11 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     _intentionalDeleteRef.current.add(key);
     setTimeout(() => _intentionalDeleteRef.current.delete(key), 2000);
   };
+
+  // Czy mamy już pierwszy server-confirmed snap dla fleet/data.
+  // Używane przez onSnapshot listener: po pierwszym !fromCache snap blokujemy
+  // pure cache emits (visibilitychange recovery / offline persistence) bo są stale.
+  const _serverSnapReceivedRef = useRef(false);
 
   const safeDbSet = (key, value) => {
     const prevCount = snapshotCounts.current[key] || 0;
