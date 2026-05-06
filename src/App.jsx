@@ -254,6 +254,27 @@ async function dbBulkAddFrachty(newFrachty) {
   }
 }
 
+// Atomic single-field update vehicle (Reset Tacho i podobne) — eliminuje race
+// state→useEffect→safeDbSet→debounce→dbSet. Firestore odrzuca write jeśli ktoś
+// inny zmienił dokument w trakcie (transaction retry). Po update onSnapshot
+// dostarczy fresh data i state aktualizuje się sam.
+async function dbUpdateVehicleField(vehicleId, patch) {
+  _pendingWrites.add(SK.vehicles);
+  try {
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(DATA_REF());
+      const list = (snap.data() || {})[SK.vehicles] || [];
+      tx.update(DATA_REF(), {
+        [SK.vehicles]: list.map(v => v && v.id === vehicleId ? { ...v, ...patch } : v),
+      });
+    });
+    setTimeout(() => _pendingWrites.delete(SK.vehicles), WRITE_COOLDOWN);
+  } catch (e) {
+    _pendingWrites.delete(SK.vehicles);
+    throw e;
+  }
+}
+
 // ── Audit log ──
 // Zapisuje każdą akcję CRUD do kolekcji auditLog.
 // Wywołanie fire-and-forget (nie blokuje UI, nie rzuca błędów).
@@ -2823,12 +2844,17 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                                 const tachoStart = parseDateLocal(v.tachoStart);
                                 const today = new Date(); today.setHours(0,0,0,0);
 
-                                const handleTachoChange = (dateStr) => {
-                                  if (!dateStr) {
-                                    const { tachoStart: _, ...rest } = v;
-                                    updateVehicle(rest);
-                                  } else {
-                                    updateVehicle({ ...v, tachoStart: dateStr });
+                                // Atomic transaction — eliminuje race condition (Reset Tacho "wracało
+                                // przekroczone" przez visibilitychange recovery + state→useEffect→debounce
+                                // chain). Firestore retry przy konflikcie. State aktualizuje się przez
+                                // onSnapshot z fresh data, NIE przez setVehicles.
+                                const handleTachoChange = async (dateStr) => {
+                                  try {
+                                    await dbUpdateVehicleField(v.id, { tachoStart: dateStr || null });
+                                    logAction("update", "vehicles", { id: v.id, plate: v.plate, field: "tachoStart" });
+                                  } catch (e) {
+                                    console.error("[handleTachoChange] error:", e);
+                                    showToast("⚠️ Błąd zapisu — spróbuj ponownie");
                                   }
                                 };
 
