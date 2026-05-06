@@ -1152,9 +1152,16 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     let retryTimer = null;
 
     const subscribe = () => {
-      currentUnsub = onSnapshot(DATA_REF(), (snap) => {
+      currentUnsub = onSnapshot(DATA_REF(), { includeMetadataChanges: false }, (snap) => {
         retryCount = 0; // reset przy sukcesie
       if (!snap.exists()) { setLoaded(true); return; }
+      // 🛡️ Skip stale cache emit (po visibilitychange recovery / Firestore offline persistence).
+      // Reset Tacho "wracał" bo cache emit z pre-write state nadpisywał świeżą wartość po
+      // _pendingWrites cooldown wygasł. fromCache=true + !hasPendingWrites = pure stale cache.
+      if (snap.metadata.fromCache && !snap.metadata.hasPendingWrites) {
+        console.log("[fleet/data] skip stale cache snap (fromCache=true, no pending writes)");
+        return;
+      }
       const data = snap.data();
 
       // Aktualizuj tylko te klucze, które NIE mają aktywnego zapisu
