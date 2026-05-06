@@ -15165,7 +15165,11 @@ function CzasPracyModal({ vehicle, entries, onSave, onDelete, onClose }) {
                       </span>
                       {e.note && <span className="text-gray-400 italic truncate" title={e.note}>· {e.note}</span>}
                     </div>
-                    <button onClick={() => onDelete(e.id)}
+                    <button onClick={() => {
+                      const startStr = startD.toLocaleDateString("pl-PL", { day: "numeric", month: "short" });
+                      const endStr = endD.toLocaleDateString("pl-PL", { day: "numeric", month: "short" });
+                      if (window.confirm(`Usunąć pauzę ${e.status} ${startStr}${days > 1 ? ` → ${endStr}` : ""}?`)) onDelete(e.id);
+                    }}
                       className="w-5 h-5 rounded flex items-center justify-center text-gray-300 hover:text-red-400 transition-all flex-shrink-0">✕</button>
                   </div>
                 );
