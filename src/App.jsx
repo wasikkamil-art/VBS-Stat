@@ -352,6 +352,10 @@ function uid() { return Math.random().toString(36).slice(2, 10); }
 function fmtPLN(n) { return Number(n).toLocaleString("pl-PL", { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + " zł"; }
 function fmtEUR(n) { return Number(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €"; }
 function fmtDate(d) { try { return new Date(d).toLocaleDateString("pl-PL"); } catch { return d; } }
+// Imię aktywnego kierowcy z driverHistory (entry bez to=). Pusty string gdy brak.
+function activeDriverName(v) { return (v?.driverHistory || []).find(d => !d.to)?.name || ""; }
+// Helper do subtitle: "{brand} · {year} · {driverName}" — driverName tylko gdy istnieje
+function vehicleSubtitle(v) { const dn = activeDriverName(v); return `${v?.brand || ""} · ${v?.year || ""}${dn ? ` · ${dn}` : ""}`; }
 
 // parseGeoString + formatOrderForDriverCopy wydzielone do src/utils/orderFormatters.js
 // (TODO #5c code splitting). Importowane na górze pliku.
@@ -3403,7 +3407,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                                 </>
                               )}
                             </div>
-                            <div className="text-xs text-gray-400">{v.brand} · {v.year} · {v.type}</div>
+                            <div className="text-xs text-gray-400">{v.brand} · {v.year} · {v.type}{activeDriverName(v) ? ` · ${activeDriverName(v)}` : ""}</div>
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -3569,7 +3573,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                           <span className="text-xl opacity-30"><VehicleIcon v={v} size={20}/></span>
                           <div>
                             <div className="text-sm font-semibold text-gray-400">{v.plate}{v.plate2 ? ` / ${v.plate2}` : ""}</div>
-                            <div className="text-xs text-gray-400">{v.brand} · {v.year}</div>
+                            <div className="text-xs text-gray-400">{vehicleSubtitle(v)}</div>
                           </div>
                         </div>
                         <div className="flex-1 mx-4 text-right">
@@ -12279,7 +12283,7 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
               <span className="text-xs font-bold text-gray-500 uppercase tracking-wider" style={{fontFamily:"'DM Mono',monospace"}}>
                 {v.plate}{v.plate2?` / ${v.plate2}`:""}
               </span>
-              <span className="text-xs text-gray-400">· {v.brand} {v.year}</span>
+              <span className="text-xs text-gray-400">· {v.brand} {v.year}{activeDriverName(v) ? ` · ${activeDriverName(v)}` : ""}</span>
               <span className="text-xs text-gray-300">({vDocs.length})</span>
             </div>
             <div className="space-y-2">
@@ -14453,7 +14457,7 @@ function ServisTab({ vehicles, onUpdateVehicle }) {
                     <span className="font-bold text-sm text-gray-900" style={{ fontFamily:"'DM Mono',monospace" }}>
                       {v.plate}{v.plate2 ? ` / ${v.plate2}` : ""}
                     </span>
-                    <div className="text-xs text-gray-400">{v.brand} · {v.year}</div>
+                    <div className="text-xs text-gray-400">{vehicleSubtitle(v)}</div>
                   </div>
                   {urgent > 0 && (
                     <span className="px-2 py-0.5 rounded-full text-xs font-bold text-white" style={{ background:"#dc2626" }}>
@@ -16912,7 +16916,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
             return (
               <div key={v.id} onClick={() => setSelectedVehicle(v.id)} className="bg-white rounded-2xl border border-gray-100 p-4 cursor-pointer hover:border-gray-300 hover:shadow-sm transition-all">
                 <div className="flex items-center justify-between mb-3">
-                  <div><div className="font-bold text-gray-900 text-base">{v.plate}</div><div className="text-xs text-gray-400">{v.brand} · {v.year}</div></div>
+                  <div><div className="font-bold text-gray-900 text-base">{v.plate}</div><div className="text-xs text-gray-400">{vehicleSubtitle(v)}</div></div>
                   <div className="text-2xl"><VehicleIcon v={v} size={20}/></div>
                 </div>
                 <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-gray-50">
@@ -16948,7 +16952,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
     <div className="p-4 md:p-6">
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <button onClick={() => setSelectedVehicle(null)} className="px-3 py-1.5 rounded-lg text-sm text-gray-500 hover:bg-gray-100 border border-gray-200">← Powrot</button>
-        <div className="flex-1"><h2 className="text-xl font-bold text-gray-900">{v?.plate} · Frachty</h2><p className="text-sm text-gray-400">{v?.brand} · {v?.year}</p></div>
+        <div className="flex-1"><h2 className="text-xl font-bold text-gray-900">{v?.plate} · Frachty</h2><p className="text-sm text-gray-400">{vehicleSubtitle(v)}</p></div>
         <button onClick={() => { setEditId(null); setShowForm(true); }} className="px-4 py-2 rounded-lg text-sm font-semibold text-white" style={{background:"#111827"}}>+ Dodaj fracht</button>
       </div>
       <div className="flex flex-wrap gap-2 mb-4">
