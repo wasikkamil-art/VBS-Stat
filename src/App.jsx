@@ -1177,7 +1177,28 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     };
 
     subscribe();
+
+    // 🛡️ Defense: zombi subscription recovery — gdy tab wraca do focus po
+    // dłuższej przerwie (sleep laptopa, ~2h+ nieaktywności tabu), Firestore SDK
+    // może zachować "żyjący" listener który nie dostaje świeżych snapshots i
+    // nie zgłasza błędu. Force re-subscribe gdy tab visible (z throttle 30s
+    // żeby nie spamować przy szybkim przełączaniu między tabami).
+    let lastResubscribe = Date.now();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastResubscribe < 30000) return;
+      lastResubscribe = now;
+      console.log("[fleet/data] tab focused — forcing fresh subscribe (zombi recovery)");
+      if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+      if (currentUnsub) { try { currentUnsub(); } catch {} currentUnsub = null; }
+      retryCount = 0;
+      subscribe();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       if (retryTimer) clearTimeout(retryTimer);
       if (currentUnsub) { try { currentUnsub(); } catch {} }
     };
@@ -1299,11 +1320,33 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   }, [user?.uid]);
 
   // ── PAUZY KIEROWCÓW — osobna kolekcja ──
+  // Bug B (2026-05-04): subscription wbiła się w stale state po permission-denied
+  // incident. Dodaję visibilitychange recovery — re-subscribe na focus tabu.
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "pauzy"), (snap) => {
-      setPauzy(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, (err) => console.error("pauzy onSnapshot error", err));
-    return () => unsub();
+    let unsub = null;
+    const subscribe = () => {
+      unsub = onSnapshot(collection(db, "pauzy"), (snap) => {
+        setPauzy(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      }, (err) => console.error("pauzy onSnapshot error", err));
+    };
+    subscribe();
+
+    let lastResubscribe = Date.now();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastResubscribe < 30000) return;
+      lastResubscribe = now;
+      console.log("[pauzy] tab focused — forcing fresh subscribe");
+      if (unsub) { try { unsub(); } catch {} }
+      subscribe();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (unsub) try { unsub(); } catch {}
+    };
   }, []);
 
   // ── PERSIST (z debounce 300ms — zapobiega wielokrotnemu zapisowi) ──
@@ -8023,14 +8066,34 @@ function GpsDddSection({ device, showToast }) {
   const [selectedDddFileId, setSelectedDddFileId] = useState(null);
   const selectedDddFile = selectedDddFileId ? dddFiles.find(f => f.id === selectedDddFileId) : null;
 
-  // Listener na Firestore — pliki DDD tego pojazdu (po VRN lub wszystkie jeśli brak dopasowania)
+  // Listener na Firestore — pliki DDD (z visibilitychange recovery dla zombi sub)
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "dddFiles"), (snap) => {
-      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => (b.uploadedAt || "").localeCompare(a.uploadedAt || ""));
-      setDddFiles(all);
-    }, (err) => console.error("dddFiles onSnapshot error", err));
-    return () => unsub();
+    let unsub = null;
+    const subscribe = () => {
+      unsub = onSnapshot(collection(db, "dddFiles"), (snap) => {
+        const all = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => (b.uploadedAt || "").localeCompare(a.uploadedAt || ""));
+        setDddFiles(all);
+      }, (err) => console.error("dddFiles onSnapshot error", err));
+    };
+    subscribe();
+
+    let lastResubscribe = Date.now();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastResubscribe < 30000) return;
+      lastResubscribe = now;
+      console.log("[dddFiles] tab focused — forcing fresh subscribe");
+      if (unsub) { try { unsub(); } catch {} }
+      subscribe();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (unsub) try { unsub(); } catch {}
+    };
   }, []);
 
   const uploadDdd = async (file) => {
