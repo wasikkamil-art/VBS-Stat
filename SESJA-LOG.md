@@ -501,3 +501,97 @@ Plus zawsze w backlogu:
 - Czeka na fix verdict (memory cache) — może 1-2 dni
 - 2026-06-01 deadline — upgrade SendGrid (trial)
 - Etap 6 — gdy gotowy
+
+---
+
+## 2026-05-06 (późny wieczór, ~23:00-00:00) — Druga regresja + atomic helpers fix + audit log fleetWrite
+
+**Kontekst**: User po hard refresh: WGM 0507M znowu "Tacho: przekroczone o 8 dni · 31.03.2026" + WGM 5367K też wrócił. **REGRESJA mimo memory cache fix**. User: "potrzebny jakiś audyt bo zrobilismy mnostwo poprawek a nic nie zmieniałem".
+
+### Diagnoza (analiza audit log)
+
+Sprawdziłem Firestore — w arrayie `fleetv2_vehicles`:
+- WGM 0507M: tachoStart=`2026-03-31` (stara wartość)
+- WGM 5367K: tachoStart=`2026-04-24` (stara wartość)
+
+**Audit log** dla mod=vehicles po 17:53:23: **PUSTO**. Czyli żaden user nie pisał vehicles bezpośrednio (przez logAction). ALE Firestore ma stare wartości — coś nadpisało **bez logAction**.
+
+**Source**: `useEffect [vehicles, loaded]` (linia ~1483) → `safeDbSet(SK.vehicles, vehicles)` — **NIE** wywołuje logAction. Cichy writeback. Jeśli onSnapshot dał stale snap → setVehicles ze stary → useEffect → safeDbSet zapisał stary → fresh atomic Reset nadpisany.
+
+### Fix #1: Granularny audit log fleetWrite (commit `020be4e`)
+
+Nowy helper `logFleetWrite(field, prev, next, source)` w `src/utils/logAction.js`:
+- `computeFleetDiff(prev, next)` → returns { removed, added, changed, prevCount, nextCount }
+- changed entry: `{ id, plate, fields: { fieldName: { from, to } } }` (max 10 entries, 60 char per value)
+- logAction("fleetWrite", field, { source, ...diff })
+
+Wywoływany w `safeDbSet` PRZED każdym write — loguje co useEffect chain pisze. Plus `_lastFleetValuesRef.current[key]` trzyma ostatni server value (update przy onSnapshot) — diff względem prawdziwego server state.
+
+W UI "Logi aktywności" admin może filtrować action="fleetWrite" + module="fleetv2_vehicles" → DOKŁADNIE zobaczy kto/kiedy/co napisał.
+
+### Fix #2: Atomic helpers BEZ _pendingWrites.add (commit `f6ff72c`)
+
+User test pokazał: klik Reset Tacho atomic write zapisuje do Firestore (audit pokazuje), ALE state lokalnie zostaje stary aż do hard refresh.
+
+**Root cause**: atomic helpers (`dbUpdateVehicleField`, `dbDeleteFromArrayField`, `dbAddToArrayField`) miały `_pendingWrites.add(key)` + setTimeout 2s WRITE_COOLDOWN. W onSnapshot listener: `if (!_pendingWrites.has(key)) setVehicles(...)`. Gdy server emit z naszą zmianą przyszedł w 2s cooldown, _pendingWrites.has=true → IGNORE. Po cooldown brak nowego snap (memory cache nie emituje cache, tylko fresh server) → state zostaje stary.
+
+**Fix**: usuń `_pendingWrites.add` z atomic helpers. Atomic transactions same są race-safe (Firestore retry przy konflikcie). Server emit po atomic commit → setVehicles z fresh data → UI aktualizuje się natychmiast.
+
+`_pendingWrites` zostaje dla nieatomic dbSet (debounce + setDoc merge) — tam race jest realny.
+
+Plus: `logFleetWrite` z source="atomic/..." dodany do każdego atomic helper — audit log pokaże WSZYSTKIE writes (atomic + safeDbSet/useEffect).
+
+### Stan końcowy 2026-05-06 (sesja 2 → 3)
+
+15 commitów dziś (od `ad7c3f1` base):
+```
+f6ff72c fix(atomic): usuń _pendingWrites.add z atomic helpers  ← fresh state natychmiast
+020be4e feat(audit): granular fleet/data write log z diff per field
+69b7001 fix(docs): atomic Firestore transaction dla docs delete + add
+376d18c (rebase)
+279c140 docs: SESJA-LOG sesja popołudnie/wieczór
+3c7392a feat(home-tile): smart baza
+0312288 feat(pauzy): unique check + Baza za Xd
+6780602 fix: confirm dialog delete pauzy
+f39a199 fix(firestore): memory-only cache  ⭐ ROOT CAUSE
+4a40251 fix(reset-tacho): cache filter zezwala initial load
+d5f1a61 fix(reset-tacho): skip stale cache emit (broken→fixed)
+93fa520 feat(ui): imię kierowcy w 6 miejscach
+e4c4143 fix(reset-tacho): atomic Firestore transaction
+374e53f fix(czas-pracy): tydzień kalendarzowy + dynamic color
+f9537bc fix(czas-pracy): dynamic color workTime 48h
+7747f45 fix(ww-csv): auto-detect separator
+e6b9de1 feat(czas-pracy): widok wielodniowy "Aktywność"
+1bcf9e7 feat(ww-csv): heurystyka C dla Postój
+```
+
+OC Przewoźnika odzyskany 2× z PITR (rano + wieczór, REST API PATCH manualnie).
+
+### Otwarte na jutro 2026-05-07
+
+⭐ **Pierwsze co user zrobi po hard refresh + login**:
+1. Klik Reset Tacho na WGM 0507M lub WGM 5367K
+2. Sprawdzić czy pole staje się puste **natychmiast** (bez hard refresh) — atomic helpers fix
+3. Sprawdzić Logi aktywności → filter action="fleetWrite" — pierwsze takie entry powinno pojawić się TERAZ
+4. Verify: pojedynczy klik = pojedynczy fleetWrite z `from: stara_data, to: null`. Jeśli pojawi się **drugi fleetWrite** z odwróconym diff (`from: null, to: stara_data`) = **mamy dowód race condition** useEffect chain → kolejny refactor
+
+📋 **Jeśli race nadal jest** (drugi fleetWrite po atomic):
+- **Refactor vehicles do atomic** — usunąć `useEffect [vehicles, loaded]` + `safeDbSet(SK.vehicles, ...)`. Zastąpić każdy `setVehicles` atomic helper (`dbAddVehicle`, `dbUpdateVehicle`, `dbDeleteVehicle`, `dbUpdateVehicleField` już jest). Jak frachty od 2026-04-30 commit `6086c2c`. ~20 miejsc w kodzie.
+- Potem: **costs/docs/rent/imi** — analogicznie eliminować useEffect writebacks (zachować tylko atomic helpers).
+- Ostateczny fix race condition na fleet/data.
+
+📋 **Jeśli atomic fix wystarcza** (brak drugiego fleetWrite):
+- **UI polish dla audit log** — polski label "Zapis fleet/data" + parser details.changed → "WGM 0507M: tachoStart 2026-03-31 → null" zamiast raw JSON. ~15 min.
+- Można wracać do **Etap 6** (compliance live, plan w memory).
+
+📋 **Bug do diagnozy** — recovery starych wartości po hard refresh:
+- Możliwe że memory cache fix nie jest jedynym sprawcą; wciąż jest **drugie źródło** stale data.
+- Audit log fleetWrite wskaże w pierwszym teście.
+
+📋 **Backup memory + .env.local** — launchd codziennie 22:00 → `~/Library/Mobile Documents/com~apple~CloudDocs/FleetStat-backup/`. Sprawdź `manifest.txt` jutro czy zaszedł.
+
+### Operacyjne (user)
+
+- 2026-05-07 (jutro) ~02:04 — kolejny raport CSV widziszwszystko, sprawdzić logi CF
+- 2026-06-01 — upgrade SendGrid trial
+- Etap 6 — gdy stable po data loss saga
