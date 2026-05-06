@@ -346,3 +346,55 @@ Worktree branch `claude/eager-rhodes-513624` zsynchronizowany z origin (push bac
 - Przed 2026-06-01 — upgrade SendGrid (trial kończy się)
 - Decyzja E3 (merge Tachograf + Czas pracy) — czekamy 1-2 tyg na user feedback (od 2026-05-04)
 - Tablet dla kierowców = decyzja zakupowa user'a (przyszłość, brak harmonogramu)
+
+---
+
+## 2026-05-06 — Incident OC + 4 fixy reliability (commits e538dad + ae6dcc4)
+
+**Kontekst**: rano user zauważył że OC Przewoźnika (uploaded wczoraj wieczór 23:23) zniknął z UI. Sesja zaczęła się od debug "OC nie widać" → odkrycie data loss → recovery z PITR → diagnoza root cause → 4 architektoniczne fixy.
+
+### Linia czasu
+
+1. **AI model fix** (commit `43c8975`) — `claude-sonnet-4-20250514` → `claude-sonnet-4-6` w 3 miejscach `/api/claude` (BulkUpload, AI chat, drugi upload). Stary model deprecated → BulkUpload silently failed → user'a 2 pierwsze próby uploadu OC nie zapisały się.
+2. **Visibilitychange recovery** (commit `9f94410`) — defense layer dla zombi onSnapshot subscriptions. Tab focus + 30s throttle → force re-subscribe dla `fleet/data`, `pauzy`, `dddFiles`. Console log `[X] tab focused — forcing fresh subscribe`.
+3. **DATA LOSS incident**: OC Przewoźnika zniknął z `fleet/data.fleetv2_docs` (2→1). PITR (Point-In-Time Recovery, 7 dni retention) pokazał OC w snapshocie wczoraj 22:00 UTC. Recovery 2× (pierwszy raz 10:30 PL, drugi wipe ~10:44 PL bo user był jeszcze na starym bundle, drugi recovery 10:50 PL). Mechanizm recovery: `gcloud auth print-access-token` + Firestore REST API PATCH z `updateMask=fleetv2_docs`.
+4. **3 fix architektoniczne** (commit `e538dad`):
+   - `safeDbSet`: rozszerzona shrink protection (każdy shrink bez `markIntentionalDelete` flag = BLOKED + toast). Intentional delete tracking (Set + 2s flag) dla legit delete. Update `onDelete` callbacków: docs, costs, rent, imi.
+   - **Custom Claim force refresh**: gdy claim ≠ Firestore role (lub claim brak), force refresh token + retry zanim setRole. Naprawia "muszę odświeżyć kilka razy żeby wskoczyło Admin" (4. raz w 72h: 2026-05-04, 05, 06).
+   - **firestore.rules**: `fleetNoMassWipe` + `fleetDataSafe` rozszerzone na `fleetv2_docs`, `fleetv2_imi`, `fleetv2_categories` (server-side defense in depth). Deploy przez `firebase deploy --only firestore:rules`.
+5. **Reset Tacho race fix** (commit `ae6dcc4`) — user testował Reset Tacho po deploy, "wracało przekroczone". Root cause: `_pendingWrites.add(key)` było dopiero w `dbSet` po 300ms debounce. W tym oknie onSnapshot odbierał stale snap → setVehicles revertował user click. Fix: `_pendingWrites.add(key)` SYNCHRONICZNIE w `safeDbSet` (po passing guards, przed debouncedDbSet timer). Window protection ~2.3s od click. Reset Tacho zostaje empty po klik.
+
+### Lessons learned (architektoniczne)
+
+- **PITR działa** — Safety warstwa 1 (`05adb1e`) z 7-dniową retencją uratowała życie. Recovery przez REST API + Python script (`/tmp/recover-oc.py`) — udokumentowane jako workflow.
+- **Stuck subscription pattern się powtarza** — 3. raz w 72h (Bug B `pauzy` + `fleet/data` 2× dziś). Defense visibilitychange recovery wdrożony, ale problem może wracać dla collections których jeszcze nie zabezpieczyłem (operacyjne, driverActivities, emailRecipients, fuelEntries, chatRooms, sprawy, rentownosc).
+- **Custom Claim force refresh** — token Firebase Auth cache ~1h. `_justLoggedIn` flag działa tylko przy świeżym sign-in, nie przy reload. Niezgodność claim vs Firestore = ZAWSZE force refresh. Code path commit `e538dad`.
+- **safeDbSet ma 2 warstwy guards**: empty (drop > 3 → 0) + shrink (every shrink bez intent flag). Plus firestore.rules jako last line of defense.
+- **`_pendingWrites` musi być setowane SYNCHRONICZNIE** przy user-initiated write (nie po async debounce). Inaczej onSnapshot fresh-but-stale revertuje state.
+
+### Stan repo na koniec sesji
+
+Origin/main: `ae6dcc4` (Reset Tacho race fix). 7 commitów dziś:
+- `ae6dcc4` fix: _pendingWrites.add synchronicznie w safeDbSet
+- `e538dad` fix: data loss protection (3 fixes — safeDbSet shrink, Custom Claim, rules)
+- `9f94410` fix(reliability): visibilitychange recovery zombi onSnapshot
+- `43c8975` fix(ai): claude-sonnet-4-20250514 → claude-sonnet-4-6
+- `7990795` docs: SESJA-LOG.md sesja 2026-05-05 popołudnie
+- `7aa40e9` feat(ddd): chronologiczne sortowanie + filtr dat + range summary
+- `32818f9` feat(ddd): DddReportView header + summary + ribbons + PDF
+
+### Otwarte (do następnej sesji)
+
+1. ⭐ **Etap 6 — Widok obecnego wyjazdu kierowcy z compliance live** (rekomendacja moja, ~3-4h). Plan w memory `project_ddd_etap6_plan.md`. Pure function `computeCurrentTrip` w `czasPracy.js` + komponent `CurrentTripView` reuse-ready dla tabletu kierowcy w przyszłości. Mieszane źródła DDD + driverActivities live, użycie `preferDddSegments`.
+2. 📋 **Visibilitychange recovery dla pozostałych onSnapshot** — `operacyjne`, `driverActivities`, `emailRecipients`, `fuelEntries`, `chatRooms`, `sprawy`, `rentownosc`. Backlog, niska pilność (mniej user-facing).
+3. 📋 **Loud error handling** w BulkUpload — toast gdy AI fails (zamiast cichego `status="error"` w queue). Skojarzenie z incident: 2 pierwsze próby OC silently failed.
+4. 📋 **Delete button** w UI dla `dddFiles` — wymaga storage rules check + dodania do GpsDddSection.
+5. 📋 **P3 audit log test** — user zmienia rolę backup admin Admin→Dyspozytor→Admin → sprawdzenie `auditLog`.
+6. 🐛 Drobiazgi: hardcoded text "WGM 0475M ~28 dni" w pustym GpsDddSection. `dist/index.html` tracked w git mimo `.gitignore`.
+
+### Operacyjne (user)
+
+- 2026-05-07 (jutro) ~02:04 — kolejny raport CSV widziszwszystko, sprawdzić w logach CF czy działa
+- Przed 2026-06-01 — upgrade SendGrid (trial)
+- Decyzja E3 merge Tachograf + Czas pracy — od 2026-05-04, czekamy ~1-2 tyg
+- Tablet dla kierowców = decyzja zakupowa, brak harmonogramu
