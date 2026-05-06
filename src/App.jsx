@@ -605,12 +605,44 @@ export default function Root() {
           if (userSnap.exists()) {
             const firestoreRole = userSnap.data().role;
             if (!claimRole && firestoreRole) {
-              // Token bez claim — fallback (CF onRoleChange może mieć opóźnienie)
-              tokenRole = firestoreRole;
-              console.warn(`[role] Token bez Custom Claim, fallback do Firestore: ${firestoreRole}`);
+              // Token bez claim — najpierw force refresh (CF onRoleChange może mieć
+              // opóźnienie). Jeśli nadal brak — fallback do Firestore role.
+              console.warn(`[role] Token bez Custom Claim, force refresh + retry...`);
+              try {
+                await u.getIdToken(true);
+                const refreshed = await u.getIdTokenResult();
+                if (refreshed.claims.role) {
+                  tokenRole = refreshed.claims.role;
+                  console.log(`[role] Po refresh claim="${tokenRole}"`);
+                } else {
+                  tokenRole = firestoreRole;
+                  console.warn(`[role] Po refresh nadal brak claim. Fallback do Firestore: ${firestoreRole}`);
+                }
+              } catch (e) {
+                tokenRole = firestoreRole;
+                console.error(`[role] Force refresh failed: ${e.message}. Fallback Firestore.`);
+              }
             } else if (claimRole && firestoreRole && claimRole !== firestoreRole) {
-              // Niezgodność: claim ≠ Firestore. Zaufaj claim (security), ale loguj.
-              console.warn(`[role] Niezgodność claim="${claimRole}" vs firestore="${firestoreRole}". Używam claim.`);
+              // Niezgodność: claim ≠ Firestore. Token może być stale (Firebase Auth
+              // cache). Force refresh i sprawdź ponownie zanim ustawimy rolę. Bez
+              // tego user widzi "Podgląd" przy login mimo że jest adminem (incident
+              // 2026-05-04, 2026-05-05, 2026-05-06).
+              console.warn(`[role] Niezgodność claim="${claimRole}" vs firestore="${firestoreRole}". Force refresh...`);
+              try {
+                await u.getIdToken(true);
+                const refreshed = await u.getIdTokenResult();
+                const refreshedRole = refreshed.claims.role;
+                if (refreshedRole) {
+                  tokenRole = refreshedRole;
+                  if (refreshedRole !== firestoreRole) {
+                    console.warn(`[role] Po refresh nadal niezgodność: claim="${refreshedRole}" vs firestore="${firestoreRole}". Używam claim (security).`);
+                  } else {
+                    console.log(`[role] Po refresh OK: claim="${refreshedRole}"`);
+                  }
+                }
+              } catch (e) {
+                console.error(`[role] Force refresh failed: ${e.message}. Używam stale claim.`);
+              }
             }
           } else {
             // Dokument z UID nie istnieje — szukaj po emailu (mógł być dodany z losowym ID)
@@ -1358,14 +1390,33 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
   // ── SAFE WRITE — dodatkowa warstwa ochrony przed utratą danych ──
   // Zapamiętuje ilości z pierwszego snapshot i blokuje zapis jeśli dane spadną
-  // nagle do zera (co oznaczałoby bug, nie realną zmianę użytkownika).
+  // nagle do zera lub w sposób nieoczekiwany (drastic shrink bez intent flag).
   const snapshotCounts = useRef({});  // ilości z ostatniego onSnapshot
+
+  // Intentional delete tracking: gdy user świadomie usuwa item (klik X w UI),
+  // markIntentionalDelete(key) ustawia flag na 2s. safeDbSet wykrywa shrink
+  // bez tej flagi jako anomalię i blokuje (to zapobiegło incydentowi 2026-05-06
+  // gdy fleet/data.fleetv2_docs spadł 2→1 bez user intent).
+  const _intentionalDeleteRef = useRef(new Set());
+  const markIntentionalDelete = (key) => {
+    _intentionalDeleteRef.current.add(key);
+    setTimeout(() => _intentionalDeleteRef.current.delete(key), 2000);
+  };
+
   const safeDbSet = (key, value) => {
     const prevCount = snapshotCounts.current[key] || 0;
     const newCount = Array.isArray(value) ? value.length : 0;
     // Blokuj jeśli: było > 3 rekordów i nagle spadło do 0
     if (prevCount > 3 && newCount === 0) {
       console.error(`🛡️ BLOCKED: zapis ${key} zablokowany — spadek z ${prevCount} do 0 rekordów`);
+      return;
+    }
+    // Blokuj jeśli: shrink (mniej niż było) bez markIntentionalDelete signal
+    // Catch-all przed: race condition multi-tab, accidental setState po stale data,
+    // CF onSnapshot zwraca empty po permission-denied + write nadpisuje ze stale state.
+    if (prevCount >= 2 && newCount < prevCount && !_intentionalDeleteRef.current.has(key)) {
+      console.error(`🛡️ BLOCKED: zapis ${key} — unexpected shrink ${prevCount}→${newCount} bez intentional delete flag`);
+      showToast(`⚠️ Zablokowano nadpisanie ${key} (anomalia ${prevCount}→${newCount}). Hard refresh.`);
       return;
     }
     debouncedDbSet(key, value);
@@ -2158,7 +2209,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     showToast(`✅ Migracja 2025: ${frCount} korekt frachtów, ${cCount} korekt kosztów`);
   };
 
-  const deleteCost   = (id)    => { setCosts((p) => p.filter((c) => c.id !== id)); logAction("delete", "costs", { id }); showToast("Usunięto wpis"); };
+  const deleteCost   = (id)    => { markIntentionalDelete(SK.costs); setCosts((p) => p.filter((c) => c.id !== id)); logAction("delete", "costs", { id }); showToast("Usunięto wpis"); };
   const updateCost   = (updated) => { setCosts((p) => p.map((c) => c.id === updated.id ? updated : c)); logAction("update", "costs", { id: updated.id, vehicleId: updated.vehicleId }); showToast("✅ Koszt zaktualizowany"); setEditCostId(null); };
   // Sync assignedDriver from driverHistory — aktywny kierowca (bez daty 'to')
   const syncAssignedDriver = (veh) => {
@@ -3533,7 +3584,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 }
                 setDocs((p) => [...p, docToSave]);
               }}
-              onDelete={(id) => setDocs((p) => p.filter((d) => d.id !== id))}
+              onDelete={(id) => { markIntentionalDelete(SK.docs); setDocs((p) => p.filter((d) => d.id !== id)); }}
               onEdit={(id, data) => setDocs((p) => p.map((d) => d.id === id ? { ...d, ...data } : d))}
             />
           )}
@@ -3561,7 +3612,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               }}
               onAdd={(r) => setRentRecords(p => [...p, { ...r, id: uid() }])}
               onUpdate={(id, data) => setRentRecords(p => p.map(r => r.id === id ? { ...r, ...data } : r))}
-              onDelete={(id) => setRentRecords(p => p.filter(r => r.id !== id))}
+              onDelete={(id) => { markIntentionalDelete(SK.rent); setRentRecords(p => p.filter(r => r.id !== id)); }}
             />
           )}
 
@@ -3641,7 +3692,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               imiRecords={imiRecords}
               vehicles={vehicles}
               onAdd={(r) => setImiRecords(p => [...p, { ...r, id: uid() }])}
-              onDelete={(id) => setImiRecords(p => p.filter(r => r.id !== id))}
+              onDelete={(id) => { markIntentionalDelete(SK.imi); setImiRecords(p => p.filter(r => r.id !== id)); }}
             />
           )}
 

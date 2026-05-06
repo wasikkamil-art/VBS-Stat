@@ -69,7 +69,9 @@ service cloud.firestore {
           && notEmptyIfPresent('fleetv2_costs')
           && notEmptyIfPresent('fleetv2_categories')
           && notEmptyIfPresent('fleetv2_frachty')
-          && notEmptyIfPresent('fleetv2_rent');
+          && notEmptyIfPresent('fleetv2_rent')
+          && notEmptyIfPresent('fleetv2_docs')
+          && notEmptyIfPresent('fleetv2_imi');
     }
 
     // 🛡️ ANTI-WIPE GUARD (po incident 2026-04-30 — utrata 10 frachtów)
@@ -86,7 +88,10 @@ service cloud.firestore {
       return noBigShrink('fleetv2_frachty')
           && noBigShrink('fleetv2_vehicles')
           && noBigShrink('fleetv2_costs')
-          && noBigShrink('fleetv2_rent');
+          && noBigShrink('fleetv2_rent')
+          && noBigShrink('fleetv2_docs')
+          && noBigShrink('fleetv2_imi')
+          && noBigShrink('fleetv2_categories');
     }
 
     match /fleet/{docId} {
