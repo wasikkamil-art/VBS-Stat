@@ -275,6 +275,42 @@ async function dbUpdateVehicleField(vehicleId, patch) {
   }
 }
 
+// Atomic delete z array field w fleet/data (imi, docs, rent, costs).
+// User zgłosił "usuwam X wracają z powrotem" dla IMI — race state→useEffect→
+// safeDbSet→debounce overwrite z stale snap. Atomic delete eliminuje to:
+// Firestore odrzuca write przy konflikcie, retry. State aktualizuje się przez
+// onSnapshot z fresh data — bez setX(filter).
+async function dbDeleteFromArrayField(fieldKey, id) {
+  _pendingWrites.add(fieldKey);
+  try {
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(DATA_REF());
+      const list = (snap.data() || {})[fieldKey] || [];
+      tx.update(DATA_REF(), { [fieldKey]: list.filter(r => r && r.id !== id) });
+    });
+    setTimeout(() => _pendingWrites.delete(fieldKey), WRITE_COOLDOWN);
+  } catch (e) {
+    _pendingWrites.delete(fieldKey);
+    throw e;
+  }
+}
+
+// Atomic add do array field w fleet/data (imi, docs, rent, costs).
+async function dbAddToArrayField(fieldKey, item) {
+  _pendingWrites.add(fieldKey);
+  try {
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(DATA_REF());
+      const list = (snap.data() || {})[fieldKey] || [];
+      tx.update(DATA_REF(), { [fieldKey]: [...list, item] });
+    });
+    setTimeout(() => _pendingWrites.delete(fieldKey), WRITE_COOLDOWN);
+  } catch (e) {
+    _pendingWrites.delete(fieldKey);
+    throw e;
+  }
+}
+
 // ── Audit log ──
 // Zapisuje każdą akcję CRUD do kolekcji auditLog.
 // Wywołanie fire-and-forget (nie blokuje UI, nie rzuca błędów).
@@ -3787,8 +3823,8 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             <ImiTab
               imiRecords={imiRecords}
               vehicles={vehicles}
-              onAdd={(r) => setImiRecords(p => [...p, { ...r, id: uid() }])}
-              onDelete={(id) => { markIntentionalDelete(SK.imi); setImiRecords(p => p.filter(r => r.id !== id)); }}
+              onAdd={(r) => dbAddToArrayField(SK.imi, { ...r, id: uid() }).catch(e => { console.error("imi add", e); showToast("⚠️ Błąd zapisu IMI"); })}
+              onDelete={(id) => dbDeleteFromArrayField(SK.imi, id).catch(e => { console.error("imi del", e); showToast("⚠️ Błąd usuwania IMI"); })}
             />
           )}
 
