@@ -2745,10 +2745,20 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                         .filter(p => p.vehicleId === v.id && p.status !== "jazda" && p.start > todayISO)
                         .sort((a, b) => a.start.localeCompare(b.start))[0] || null;
 
+                      // Smart baza — kierowca wrócił z trasy, ma zaplanowaną bazę:
+                      // start > today (np. 8 maj) ALE rozładował już (04 maj) i brak nowego frachtu.
+                      // Logicznie: jest NA bazie OD rozładunku, pauza tylko mówi "do kiedy".
+                      // Tylko dla status="baza" (pauza9/11/24/45 to konkretne odpoczynki, nie miejsce).
+
                       // Ile dni stoi (od ostatniego rozładunku)
                       const daysSinceUnload = lastDoneF
                         ? Math.round((todayMs - new Date(lastDoneF.dataRozladunku + "T00:00:00").getTime()) / 86400000)
                         : null;
+
+                      const isCurrentlyAtBaza = !vehiclePauza
+                        && futurePauza?.status === "baza"
+                        && lastDoneF?.dataRozladunku && lastDoneF.dataRozladunku <= todayISO
+                        && (!nextF || futurePauza.start <= nextF.dataZaladunku);
 
                       // PRIORYTET 1: W trasie
                       if (activeF) {
@@ -2758,14 +2768,15 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                         statusColor = "#15803d";
                         statusBg = "#f0fdf4";
                       }
-                      // PRIORYTET 2: Pauza (z czasu pracy)
-                      else if (vehiclePauza) {
+                      // PRIORYTET 2: Pauza (aktywna lub smart baza po rozładunku)
+                      else if (vehiclePauza || isCurrentlyAtBaza) {
+                        const effectivePauza = vehiclePauza || futurePauza;
                         const pauzaLabels = { pauza9: "Pauza 9h", pauza11: "Pauza 11h", pauza24: "Pauza 24h", pauza45: "Pauza 45h", pauzaInne: "Pauza", baza: "Baza" };
                         const pauzaColors = { pauza9: "#b45309", pauza11: "#c2410c", pauza24: "#dc2626", pauza45: "#9333ea", pauzaInne: "#0369a1", baza: "#6b7280" };
                         const pauzaBgs =    { pauza9: "#fffbeb", pauza11: "#fff7ed", pauza24: "#fef2f2", pauza45: "#faf5ff", pauzaInne: "#f0f9ff", baza: "#f3f4f6" };
                         const pauzaIcons =  { pauza9: "🛏️", pauza11: "🛏️", pauza24: "🛏️", pauza45: "🛏️", pauzaInne: "⏸️", baza: "🏠" };
-                        const ps = vehiclePauza.status;
-                        const endDate = new Date(vehiclePauza.end + "T00:00:00").toLocaleDateString("pl-PL", { day:"numeric", month:"short" });
+                        const ps = effectivePauza.status;
+                        const endDate = new Date(effectivePauza.end + "T00:00:00").toLocaleDateString("pl-PL", { day:"numeric", month:"short" });
                         status = "pauza";
                         statusLabel = `${pauzaLabels[ps] || "Pauza"} · do ${endDate}`;
                         statusIcon = pauzaIcons[ps] || "⏸️";
