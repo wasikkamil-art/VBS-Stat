@@ -1419,6 +1419,11 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
       showToast(`⚠️ Zablokowano nadpisanie ${key} (anomalia ${prevCount}→${newCount}). Hard refresh.`);
       return;
     }
+    // 🛡️ Mark _pendingWrites SYNCHRONICZNIE (przed debounce 300ms), żeby onSnapshot
+    // ignorował stale snapshots w oknie debounce. Bez tego Reset Tacho i podobne
+    // single-field updates "wracały do poprzedniego stanu" — fresh snapshot
+    // przed dbSet nadpisywał state ze stale data (incident 2026-05-06).
+    _pendingWrites.add(key);
     debouncedDbSet(key, value);
   };
 
