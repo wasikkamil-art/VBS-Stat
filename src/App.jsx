@@ -6725,7 +6725,10 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
                     <span className={`text-sm font-semibold ${isActive ? "text-violet-700" : "text-gray-800"}`}>{plate}</span>
                   </div>
                   {dev.fleetVehicle && (
-                    <div className="text-xs text-gray-400 ml-4 mt-0.5">{dev.fleetVehicle.brand} {dev.fleetVehicle.model}</div>
+                    <div className="text-xs text-gray-400 ml-4 mt-0.5">
+                      {dev.fleetVehicle.brand} {dev.fleetVehicle.model}
+                      {activeDriverName(dev.fleetVehicle) && <span> · {activeDriverName(dev.fleetVehicle)}</span>}
+                    </div>
                   )}
                   {pos && (
                     <div className="text-xs text-gray-400 ml-4 mt-0.5">
