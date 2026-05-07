@@ -238,6 +238,45 @@ export function effectiveWeeklyDriveLimit(segments, weekStartMs) {
   return Math.min(REGULATION.WEEKLY_DRIVE, Math.max(0, remaining));
 }
 
+// Wyrównanie za skrócone tygodniowe odpoczynki (Pakiet Mobilności, art. 8 ust. 6).
+// Kierowca może skrócić tygodniowy odpoczynek do 24h (zamiast 45h regularnego).
+// Brakujące godziny (45h - actual) muszą być wyrównane w ciągu 3 kolejnych
+// tygodni — przez dłuższy odpoczynek tygodniowy (>45h) lub dzienny.
+// Algorytm FIFO: najstarsze skrócenie najpierw kompensowane przez nadmiar.
+export function weeklyRestCompensation(segments, nowMs) {
+  const lookbackMs = nowMs - 4 * 7 * 24 * 3600000; // 4 tygodnie wstecz
+  // Weekly rests = rest segments ≥ 24h (mniejsze to dzienne)
+  const weeklyRests = segments.filter(s =>
+    s.type === "rest" &&
+    s.endMs >= lookbackMs &&
+    s.endMs <= nowMs &&
+    s.durMin >= 24 * 60
+  ).sort((a, b) => a.startMs - b.startMs);
+
+  const targetMin = 45 * 60; // 2700 min = 45h regularny tygodniowy
+  let owedMin = 0;
+  let oldestShortenedEnd = null;
+
+  weeklyRests.forEach(s => {
+    if (s.durMin < targetMin) {
+      // Skrócony — dodaj do brakujących
+      owedMin += targetMin - s.durMin;
+      if (oldestShortenedEnd === null) oldestShortenedEnd = s.endMs;
+    } else if (s.durMin > targetMin) {
+      // Wydłużony powyżej 45h — kompensuje brakujące (FIFO)
+      const extraMin = s.durMin - targetMin;
+      const used = Math.min(extraMin, owedMin);
+      owedMin -= used;
+      if (owedMin === 0) oldestShortenedEnd = null;
+    }
+  });
+
+  return {
+    owedMin,
+    deadlineMs: oldestShortenedEnd ? oldestShortenedEnd + 3 * 7 * 24 * 3600000 : null,
+  };
+}
+
 // Liczba zmniejszonych odpoczynków dziennych (≥9h, <11h) w bieżącym tygodniu.
 // Limit: max 3 między dwoma odpoczynkami tygodniowymi (art. 8 ust. 4).
 export function reducedDailyRestsThisWeek(segments, weekStartMs, nowMs) {
@@ -384,6 +423,7 @@ export function computeDriverCompliance(rawSegments = [], periodStart = null, no
       limit: REGULATION.BIWEEKLY_DRIVE,
       start: biweekStart,
     },
+    weeklyRestComp: weeklyRestCompensation(segments, nowMs),
     period28,
     sources: sourceStats,
     hasDdd,

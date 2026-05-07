@@ -405,6 +405,44 @@ export default function TachografComplianceSection({ device, position, driverAct
         )}
       </div>
 
+      {/* ═══════════════════════════════════════════════════ */}
+      {/* SEKCJA 5: ZMNIEJSZONE TYGODNIOWE CZASY ODPOCZYNKÓW  */}
+      {/* ═══════════════════════════════════════════════════ */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-5">
+        <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4 pb-2 border-b border-gray-100">
+          Zmniejszone tygodniowe czasy odpoczynków
+        </div>
+        <div>
+          <div className="flex items-center gap-1.5 mb-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>
+            <span className="text-[10px] font-semibold text-gray-500 uppercase">Wyrównanie (Pakiet Mobilności art. 8.6)</span>
+          </div>
+          {compliance.weeklyRestComp.owedMin > 0 ? (
+            <>
+              <div className="flex items-baseline gap-2">
+                <span className="text-lg font-bold text-amber-700 tabular-nums">
+                  {Math.floor(compliance.weeklyRestComp.owedMin / 60)}h {compliance.weeklyRestComp.owedMin % 60}min
+                </span>
+                <span className="text-[11px] text-gray-500">do oddania</span>
+              </div>
+              {compliance.weeklyRestComp.deadlineMs && (
+                <div className="text-[11px] text-amber-700 mt-1">
+                  ⚠ Deadline wyrównania: {fmtDateTime(compliance.weeklyRestComp.deadlineMs)}
+                </div>
+              )}
+              <div className="text-[11px] text-gray-500 mt-1.5">
+                Wyrównanie przez dłuższy odpoczynek (&gt;45h tygodniowy lub doczepiony do dziennego).
+              </div>
+            </>
+          ) : (
+            <div className="flex items-baseline gap-2">
+              <span className="text-lg font-bold text-green-700 tabular-nums">—</span>
+              <span className="text-[11px] text-gray-500">brak skróconych tygodniowych odpoczynków do wyrównania</span>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* INFO BOX — link do starego widoku */}
       <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-[11px] text-blue-700">
         ℹ Ten widok pokazuje compliance w stylu Webfleet (skupiony na limitach). Pełny widok z planem do przodu, timeline 7-dniowym, historią aktywności i ręcznym dodawaniem segmentów — w zakładce <strong>Czas pracy</strong>.
