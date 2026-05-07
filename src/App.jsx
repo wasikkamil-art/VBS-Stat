@@ -3257,13 +3257,16 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                   return map[s] || "#e5e7eb";
                 };
 
+                // Imię kierowcy z driverHistory (aktualny stan), nie z p.driver (zapisane przy tworzeniu pauzy — drift gdy kierowca się zmienia).
+                const liveDriver = (plate) => activeDriverName(vehicles.find(v => v.plate === plate)) || "";
                 const activePauzy = pauzy.filter(p => {
                   if (p.status === "jazda") return false;
                   return p.start <= todayStr && p.end >= todayStr;
-                });
+                }).map(p => ({ ...p, driver: liveDriver(p.plate) || p.driver }));
                 const futurePauzy = pauzy.filter(p => {
                   return p.start > todayStr;
-                }).sort((a,b) => a.start.localeCompare(b.start)).slice(0, 5);
+                }).sort((a,b) => a.start.localeCompare(b.start)).slice(0, 5)
+                  .map(p => ({ ...p, driver: liveDriver(p.plate) || p.driver }));
 
                 if (activePauzy.length === 0 && futurePauzy.length === 0) return null;
 
