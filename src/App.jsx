@@ -6664,18 +6664,19 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
     return d.toLocaleString("pl-PL", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" });
   };
 
-  // 2026-05-07: Konsolidacja zakładek 8→4 (krok 2 — finalne nazwy):
-  // - Usunięte wcześniej (522 linie): Kilometry / Trasy / Karta kierowcy (duplikaty Mapy/DDD)
-  // - "Czas pracy" zakładka usunięta (treść = uproszczony widok, scalona w "Czas pracy kierowcy")
-  // - Pozostałe ID zachowane (ddd/tachograf/aktywnosc) tylko nowe labels:
-  //   ddd → "Tachograf" (pliki DDD = pliki tachografu)
-  //   tachograf → "Czas pracy kierowcy" (Webfleet style — głowny widok)
-  //   aktywnosc → "Monitoring jazdy"
+  // 2026-05-07: Konsolidacja zakładek 8→3 (FINAL):
+  // - Wcześniej usunięte (522 linie): Kilometry / Trasy / Karta kierowcy (duplikaty Mapy/DDD)
+  // - "Czas pracy" zakładka usunięta (scalona z Tachograf w "Czas pracy kierowcy")
+  // - "Monitoring jazdy" usunięte (multi-day widok scalony w "Czas pracy kierowcy"
+  //   jako sekcja Timeline z range pickerem; eliminuje duplikat)
+  // Final 3 zakładki:
+  //   mapa → "Mapa online" (live + planowane trasy)
+  //   ddd → "Tachograf" (upload/lista plików DDD)
+  //   tachograf → "Czas pracy kierowcy" (compliance Webfleet 1:1 + plan + multi-day timeline)
   const SUB_TABS = [
     { id: "mapa", label: "Mapa online", icon: "🗺️" },
     { id: "ddd", label: "Tachograf", icon: "💾" },
     { id: "tachograf", label: "Czas pracy kierowcy", icon: "⏱️" },
-    { id: "aktywnosc", label: "Monitoring jazdy", icon: "📅" },
   ];
 
   if (loading) {
@@ -6821,18 +6822,21 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
               );
             })()}
             {subTab === "ddd" && <GpsDddSection device={selectedDev} showToast={showToast} />}
-            {/* 2026-05-07: subTab === "czas-pracy" — usunięte (treść scalona w "Czas pracy kierowcy" = subTab "tachograf").
-                Komponent GpsCzasPracySection zostaje w kodzie do potencjalnego scalenia (Plan do przodu, Timeline 24h). */}
-            {subTab === "aktywnosc" && (
-              <MultiDayActivityView
-                key={selectedDev?.fleetVehicle?.id}
-                vehicle={selectedDev?.fleetVehicle}
-                driverActivities={driverActivities}
-              />
-            )}
+            {/* 2026-05-07: subTab === "czas-pracy" / "aktywnosc" — usunięte (scalone w "Czas pracy kierowcy"). */}
             {subTab === "tachograf" && (
               <Suspense fallback={<div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-sm text-gray-500">📋 Ładowanie compliance tachografu…</div>}>
-                <TachografComplianceSection device={selectedDev} position={selectedPos} driverActivities={driverActivities} />
+                <TachografComplianceSection
+                  device={selectedDev}
+                  position={selectedPos}
+                  driverActivities={driverActivities}
+                  multiDayView={
+                    <MultiDayActivityView
+                      key={selectedDev?.fleetVehicle?.id}
+                      vehicle={selectedDev?.fleetVehicle}
+                      driverActivities={driverActivities}
+                    />
+                  }
+                />
               </Suspense>
             )}
           </>
