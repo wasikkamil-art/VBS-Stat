@@ -299,7 +299,12 @@ export default function TachografComplianceSection({ device, position, driverAct
               <span className="text-[10px] font-semibold text-gray-500 uppercase">Najpóźniejszy koniec zmiany</span>
             </div>
             <div className="text-sm font-bold text-gray-900 tabular-nums">{fmtDateTime(compliance.shift.latestEndMs)}</div>
-            <div className="text-[11px] text-gray-500 mt-0.5">+13h od rozpoczęcia (Pakiet Mobilności)</div>
+            <div className="text-[11px] text-gray-500 mt-0.5">
+              +{compliance.shift.shiftHours}h od rozpoczęcia
+              {compliance.shift.canReduce
+                ? <span className="ml-1 text-gray-400">(z ~9h skróconym odp.)</span>
+                : <span className="ml-1 text-amber-600 font-semibold">(brak skróceń — 11h regularny)</span>}
+            </div>
           </div>
 
           <div>
@@ -308,7 +313,9 @@ export default function TachografComplianceSection({ device, position, driverAct
               <span className="text-[10px] font-semibold text-gray-500 uppercase">Najwcześniejszy start następnej</span>
             </div>
             <div className="text-sm font-bold text-gray-900 tabular-nums">{fmtDateTime(compliance.shift.nextStartMs)}</div>
-            <div className="text-[11px] text-gray-500 mt-0.5">+11h regularnego odpoczynku</div>
+            <div className="text-[11px] text-gray-500 mt-0.5">
+              +{compliance.shift.nextRestHours}h {compliance.shift.canReduce ? "skróconego" : "regularnego"} odpoczynku
+            </div>
           </div>
         </div>
       </div>

@@ -212,15 +212,21 @@ export function preferDddSegments(segments) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Najpóźniejszy moment zakończenia bieżącej zmiany (Pakiet Mobilności).
-// Limit "okres pracy" = 13h od końca ostatniego dziennego odpoczynku.
-export function shiftLatestEndMs(shiftStartMs) {
-  return shiftStartMs + 13 * 3600000;
+// Okres 24h od końca poprzedniego odpoczynku = shift + dailyRest.
+// - Z 9h skróconym odpoczynkiem: shift max 15h (kierowca ma reduced rest dostępne, max 3x/tyg)
+// - Z 11h regularnym odpoczynkiem: shift max 13h
+// canReduceDailyRest = czy kierowca jeszcze ma dostępne skrócenia dziennego odpoczynku
+export function shiftLatestEndMs(shiftStartMs, canReduceDailyRest = true) {
+  const shiftHours = canReduceDailyRest ? 15 : 13;
+  return shiftStartMs + shiftHours * 3600000;
 }
 
 // Najwcześniejszy moment rozpoczęcia kolejnej zmiany.
-// Wymagany 11h regularny dzienny odpoczynek po zakończeniu zmiany.
-export function nextShiftEarliestStartMs(shiftEndMs) {
-  return shiftEndMs + REGULATION.DAILY_REST_REGULAR * 60000;
+// - Z 9h skróconym odpoczynkiem (jeśli dostępny)
+// - Z 11h regularnym odpoczynkiem (jeśli wykorzystane wszystkie 3 skrócenia)
+export function nextShiftEarliestStartMs(shiftEndMs, canReduceDailyRest = true) {
+  const restMin = canReduceDailyRest ? REGULATION.DAILY_REST_REDUCED : REGULATION.DAILY_REST_REGULAR;
+  return shiftEndMs + restMin * 60000;
 }
 
 // Limit jazdy w bieżącym tygodniu uwzględniający 90h biweekly cap (art. 6 ust. 2 561/2006).
@@ -345,12 +351,20 @@ export function computeDriverCompliance(rawSegments = [], periodStart = null, no
       extendedDaysAllowed: REGULATION.EXTENDED_PER_WEEK,
       start: dayStart,
     },
-    // NEW: zmiana (Pakiet Mobilności — okres pracy max 13h)
-    shift: {
-      startMs: dayStart,
-      latestEndMs: shiftLatestEndMs(dayStart),
-      nextStartMs: nextShiftEarliestStartMs(shiftLatestEndMs(dayStart)),
-    },
+    // NEW: zmiana (Pakiet Mobilności — okres pracy max 13h regularny / 15h ze skróconym odpoczynkiem)
+    shift: (() => {
+      const reducedRestsUsed = reducedDailyRestsThisWeek(segments, weekStart, nowMs);
+      const canReduce = reducedRestsUsed < REGULATION.DAILY_REST_REDUCED_PER_WEEK;
+      const latestEndMs = shiftLatestEndMs(dayStart, canReduce);
+      return {
+        startMs: dayStart,
+        latestEndMs,
+        nextStartMs: nextShiftEarliestStartMs(latestEndMs, canReduce),
+        canReduce,
+        shiftHours: canReduce ? 15 : 13,
+        nextRestHours: canReduce ? 9 : 11,
+      };
+    })(),
     weekly: {
       drive: weekSums.drive,
       work: weekSums.work,
