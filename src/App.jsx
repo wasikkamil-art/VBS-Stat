@@ -1603,7 +1603,10 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   // onSave/onDelete/onEdit dokumentów używają atomic helpers (dbAddToArrayField,
   // dbDeleteFromArrayField, dbUpdateInArrayField). Cichy writeback eliminowany.
   // useEffect(() => { if (loaded && docs.length > 0) safeDbSet(SK.docs, docs); },                   [docs, loaded]);
-  useEffect(() => { if (loaded && imiRecords.length > 0) safeDbSet(SK.imi, imiRecords); },        [imiRecords, loaded]);
+  // FIX 2026-05-07 (faza 2): USUNIĘTY useEffect [imiRecords, loaded] → safeDbSet.
+  // onAdd/onDelete IMI używają atomic helpers (dbAddToArrayField, dbDeleteFromArrayField).
+  // Wcześniej cichy writeback mógł cofać delete (28 IMI zniknęło-wróciło 2026-05-06 wieczór).
+  // useEffect(() => { if (loaded && imiRecords.length > 0) safeDbSet(SK.imi, imiRecords); },        [imiRecords, loaded]);
   useEffect(() => { if (loaded && rentRecords.length > 0) safeDbSet(SK.rent, rentRecords); },     [rentRecords, loaded]);
   // FIX 2026-04-30: USUNIĘTY useEffect który writebackował całą tablicę frachtyList do Firestore.
   // Powodował race condition multi-tab — 10 frachtów zaginęło 27-30.04. Teraz każda mutacja
