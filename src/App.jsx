@@ -6664,16 +6664,18 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
     return d.toLocaleString("pl-PL", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" });
   };
 
-  // 2026-05-07: Zakładki "Kilometry", "Trasy", "Karta kierowcy" usunięte —
-  // treść była zduplikowana z Mapą online (km + trasa pokazane przy kliku
-  // w zlecenie) i Plikami DDD (karta kierowcy = pliki tachograf). Kod
-  // komponentów GpsKilometry/Trasy/KartaSection wycięty (522 linie).
+  // 2026-05-07: Konsolidacja zakładek 8→4 (krok 2 — finalne nazwy):
+  // - Usunięte wcześniej (522 linie): Kilometry / Trasy / Karta kierowcy (duplikaty Mapy/DDD)
+  // - "Czas pracy" zakładka usunięta (treść = uproszczony widok, scalona w "Czas pracy kierowcy")
+  // - Pozostałe ID zachowane (ddd/tachograf/aktywnosc) tylko nowe labels:
+  //   ddd → "Tachograf" (pliki DDD = pliki tachografu)
+  //   tachograf → "Czas pracy kierowcy" (Webfleet style — głowny widok)
+  //   aktywnosc → "Monitoring jazdy"
   const SUB_TABS = [
     { id: "mapa", label: "Mapa online", icon: "🗺️" },
-    { id: "ddd", label: "Pliki DDD", icon: "💾" },
-    { id: "czas-pracy", label: "Czas pracy", icon: "⏱️" },
-    { id: "aktywnosc", label: "Aktywność", icon: "📅" },
-    { id: "tachograf", label: "Tachograf", icon: "📋" },
+    { id: "ddd", label: "Tachograf", icon: "💾" },
+    { id: "tachograf", label: "Czas pracy kierowcy", icon: "⏱️" },
+    { id: "aktywnosc", label: "Monitoring jazdy", icon: "📅" },
   ];
 
   if (loading) {
@@ -6819,11 +6821,8 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
               );
             })()}
             {subTab === "ddd" && <GpsDddSection device={selectedDev} showToast={showToast} />}
-            {subTab === "czas-pracy" && (
-              <Suspense fallback={<div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-sm text-gray-500">⏱ Ładowanie czasu pracy…</div>}>
-                <GpsCzasPracySection device={selectedDev} position={selectedPos} driverActivities={driverActivities} showToast={showToast} />
-              </Suspense>
-            )}
+            {/* 2026-05-07: subTab === "czas-pracy" — usunięte (treść scalona w "Czas pracy kierowcy" = subTab "tachograf").
+                Komponent GpsCzasPracySection zostaje w kodzie do potencjalnego scalenia (Plan do przodu, Timeline 24h). */}
             {subTab === "aktywnosc" && (
               <MultiDayActivityView
                 key={selectedDev?.fleetVehicle?.id}

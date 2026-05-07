@@ -443,9 +443,9 @@ export default function TachografComplianceSection({ device, position, driverAct
         </div>
       </div>
 
-      {/* INFO BOX — link do starego widoku */}
+      {/* INFO BOX — info o widoku */}
       <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-[11px] text-blue-700">
-        ℹ Ten widok pokazuje compliance w stylu Webfleet (skupiony na limitach). Pełny widok z planem do przodu, timeline 7-dniowym, historią aktywności i ręcznym dodawaniem segmentów — w zakładce <strong>Czas pracy</strong>.
+        ℹ Widok zgodny z Webfleet — limity 561/2006 + Pakiet Mobilności. Wielodniowy timeline aktywności w zakładce <strong>Monitoring jazdy</strong>.
       </div>
     </div>
   );
