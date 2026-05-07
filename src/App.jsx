@@ -6664,11 +6664,12 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
     return d.toLocaleString("pl-PL", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" });
   };
 
+  // 2026-05-07: Zakładki "Kilometry", "Trasy", "Karta kierowcy" ukryte z paska
+  // (treść zduplikowana z Mapą online / Plikami DDD). Komponenty GpsKilometrySection,
+  // GpsTrasySection, GpsKartaSection zostają w kodzie — funkcjonalność zostanie
+  // przeniesiona do Mapy online (statystyki + selector daty) i Plików DDD (info karty).
   const SUB_TABS = [
     { id: "mapa", label: "Mapa online", icon: "🗺️" },
-    { id: "kilometry", label: "Kilometry", icon: "📊" },
-    { id: "trasy", label: "Trasy", icon: "🛣️" },
-    { id: "karta", label: "Karta kierowcy", icon: "💳" },
     { id: "ddd", label: "Pliki DDD", icon: "💾" },
     { id: "czas-pracy", label: "Czas pracy", icon: "⏱️" },
     { id: "aktywnosc", label: "Aktywność", icon: "📅" },
@@ -6817,9 +6818,8 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
                 </>
               );
             })()}
-            {subTab === "kilometry" && <GpsKilometrySection device={selectedDev} position={selectedPos} showToast={showToast} />}
-            {subTab === "trasy" && <GpsTrasySection device={selectedDev} showToast={showToast} />}
-            {subTab === "karta" && <GpsKartaSection device={selectedDev} showToast={showToast} />}
+            {/* 2026-05-07: subTab === "kilometry" / "trasy" / "karta" — ukryte z paska,
+                komponenty zostają (do przeniesienia treści w przyszłości). */}
             {subTab === "ddd" && <GpsDddSection device={selectedDev} showToast={showToast} />}
             {subTab === "czas-pracy" && (
               <Suspense fallback={<div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-sm text-gray-500">⏱ Ładowanie czasu pracy…</div>}>
