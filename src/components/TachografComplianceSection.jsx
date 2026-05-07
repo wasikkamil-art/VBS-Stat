@@ -13,6 +13,7 @@ import {
 
 export default function TachografComplianceSection({ device, position, driverActivities = [] }) {
   const [, forceTick] = useState(0);
+  const [showWeek, setShowWeek] = useState(false);
 
   // Tick co 30s żeby liczniki live się odświeżały (countdownów do przerwy/odpoczynku)
   useEffect(() => {
@@ -442,6 +443,191 @@ export default function TachografComplianceSection({ device, position, driverAct
           )}
         </div>
       </div>
+
+      {/* ═══════════════════════════════════════════════════ */}
+      {/* SEKCJA 6: PLAN DO PRZODU (auto)                     */}
+      {/* ═══════════════════════════════════════════════════ */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-5">
+        <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4 pb-2 border-b border-gray-100">
+          📅 Plan do przodu (auto)
+        </div>
+        {plan ? (
+          <div className="space-y-2">
+            <div className="flex items-start gap-2 p-2 rounded-lg" style={{ background: "#fffbeb", border: "1px solid #fde68a" }}>
+              <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#fef3c7" }}>⏸</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-bold text-amber-900">Przerwa 45 min</div>
+                <div className="text-[11px] text-amber-700">
+                  za {fmtHM(plan.nextBreak.driveMinToGo)} · {fmtTimeShort(plan.nextBreak.atMs)} → {fmtTimeShort(plan.nextBreak.endMs)}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-start gap-2 p-2 rounded-lg" style={{ background: "#eff6ff", border: "1px solid #bfdbfe" }}>
+              <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#dbeafe" }}>🛑</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-bold text-blue-900">Koniec jazdy dziennej</div>
+                <div className="text-[11px] text-blue-700">
+                  limit {fmtHM(plan.endOfDay.dailyLimit)} · {fmtTimeShort(plan.endOfDay.atMs)}
+                  {plan.endOfDay.extendedAllowed && compliance.daily.extendedDaysUsed === 0 && " (+10h dozwolone 2×/tydz)"}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-start gap-2 p-2 rounded-lg" style={{ background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
+              <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#dcfce7" }}>🛏</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-bold text-green-900">Odpoczynek dzienny 11h</div>
+                <div className="text-[11px] text-green-700">
+                  {fmtTimeShort(plan.dailyRest.startMs)} → {fmtTimeShort(plan.dailyRest.endMs)}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-start gap-2 p-2 rounded-lg" style={{ background: "#f5f3ff", border: "1px solid #c7d2fe" }}>
+              <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#ede9fe" }}>🛌</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-bold text-violet-900">Odpoczynek tygodniowy 45h</div>
+                <div className="text-[11px] text-violet-700">
+                  {fmtTimeShort(plan.weeklyRest.startMs)} → {fmtTimeShort(plan.weeklyRest.endMs)}
+                </div>
+              </div>
+            </div>
+            {plan.returnToBase && (
+              <div className="flex items-start gap-2 p-2 rounded-lg" style={{ background: "#fef2f2", border: "1px solid #fecaca" }}>
+                <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#fee2e2" }}>🏠</div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-bold text-red-900">Powrót do bazy</div>
+                  <div className="text-[11px] text-red-700">
+                    do {new Date(plan.returnToBase.deadlineMs).toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit" })} · za {plan.returnToBase.daysLeft} dni
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="text-xs text-gray-400 italic">Brak danych do wyznaczenia planu</div>
+        )}
+      </div>
+
+      {/* ═══════════════════════════════════════════════════ */}
+      {/* SEKCJA 7: TIMELINE 24H (z opcją 7 dni wstecz)        */}
+      {/* ═══════════════════════════════════════════════════ */}
+      {(() => {
+        const sumDay = (dayStart, dayEnd) => {
+          const sums = { drive: 0, work: 0, avail: 0, rest: 0 };
+          compliance.segments.forEach(s => {
+            const start = Math.max(s.startMs, dayStart);
+            const end = Math.min(s.endMs, dayEnd);
+            if (end > start) {
+              const mins = Math.round((end - start) / 60000);
+              if (s.type in sums) sums[s.type] += mins;
+            }
+          });
+          return sums;
+        };
+
+        const DayBar = ({ dayStart, dayEnd, height = 22 }) => {
+          const dayDur = dayEnd - dayStart;
+          const clips = compliance.segments
+            .filter(s => s.endMs > dayStart && s.startMs < dayEnd)
+            .map(s => ({
+              type: s.type,
+              startMs: Math.max(s.startMs, dayStart),
+              endMs: Math.min(s.endMs, dayEnd),
+              isOpen: s.isOpen,
+            }))
+            .sort((a, b) => a.startMs - b.startMs);
+          return (
+            <div style={{ height, position: "relative", background: "#f3f4f6", borderRadius: 6, overflow: "hidden" }}>
+              {clips.map((c, i) => {
+                const meta = ACTIVITY_TYPES[c.type] || { label: c.type, color: "#9ca3af" };
+                const left = ((c.startMs - dayStart) / dayDur) * 100;
+                const width = ((c.endMs - c.startMs) / dayDur) * 100;
+                return (
+                  <div key={i}
+                    style={{
+                      position: "absolute", top: 0, bottom: 0,
+                      left: `${left}%`, width: `${width}%`,
+                      background: meta.color,
+                    }}
+                    title={`${meta.label} · ${fmtTimeShort(c.startMs)}${c.isOpen ? " → teraz" : ` → ${fmtTimeShort(c.endMs)}`}`}
+                  />
+                );
+              })}
+            </div>
+          );
+        };
+
+        const todayStart = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); })();
+        const todayEnd = todayStart + 86400000;
+        const todaySums = sumDay(todayStart, todayEnd);
+
+        const past7Days = (() => {
+          const days = [];
+          const names = ["Nd","Pon","Wt","Śr","Cz","Pt","Sob"];
+          for (let i = 1; i <= 7; i++) {
+            const d = new Date(todayStart);
+            d.setDate(d.getDate() - i);
+            const s = d.getTime();
+            const e = s + 86400000;
+            const label = `${names[d.getDay()]} ${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}`;
+            days.push({ start: s, end: e, label, sums: sumDay(s, e) });
+          }
+          return days;
+        })();
+
+        return (
+          <div className="bg-white rounded-2xl border border-gray-100 p-5">
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">📊 Timeline aktywności — dziś</div>
+              <div className="flex gap-3 text-[10px] text-gray-500">
+                {Object.entries(ACTIVITY_TYPES).map(([k, m]) => (
+                  <span key={k} className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full" style={{ background: m.color }} />
+                    {m.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <DayBar dayStart={todayStart} dayEnd={todayEnd} height={24} />
+
+            <div className="flex justify-between text-[10px] text-gray-400 mt-1 font-mono">
+              <span>00</span><span>03</span><span>06</span><span>09</span><span>12</span>
+              <span>15</span><span>18</span><span>21</span><span>24</span>
+            </div>
+
+            <div className="mt-3 flex gap-4 text-[11px] text-gray-600 flex-wrap">
+              <span>🚛 Jazda <strong>{fmtHM(todaySums.drive)}</strong></span>
+              <span>🔧 Praca <strong>{fmtHM(todaySums.work)}</strong></span>
+              <span>⏱ Dysp. <strong>{fmtHM(todaySums.avail)}</strong></span>
+              <span>🛏 Odp. <strong>{fmtHM(todaySums.rest)}</strong></span>
+            </div>
+
+            <button onClick={() => setShowWeek(s => !s)}
+              className="mt-3 text-xs font-semibold text-blue-600 hover:text-blue-700 transition-colors">
+              {showWeek ? "▲ Zwiń historię 7 dni" : "▼ Pokaż 7 dni wstecz"}
+            </button>
+
+            {showWeek && (
+              <div className="mt-3 pt-3 border-t border-gray-100 space-y-3">
+                {past7Days.map(day => (
+                  <div key={day.start}>
+                    <div className="flex items-center justify-between text-[11px] mb-1 flex-wrap gap-2">
+                      <span className="font-semibold text-gray-700">{day.label}</span>
+                      <span className="text-gray-400 tabular-nums">
+                        Jazda {fmtHM(day.sums.drive)} · Praca {fmtHM(day.sums.work)} · Dysp. {fmtHM(day.sums.avail)} · Odp. {fmtHM(day.sums.rest)}
+                      </span>
+                    </div>
+                    <DayBar dayStart={day.start} dayEnd={day.end} height={18} />
+                  </div>
+                ))}
+                <div className="flex justify-between text-[10px] text-gray-400 mt-1 font-mono pt-1">
+                  <span>00</span><span>06</span><span>12</span><span>18</span><span>24</span>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* INFO BOX — info o widoku */}
       <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-[11px] text-blue-700">
