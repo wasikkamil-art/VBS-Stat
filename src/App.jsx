@@ -298,6 +298,31 @@ async function dbAddToArrayField(fieldKey, item) {
   try { logFleetWrite(fieldKey, prev, next, "atomic/dbAddToArrayField"); } catch {}
 }
 
+// Atomic update item w array field (po id) w fleet/data — patch merge.
+async function dbUpdateInArrayField(fieldKey, id, patch) {
+  let prev, next;
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(DATA_REF());
+    prev = (snap.data() || {})[fieldKey] || [];
+    next = prev.map(r => r && r.id === id ? { ...r, ...patch } : r);
+    tx.update(DATA_REF(), { [fieldKey]: next });
+  });
+  try { logFleetWrite(fieldKey, prev, next, "atomic/dbUpdateInArrayField"); } catch {}
+}
+
+// Atomic bulk replace całego array field (import, migracje). Używaj ostrożnie —
+// nadpisuje wszystko. Server emit po commit aktualizuje state przez onSnapshot.
+async function dbBulkReplaceArrayField(fieldKey, items) {
+  let prev, next;
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(DATA_REF());
+    prev = (snap.data() || {})[fieldKey] || [];
+    next = items;
+    tx.update(DATA_REF(), { [fieldKey]: next });
+  });
+  try { logFleetWrite(fieldKey, prev, next, "atomic/dbBulkReplaceArrayField"); } catch {}
+}
+
 // Atomic update wielu pojazdów jednocześnie (assign/unassign driver — może modyfikować
 // 2 pojazdy: dodanie kierowcy do nowego + zamknięcie historii na starym).
 async function dbAssignDriverToVehicle(vehicleId, driverEmail, driverName) {
@@ -1574,7 +1599,10 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   // useEffect(() => { if (loaded && vehicles.length > 0) safeDbSet(SK.vehicles, vehicles); },       [vehicles, loaded]);
   useEffect(() => { if (loaded && costs.length > 0) safeDbSet(SK.costs, costs); },                [costs, loaded]);
   useEffect(() => { if (loaded && categories.length > 0) safeDbSet(SK.categories, categories); }, [categories, loaded]);
-  useEffect(() => { if (loaded && docs.length > 0) safeDbSet(SK.docs, docs); },                   [docs, loaded]);
+  // FIX 2026-05-07 (faza 2): USUNIĘTY useEffect [docs, loaded] → safeDbSet.
+  // onSave/onDelete/onEdit dokumentów używają atomic helpers (dbAddToArrayField,
+  // dbDeleteFromArrayField, dbUpdateInArrayField). Cichy writeback eliminowany.
+  // useEffect(() => { if (loaded && docs.length > 0) safeDbSet(SK.docs, docs); },                   [docs, loaded]);
   useEffect(() => { if (loaded && imiRecords.length > 0) safeDbSet(SK.imi, imiRecords); },        [imiRecords, loaded]);
   useEffect(() => { if (loaded && rentRecords.length > 0) safeDbSet(SK.rent, rentRecords); },     [rentRecords, loaded]);
   // FIX 2026-04-30: USUNIĘTY useEffect który writebackował całą tablicę frachtyList do Firestore.
@@ -3829,7 +3857,10 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 console.error("doc del", e);
                 showToast("⚠️ Błąd usuwania dokumentu");
               })}
-              onEdit={(id, data) => setDocs((p) => p.map((d) => d.id === id ? { ...d, ...data } : d))}
+              onEdit={(id, data) => dbUpdateInArrayField(SK.docs, id, data).catch(e => {
+                console.error("doc edit", e);
+                showToast("⚠️ Błąd edycji dokumentu");
+              })}
             />
           )}
 
