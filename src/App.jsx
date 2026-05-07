@@ -298,6 +298,66 @@ async function dbAddToArrayField(fieldKey, item) {
   try { logFleetWrite(fieldKey, prev, next, "atomic/dbAddToArrayField"); } catch {}
 }
 
+// Atomic update wielu pojazdów jednocześnie (assign/unassign driver — może modyfikować
+// 2 pojazdy: dodanie kierowcy do nowego + zamknięcie historii na starym).
+async function dbAssignDriverToVehicle(vehicleId, driverEmail, driverName) {
+  if (!vehicleId || !driverEmail) return;
+  const today = new Date().toISOString().split("T")[0];
+  let prev, next;
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(DATA_REF());
+    prev = (snap.data() || {})[SK.vehicles] || [];
+    next = prev.map(v => {
+      if (v.id === vehicleId) {
+        const hist = v.driverHistory || [];
+        const alreadyActive = hist.some(d => !d.to && d.email === driverEmail);
+        if (alreadyActive) return { ...v, assignedDriver: driverEmail };
+        const updated = hist.map(d => !d.to && d.email !== driverEmail ? { ...d, to: today } : d);
+        const newEntry = { id: Date.now().toString(36), name: driverName || driverEmail, email: driverEmail, phone: "", from: today, to: "" };
+        return { ...v, driverHistory: [...updated, newEntry], assignedDriver: driverEmail };
+      }
+      if (v.assignedDriver === driverEmail) {
+        const hist = (v.driverHistory || []).map(d => !d.to && d.email === driverEmail ? { ...d, to: today } : d);
+        return { ...v, driverHistory: hist, assignedDriver: "" };
+      }
+      return v;
+    });
+    tx.update(DATA_REF(), { [SK.vehicles]: next });
+  });
+  try { logFleetWrite(SK.vehicles, prev, next, "atomic/dbAssignDriverToVehicle"); } catch {}
+}
+
+async function dbUnassignDriverFromVehicle(driverEmail) {
+  if (!driverEmail) return;
+  const today = new Date().toISOString().split("T")[0];
+  let prev, next;
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(DATA_REF());
+    prev = (snap.data() || {})[SK.vehicles] || [];
+    next = prev.map(v => {
+      if (v.assignedDriver === driverEmail) {
+        const hist = (v.driverHistory || []).map(d => !d.to && d.email === driverEmail ? { ...d, to: today } : d);
+        return { ...v, driverHistory: hist, assignedDriver: "" };
+      }
+      return v;
+    });
+    tx.update(DATA_REF(), { [SK.vehicles]: next });
+  });
+  try { logFleetWrite(SK.vehicles, prev, next, "atomic/dbUnassignDriverFromVehicle"); } catch {}
+}
+
+// Atomic add vehicle (dla addVehicle handler).
+async function dbAddVehicle(vehicle) {
+  let prev, next;
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(DATA_REF());
+    prev = (snap.data() || {})[SK.vehicles] || [];
+    next = [...prev, vehicle];
+    tx.update(DATA_REF(), { [SK.vehicles]: next });
+  });
+  try { logFleetWrite(SK.vehicles, prev, next, "atomic/dbAddVehicle"); } catch {}
+}
+
 // ── Audit log ──
 // Zapisuje każdą akcję CRUD do kolekcji auditLog.
 // Wywołanie fire-and-forget (nie blokuje UI, nie rzuca błędów).
@@ -1505,7 +1565,13 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
   // ⚠️ WAŻNE: Wszystkie zapisy mają guard length > 0
   // + safeDbSet blokuje nagły spadek do zera (podwójna ochrona)
-  useEffect(() => { if (loaded && vehicles.length > 0) safeDbSet(SK.vehicles, vehicles); },       [vehicles, loaded]);
+  // FIX 2026-05-07: USUNIĘTY useEffect [vehicles] → safeDbSet — analogicznie do frachty 2026-04-30.
+  // Powodował catastrophic data loss 2026-05-07 08:12:45 UTC: setVehicles ze stale state
+  // (partial vehicle objects bez OC/VIN/ubezpieczeń) → useEffect zapisał stale → wszystkie
+  // 6 pojazdów straciło 17/17 krytycznych pól (vin, ocNumber, acExpiry, gap, wartoscNet, ...).
+  // Teraz każda mutacja przechodzi przez atomic helpers (dbAddVehicle, dbUpdateVehicleField,
+  // dbAssignDriverToVehicle, dbUnassignDriverFromVehicle). Race condition niemożliwe.
+  // useEffect(() => { if (loaded && vehicles.length > 0) safeDbSet(SK.vehicles, vehicles); },       [vehicles, loaded]);
   useEffect(() => { if (loaded && costs.length > 0) safeDbSet(SK.costs, costs); },                [costs, loaded]);
   useEffect(() => { if (loaded && categories.length > 0) safeDbSet(SK.categories, categories); }, [categories, loaded]);
   useEffect(() => { if (loaded && docs.length > 0) safeDbSet(SK.docs, docs); },                   [docs, loaded]);
@@ -2297,19 +2363,47 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     const active = (veh.driverHistory || []).find(d => !d.to);
     return { ...veh, assignedDriver: active?.email || "" };
   };
-  const addVehicle   = (v)     => { const vid = uid(); const veh = syncAssignedDriver({ ...v, id: vid, driverHistory: v.driverHistory || [] }); setVehicles((p) => [...p, veh]); logAction("add", "vehicles", { id: vid, type: v.type, plate: v.plate }); showToast("Pojazd dodany"); setShowAddVehicle(false); };
-  const delVehicle   = (id, reason) => {
-    const veh = vehicles.find(v => v.id === id);
-    setVehicles((p) => p.map((v) => v.id !== id ? v : {
-      ...v,
-      archived: true,
-      archivedDate: new Date().toISOString().slice(0,10),
-      archivedReason: reason || "",
-    }));
-    logAction("delete", "vehicles", { id, plate: veh?.plate, reason });
-    showToast("✅ Pojazd przeniesiony do archiwum");
+  const addVehicle   = async (v) => {
+    const vid = uid();
+    const veh = syncAssignedDriver({ ...v, id: vid, driverHistory: v.driverHistory || [] });
+    try {
+      await dbAddVehicle(veh);
+      logAction("add", "vehicles", { id: vid, type: v.type, plate: v.plate });
+      showToast("Pojazd dodany");
+      setShowAddVehicle(false);
+    } catch (e) {
+      console.error("addVehicle error", e);
+      showToast("❌ Błąd zapisu: " + (e?.message || e));
+    }
   };
-  const updateVehicle= (updated) => { const veh = syncAssignedDriver(updated); setVehicles((p) => p.map((v) => v.id === veh.id ? veh : v)); logAction("update", "vehicles", { id: veh.id, plate: veh.plate }); showToast("✅ Zmiany zapisane"); setEditVehicleId(null); };
+  const delVehicle   = async (id, reason) => {
+    const veh = vehicles.find(v => v.id === id);
+    try {
+      await dbUpdateVehicleField(id, {
+        archived: true,
+        archivedDate: new Date().toISOString().slice(0,10),
+        archivedReason: reason || "",
+      });
+      logAction("delete", "vehicles", { id, plate: veh?.plate, reason });
+      showToast("✅ Pojazd przeniesiony do archiwum");
+    } catch (e) {
+      console.error("delVehicle error", e);
+      showToast("❌ Błąd zapisu: " + (e?.message || e));
+    }
+  };
+  const updateVehicle= async (updated) => {
+    const veh = syncAssignedDriver(updated);
+    const { id: _id, ...patch } = veh;
+    try {
+      await dbUpdateVehicleField(veh.id, patch);
+      logAction("update", "vehicles", { id: veh.id, plate: veh.plate });
+      showToast("✅ Zmiany zapisane");
+      setEditVehicleId(null);
+    } catch (e) {
+      console.error("updateVehicle error", e);
+      showToast("❌ Błąd zapisu: " + (e?.message || e));
+    }
+  };
   const addCategory  = (cat)   => setCategories((p) => [...p, cat]);
 
   const CAT_FALLBACKS = {
@@ -3678,7 +3772,15 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                           {v.archivedReason && <div className="text-xs text-gray-500">{v.archivedReason}</div>}
                           {v.archivedDate && <div className="text-xs text-gray-300">{v.archivedDate}</div>}
                         </div>
-                        <button onClick={() => { setVehicles(p => p.map(vv => vv.id===v.id ? (({archived, archivedDate, archivedReason, ...rest}) => rest)(vv) : vv)); logAction("update", "vehicles", { id: v.id, plate: v.plate, action: "restore" }); }}
+                        <button onClick={async () => {
+                          try {
+                            await dbUpdateVehicleField(v.id, { archived: false, archivedDate: "", archivedReason: "" });
+                            logAction("update", "vehicles", { id: v.id, plate: v.plate, action: "restore" });
+                          } catch (e) {
+                            console.error("restore vehicle error", e);
+                            showToast("❌ Błąd zapisu: " + (e?.message || e));
+                          }
+                        }}
                           className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-400 hover:text-gray-700 hover:border-gray-300 transition-all flex-shrink-0">
                           Przywróć
                         </button>
@@ -9384,43 +9486,28 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
   }
 
   // ── Przypisanie / odpisanie kierowcy do pojazdu ──
-  function assignDriverToVehicle(driverEmail, driverName, vehicleId) {
+  async function assignDriverToVehicle(driverEmail, driverName, vehicleId) {
     if (!vehicleId || !driverEmail) return;
-    const today = new Date().toISOString().split("T")[0];
-    setVehicles(prev => prev.map(v => {
-      if (v.id === vehicleId) {
-        const hist = v.driverHistory || [];
-        // Sprawdź czy ten kierowca już jest aktywny na tym pojeździe
-        const alreadyActive = hist.some(d => !d.to && d.email === driverEmail);
-        if (alreadyActive) return { ...v, assignedDriver: driverEmail };
-        // Zamknij tylko aktywnego kierowcę z emailem INNYM niż nowy (nie ruszaj imion)
-        const updated = hist.map(d => !d.to && d.email !== driverEmail ? { ...d, to: today } : d);
-        const newEntry = { id: Date.now().toString(36), name: driverName || driverEmail, email: driverEmail, phone: "", from: today, to: "" };
-        return { ...v, driverHistory: [...updated, newEntry], assignedDriver: driverEmail };
-      }
-      // Odpisz tego kierowcę z innego auta (tylko jego wpis, nie ruszaj innych)
-      if (v.assignedDriver === driverEmail) {
-        const hist = (v.driverHistory || []).map(d => !d.to && d.email === driverEmail ? { ...d, to: today } : d);
-        return { ...v, driverHistory: hist, assignedDriver: "" };
-      }
-      return v;
-    }));
-    logAction("update", "vehicles", { vehicleId, assignedDriver: driverEmail, action: "assignDriver" });
-    showToast("✅ Kierowca przypisany do pojazdu");
+    try {
+      await dbAssignDriverToVehicle(vehicleId, driverEmail, driverName);
+      logAction("update", "vehicles", { vehicleId, assignedDriver: driverEmail, action: "assignDriver" });
+      showToast("✅ Kierowca przypisany do pojazdu");
+    } catch (e) {
+      console.error("assignDriverToVehicle error", e);
+      showToast("❌ Błąd zapisu: " + (e?.message || e));
+    }
   }
 
-  function unassignDriver(driverEmail) {
+  async function unassignDriver(driverEmail) {
     if (!driverEmail) return;
-    const today = new Date().toISOString().split("T")[0];
-    setVehicles(prev => prev.map(v => {
-      if (v.assignedDriver === driverEmail) {
-        const hist = (v.driverHistory || []).map(d => !d.to && d.email === driverEmail ? { ...d, to: today } : d);
-        return { ...v, driverHistory: hist, assignedDriver: "" };
-      }
-      return v;
-    }));
-    logAction("update", "vehicles", { driverEmail, action: "unassignDriver" });
-    showToast("✅ Kierowca odpisany od pojazdu");
+    try {
+      await dbUnassignDriverFromVehicle(driverEmail);
+      logAction("update", "vehicles", { driverEmail, action: "unassignDriver" });
+      showToast("✅ Kierowca odpisany od pojazdu");
+    } catch (e) {
+      console.error("unassignDriver error", e);
+      showToast("❌ Błąd zapisu: " + (e?.message || e));
+    }
   }
 
   // ── Normalizacja numeru WhatsApp do formatu E.164 bez "+" (np. "48501234567") ──
