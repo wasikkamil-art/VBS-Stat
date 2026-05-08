@@ -513,10 +513,6 @@ export default function TachografComplianceSection({ device, position, driverAct
       {/* zachowuje pełen widget z wyborem zakresu dat, sumami okresu i listą dni. */}
       {multiDayView}
 
-      {/* INFO BOX — info o widoku */}
-      <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-[11px] text-blue-700">
-        ℹ Widok zgodny z Webfleet — limity 561/2006 + Pakiet Mobilności. Compliance live + plan do przodu + multi-day timeline = całość w jednym miejscu.
-      </div>
     </div>
   );
 }
