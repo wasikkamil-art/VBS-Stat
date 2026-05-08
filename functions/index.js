@@ -266,6 +266,18 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
       p.end >= todayISO
     );
 
+    // Pauza zaplanowana w przyszłości (najwcześniejsza)
+    const futurePauza = pauzyList
+      .filter(p => p.vehicleId === v.id && p.status !== "jazda" && p.start > todayISO)
+      .sort((a, b) => a.start.localeCompare(b.start))[0] || null;
+
+    // Smart baza — kierowca rozładował się + ma zaplanowaną bazę → JEST już na bazie
+    // (logika z UI commit 3c7392a). Tylko dla status="baza" (pauza9/11/24/45 to konkretne odpoczynki).
+    const isCurrentlyAtBaza = !vehiclePauza
+      && futurePauza?.status === "baza"
+      && lastDoneF?.dataRozladunku && lastDoneF.dataRozladunku <= todayISO
+      && (!nextF || futurePauza.start <= nextF.dataZaladunku);
+
     // Info o pojeździe — typ, wymiary, wyposażenie
     const hasWinda = (v.equipment || []).includes("winda");
     const hasPrzyczepa = v.plate2 && v.plate2.trim() !== "";
@@ -297,23 +309,25 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
       const rozlKod = [lastPending.dokod, lastPending.dokod2, lastPending.dokod3].filter(s => s && s.trim()).pop() || "—";
       const rozlDate = lastPending.dataRozladunku ? fmtDate(lastPending.dataRozladunku) : "";
       details = rozlDate ? `${rozlKod} · ${rozlDate}` : rozlKod;
-    } else if (vehiclePauza) {
+    } else if (vehiclePauza || isCurrentlyAtBaza) {
+      // Smart baza: gdy auto rozładowane + ma future pauzę baza, traktuj jako pauzę aktywną
+      const effectivePauza = vehiclePauza || futurePauza;
       const pauzaLabels = { pauza9: "Pauza 9h", pauza11: "Pauza 11h", pauza24: "Pauza 24h", pauza45: "Pauza 45h", pauzaInne: "Pauza", baza: "Baza" };
-      statusText = vehiclePauza.status === "baza" ? "🏠 Baza" : `⏸️ ${pauzaLabels[vehiclePauza.status] || "Pauza"}`;
-      statusColor = vehiclePauza.status === "baza" ? "#0369a1" : "#9333ea";
-      statusBg = vehiclePauza.status === "baza" ? "#f0f9ff" : "#faf5ff";
+      statusText = effectivePauza.status === "baza" ? "🏠 Baza" : `⏸️ ${pauzaLabels[effectivePauza.status] || "Pauza"}`;
+      statusColor = effectivePauza.status === "baza" ? "#0369a1" : "#9333ea";
+      statusBg = effectivePauza.status === "baza" ? "#f0f9ff" : "#faf5ff";
       statusType = "pauza";
       const BAZA_KOD = "PL 25-611 Kielce";
       // Dla statusu "baza" → kod bazy; dla pauzy w trasie → ostatni kod rozładunku
       let locationKod = BAZA_KOD;
-      if (vehiclePauza.status !== "baza") {
+      if (effectivePauza.status !== "baza") {
         // Weź kod z ostatniego rozładowanego frachtu (tam kierowca faktycznie stoi)
         const refF = lastDoneF || activeF;
         if (refF) {
           locationKod = [refF.dokod, refF.dokod2, refF.dokod3].filter(s => s && s.trim()).pop() || BAZA_KOD;
         }
       }
-      details = `Dostępny od: ${fmtDate(vehiclePauza.end)} · ${locationKod}`;
+      details = `Dostępny od: ${fmtDate(effectivePauza.end)} · ${locationKod}`;
     } else if (nextF) {
       // Załadunek zaplanowany = traktuj jako "W trasie" (auto nie jest dostępne)
       statusText = "🚛 W trasie";
