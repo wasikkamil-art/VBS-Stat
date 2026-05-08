@@ -1523,20 +1523,40 @@ exports.parseDddFile = onCall(
     // preferDddSegments w czasPracy.js wycinka GPS/CSV w zakresach pokrytych przez DDD.
     let activitiesWritten = 0;
     let driverEmail = null;
-    if (metadata.driverName) {
-      const target = metadata.driverName.trim().toLowerCase();
-      outer: for (const v of vehicles) {
+    let matchMethod = null;
+
+    // Priorytet 1: po cardNumber (deterministyczne, niezależne od pisowni nazwiska)
+    const targetCard = (metadata.cardNumber || "").trim();
+    if (targetCard) {
+      outerCard: for (const v of vehicles) {
         for (const d of (v.driverHistory || [])) {
-          if (d?.name?.trim().toLowerCase() === target && d?.email) {
+          if (d?.cardNumber && String(d.cardNumber).trim() === targetCard && d?.email) {
             driverEmail = d.email;
-            break outer;
+            matchMethod = "cardNumber";
+            break outerCard;
           }
         }
       }
     }
+
+    // Priorytet 2 (fallback): po nazwie (case-insensitive trim)
+    if (!driverEmail && metadata.driverName) {
+      const targetName = metadata.driverName.trim().toLowerCase();
+      outerName: for (const v of vehicles) {
+        for (const d of (v.driverHistory || [])) {
+          if (d?.name?.trim().toLowerCase() === targetName && d?.email) {
+            driverEmail = d.email;
+            matchMethod = "name";
+            break outerName;
+          }
+        }
+      }
+    }
+
     if (!driverEmail) {
-      console.warn(`[DDD parse] No driverEmail found for ${metadata.driverName} — skipping driverActivities write`);
+      console.warn(`[DDD parse] No driverEmail found for cardNumber=${targetCard}, name=${metadata.driverName} — skipping driverActivities write`);
     } else {
+      console.log(`[DDD parse] Matched driver by ${matchMethod}: ${driverEmail}`);
       // Reupload safety: usuń stare segmenty source=ddd dla tego kierowcy w zakresie pliku
       if (metadata.periodStart && metadata.periodEnd) {
         const startISO = new Date(metadata.periodStart + "T00:00:00Z").toISOString();
