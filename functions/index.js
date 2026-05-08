@@ -1500,7 +1500,6 @@ exports.parseDddFile = onCall(
       computeDddDailyReport(parsed, vehicles);
 
     // Zapisz dokument z pełnymi danymi raportu w jednym dddFiles document
-    // UWAGA: NIE zapisujemy do driverActivities — DDD = archive per kierowca.
     const dddDoc = {
       storagePath,
       originalFileName: originalFileName || storagePath.split("/").pop(),
@@ -1518,11 +1517,97 @@ exports.parseDddFile = onCall(
 
     console.log(`[DDD parse] OK fileId=${dddRef.id} type=${metadata.fileType} segments=${totalSegments} days=${summary.daysWithCard} drive=${summary.totalDriveMin}min km=${summary.totalKm}`);
 
+    // ── 2026-05-08: DDD → driverActivities (compliance live, decyzja zrewidowana 2026-05-05).
+    // Pakiet Mobilności wymaga compliance opartego na danych tachografu.
+    // GPS/CSV są źródłem live (gdy kierowca w trasie), DDD = nadrzędne źródło prawdy gdy wraca do bazy.
+    // preferDddSegments w czasPracy.js wycinka GPS/CSV w zakresach pokrytych przez DDD.
+    let activitiesWritten = 0;
+    let driverEmail = null;
+    if (metadata.driverName) {
+      const target = metadata.driverName.trim().toLowerCase();
+      outer: for (const v of vehicles) {
+        for (const d of (v.driverHistory || [])) {
+          if (d?.name?.trim().toLowerCase() === target && d?.email) {
+            driverEmail = d.email;
+            break outer;
+          }
+        }
+      }
+    }
+    if (!driverEmail) {
+      console.warn(`[DDD parse] No driverEmail found for ${metadata.driverName} — skipping driverActivities write`);
+    } else {
+      // Reupload safety: usuń stare segmenty source=ddd dla tego kierowcy w zakresie pliku
+      if (metadata.periodStart && metadata.periodEnd) {
+        const startISO = new Date(metadata.periodStart + "T00:00:00Z").toISOString();
+        const endISO = new Date(metadata.periodEnd + "T23:59:59.999Z").toISOString();
+        const oldSnap = await db.collection("driverActivities")
+          .where("driverEmail", "==", driverEmail)
+          .where("source", "==", "ddd")
+          .where("startTs", ">=", startISO)
+          .where("startTs", "<=", endISO)
+          .get();
+        if (!oldSnap.empty) {
+          let delBatch = db.batch();
+          let delCount = 0;
+          for (const d of oldSnap.docs) {
+            delBatch.delete(d.ref);
+            delCount++;
+            if (delCount % 400 === 0) {
+              await delBatch.commit();
+              delBatch = db.batch();
+            }
+          }
+          if (delCount % 400 !== 0) await delBatch.commit();
+          console.log(`[DDD parse] Replaced ${oldSnap.size} old DDD activities for ${driverEmail} ${metadata.periodStart}→${metadata.periodEnd}`);
+        }
+      }
+
+      // Insert nowe segmenty z source=ddd
+      let batch = db.batch();
+      let writeCount = 0;
+      for (const [day, slot] of Object.entries(dailyTotals)) {
+        const vehicleId = slot.vehicleId || null;
+        for (const seg of slot.segments) {
+          const startMs = Date.UTC(
+            +day.slice(0,4), +day.slice(5,7) - 1, +day.slice(8,10),
+            Math.floor(seg.fromMin / 60), seg.fromMin % 60, 0
+          );
+          const endMs = startMs + seg.durMin * 60000;
+          const ref = db.collection("driverActivities").doc();
+          batch.set(ref, {
+            driverEmail,
+            driverName: metadata.driverName,
+            vehicleId,
+            type: seg.type,
+            startTs: new Date(startMs).toISOString(),
+            endTs: new Date(endMs).toISOString(),
+            source: "ddd",
+            dddFileId: dddRef.id,
+            distanceKm: 0,
+            address: null,
+            createdAt: new Date().toISOString(),
+          });
+          writeCount++;
+          activitiesWritten++;
+          if (writeCount >= 400) {
+            await batch.commit();
+            batch = db.batch();
+            writeCount = 0;
+          }
+        }
+      }
+      if (writeCount > 0) await batch.commit();
+      console.log(`[DDD parse] Wrote ${activitiesWritten} segments to driverActivities (source=ddd, driver=${driverEmail})`);
+    }
+
     return {
       success: true,
       fileId: dddRef.id,
       metadata,
       activitiesCount: totalSegments,
+      activitiesWritten,
+      driverEmail,
       summary,
     };
   }
