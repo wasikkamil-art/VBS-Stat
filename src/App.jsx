@@ -6550,7 +6550,9 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
 
       if (devRes.data?.success && mapped.length > 0) {
         setGpsDevices(mapped);
-        if (!selectedDevice && mapped.length > 0) setSelectedDevice(mapped[0].deviceId || mapped[0].id);
+        // FIX 2026-05-08: setSelectedDevice tylko gdy null (funkcyjny setState żeby uniknąć stale closure
+        // z setInterval — wcześniej auto-refresh co 30s resetował wybór na pierwszy pojazd).
+        setSelectedDevice(prev => prev || mapped[0].deviceId || mapped[0].id);
       }
       if (posRes.data?.success && posArray.length > 0) {
         setGpsPositions(posArray);
@@ -6716,7 +6718,20 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
               const isActive = devId === selectedDevice;
               const plate = dev.plate || dev.deviceName || dev.name || `#${devId}`;
               const posTime = pos?.dateTime || pos?.timestamp;
-              const isOnline = pos && pos.ignitionState === "ON" || (posTime && typeof posTime === "object" && (() => { const d = new Date(posTime.year, posTime.month - 1, posTime.day, posTime.hour, posTime.minute, posTime.seconds || 0); return (Date.now() - d.getTime()) < 600000; })());
+              // Online (zielona ikona) — auto aktywne dziś:
+              // 1) ignition ON, lub
+              // 2) pozycja świeża (<10 min), lub
+              // 3) miało drive/work segment dziś (driverActivities)
+              const todayMs = (() => { const d = new Date(); d.setHours(0,0,0,0); return d.getTime(); })();
+              const fleetVehId = dev.fleetVehicle?.id;
+              const hasTodayActivity = fleetVehId && driverActivities.some(a =>
+                a.vehicleId === fleetVehId && Date.parse(a.endTs) > todayMs && (a.type === "drive" || a.type === "work")
+              );
+              const posIsFresh = posTime && typeof posTime === "object" && (() => {
+                const d = new Date(posTime.year, posTime.month - 1, posTime.day, posTime.hour, posTime.minute, posTime.seconds || 0);
+                return (Date.now() - d.getTime()) < 600000;
+              })();
+              const isOnline = (pos && pos.ignitionState === "ON") || posIsFresh || hasTodayActivity;
               return (
                 <button key={devId} onClick={() => { setSelectedDevice(devId); setSubTab("mapa"); }}
                   className={`w-full text-left px-4 py-3 border-b border-gray-50 transition-all ${isActive ? "bg-violet-50 border-l-4 border-l-violet-500" : "hover:bg-gray-50 border-l-4 border-l-transparent"}`}>
