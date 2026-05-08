@@ -404,8 +404,13 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
 <body style="margin:0;padding:0;background:#f8f9fb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
   <div style="max-width:600px;margin:20px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
 
+    <!-- LOGO VBS -->
+    <div style="text-align:center;padding:20px 20px 0 20px;">
+      <img src="https://fleetstat.pl/vbs-logo.png" alt="VBS Transport" style="max-width:180px;height:auto;display:inline-block;">
+    </div>
+
     <!-- HEADER -->
-    <div style="background:linear-gradient(135deg,#1e293b,#334155);padding:28px 36px;color:#fff;">
+    <div style="background:linear-gradient(135deg,#1e293b,#334155);padding:28px 36px;color:#fff;margin-top:16px;">
       <h1 style="margin:0;font-size:22px;font-weight:700;">🚛 FleetStat — Status floty</h1>
       <p style="margin:8px 0 0;font-size:14px;color:#94a3b8;">${dateStr} · ${timeStr}</p>
     </div>
