@@ -8439,7 +8439,10 @@ function DddDailyRow({ day, data }) {
           position: "relative",
           width: "100%",
           height: 22,
-          background: "#e5e7eb",
+          // 2026-05-11: blue-100 zamiast gray-200 — gap "domyślnie odpoczynek"
+          // (zgodne z fillGapsAsRest filozofią). Jeśli synthetic rest segments
+          // wypełniają gap, tło i tak jest niewidoczne (safety net dla edge case).
+          background: "#dbeafe",
           borderRadius: 4,
           overflow: "hidden",
         }}>
@@ -8563,7 +8566,32 @@ function MultiDayActivityView({ vehicle, driverActivities = [] }) {
         cur = segEnd;
       }
     }
-    Object.values(totals).forEach(t => { t.drivers = Array.from(t.drivers); });
+    // User feedback 2026-05-11: szare pola (gap między segmentami) = przerwa,
+    // nie "Dyspozycyjność". Filozofia spójna z fillGapsAsRest w czasPracy.js
+    // (compliance pipeline) — gap = silnik OFF = samochód stoi = kierowca odpoczywa.
+    // Wypełniamy luki w paskach synthetic rest, plus dorzucamy do sumy t.rest.
+    Object.values(totals).forEach(t => {
+      t.drivers = Array.from(t.drivers);
+      if (t.segments.length === 0) return;
+      t.segments.sort((a, b) => a.fromMin - b.fromMin);
+      const filled = [];
+      let lastEnd = 0;
+      for (const seg of t.segments) {
+        if (seg.fromMin > lastEnd) {
+          const gapDur = seg.fromMin - lastEnd;
+          filled.push({ type: "rest", fromMin: lastEnd, durMin: gapDur, synthetic: true });
+          t.rest = (t.rest || 0) + gapDur;
+        }
+        filled.push(seg);
+        lastEnd = seg.fromMin + seg.durMin;
+      }
+      if (lastEnd < 1440) {
+        const gapDur = 1440 - lastEnd;
+        filled.push({ type: "rest", fromMin: lastEnd, durMin: gapDur, synthetic: true });
+        t.rest = (t.rest || 0) + gapDur;
+      }
+      t.segments = filled;
+    });
     const days = Object.keys(totals).sort();
     return {
       dailyTotals: totals,
