@@ -207,6 +207,39 @@ export function preferDddSegments(segments) {
   return result;
 }
 
+// Scal rest segmenty oddzielone "ciszą" (brak segmentu drive/work/avail pomiędzy).
+//
+// Kontekst (2026-05-11): CSV widziszwszystko nie raportuje fragmentów gdy silnik
+// wyłączony. Skutek: weekend kierowcy (auto stoi 48h) widać jako 2-3 rest fragmenty
+// rozdzielone ~24h gap'ami; żaden nie kwalifikuje się samodzielnie jako weekly rest
+// (≥45h) → false alert "brak weekly rest" w computeDriverCompliance.
+//
+// Filozofia (spójna z mapWwPostojToType — postoje≥45min jako rest, fix 5bc3a66):
+// gap między rest segmentami = kontynuacja rest dopóki brak sprzecznego dowodu.
+// NIE scala przez drive/work (faktyczna przerwa rest) ani przez avail (formalnie
+// przerywa rest wg 561/2006).
+//
+// Test case (Volodymyr WGM 0475M, weekend 9-11.05.2026):
+//   Wejście: rest 15h13min (ww_csv) + gap 24h + rest 6h45min (auto_gps)
+//   Wyjście: rest 45h58min (1 segment, coalesced=true) → kwalifikuje jako weekly rest.
+export function coalesceRestGaps(segments) {
+  const sorted = [...segments].sort((a, b) => a.startMs - b.startMs);
+  const result = [];
+  for (const s of sorted) {
+    const last = result[result.length - 1];
+    if (last && last.type === "rest" && s.type === "rest") {
+      // Brak segmentu drive/work/avail pomiędzy → 1 ciągły rest
+      last.endMs = Math.max(last.endMs, s.endMs);
+      last.durMin = Math.max(0, Math.round((last.endMs - last.startMs) / 60000));
+      last.coalesced = true;
+      last.coalescedSources = [...(last.coalescedSources || [last.source]), s.source];
+    } else {
+      result.push({ ...s });
+    }
+  }
+  return result;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // TACHOGRAF VIEW HELPERS (Webfleet style)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -244,9 +277,13 @@ export function effectiveWeeklyDriveLimit(segments, weekStartMs) {
 // tygodni — przez dłuższy odpoczynek tygodniowy (>45h) lub dzienny.
 // Algorytm FIFO: najstarsze skrócenie najpierw kompensowane przez nadmiar.
 export function weeklyRestCompensation(segments, nowMs) {
+  // Pre-coalesce: scal rest fragmenty oddzielone "ciszą" CSV (silnik OFF) —
+  // bez tego weekend kierowcy bywa rozbity na 2-3 sub-24h fragmenty i żaden
+  // nie kwalifikuje się jako weekly rest. Patrz coalesceRestGaps.
+  const coalesced = coalesceRestGaps(segments);
   const lookbackMs = nowMs - 4 * 7 * 24 * 3600000; // 4 tygodnie wstecz
   // Weekly rests = rest segments ≥ 24h (mniejsze to dzienne)
-  const weeklyRests = segments.filter(s =>
+  const weeklyRests = coalesced.filter(s =>
     s.type === "rest" &&
     s.endMs >= lookbackMs &&
     s.endMs <= nowMs &&
