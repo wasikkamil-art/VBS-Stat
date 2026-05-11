@@ -2582,11 +2582,15 @@ const WW_TYPE_MAP = {
 };
 
 // CSV widziszwszystko nie rozróżnia rest/work/avail dla "Postój" (per pojazd, brak tachografu).
-// Heurystyka C: ≥9h = daily/weekly rest, 45min-9h = niejasny postój (avail), <45min = krótka pauza/manewry (work).
+// Heurystyka E (2026-05-08): konserwatywne — postoje >=45min strzelamy jako rest.
+// CSV nie ma pewności co kierowca robił podczas postoju (sen, czekanie, "?"),
+// więc bezpieczniej założyć rest niż avail. DDD (gdy kierowca wgra) nadpisze
+// avail tam gdzie kierowca świadomie wcisnął "?" na tachografie (preferDddSegments).
+// - ≥45min → rest
+// - <45min → work (krótka pauza/manewr)
 function mapWwPostojToType(durMs) {
   const durMin = durMs / 60000;
-  if (durMin >= 540) return "rest";
-  if (durMin >= 45) return "avail";
+  if (durMin >= 45) return "rest";
   return "work";
 }
 
