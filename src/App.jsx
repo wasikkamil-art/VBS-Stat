@@ -8447,11 +8447,12 @@ function DddDailyRow({ day, data }) {
           overflow: "hidden",
         }}>
         {segments.map((s, i) => {
-          const color = DDD_COLORS[s.type] || "#9ca3af";
+          const color = s._color || DDD_COLORS[s.type] || "#9ca3af";
           const left = (s.fromMin / 1440) * 100;
           const width = (s.durMin / 1440) * 100;
           const startStr = dddUtcMinToLocalHHMM(s.fromMin, day);
           const endStr = dddUtcMinToLocalHHMM(s.fromMin + s.durMin, day);
+          const label = s.type === "future" ? "Przyszłość" : DDD_TYPE_LABEL[s.type];
           return (
             <div
               key={i}
@@ -8462,7 +8463,7 @@ function DddDailyRow({ day, data }) {
                 height: "100%",
                 background: color,
               }}
-              title={`${DDD_TYPE_LABEL[s.type]}: ${startStr} → ${endStr} (${fmtHM(s.durMin)})${s.address ? ` · ${s.address}` : ""}`}
+              title={`${label}: ${startStr} → ${endStr} (${fmtHM(s.durMin)})${s.address ? ` · ${s.address}` : ""}`}
             />
           );
         })}
@@ -8569,26 +8570,52 @@ function MultiDayActivityView({ vehicle, driverActivities = [] }) {
     // User feedback 2026-05-11: szare pola (gap między segmentami) = przerwa,
     // nie "Dyspozycyjność". Filozofia spójna z fillGapsAsRest w czasPracy.js
     // (compliance pipeline) — gap = silnik OFF = samochód stoi = kierowca odpoczywa.
-    // Wypełniamy luki w paskach synthetic rest, plus dorzucamy do sumy t.rest.
-    Object.values(totals).forEach(t => {
+    // Wypełniamy luki synthetic rest do "now" (dla today) lub 1440 (past dni).
+    // Przyszłość dnia bieżącego = future segment (biały) — jeszcze nie wiemy.
+    const nowMsForFill = Date.now();
+    const nowDateForFill = new Date(nowMsForFill);
+    const todayUtcDateStr = nowDateForFill.toISOString().slice(0, 10);
+    const todayUtcStartMs = Date.UTC(
+      nowDateForFill.getUTCFullYear(),
+      nowDateForFill.getUTCMonth(),
+      nowDateForFill.getUTCDate()
+    );
+    const nowMinOfTodayUtc = Math.floor((nowMsForFill - todayUtcStartMs) / 60000);
+    Object.entries(totals).forEach(([dateStr, t]) => {
       t.drivers = Array.from(t.drivers);
       if (t.segments.length === 0) return;
+      const isToday = dateStr === todayUtcDateStr;
+      const restLimit = isToday ? nowMinOfTodayUtc : 1440;
       t.segments.sort((a, b) => a.fromMin - b.fromMin);
       const filled = [];
       let lastEnd = 0;
       for (const seg of t.segments) {
         if (seg.fromMin > lastEnd) {
-          const gapDur = seg.fromMin - lastEnd;
-          filled.push({ type: "rest", fromMin: lastEnd, durMin: gapDur, synthetic: true });
-          t.rest = (t.rest || 0) + gapDur;
+          const gapEnd = Math.min(seg.fromMin, restLimit);
+          if (gapEnd > lastEnd) {
+            const gapDur = gapEnd - lastEnd;
+            filled.push({ type: "rest", fromMin: lastEnd, durMin: gapDur, synthetic: true });
+            t.rest = (t.rest || 0) + gapDur;
+          }
         }
         filled.push(seg);
         lastEnd = seg.fromMin + seg.durMin;
       }
-      if (lastEnd < 1440) {
-        const gapDur = 1440 - lastEnd;
+      if (lastEnd < restLimit) {
+        const gapDur = restLimit - lastEnd;
         filled.push({ type: "rest", fromMin: lastEnd, durMin: gapDur, synthetic: true });
         t.rest = (t.rest || 0) + gapDur;
+        lastEnd = restLimit;
+      }
+      // Today: przyszłość od max(lastEnd, now) do 1440 jako "future" (biały)
+      if (isToday && lastEnd < 1440) {
+        filled.push({
+          type: "future",
+          fromMin: lastEnd,
+          durMin: 1440 - lastEnd,
+          _color: "#ffffff",
+          synthetic: true,
+        });
       }
       t.segments = filled;
     });
