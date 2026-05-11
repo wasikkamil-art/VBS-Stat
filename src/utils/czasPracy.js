@@ -235,6 +235,53 @@ export function lastActualWeeklyRestEnd(segments, now) {
   return bestEndMs;
 }
 
+// Wypełnij luki MIĘDZY znanymi segmentami synthetic rest ("fillgap").
+//
+// Kontekst (2026-05-11): user feedback — "szare pola w UI POWINNY być liczone
+// jako przerwa, nie powinno być traktowane jako inne". Filozofia rozszerzona:
+// CSV "milczy" gdy silnik OFF → samochód stoi → kierowca odpoczywa (benefit-of-doubt).
+//
+// Wpływ na metryki (wszystkie dostają już "wypełnione" segmenty):
+// - sumByType: rest sums większe o łączny czas gap'ów; drive/work/avail bez zmian
+// - lastDailyRestEnd: znajduje rest end tam gdzie wcześniej fallback (now-24h)
+// - continuousDrive: synthetic rest ≥45min resetuje cutoff (kierowca miał przerwę)
+// - weeklyRestCompensation: synthetic rest między 2 real rest → coalesce w 1 segment ≥45h
+// - current state: bez wpływu (synthetic NIE jest current — ostatni real zostaje)
+//
+// Scope: wypełniamy TYLKO wewnętrzne gap'y (między 2 znanymi segmentami).
+// NIE dorzucamy nic przed pierwszym (nieznana historia) ani po ostatnim (current).
+// NIE wypełniamy gdy segmenty nakładają się (curr.endMs >= next.startMs).
+//
+// Synthetic segments oznaczone source="fillgap" + synthetic=true (audyt + UI badge).
+export function fillGapsAsRest(segments) {
+  if (segments.length < 2) return segments;
+  const sorted = [...segments].sort((a, b) => a.startMs - b.startMs);
+  const result = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const curr = sorted[i];
+    result.push(curr);
+    const next = sorted[i + 1];
+    if (!next) break;
+    if (curr.endMs >= next.startMs) continue; // overlap lub touching → brak gap
+    const gapStart = curr.endMs;
+    const gapEnd = next.startMs;
+    const gapDurMin = Math.round((gapEnd - gapStart) / 60000);
+    if (gapDurMin <= 0) continue;
+    result.push({
+      startMs: gapStart,
+      endMs: gapEnd,
+      startTs: new Date(gapStart).toISOString(),
+      endTs: new Date(gapEnd).toISOString(),
+      durMin: gapDurMin,
+      type: "rest",
+      source: "fillgap",
+      synthetic: true,
+      isOpen: false,
+    });
+  }
+  return result;
+}
+
 // Scal rest segmenty oddzielone "ciszą" (brak segmentu drive/work/avail pomiędzy).
 //
 // Kontekst (2026-05-11): CSV widziszwszystko nie raportuje fragmentów gdy silnik
@@ -379,7 +426,10 @@ export function computeDriverCompliance(rawSegments = [], periodStart = null, no
     .map(s => normalizeSegment(s, now))
     .sort((a, b) => a.startMs - b.startMs);
   // Priorytet DDD — odfiltrowujemy GPS/manual tam gdzie mamy tachograf
-  const segments = preferDddSegments(allSegments);
+  const filteredByPriority = preferDddSegments(allSegments);
+  // Wypełnij wewnętrzne gap'y synthetic rest (user feedback 2026-05-11:
+  // szare pola w UI = przerwa, benefit-of-doubt kierowcy). Patrz fillGapsAsRest.
+  const segments = fillGapsAsRest(filteredByPriority);
 
   const nowMs = now.getTime();
   const current = segments[segments.length - 1] || null;
