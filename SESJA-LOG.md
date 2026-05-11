@@ -754,3 +754,82 @@ Wszystkie do dedykowanej sesji compliance verify (~1-2h).
 - `project_priority_compliance_data_verify.md` — utworzony (rano) + zaktualizowany (wieczór, 4 bugi udokumentowane)
 - `feedback_communication_style.md` — rozszerzony o "po ludzku, nie żargonem" (user feedback)
 
+
+---
+
+## 2026-05-11 — Compliance verify (audit + 2 z 4 bugów fixed)
+
+**Kontekst startu**: priorytet ⭐ z memory `project_priority_compliance_data_verify` — 4 bugi compliance udokumentowane 2026-05-08 podczas mega-sesji. Flota GPS rośnie (3 pojazdy aktywne), błędne compliance = ryzyko mandatów. Sesja dedykowana ~1-2h.
+
+### Audit (read-first)
+
+Mapa kodu po przeczytaniu:
+- **Silnik**: `src/utils/czasPracy.js` (493 linii) — REGULATION + computeDriverCompliance + computeDriverPlan + weeklyRestCompensation + preferDddSegments
+- **3 źródła** w `functions/index.js`:
+  - `scheduledGpsPoll` (565-717) — auto_gps source
+  - `wwReportInbound` + `processWWCsv` + `importWWForVehicle` + `mapWwPostojToType` — ww_csv source (z fix `5bc3a66` postoje≥45min jako rest)
+  - `parseDddFile` (segment writes 1520-1625) — ddd source
+- **Render**: `TachografComplianceSection.jsx` (107 → `plan?.weeklyRest?.startMs`)
+
+Mapowanie 4 bugów na linie kodu + ranking impactu:
+1. #1 Weekly rest false alert (active complaint) — `czasPracy.js:246-278`
+2. #3+#4 Deadline kalendarzowy (planowanie tras) — `czasPracy.js:158-165` + `455-460`
+3. #2 auto_gps fragmentation (cosmetic + edge) — `functions/index.js:664`
+
+### Bug #1 ✅ commit `79ae3c7`
+
+CSV widziszwszystko nie raportuje fragmentów gdy silnik OFF → weekend kierowcy = 2-3 rest fragmenty rozbite ~24h gap'ami. `weeklyRestCompensation` filtruje per-segment `durMin >= 24*60` → żaden fragment samodzielnie nie kwalifikuje → false alert "brak weekly rest".
+
+Volodymyr WGM 0475M (weekend 9-11.05.2026, faktyczny rest 45h53min):
+- 09.05 09:49→10.05 03:03 PL = 15h13min (ww_csv)
+- gap 24h (silnik OFF)
+- 11.05 03:01→09:43 PL = 6h45min (auto_gps)
+
+Fix: nowa funkcja `coalesceRestGaps(segments)` jako export utility — scala 2+ rest oddzielonych BRAK segmentu drive/work/avail między nimi. Wywołane lokalnie w `weeklyRestCompensation` (mała blast radius — nie ruszamy current state UI, daily sums, continuousDrive, lastDailyRestEnd). Filozofia spójna z `5bc3a66` — gap = kontynuacja rest dopóki brak sprzecznego dowodu.
+
+Po fix Volodymyr: 1 scalony rest 45h58min, `coalesced=true`, kwalifikuje jako weekly rest ✅.
+
+### Bug #3+#4 ✅ commit `02a3e86`
+
+Screenshot user'a 2026-05-11 — mimo że Volodymyr wykręcił 45h, system pokazuje "Odpoczynek tygodniowy 17.05 00:00 → 18.05 21:00" (kalendarzowo niedziela). Faktycznie wg 561/2006 art. 8.6 deadline = `koniec_poprzedniego_weekly_rest + 6×24h`.
+
+`lastWeeklyRestEnd(segments, now)` ignorował segments — komentarz w kodzie potwierdza: "segments... nieużywane" — zawsze zwracał kalendarzowy poniedziałek.
+
+Fix:
+- Nowa funkcja `lastActualWeeklyRestEnd(segments, now)` — szuka rest≥45h w lookback 14d (z `coalesceRestGaps` z fix #1)
+- `computeDriverCompliance` zwraca pole `lastActualWeeklyRestEnd`
+- `computeDriverPlan.weeklyRest`: `endMs + 6×24h` jeśli istnieje, fallback na niedzielę kalendarzową gdy null (nowy kierowca / brak danych ≥45h w 14d — backward compat)
+- NIE zmienione `lastWeeklyRestEnd` (używane w App.jsx + computeDriverCompliance dla weekStart kalendarzowy = sums tygodniowe wg art.4i — inny semant)
+
+Po fix Volodymyr: deadline 17.05 09:43 → 19.05 06:43 (zamiast 17.05 00:00 → 18.05 21:00). W innych przypadkach (kierowca skończył rest w środę 12:00) różnica może być ~3-4 dni.
+
+### Bug #2 🔲 OTWARTE — osobna sesja
+
+`scheduledGpsPoll` (`functions/index.js:664`): `speed > 3 ? "drive" : "rest"` bez hysteresis → 30+ switches drive/rest po 0-1 min na sygnalizacji/korkach.
+
+Plan fix (przygotowany, NIE wdrożony):
+- Hysteresis: speed > 5 → drive, speed < 1 → rest, w środku utrzymaj poprzedni typ
+- Min-duration filter: zatrzymanie <2 min nie kończy drive
+
+Wymaga **CF deploy z main repo** (memory `feedback_deploy_worktree.md` — z worktree NIE działa). Osobna sesja.
+
+### Stan końcowy 2026-05-11
+
+**Branch**: `claude/affectionate-buck-2399c6` na `origin` (2 commits ahead of main)
+- `79ae3c7` — fix #1 (coalesceRestGaps)
+- `02a3e86` — fix #3+#4 (lastActualWeeklyRestEnd + deadline art.8.6)
+
+**PR**: https://github.com/wasikkamil-art/VBS-Stat/pull/new/claude/affectionate-buck-2399c6
+
+**Verify produkcyjnie po merge** (user):
+1. Mergeuj PR → main → Vercel auto-deploy ~3 min
+2. Otwórz fleetstat.pl → Tachograf → Volodymyr WGM 0475M
+3. Sprawdź: (a) kafel "Wyrównanie tygodniowe" zielony (owedMin=0) + (b) "Odpoczynek tygodniowy" pokazuje 17.05 09:43 → 19.05 06:43 (NIE 17.05 00:00)
+
+**Otwarte na kolejną sesję**:
+- Bug #2 (auto_gps fragmentation hysteresis) — wymaga CF deploy z main repo
+- Pozostałe priorytety z poprzedniego SESJA-LOG (DDD pozostali kierowcy, badge "TCH" w UI, delete button dddFiles, etc.)
+
+### Memory zaktualizowane
+
+- `project_priority_compliance_data_verify.md` — status OPEN → IN PROGRESS, bugi #1 + #3+#4 oznaczone ✅ z commit hash, bug #2 OTWARTE z notatką "wymaga CF deploy z main repo"
