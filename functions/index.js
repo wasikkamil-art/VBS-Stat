@@ -1557,20 +1557,23 @@ exports.parseDddFile = onCall(
       console.warn(`[DDD parse] No driverEmail found for cardNumber=${targetCard}, name=${metadata.driverName} — skipping driverActivities write`);
     } else {
       console.log(`[DDD parse] Matched driver by ${matchMethod}: ${driverEmail}`);
-      // Reupload safety: usuń stare segmenty source=ddd dla tego kierowcy w zakresie pliku
+      // Reupload safety: usuń stare segmenty source=ddd dla tego kierowcy w zakresie pliku.
+      // Single-field query (driverEmail) — composite filter w JS, żeby uniknąć wymogu
+      // composite index w Firestore. Per kierowca segmenty są małą collection (~5000 max).
       if (metadata.periodStart && metadata.periodEnd) {
         const startISO = new Date(metadata.periodStart + "T00:00:00Z").toISOString();
         const endISO = new Date(metadata.periodEnd + "T23:59:59.999Z").toISOString();
         const oldSnap = await db.collection("driverActivities")
           .where("driverEmail", "==", driverEmail)
-          .where("source", "==", "ddd")
-          .where("startTs", ">=", startISO)
-          .where("startTs", "<=", endISO)
           .get();
-        if (!oldSnap.empty) {
+        const toDelete = oldSnap.docs.filter(d => {
+          const data = d.data();
+          return data.source === "ddd" && data.startTs >= startISO && data.startTs <= endISO;
+        });
+        if (toDelete.length > 0) {
           let delBatch = db.batch();
           let delCount = 0;
-          for (const d of oldSnap.docs) {
+          for (const d of toDelete) {
             delBatch.delete(d.ref);
             delCount++;
             if (delCount % 400 === 0) {
@@ -1579,7 +1582,7 @@ exports.parseDddFile = onCall(
             }
           }
           if (delCount % 400 !== 0) await delBatch.commit();
-          console.log(`[DDD parse] Replaced ${oldSnap.size} old DDD activities for ${driverEmail} ${metadata.periodStart}→${metadata.periodEnd}`);
+          console.log(`[DDD parse] Replaced ${toDelete.length} old DDD activities for ${driverEmail} ${metadata.periodStart}→${metadata.periodEnd}`);
         }
       }
 
