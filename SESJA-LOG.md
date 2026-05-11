@@ -595,3 +595,162 @@ OC Przewoźnika odzyskany 2× z PITR (rano + wieczór, REST API PATCH manualnie)
 - 2026-05-07 (jutro) ~02:04 — kolejny raport CSV widziszwszystko, sprawdzić logi CF
 - 2026-06-01 — upgrade SendGrid trial
 - Etap 6 — gdy stable po data loss saga
+
+---
+
+## 2026-05-07 / 2026-05-08 — MEGA-SESJA: recovery + atomic refactor + GPS konsolidacja + Tachograf Webfleet + DDD live compliance
+
+20 commitów w jednej długiej sesji. Najwięcej zmian w jednym dniu od startu repo.
+
+### Część 1 — Diagnostyka data loss + recovery (rano 2026-05-07)
+
+User zgłosił że WGM 0507M nie ma kierowcy w UI Przegląd, plus inne pojazdy mają "Jan Kowalski" / "Piotr Wiśniewski" zamiast aktualnych imion (Volodymyr Iwansky / Siarhei Kolabu / volodymyr.lukashuchuk). 3 dzień łatka-do-łatki — meta-pattern szukamy.
+
+**Diagnoza 3-fazowa (read-only, ~45 min)**:
+1. **PITR snapshots** (6 punktów w czasie) — kolekcje, counts, diff
+2. **Audit log fleetWrite** — kto/kiedy/co napisał ostatnie 24h
+3. **Code audit** (Explore agent) — wszystkie write paths fleet/data
+
+**Smoking gun**: fleetWrite 2026-05-07 08:12:45 UTC, source=`safeDbSet/useEffect`, prev_count=6 → next_count=6, **30+ pól ustawionych na None** dla każdego z 6 pojazdów. VIN, OC numer/expiry/kwota, AC, GAP, inspectionExpiry, udtExpiry, wartość netto, assignedDriver, tachoStart — **WSZYSTKO zniknęło**.
+
+Source: `useEffect [vehicles, loaded] → safeDbSet(SK.vehicles, vehicles)` — silent writeback z stale state (partial vehicle objects z formularza edycji). Ten sam mechanizm który zniszczył frachty 2026-04-30, OC Przewoźnika 2026-05-06 — w pojazdach wciąż istniał.
+
+**Recovery**: PITR snapshot `1h ago` (08:00 UTC) → PATCH `fleet/data?updateMask=fleetv2_vehicles` → 6 pojazdów z VIN/OC/aktywnymi kierowcami przywrócone. HTTP 200, updateTime 09:37 UTC.
+
+### Część 2 — Atomic helpers refactor (kontynuacja 2026-04-30 dla frachty)
+
+**Komit `08fc5e1`** — vehicles atomic:
+- USUNIĘTY `useEffect [vehicles, loaded] → safeDbSet` (linia 1508)
+- Nowe helpery: `dbAddVehicle`, `dbAssignDriverToVehicle`, `dbUnassignDriverFromVehicle`
+- Refactor 6 callsite (`addVehicle`, `delVehicle`, `updateVehicle`, `restore`, `assignDriverToVehicle`, `unassignDriver`)
+
+**Komit `01483c4`** — fix widoku statusów kierowców w Przeglądzie:
+Helper `liveDriver(plate)` wyciąga aktywnego kierowcę z `vehicles[].driverHistory` zamiast `p.driver` (stale string w pauzy). Zero drift gdy kierowca się zmieni.
+
+**Komit `653f26e`** — docs atomic:
+- USUNIĘTY useEffect [docs, loaded]
+- `onEdit` dokumentu refactor na `dbUpdateInArrayField` (był optimistic setState)
+- Nowe helpery: `dbUpdateInArrayField` (update item po id) + `dbBulkReplaceArrayField`
+
+**Komit `dc53e59`** — imi atomic:
+- USUNIĘTY useEffect [imiRecords, loaded] (onAdd/onDelete już atomic)
+- Wyjaśnia symptom z 2026-05-06 wieczór: 28 IMI zniknęło-wróciło + 5 (delete duplikatów) wracało
+
+Zostały do faza 2: **costs, rent, categories** (ten sam pattern, niska pilność).
+
+### Część 3 — GPS/Monitoring konsolidacja 8 → 3 zakładki
+
+User: "uważam że mamy tu za dużo rzeczy". Komity:
+
+- `4ef12c4` — ukryte: Kilometry/Trasy/Karta kierowcy (5 zakładek)
+- `7115eda` — wycięte 522 linie kodu (GpsKilometry/Trasy/KartaSection)
+- `7cf7dcb` — nowe nazwy: ddd → "Tachograf", tachograf → "Czas pracy kierowcy", aktywnosc → "Monitoring jazdy"
+- `b26e3f8` — Monitoring jazdy scalony jako sekcja Multi-day timeline w Czas pracy kierowcy (4→3)
+
+**Final layout**: Mapa online, Tachograf (pliki DDD), Czas pracy kierowcy (Webfleet view + plan + multi-day timeline).
+
+### Część 4 — Tachograf compliance 1:1 z Webfleet
+
+User pokazał screenshoty Webfleet — porównanie z naszym Tachografem.
+
+- `fd8f941` — **fix 13h → 15h** "najpóźniejszy koniec zmiany" (Pakiet Mobilności art. 8.4). Dynamiczne: 15h gdy skrócenie dostępne, 13h gdy 3/3 użyte. + tooltip z explanation.
+- `7738146` — sekcja "Zmniejszone tygodniowe czasy odpoczynków — Wyrównanie" (art. 8.6). Algorytm FIFO: skrócony tygodniowy (24h ≤ x < 45h) dodaje brakujące min do owed, wydłużony (>45h) kompensuje. Deadline = endMs najstarszego nieskompensowanego + 3 tyg.
+- `b61fec0` — scalenie **Plan do przodu** + **Timeline 24h (z 7d wstecz)** ze starego GpsCzasPracySection.
+- `26a0c9c` — usunięcie zbędnego info-boxa "Widok zgodny z Webfleet".
+
+### Część 5 — Email "Status floty" — smart baza + logo VBS
+
+User pokazał email — pojazdy z pauzą zaplanowaną w przyszłości po rozładunku pokazywały "DO PODJĘCIA" zamiast "Baza".
+
+- `deaa574` — smart baza w `buildEmailHTML`: jeśli kierowca rozładował się + ma pauzę baza zaplanowaną + brak nextF → `isCurrentlyAtBaza=true` → wyświetla 🏠 Baza · "Dostępny od: X" · PL 25-611 Kielce. Plus sortowanie: W trasie najpierw, Baza na dole. Plus "Pauza/Baza: N" w nagłówku liczy aktywne + at-base.
+- `d2e1fa1` — logo VBS w nagłówku (analogiczne do emaila "Kółko zakończone").
+
+Bug "wciąż DO PODJĘCIA po deploy" — okazało się że jest **druga CF** `sendFleetEmailNow` (manualne wysyłanie) której nie zdeployowałem osobno. Po deploy wszystkich 4 (sendFleetEmail8/14/20/Now) — działa.
+
+### Część 6 — DDD parser → driverActivities live (decyzja 2026-05-05 zrewidowana)
+
+User pyta o source danych compliance. Wyjaśnienie: ww_csv + auto_gps live, DDD = archive only (decyzja 2026-05-05). User: "to chce odwrotnie — DDD jest nadrzędne (rozliczane przez policję), system powinien nadpisać CSV/GPS gdy kierowca wgra DDD".
+
+**Plan implementacji**:
+- `ce9ae97` — Cloud Function `parseDddFile` po `dddFiles add` zapisuje segmenty z `source="ddd"` do `driverActivities`. Reupload safety: usuwa stare segmenty source=ddd dla danego kierowcy w periodStart→periodEnd. `preferDddSegments` w czasPracy.js automatycznie wycina ww_csv/auto_gps w pokrytych zakresach (już istniało).
+- `7ae4de7` — match po **cardNumber** w driverHistory (primary), fallback po nazwie (case-insensitive trim). Powód: DDD ma `driverName="Siarhei Kolabau"` ale fleet/data ma `"Siarhei Kolabu "` (rozjazd transliteracji). cardNumber = deterministyczny (jeden na 5 lat). + UI input "Numer karty kierowcy (DDD)" w driverHistory editor.
+- `9a8be33` — fix `FAILED_PRECONDITION` (cleanup query wymagał composite index). Uproszczone: single-field query po driverEmail + composite filter w JS.
+
+**Test Siarhei (user wgrał plik DDD ponownie po update cardNumber)**:
+- 4350 segmentów ddd trafiło do driverActivities
+- Total Siarhei: 4357 (4350 ddd + 6 ww_csv + 1 auto_gps)
+- Weekly rests merged ≥24h (z DDD): 3 segmenty
+  - 17-19.04 → 45h 5min (regularny, +0.1h ekstra)
+  - **25-26.04 → 24h 1min** (SKRÓCONY, brak 21h) ⚠
+  - 02-04.05 → 45h 16min (regularny, +0.3h ekstra)
+- **OWED: 20h 43min**, deadline **17.05 07:28**
+
+**To realne** ostrzeżenie dla dyspozytora. Pierwszy raz w aplikacji compliance z **rzeczywistego tachografu**.
+
+### Część 7 — heurystyka ww_csv (konserwatywne)
+
+User pokazał timeline Volodymyra — nocą szary (avail). Bug: heurystyka klasyfikowała postoje 45min-9h jako avail mimo że nocą kierowca spał (powinno być rest).
+
+Najpierw zaproponowałem heurystykę nocną (22:00-06:00 → rest), user wycofał: "zrobimy inaczej, dyspozycyjność zamienimy na niebieski (rest)".
+
+- `5bc3a66` — `mapWwPostojToType`: ≥45min → rest, <45min → work. **Brak avail z CSV** — DDD da prawdziwy avail (kierowca świadomie wciska "?"). Plus migration 29 istniejących avail (source=ww_csv) → rest.
+- Avail w bazie po migration: 69 (wszystkie z DDD = świadomie wciśnięte na tachografie).
+
+### Część 8 — GPS scale-up: 3 pojazdy GPS (był 1)
+
+User dodał fizycznie GPS do WGM 0507M i WGM 5367K. Plus dodał "gps" w equipment przez UI edit pojazdu (test atomic helpers in real use — działa, fleetWrite audit log pokazuje atomic/dbUpdateVehicleField).
+
+- `a7558c9` — imię kierowcy w lewym panelu listy GPS po marce ("Iveco · Volodymyr Iwansky")
+- `061133b` — fix 2 bugów:
+  - Zielona ikonka tylko dla `ignitionState=ON` lub pozycji <10 min → dodano check `hasTodayActivity` (drive/work segment dzisiaj)
+  - **Stale closure setInterval** w auto-refresh: `if (!selectedDevice) setSelectedDevice(...)` resetował wybór na pierwszy pojazd co 30s (zamiana na funkcyjny setState z fresh prev)
+
+### Część 9 — 4 BUGI compliance znalezione + udokumentowane (do dedykowanej sesji)
+
+Po dorobieniu DDD live, user pyta dlaczego niewidoczne weekly rest Volodymyra (9-11.05). Analiza segmentów:
+
+**Faktyczny rest**: 9.05 09:49 PL → 11.05 07:42 PL = **45h 53min** regularny ✅
+
+**W bazie**: 3 fragmenty z gap 24h "ciszy" CSV (CSV nie raportuje gdy silnik wyłączony). Algorytm `weeklyRestCompensation` filtr `s.durMin >= 24*60` → żaden fragment nie kwalifikuje → fałszywy alarm "brak weekly rest".
+
+**4 bugi compliance udokumentowane** w memory `project_priority_compliance_data_verify.md`:
+1. CSV "milczy" + algorytm nie scala fragmentów = false alert weekly rest
+2. auto_gps generuje krótkie switches drive/rest <1 min (fragmentacja)
+3. Weekly rest deadline kalendarzowo (nd 00:00) zamiast 561/2006 art. 8.6 (6×24h od last rest end)
+4. Uproszczenie kalendarzowe weekly rest deadline
+
+Wszystkie do dedykowanej sesji compliance verify (~1-2h).
+
+### Stan końcowy 2026-05-08
+
+20 commitów dziś. Vercel deploy live (`5bc3a66` ostatni). Cloud Functions deploy: sendFleetEmail8/14/20/Now, parseDddFile, wwReportInbound.
+
+### Otwarte na następną sesję
+
+⭐ **PRIORYTET — Dedykowana sesja compliance verify** (~1-2h):
+- 4 bugi udokumentowane w memory `project_priority_compliance_data_verify.md`
+- Cel: 1:1 z 561/2006 + Pakiet Mobilności
+- Test cases: Volodymyr (gap CSV), Siarhei (DDD source of truth), edge cases
+
+📋 **Faza 2 fleet/data zakończenie**: costs, rent, categories atomic helpers (~30 min, low priority)
+
+📋 **DDD Krok 3 (zaplanowane na "jutro" z dzisiejszej sesji)** — UI badge "TCH" przy danych z tachografu (~1h, dla użytkowników widzieć czy dane są z DDD czy CSV/GPS)
+
+📋 **DDD pozostałych kierowców** — Volodymyr Iwansky (priorytet — często skrócenia), Lukashuchuk, Mirosław Teper. Każdy plik = realne dane.
+
+📋 **scheduledGpsPoll — fragmentacja krótkich switches** — gdzieś bug który generuje 30+ drive/rest po 0-1 min (hysteresis: speed > 5 → drive, speed < 1 → rest)
+
+📋 **Delete button dla dddFiles** w UI (zaplanowane wcześniej, nie zrobione)
+
+### Operacyjne (user)
+
+- Następny CSV widziszwszystko ~02:04 PL kolejnego dnia — sprawdzić heurystyka E działa (postoje ≥45min → rest)
+- 2026-06-01 deadline — upgrade SendGrid trial
+- Plus: 3 pojazdy GPS aktywne (była 1) → dane compliance dla WGM 0507M i 5367K będą rosły
+
+### Memory zaktualizowane
+
+- `MEMORY.md` — dodany priorytet ⭐ z gwiazdką
+- `project_priority_compliance_data_verify.md` — utworzony (rano) + zaktualizowany (wieczór, 4 bugi udokumentowane)
+- `feedback_communication_style.md` — rozszerzony o "po ludzku, nie żargonem" (user feedback)
+
