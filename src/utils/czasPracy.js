@@ -207,6 +207,34 @@ export function preferDddSegments(segments) {
   return result;
 }
 
+// Znajdź endMs ostatniego rzeczywistego weekly rest (≥45h ciągły) w lookback 14 dni.
+//
+// Kontekst (2026-05-11): używane do liczenia deadline kolejnego weekly rest wg
+// 561/2006 art. 8.6 — "tygodniowy okres odpoczynku rozpoczyna się nie później
+// niż po zakończeniu sześciu okresów 24-godzinnych od końca poprzedniego".
+//
+// Bez tego computeDriverPlan.weeklyRest hard-coduje deadline jako kalendarzową
+// niedzielę 00:00 (bug #3+#4). Rzeczywisty deadline = lastActualEnd + 6×24h.
+//
+// Pre-coalesce: rest fragmenty oddzielone "ciszą" CSV są scalane (patrz
+// coalesceRestGaps) — bez tego weekend Volodymyra (15h+gap+6h) nie kwalifikuje.
+//
+// Zwraca null jeśli brak rest≥45h w 14 dniach (nowy kierowca, brak danych) —
+// caller (computeDriverPlan) powinien fallback na kalendarzową niedzielę.
+export function lastActualWeeklyRestEnd(segments, now) {
+  const nowMs = now.getTime();
+  const lookbackMs = nowMs - 14 * 24 * 3600000;
+  const coalesced = coalesceRestGaps(segments);
+  let bestEndMs = null;
+  for (const s of coalesced) {
+    if (s.type !== "rest") continue;
+    if (s.endMs < lookbackMs || s.endMs > nowMs) continue;
+    if (s.durMin < REGULATION.WEEKLY_REST_REGULAR) continue; // 45h
+    if (bestEndMs === null || s.endMs > bestEndMs) bestEndMs = s.endMs;
+  }
+  return bestEndMs;
+}
+
 // Scal rest segmenty oddzielone "ciszą" (brak segmentu drive/work/avail pomiędzy).
 //
 // Kontekst (2026-05-11): CSV widziszwszystko nie raportuje fragmentów gdy silnik
@@ -461,6 +489,10 @@ export function computeDriverCompliance(rawSegments = [], periodStart = null, no
       start: biweekStart,
     },
     weeklyRestComp: weeklyRestCompensation(segments, nowMs),
+    // NEW (fix #3+#4): endMs ostatniego rzeczywistego weekly rest (≥45h) w lookback 14d.
+    // Używane przez computeDriverPlan do liczenia deadline kolejnego weekly rest
+    // wg 561/2006 art. 8.6 (zamiast hard-coded niedziela kalendarzowa). null = fallback.
+    lastActualWeeklyRestEnd: lastActualWeeklyRestEnd(segments, now),
     period28,
     sources: sourceStats,
     hasDdd,
@@ -488,12 +520,21 @@ export function computeDriverPlan(compliance, now = new Date()) {
   // 3. Odpoczynek dzienny 11h (lub 9h jeśli skrócony)
   const dailyRestEndMs = endOfDayMs + REGULATION.DAILY_REST_REGULAR * 60000;
 
-  // 4. Odpoczynek tygodniowy — ile godzin zostało do końca bieżącego tygodnia (regularny)
-  const weekStartDate = new Date(compliance.weekly.start);
-  const weekEndDate = new Date(weekStartDate);
-  weekEndDate.setDate(weekStartDate.getDate() + 6);
-  weekEndDate.setHours(0, 0, 0, 0);
-  const weeklyRestStartMs = weekEndDate.getTime();
+  // 4. Odpoczynek tygodniowy — wg 561/2006 art. 8.6:
+  // "Tygodniowy okres odpoczynku rozpoczyna się nie później niż po zakończeniu
+  // sześciu okresów 24-godzinnych od końca poprzedniego tygodniowego okresu odpoczynku."
+  // Czyli deadline = lastActualWeeklyRestEnd + 6×24h (NIE niedziela kalendarzowa).
+  // Fallback (gdy brak rest≥45h w lookback 14d — nowy kierowca / brak danych): kalendarzowo.
+  let weeklyRestStartMs;
+  if (compliance.lastActualWeeklyRestEnd) {
+    weeklyRestStartMs = compliance.lastActualWeeklyRestEnd + 6 * 24 * 3600000;
+  } else {
+    const weekStartDate = new Date(compliance.weekly.start);
+    const weekEndDate = new Date(weekStartDate);
+    weekEndDate.setDate(weekStartDate.getDate() + 6);
+    weekEndDate.setHours(0, 0, 0, 0);
+    weeklyRestStartMs = weekEndDate.getTime();
+  }
   const weeklyRestEndMs = weeklyRestStartMs + REGULATION.WEEKLY_REST_REGULAR * 60000;
 
   // 5. Powrót do bazy
