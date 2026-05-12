@@ -2938,16 +2938,18 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                         && (!nextF || futurePauza.start <= nextF.dataZaladunku);
 
                       // PRIORYTET 1: W trasie (z badgem "opóźniony" gdy data rozładunku przekroczona).
-                      // Grace period: pokaż "opóźniony" dopiero od 2-go dnia po dataRozladunku
-                      // (pierwszy dzień to normalne — kierowca może rozładowywać / jechać do bazy).
+                      // Semantyka "1 dzień minął" = >=24h od dataRozladunku → wymaga 2 dni kalendarzowych.
+                      // displayedOverdue = daysCalendar - 1 (np. 12.05 vs 11.05 = 1 dzień kalendarzowo,
+                      // ale dzień jeszcze nie minął całkowicie → display 0; 13.05 → display 1d).
                       if (activeF) {
                         status = "trasa";
-                        const overdueDays = activeF.dataRozladunku < todayISO
+                        const overdueDaysCal = activeF.dataRozladunku < todayISO
                           ? Math.round((todayMs - new Date(activeF.dataRozladunku + "T00:00:00").getTime()) / 86400000)
                           : 0;
-                        const showOverdue = overdueDays >= 2;
+                        const displayedOverdue = Math.max(0, overdueDaysCal - 1);
+                        const showOverdue = displayedOverdue >= 1;
                         statusLabel = showOverdue
-                          ? `W trasie · opóźniony ${overdueDays}d`
+                          ? `W trasie · opóźniony ${displayedOverdue}d`
                           : "W trasie";
                         statusIcon = <IconTruck size={14}/>;
                         statusColor = showOverdue ? "#dc2626" : "#15803d";
@@ -3000,11 +3002,14 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                         statusColor = "#1d4ed8";
                         statusBg = "#eff6ff";
                       }
-                      // PRIORYTET 4: Czeka na zlecenie (z liczbą dni)
+                      // PRIORYTET 4: Czeka na zlecenie (z liczbą dni — grace period 1 dzień).
+                      // Semantyka "1 dzień minął" = >=24h od rozładunku → 2 dni kalendarzowych.
+                      // displayedDays = daysSinceUnload - 1 (12.05 vs 11.05 → 0, 13.05 → 1d).
                       else {
                         status = "czeka";
-                        if (daysSinceUnload !== null && daysSinceUnload > 0) {
-                          statusLabel = `Czeka na zlecenie · ${daysSinceUnload}d`;
+                        const displayedDays = daysSinceUnload !== null ? daysSinceUnload - 1 : 0;
+                        if (displayedDays >= 1) {
+                          statusLabel = `Czeka na zlecenie · ${displayedDays}d`;
                         } else {
                           statusLabel = "Czeka na zlecenie";
                         }
@@ -3026,7 +3031,19 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                           && !isStaleOverdue(r)
                         )
                         .sort((a, b) => (b.dataRozladunku || "").localeCompare(a.dataRozladunku || ""));
-                      const displayF = pendingFF[0] || activeF || nextF || lastF;
+                      // displayF — fracht pokazany na karcie. Dla "pauza"/"czeka" preferujemy
+                      // lastDoneF (ostatni rozładowany — wspominamy gdzie kierowca był) zamiast
+                      // nextF (przyszły fracht może być za 7 miesięcy → "Zał. 09.12 · Rozł. —"
+                      // myleace dla user). Dla "trasa" → activeF, dla "planowany" → nextF.
+                      let displayF;
+                      if (status === "trasa") {
+                        displayF = pendingFF[0] || activeF;
+                      } else if (status === "planowany") {
+                        displayF = nextF || pendingFF[0] || lastDoneF || lastF;
+                      } else {
+                        // pauza / czeka — wspominamy ostatnią trasę
+                        displayF = lastDoneF || pendingFF[0] || nextF || lastF;
+                      }
 
                       // Dane trasy z ostatniego pending / aktywnego / następnego frachtu
                       const skad = displayF ? [displayF.zaladunekKod,displayF.zaladunekKod2,displayF.zaladunekKod3].filter(s=>s&&s.trim()).join(" / ") || displayF.skad || "—" : "—";
