@@ -3055,6 +3055,12 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                       const dataZal = displayF?.dataZaladunku || null;
                       const dataRozl = displayF?.dataRozladunku || null;
                       const fmtD = (d) => d ? new Date(d).toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit"}) : "—";
+                      // Wizualne potwierdzenie rozładowania — data rozł. na zielono gdy fracht
+                      // formalnie zakończony (isFrachtRozladowany = true). Spójność z statusem
+                      // "Czeka na zlecenie" / "Baza" → user widzi że poprzednia trasa OK.
+                      const displayFRozladowany = displayF
+                        ? isFrachtRozladowany(displayF, eventsByFrachtApp[displayF.id] || [])
+                        : false;
 
                       return (
                         <div key={v.id} className="bg-white rounded-2xl border overflow-hidden"
@@ -3102,7 +3108,10 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                                 <span className="text-gray-200">·</span>
                                 <div className="flex items-center gap-1">
                                   <span className="text-xs text-gray-400">Rozł.</span>
-                                  <span className="text-xs font-semibold text-gray-700">{fmtD(dataRozl)}</span>
+                                  <span className={`text-xs font-semibold ${displayFRozladowany ? "text-green-600" : "text-gray-700"}`}>
+                                    {fmtD(dataRozl)}
+                                    {displayFRozladowany && " ✓"}
+                                  </span>
                                 </div>
                               </div>
 
