@@ -2871,15 +2871,26 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                       const todayISO = new Date().toLocaleDateString("sv-SE"); // "2026-04-02" w lokalnym timezone
                       const todayMs = new Date(todayISO + "T00:00:00").getTime();
 
-                      // Szukaj aktywnego frachtu: załadowany w dniu (lub wcześniej) i NIE zakończony
-                      // (brak event dotarcie_rozladunek). 2026-05-12: usunięto `today <= dataRozladunku`
-                      // żeby pokrywać też frachty opóźnione (data rozładunku w przeszłości, ale
-                      // kierowca jeszcze nie odznaczył dotarcia) — wcześniej fracht "wisiał w luce"
-                      // i system spadał do "Czeka na zlecenie · Xd" z poprzedniego rozładowanego.
+                      // Helper: fracht "ślepy" — rozładunek > 14 dni temu, kierowca zapomniał
+                      // odznaczyć. Bez cap stare frachty (np. z grudnia) wchodziłyby do activeF
+                      // pokazując "W trasie · opóźniony 134d" — myleace dla user.
+                      const STALE_FRACHT_DAYS = 14;
+                      const isStaleOverdue = (r) => {
+                        if (!r.dataRozladunku || r.dataRozladunku >= todayISO) return false;
+                        const overdueDays = Math.round((todayMs - new Date(r.dataRozladunku + "T00:00:00").getTime()) / 86400000);
+                        return overdueDays > STALE_FRACHT_DAYS;
+                      };
+
+                      // Szukaj aktywnego frachtu: załadowany w dniu (lub wcześniej) i NIE zakończony.
+                      // 2026-05-12: pokrywa też opóźnione (rozładunek w przeszłości max 14 dni temu) —
+                      // wcześniej fracht "wisiał w luce" → fallback "Czeka na zlecenie" myleacy.
+                      // Cap 14d zapobiega łapaniu starych "ślepych" frachtów (zapomniane dotarcia).
                       const activeF = vFrachty.find(r => {
                         if (!r.dataZaladunku || !r.dataRozladunku) return false;
                         if (isFrachtRozladowany(r, eventsByFrachtApp[r.id] || [])) return false;
-                        return r.dataZaladunku <= todayISO;
+                        if (r.dataZaladunku > todayISO) return false;
+                        if (isStaleOverdue(r)) return false;
+                        return true;
                       });
 
                       // Szukaj następnego zaplanowanego (zał > dziś)
@@ -2926,18 +2937,21 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                         && lastDoneF?.dataRozladunku && lastDoneF.dataRozladunku <= todayISO
                         && (!nextF || futurePauza.start <= nextF.dataZaladunku);
 
-                      // PRIORYTET 1: W trasie (z badgem "opóźniony" gdy data rozładunku przekroczona)
+                      // PRIORYTET 1: W trasie (z badgem "opóźniony" gdy data rozładunku przekroczona).
+                      // Grace period: pokaż "opóźniony" dopiero od 2-go dnia po dataRozladunku
+                      // (pierwszy dzień to normalne — kierowca może rozładowywać / jechać do bazy).
                       if (activeF) {
                         status = "trasa";
                         const overdueDays = activeF.dataRozladunku < todayISO
                           ? Math.round((todayMs - new Date(activeF.dataRozladunku + "T00:00:00").getTime()) / 86400000)
                           : 0;
-                        statusLabel = overdueDays > 0
+                        const showOverdue = overdueDays >= 2;
+                        statusLabel = showOverdue
                           ? `W trasie · opóźniony ${overdueDays}d`
                           : "W trasie";
                         statusIcon = <IconTruck size={14}/>;
-                        statusColor = overdueDays > 0 ? "#dc2626" : "#15803d";
-                        statusBg = overdueDays > 0 ? "#fef2f2" : "#f0fdf4";
+                        statusColor = showOverdue ? "#dc2626" : "#15803d";
+                        statusBg = showOverdue ? "#fef2f2" : "#f0fdf4";
                       }
                       // PRIORYTET 2: Pauza (aktywna lub smart baza po rozładunku)
                       else if (vehiclePauza || isCurrentlyAtBaza) {
@@ -3001,11 +3015,16 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
                       // Aktywny fracht do wyświetlenia na karcie
                       // Dla trasy: pokaż OSTATNI rozładunek w ciągu (nie pierwszy aktywny)
-                      // 2026-05-12: usunięto `dataRozladunku >= todayISO` żeby pokrywać też frachty
-                      // opóźnione (already loaded but not yet unloaded). Filtr `dataZaladunku <= today`
-                      // zapewnia że nie pokażemy frachtu z przyszłości jako displayF.
+                      // 2026-05-12: usunięto `dataRozladunku >= todayISO` żeby pokrywać opóźnione,
+                      // dorzucony cap isStaleOverdue żeby stary "ślepy" fracht (134d) nie wchodził
+                      // jako displayF z mylącą trasą/klientem.
                       const pendingFF = vFrachty
-                        .filter(r => !isFrachtRozladowany(r, eventsByFrachtApp[r.id] || []) && r.dataZaladunku && r.dataZaladunku <= todayISO)
+                        .filter(r =>
+                          !isFrachtRozladowany(r, eventsByFrachtApp[r.id] || [])
+                          && r.dataZaladunku
+                          && r.dataZaladunku <= todayISO
+                          && !isStaleOverdue(r)
+                        )
                         .sort((a, b) => (b.dataRozladunku || "").localeCompare(a.dataRozladunku || ""));
                       const displayF = pendingFF[0] || activeF || nextF || lastF;
 
