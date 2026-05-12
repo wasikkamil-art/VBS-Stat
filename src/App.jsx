@@ -2871,11 +2871,15 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                       const todayISO = new Date().toLocaleDateString("sv-SE"); // "2026-04-02" w lokalnym timezone
                       const todayMs = new Date(todayISO + "T00:00:00").getTime();
 
-                      // Szukaj aktywnego frachtu (zał <= dziś <= rozł, nie rozładowany)
+                      // Szukaj aktywnego frachtu: załadowany w dniu (lub wcześniej) i NIE zakończony
+                      // (brak event dotarcie_rozladunek). 2026-05-12: usunięto `today <= dataRozladunku`
+                      // żeby pokrywać też frachty opóźnione (data rozładunku w przeszłości, ale
+                      // kierowca jeszcze nie odznaczył dotarcia) — wcześniej fracht "wisiał w luce"
+                      // i system spadał do "Czeka na zlecenie · Xd" z poprzedniego rozładowanego.
                       const activeF = vFrachty.find(r => {
                         if (!r.dataZaladunku || !r.dataRozladunku) return false;
                         if (isFrachtRozladowany(r, eventsByFrachtApp[r.id] || [])) return false;
-                        return r.dataZaladunku <= todayISO && todayISO <= r.dataRozladunku;
+                        return r.dataZaladunku <= todayISO;
                       });
 
                       // Szukaj następnego zaplanowanego (zał > dziś)
@@ -2922,13 +2926,18 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                         && lastDoneF?.dataRozladunku && lastDoneF.dataRozladunku <= todayISO
                         && (!nextF || futurePauza.start <= nextF.dataZaladunku);
 
-                      // PRIORYTET 1: W trasie
+                      // PRIORYTET 1: W trasie (z badgem "opóźniony" gdy data rozładunku przekroczona)
                       if (activeF) {
                         status = "trasa";
-                        statusLabel = "W trasie";
+                        const overdueDays = activeF.dataRozladunku < todayISO
+                          ? Math.round((todayMs - new Date(activeF.dataRozladunku + "T00:00:00").getTime()) / 86400000)
+                          : 0;
+                        statusLabel = overdueDays > 0
+                          ? `W trasie · opóźniony ${overdueDays}d`
+                          : "W trasie";
                         statusIcon = <IconTruck size={14}/>;
-                        statusColor = "#15803d";
-                        statusBg = "#f0fdf4";
+                        statusColor = overdueDays > 0 ? "#dc2626" : "#15803d";
+                        statusBg = overdueDays > 0 ? "#fef2f2" : "#f0fdf4";
                       }
                       // PRIORYTET 2: Pauza (aktywna lub smart baza po rozładunku)
                       else if (vehiclePauza || isCurrentlyAtBaza) {
@@ -2992,8 +3001,11 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
                       // Aktywny fracht do wyświetlenia na karcie
                       // Dla trasy: pokaż OSTATNI rozładunek w ciągu (nie pierwszy aktywny)
+                      // 2026-05-12: usunięto `dataRozladunku >= todayISO` żeby pokrywać też frachty
+                      // opóźnione (already loaded but not yet unloaded). Filtr `dataZaladunku <= today`
+                      // zapewnia że nie pokażemy frachtu z przyszłości jako displayF.
                       const pendingFF = vFrachty
-                        .filter(r => !isFrachtRozladowany(r, eventsByFrachtApp[r.id] || []) && r.dataRozladunku && r.dataRozladunku >= todayISO)
+                        .filter(r => !isFrachtRozladowany(r, eventsByFrachtApp[r.id] || []) && r.dataZaladunku && r.dataZaladunku <= todayISO)
                         .sort((a, b) => (b.dataRozladunku || "").localeCompare(a.dataRozladunku || ""));
                       const displayF = pendingFF[0] || activeF || nextF || lastF;
 
