@@ -13123,18 +13123,26 @@ const RENT_COSTS = [
 
 const MONTHS_PL = ["Styczeń","Luty","Marzec","Kwiecień","Maj","Czerwiec","Lipiec","Sierpień","Wrzesień","Październik","Listopad","Grudzień"];
 
-// Czy miesiąc jest "zamknięty" lub bieżący — filtruje przyszłe miesiące w widokach
-// Rentowność (flota/pojazd/trendy). User 2026-05-13: przyszłe miesiące mają hard-coded
-// projekcje stałych kosztów (ZUS/polisa/slickshift/telefon/uruchomienie) z seed
-// importAllCosts — myleace bo nie reflektują real frachtów/kosztów.
-// Zamknięte = przeszły rok lub bieżący miesiąc (i wcześniejsze) w bieżącym roku.
+// Status miesiąca w widokach Rentowność (flota/pojazd/trendy):
+// - "closed" = przeszły miesiąc (pełne dane: frachty + koszty + zysk)
+// - "current" = bieżący miesiąc (TYLKO frachty, bez kosztów/zysku — user 2026-05-13:
+//   "w maju będziemy widzieć tylko sumę frachtów bez kosztów dopóki nie zamkniemy")
+// - "future" = przyszły miesiąc (nic, "—")
+//
+// User 2026-05-13: przyszłe miesiące mają hard-coded projekcje stałych kosztów
+// (ZUS/polisa/slickshift/telefon/uruchomienie) z seed importAllCosts — myleace.
+// Bieżący miesiąc trwa, koszty zamknięte dopiero po końcu miesiąca przez import Excel.
 function isMonthClosed(year, month) {
   const now = new Date();
   const currentY = now.getFullYear();
   const currentM = now.getMonth();
   if (year < currentY) return true;
   if (year > currentY) return false;
-  return month <= currentM;
+  return month < currentM; // < zamiast <= (bieżący nie jest "zamknięty")
+}
+function isMonthCurrent(year, month) {
+  const now = new Date();
+  return year === now.getFullYear() && month === now.getMonth();
 }
 
 function rentKey(vehicleId, year, month) { return `${vehicleId}_${year}_${month}`; }
@@ -13258,10 +13266,21 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
     };
   };
 
-  // Filter isMonthClosed — KPI floty + sumy roczne tylko z zamkniętych/bieżącego miesięcy
-  const totalFrachty = (vid, y) => MONTHS_PL.reduce((s,_,m) => { if (!isMonthClosed(y,m)) return s; const r = getRecord(vid,y,m); return s + (r?.frachty||0); }, 0);
+  // Sumy roczne — różne reguły per metric:
+  // - Frachty: closed + current (bieżący miesiąc też wliczony — frachty już wpłynęły)
+  // - Koszty: tylko closed (bieżący miesiąc nie zamknięty kosztowo)
+  // - Zysk: tylko closed (bieżący ma niepełne dane — frachty bez kosztów = sztuczny zysk)
+  const totalFrachty = (vid, y) => MONTHS_PL.reduce((s,_,m) => { if (!isMonthClosed(y,m) && !isMonthCurrent(y,m)) return s; const r = getRecord(vid,y,m); return s + (r?.frachty||0); }, 0);
   const totalKoszt   = (vid, y) => MONTHS_PL.reduce((s,_,m) => { if (!isMonthClosed(y,m)) return s; const r = getRecord(vid,y,m); return s + Object.values(r?.costs||{}).reduce((a,v)=>a+(v||0),0); }, 0);
-  const totalZysk    = (vid, y) => totalFrachty(vid,y) - totalKoszt(vid,y);
+  // Zysk: per-month closed only — żeby NIE liczyć frachty bieżącego (bez kosztów = sztuczny boost)
+  const totalZysk    = (vid, y) => MONTHS_PL.reduce((s,_,m) => {
+    if (!isMonthClosed(y,m)) return s;
+    const r = getRecord(vid,y,m);
+    if (!r) return s;
+    const f = r.frachty || 0;
+    const k = Object.values(r?.costs||{}).reduce((a,v)=>a+(v||0),0);
+    return s + (f - k);
+  }, 0);
 
   const fleetFrachty = (y) => vehicles.reduce((s,v) => s + totalFrachty(v.id,y), 0);
   const fleetKoszt   = (y) => vehicles.reduce((s,v) => s + totalKoszt(v.id,y), 0);
@@ -13364,13 +13383,11 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
                     <tr key={v.id} className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="px-4 py-2 font-semibold text-gray-800" style={{ fontFamily:"'DM Mono',monospace", fontSize:11 }}>{v.plate}</td>
                       {MONTHS_PL.map((_,mi) => {
-                        // Filter przyszłe miesiące — bieżący jest pokazany, dalsze "—"
-                        if (!isMonthClosed(selYear, mi)) {
-                          return (
-                            <td key={mi} className="text-center py-2 px-1">
-                              <span className="text-gray-200 text-xs">—</span>
-                            </td>
-                          );
+                        const isCurrent = isMonthCurrent(selYear, mi);
+                        const isFuture = !isMonthClosed(selYear, mi) && !isCurrent;
+                        // Future — ukryte ("—")
+                        if (isFuture) {
+                          return <td key={mi} className="text-center py-2 px-1"><span className="text-gray-200 text-xs">—</span></td>;
                         }
                         const r = getRecord(v.id, selYear, mi);
                         if (!r) return (
@@ -13380,6 +13397,21 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
                           </td>
                         );
                         const f = r.frachty || 0;
+                        // Bieżący miesiąc — pokaż TYLKO frachty (suma, niebieski, * = trwa)
+                        if (isCurrent) {
+                          if (f === 0) return <td key={mi} className="text-center py-2 px-1"><span className="text-gray-200 text-xs">—</span></td>;
+                          return (
+                            <td key={mi} className="text-center py-2 px-1">
+                              <button onClick={() => openAdd(v.id, selYear, mi)}
+                                className="w-full h-7 rounded-lg text-xs font-bold transition-all hover:opacity-80"
+                                style={{ background: "#eff6ff", color: "#3b82f6" }}
+                                title="Miesiąc trwa — pokazana tylko suma frachtów (koszty zamykane po końcu miesiąca)">
+                                +{Math.round(f).toLocaleString("pl-PL")}*
+                              </button>
+                            </td>
+                          );
+                        }
+                        // Closed — zysk normalny
                         const k = Object.values(r?.costs||{}).reduce((s,v)=>s+(v||0),0);
                         const z = f - k;
                         return (
@@ -13401,10 +13433,18 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
                   <tr style={{ background:"#f9fafb" }}>
                     <td className="px-4 py-2.5 font-bold text-gray-700 text-xs">SUMA</td>
                     {MONTHS_PL.map((_,mi) => {
-                      // Filter przyszłe miesiące w SUMA wierszu
-                      if (!isMonthClosed(selYear, mi)) {
+                      const isCurrent = isMonthCurrent(selYear, mi);
+                      const isFuture = !isMonthClosed(selYear, mi) && !isCurrent;
+                      if (isFuture) {
                         return <td key={mi} className="text-center py-2.5 px-1 font-bold text-xs text-gray-200">—</td>;
                       }
+                      // Bieżący miesiąc — suma frachtów wszystkich pojazdów (bez kosztów)
+                      if (isCurrent) {
+                        const f = vehicles.reduce((s,v) => { const r = getRecord(v.id,selYear,mi); return s + (r?.frachty||0); }, 0);
+                        if (f === 0) return <td key={mi} className="text-center py-2.5 px-1 font-bold text-xs text-gray-200">—</td>;
+                        return <td key={mi} className="text-center py-2.5 px-1 font-bold text-xs" style={{ color: "#3b82f6" }} title="Miesiąc trwa — suma frachtów">+{Math.round(f).toLocaleString("pl-PL")}*</td>;
+                      }
+                      // Closed — suma zysku
                       const z = vehicles.reduce((s,v) => { const r=getRecord(v.id,selYear,mi); if(!r) return s; const f=r.frachty||0; const k=Object.values(r?.costs||{}).reduce((s,v)=>s+(v||0),0); return s+f-k; }, 0);
                       const hasAny = vehicles.some(v => getRecord(v.id,selYear,mi));
                       return <td key={mi} className="text-center py-2.5 px-1 font-bold text-xs" style={{ color: hasAny ? zyskColor(z) : "#d1d5db" }}>{hasAny ? (z>=0?"+":"")+Math.round(z).toLocaleString("pl-PL") : "—"}</td>;
@@ -13480,14 +13520,19 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
           {selVehicle && (() => {
             const v = vehicles.find(vv => vv.id === selVehicle);
             const yearData = MONTHS_PL.map((lbl, mi) => {
-              // Przyszłe miesiące — pusty stub, hasData=false (dashed border w chart)
-              if (!isMonthClosed(selYear, mi)) {
-                return { lbl: lbl.slice(0,3), frachty: 0, koszty: 0, zysk: 0, hasData: false };
+              const isCurrent = isMonthCurrent(selYear, mi);
+              const isFuture = !isMonthClosed(selYear, mi) && !isCurrent;
+              if (isFuture) {
+                return { lbl: lbl.slice(0,3), frachty: 0, koszty: 0, zysk: 0, hasData: false, isCurrent: false };
               }
               const r = getRecord(selVehicle, selYear, mi);
               const f = r?.frachty || 0;
+              // Bieżący — pokazujemy tylko frachty (koszty/zysk pomijamy)
+              if (isCurrent) {
+                return { lbl: lbl.slice(0,3), frachty: f, koszty: 0, zysk: 0, hasData: f > 0, isCurrent: true };
+              }
               const k = r ? Object.values(r?.costs||{}).reduce((s,v)=>s+(v||0),0) : 0;
-              return { lbl: lbl.slice(0,3), frachty: f, koszty: k, zysk: f-k, hasData: !!r };
+              return { lbl: lbl.slice(0,3), frachty: f, koszty: k, zysk: f-k, hasData: !!r, isCurrent: false };
             });
             const annualF = yearData.reduce((s,d)=>s+d.frachty,0);
             const annualK = yearData.reduce((s,d)=>s+d.koszty,0);
@@ -13524,22 +13569,27 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
                   <div className="text-sm font-semibold text-gray-700 mb-4">Przychód vs Koszty — miesięcznie</div>
                   <div className="flex items-end gap-1.5" style={{ height: 140 }}>
                     {yearData.map((d, i) => (
-                      <div key={i} className="flex-1 flex flex-col items-center gap-0.5 group cursor-pointer" onClick={() => openAdd(selVehicle, selYear, i)}>
+                      <div key={i} className={"flex-1 flex flex-col items-center gap-0.5 group "+(d.hasData?"cursor-pointer":"")} onClick={() => d.hasData && openAdd(selVehicle, selYear, i)}>
                         <div className="w-full flex flex-col justify-end gap-px relative" style={{ height: 110 }}>
                           {d.hasData ? (
                             <>
                               <div className="w-full rounded-t transition-all" style={{ height: Math.max(2, d.frachty/maxBar*100)+'%', background:"#3b82f6", opacity:0.85 }} title={`Frachty: ${fmt(d.frachty)}`} />
-                              <div className="w-full rounded-t transition-all" style={{ height: Math.max(2, d.koszty/maxBar*100)+'%', background:"#ef444460" }} title={`Koszty: ${fmt(d.koszty)}`} />
+                              {!d.isCurrent && (
+                                <div className="w-full rounded-t transition-all" style={{ height: Math.max(2, d.koszty/maxBar*100)+'%', background:"#ef444460" }} title={`Koszty: ${fmt(d.koszty)}`} />
+                              )}
                             </>
                           ) : (
                             <div className="w-full rounded-t border-2 border-dashed border-gray-200 group-hover:border-amber-300 transition-all" style={{ height:"100%" }} />
                           )}
                         </div>
                         <div className="text-xs text-gray-400" style={{ fontSize:9 }}>{d.lbl}</div>
-                        {d.hasData && (
+                        {d.hasData && !d.isCurrent && (
                           <div className="text-xs font-bold" style={{ color: zyskColor(d.zysk), fontSize:9 }}>
                             {d.zysk >= 0 ? "+" : ""}{Math.round(d.zysk).toLocaleString("pl-PL")}
                           </div>
+                        )}
+                        {d.hasData && d.isCurrent && (
+                          <div className="text-xs font-bold" style={{ color: "#3b82f6", fontSize:9 }}>trwa</div>
                         )}
                       </div>
                     ))}
@@ -13593,18 +13643,19 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
                     </thead>
                     <tbody>
                       {MONTHS_PL.map((lbl, mi) => {
-                        // Przyszłe miesiące — pokaż wiersz z "—" we wszystkich kolumnach (struktura zachowana)
-                        const isFuture = !isMonthClosed(selYear, mi);
+                        const isCurrent = isMonthCurrent(selYear, mi);
+                        const isFuture = !isMonthClosed(selYear, mi) && !isCurrent;
                         const r = isFuture ? null : getRecord(selVehicle, selYear, mi);
                         const f = r?.frachty || 0;
-                        const k = r ? RENT_COSTS.reduce((s,c)=>s+(r.costs?.[c.id]||0),0) : 0;
+                        const showKoszty = !isCurrent && !isFuture; // bieżący miesiąc bez kosztów/zysku
+                        const k = (r && showKoszty) ? RENT_COSTS.reduce((s,c)=>s+(r.costs?.[c.id]||0),0) : 0;
                         const z = f - k;
                         return (
                           <tr key={mi} className={`border-b border-gray-50 hover:bg-gray-50 ${isFuture ? "opacity-50" : "cursor-pointer"}`} onClick={() => !isFuture && openAdd(selVehicle, selYear, mi)}>
-                            <td className="px-5 py-2.5 font-medium text-gray-700">{lbl}</td>
+                            <td className="px-5 py-2.5 font-medium text-gray-700">{lbl}{isCurrent && <span className="ml-1 text-xs text-blue-500 font-normal">(trwa)</span>}</td>
                             <td className="text-right px-3 py-2.5 text-blue-600 font-medium">{f > 0 ? fmt(f) : <span className="text-gray-200">—</span>}</td>
-                            <td className="text-right px-3 py-2.5 text-gray-600">{k > 0 ? fmt(k) : <span className="text-gray-200">—</span>}</td>
-                            <td className="text-right px-3 py-2.5 font-bold" style={{ color: r ? zyskColor(z) : "#d1d5db" }}>{r ? fmtS(z) : "—"}</td>
+                            <td className="text-right px-3 py-2.5 text-gray-600">{showKoszty ? (k > 0 ? fmt(k) : <span className="text-gray-200">—</span>) : <span className="text-gray-200">—</span>}</td>
+                            <td className="text-right px-3 py-2.5 font-bold" style={{ color: showKoszty && r ? zyskColor(z) : "#d1d5db" }}>{showKoszty && r ? fmtS(z) : "—"}</td>
                             {(() => {
                               const op = operacyjne.find(o => o.vehicleId === selVehicle && o.year === selYear && o.month === mi+1);
                               const koszt_km = op?.kmLicznik && r?.costs ? (Object.values(r.costs||{}).reduce((s,v)=>s+v,0) / op.kmLicznik).toFixed(2) : null;
@@ -13751,8 +13802,12 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
   }, [vehicles]);
   const toggleArr = (arr, setArr, val) => setArr(p => p.includes(val) ? p.filter(x=>x!==val) : [...p, val]);
   const getVal = (vid, year, mi, metId) => {
-    // Filter przyszłe miesiące — return null żeby Recharts/LineChart nie rysował punktu
-    if (!isMonthClosed(year, mi)) return null;
+    const closed = isMonthClosed(year, mi);
+    const current = isMonthCurrent(year, mi);
+    // Future — return null (Recharts skipuje punkt)
+    if (!closed && !current) return null;
+    // Bieżący miesiąc — TYLKO frachty pokazujemy; pozostałe metryki (koszty/zysk/km/paliwo/spalanie/eurKm/dni) = null
+    if (current && metId !== "frachty") return null;
     // Single source of truth: getRecord handles all corrections (2025 Excel, 2026 fleet)
     const r = getRecord(vid, year, mi);
     const op = operacyjne.find(o => o.vehicleId===vid && o.year===year && o.month===mi+1);
