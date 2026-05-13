@@ -14050,16 +14050,23 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
           IIFE jest zawsze invokowane (nie warunkowo), ale fragile. */}
       {(() => {
         /* eslint-disable react-hooks/rules-of-hooks */
+        // lowerIsBetter: metryki gdzie spadek = sukces (koszty/spalanie/eurkm/paliwo).
+        // Inwersja kolorystyki YoY w render — user 2026-05-13: "niższy koszt to kolor
+        // powinien być zielony nie czerwony bo spadek kosztów to sukces a nie porażka".
         const METRICS = [
-          { id:"frachty",  label:"Frachty €",      fn:(vid,y,mi)=>{ const r=getRecord(vid,y,mi); return r?.frachty||0; } },
-          { id:"koszty",   label:"Koszty €",       fn:(vid,y,mi)=>{ const r=getRecord(vid,y,mi); return r?Object.values(r.costs||{}).reduce((s,v)=>s+(v||0),0):0; } },
-          { id:"zysk",     label:"Zysk €",         fn:(vid,y,mi)=>{ const r=getRecord(vid,y,mi); const f=r?.frachty||0; const k=r?Object.values(r.costs||{}).reduce((s,v)=>s+(v||0),0):0; return f-k; } },
-          { id:"km",       label:"KM licznik",     fn:(vid,y,mi)=>{ const op=operacyjne.find(o=>o.vehicleId===vid&&o.year===y&&o.month===mi+1); return op?.kmLicznik||0; } },
-          { id:"paliwo",   label:"Paliwo L",       fn:(vid,y,mi)=>{ const op=operacyjne.find(o=>o.vehicleId===vid&&o.year===y&&o.month===mi+1); return op?.paliwoL||0; } },
-          { id:"spalanie", label:"Spalanie L/100", fn:(vid,y,mi)=>{ const op=operacyjne.find(o=>o.vehicleId===vid&&o.year===y&&o.month===mi+1); return op?.spalanie||0; } },
-          { id:"eurkm",    label:"€/km",            fn:(vid,y,mi)=>{ const op=operacyjne.find(o=>o.vehicleId===vid&&o.year===y&&o.month===mi+1); const fc=getRecord(vid,y,mi)?.costs?.paliwo||0; return (op?.kmLicznik&&fc)?parseFloat((fc/op.kmLicznik).toFixed(2)):0; } },
-          { id:"dni",      label:"Dni w trasie",   fn:(vid,y,mi)=>{ const op=operacyjne.find(o=>o.vehicleId===vid&&o.year===y&&o.month===mi+1); return op?.dni||0; } },
+          { id:"frachty",  label:"Frachty €",      lowerIsBetter:false, fn:(vid,y,mi)=>{ const r=getRecord(vid,y,mi); return r?.frachty||0; } },
+          { id:"koszty",   label:"Koszty €",       lowerIsBetter:true,  fn:(vid,y,mi)=>{ const r=getRecord(vid,y,mi); return r?Object.values(r.costs||{}).reduce((s,v)=>s+(v||0),0):0; } },
+          { id:"zysk",     label:"Zysk €",         lowerIsBetter:false, fn:(vid,y,mi)=>{ const r=getRecord(vid,y,mi); const f=r?.frachty||0; const k=r?Object.values(r.costs||{}).reduce((s,v)=>s+(v||0),0):0; return f-k; } },
+          { id:"km",       label:"KM licznik",     lowerIsBetter:false, fn:(vid,y,mi)=>{ const op=operacyjne.find(o=>o.vehicleId===vid&&o.year===y&&o.month===mi+1); return op?.kmLicznik||0; } },
+          { id:"paliwo",   label:"Paliwo L",       lowerIsBetter:true,  fn:(vid,y,mi)=>{ const op=operacyjne.find(o=>o.vehicleId===vid&&o.year===y&&o.month===mi+1); return op?.paliwoL||0; } },
+          { id:"spalanie", label:"Spalanie L/100", lowerIsBetter:true,  fn:(vid,y,mi)=>{ const op=operacyjne.find(o=>o.vehicleId===vid&&o.year===y&&o.month===mi+1); return op?.spalanie||0; } },
+          { id:"eurkm",    label:"€/km",            lowerIsBetter:true,  fn:(vid,y,mi)=>{ const op=operacyjne.find(o=>o.vehicleId===vid&&o.year===y&&o.month===mi+1); const fc=getRecord(vid,y,mi)?.costs?.paliwo||0; return (op?.kmLicznik&&fc)?parseFloat((fc/op.kmLicznik).toFixed(2)):0; } },
+          { id:"dni",      label:"Dni w trasie",   lowerIsBetter:false, fn:(vid,y,mi)=>{ const op=operacyjne.find(o=>o.vehicleId===vid&&o.year===y&&o.month===mi+1); return op?.dni||0; } },
         ];
+        // Helper: "good" change (sukces) wymaga: lowerIsBetter=true → pct<=0; false → pct>=0
+        const isGoodChange = (pct, lib) => lib ? pct <= 0 : pct >= 0;
+        // Helper: "good" trend dla miesięcznego bar (v26 vs v25): lowerIsBetter → v26<=v25 OK
+        const isGoodTrend = (v26, v25, lib) => lib ? v26 <= v25 : v26 >= v25;
         const [yoyMode, setYoyMode] = useState("flota");
         const [yoyMet, setYoyMet] = useState("frachty");
         const met = METRICS.find(m=>m.id===yoyMet);
@@ -14128,7 +14135,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                     {[
                       {label:"YTD 2026",value:fmtFull(ytd26)+" €",sub:closedMonths+" mies. zamknięte · "+(full25?(ytd26/full25*100).toFixed(0):0)+"% rocznego 2025",vc:"#1d4ed8",bg:"#eff6ff",bc:"#bfdbfe"},
                       {label:"YTD 2025",value:fmtFull(ytd25)+" €",sub:closedMonths+" mies. porównywalne",vc:"#64748b",bg:"#f8fafc",bc:"#e5e7eb"},
-                      {label:"ZMIANA YTD",value:(pctYtd>=0?"+":"")+pctYtd.toFixed(1)+"%",sub:(pctYtd>=0?"+":"")+fmtFull(ytd26-ytd25)+" €",vc:pctYtd>=0?"#15803d":"#dc2626",bg:pctYtd>=0?"#f0fdf4":"#fef2f2",bc:pctYtd>=0?"#bbf7d0":"#fecaca"},
+                      {label:"ZMIANA YTD",value:(pctYtd>=0?"+":"")+pctYtd.toFixed(1)+"%",sub:(pctYtd>=0?"+":"")+fmtFull(ytd26-ytd25)+" €",vc:isGoodChange(pctYtd,met.lowerIsBetter)?"#15803d":"#dc2626",bg:isGoodChange(pctYtd,met.lowerIsBetter)?"#f0fdf4":"#fef2f2",bc:isGoodChange(pctYtd,met.lowerIsBetter)?"#bbf7d0":"#fecaca"},
                       {label:"PROJEKCJA ROCZNA",value:fmtFull(projection)+" €",sub:"vs "+fmtFull(full25)+" € w 2025",vc:"#6366f1",bg:"#f5f3ff",bc:"#ddd6fe"},
                     ].map((c,i)=>(
                       <div key={i} style={{background:c.bg,borderRadius:10,padding:"10px 14px",border:"1px solid "+c.bc}}>
@@ -14161,13 +14168,13 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                         <div style={{display:"grid",gridTemplateColumns:"44px 1fr 68px 68px 52px",gap:8,padding:"5px 12px",alignItems:"center",opacity:isFut?0.28:1,background:mi%2===0?"#fff":"#fafbfc",borderBottom:isQEnd?"none":"1px solid #f3f4f6",transition:"background 0.15s"}}>
                           <div style={{fontSize:11,fontWeight:600,color:"#334155"}}>{m}</div>
                           <div style={{display:"flex",flexDirection:"column",gap:2}}>
-                            <div style={{width:bW26+"%",height:8,background:!isFut&&v26>=v25?"linear-gradient(90deg,#3b82f6,#2563eb)":!isFut?"linear-gradient(90deg,#f97316,#ea580c)":"#e5e7eb",borderRadius:4,transition:"width 0.4s ease",minWidth:v26?3:0}}/>
+                            <div style={{width:bW26+"%",height:8,background:!isFut&&isGoodTrend(v26,v25,met.lowerIsBetter)?"linear-gradient(90deg,#3b82f6,#2563eb)":!isFut?"linear-gradient(90deg,#f97316,#ea580c)":"#e5e7eb",borderRadius:4,transition:"width 0.4s ease",minWidth:v26?3:0}}/>
                             <div style={{width:bW25+"%",height:5,background:"#e2e8f0",borderRadius:3}}/>
                           </div>
                           <div style={{fontSize:12,fontWeight:700,color:"#1d4ed8",textAlign:"right"}}>{fmtV(v26)}</div>
                           <div style={{fontSize:11,color:"#94a3b8",textAlign:"right"}}>{fmtV(v25)}</div>
                           <div style={{textAlign:"right"}}>
-                            {pct!==null?<span style={{fontSize:10,fontWeight:700,color:pct>=0?"#15803d":"#dc2626"}}>{pct>=0?"▲":"▼"}{Math.abs(pct).toFixed(0)}%</span>:<span style={{color:"#d1d5db",fontSize:10}}>—</span>}
+                            {pct!==null?<span style={{fontSize:10,fontWeight:700,color:isGoodChange(pct,met.lowerIsBetter)?"#15803d":"#dc2626"}}>{pct>=0?"▲":"▼"}{Math.abs(pct).toFixed(0)}%</span>:<span style={{color:"#d1d5db",fontSize:10}}>—</span>}
                           </div>
                         </div>
                         {isQEnd&&(()=>{
@@ -14186,7 +14193,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                               <div style={{fontSize:12,fontWeight:700,color:"#1d4ed8",textAlign:"right"}}>{fmtV(q26)}</div>
                               <div style={{fontSize:11,fontWeight:500,color:"#94a3b8",textAlign:"right"}}>{fmtV(q25)}</div>
                               <div style={{textAlign:"right"}}>
-                                {qPct!==null?<span style={{fontSize:10,fontWeight:800,color:qPct>=0?"#15803d":"#dc2626"}}>{qPct>=0?"+":""}{qPct.toFixed(1)}%</span>:<span style={{color:"#d1d5db",fontSize:10}}>—</span>}
+                                {qPct!==null?<span style={{fontSize:10,fontWeight:800,color:isGoodChange(qPct,met.lowerIsBetter)?"#15803d":"#dc2626"}}>{qPct>=0?"+":""}{qPct.toFixed(1)}%</span>:<span style={{color:"#d1d5db",fontSize:10}}>—</span>}
                               </div>
                             </div>
                           );
@@ -14213,7 +14220,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                               <span style={{fontSize:13,color:"#94a3b8"}}>vs {fmtV(h25)}</span>
                             </div>
                           </div>
-                          {hPct!==null?<span style={{fontSize:13,fontWeight:800,padding:"3px 10px",borderRadius:8,background:hPct>=0?"#f0fdf4":"#fef2f2",color:hPct>=0?"#15803d":"#dc2626",border:"1px solid "+(hPct>=0?"#bbf7d0":"#fecaca")}}>{hPct>=0?"+":""}{hPct.toFixed(1)}%</span>:<span style={{color:"#d1d5db"}}>—</span>}
+                          {hPct!==null?<span style={{fontSize:13,fontWeight:800,padding:"3px 10px",borderRadius:8,background:isGoodChange(hPct,met.lowerIsBetter)?"#f0fdf4":"#fef2f2",color:isGoodChange(hPct,met.lowerIsBetter)?"#15803d":"#dc2626",border:"1px solid "+(isGoodChange(hPct,met.lowerIsBetter)?"#bbf7d0":"#fecaca")}}>{hPct>=0?"+":""}{hPct.toFixed(1)}%</span>:<span style={{color:"#d1d5db"}}>—</span>}
                         </div>
                       );
                     })}
@@ -14228,7 +14235,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                         <span style={{fontSize:14,color:"#94a3b8"}}>vs {fmtV(ytd25)} (te same mies.)</span>
                       </div>
                     </div>
-                    {pctYtd?<span style={{fontSize:14,fontWeight:800,padding:"4px 12px",borderRadius:8,background:pctYtd>=0?"#f0fdf4":"#fef2f2",color:pctYtd>=0?"#15803d":"#dc2626",border:"1px solid "+(pctYtd>=0?"#bbf7d0":"#fecaca")}}>{pctYtd>=0?"+":""}{pctYtd.toFixed(1)}% YTD</span>:<span style={{color:"#d1d5db"}}>—</span>}
+                    {pctYtd?<span style={{fontSize:14,fontWeight:800,padding:"4px 12px",borderRadius:8,background:isGoodChange(pctYtd,met.lowerIsBetter)?"#f0fdf4":"#fef2f2",color:isGoodChange(pctYtd,met.lowerIsBetter)?"#15803d":"#dc2626",border:"1px solid "+(isGoodChange(pctYtd,met.lowerIsBetter)?"#bbf7d0":"#fecaca")}}>{pctYtd>=0?"+":""}{pctYtd.toFixed(1)}% YTD</span>:<span style={{color:"#d1d5db"}}>—</span>}
                   </div>
                 </div>
               );
