@@ -311,6 +311,40 @@ async function dbAddToArrayField(fieldKey, item) {
   try { logFleetWrite(fieldKey, prev, next, "atomic/dbAddToArrayField"); } catch {}
 }
 
+// Wrapper z read-back verification dla dbAddToArrayField (2026-05-13).
+// Po write czeka i czyta fleet/data ponownie żeby potwierdzić że doc tam jest.
+// Catch failed writes których SDK nie zgłosił errorem (rzadkie ale możliwe —
+// QUIC drops, transient 400s). Maks 3 próby (1 write + 2 retry).
+//
+// Używaj dla docs/imi/rent gdzie utrata pojedynczego rekordu = ból
+// (user musi pamiętać + wgrać ręcznie ponownie).
+async function dbAddToArrayFieldVerified(fieldKey, item, { maxRetries = 2, verifyDelayMs = 2000 } = {}) {
+  if (!item || !item.id) {
+    throw new Error(`dbAddToArrayFieldVerified: item.id required`);
+  }
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+    try {
+      await dbAddToArrayField(fieldKey, item);
+      // Verify: po delay czytaj fleet/data, sprawdź czy item.id jest w array
+      await new Promise(r => setTimeout(r, verifyDelayMs));
+      const snap = await getDoc(DATA_REF());
+      const arr = (snap.data() || {})[fieldKey] || [];
+      const found = arr.some(r => r && r.id === item.id);
+      if (found) {
+        if (attempt > 1) console.log(`✅ Verify success for ${fieldKey} ${item.id} after attempt ${attempt}`);
+        return; // success
+      }
+      lastError = new Error(`Verify failed: doc ${item.id} nie znaleziony w ${fieldKey} po zapisie (próba ${attempt}/${maxRetries + 1})`);
+      console.warn(`🛡️ ${lastError.message}`);
+    } catch (e) {
+      lastError = e;
+      console.warn(`🛡️ Write/verify failed for ${fieldKey} ${item.id} (próba ${attempt}/${maxRetries + 1}):`, e.message);
+    }
+  }
+  throw lastError || new Error(`Write+verify ${fieldKey} ${item.id} failed po ${maxRetries + 1} próbach`);
+}
+
 // Atomic update item w array field (po id) w fleet/data — patch merge.
 // Shrink-protection: update NIGDY nie zmienia długości (map zachowuje liczbę).
 // Plus: jeśli id nie istniał, no-op (nie commit) — chroni przed bug w callerze.
@@ -3935,11 +3969,12 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                     docToSave = { ...docToSave, fileData: null };
                   }
                 }
-                await dbAddToArrayField(SK.docs, docToSave).catch(e => {
-                  console.error("[docs] add FAILED", e);
+                // Verified add: po write czyta fleet/data ponownie + retry × 2.
+                // Catch failed writes których SDK nie zgłosił (QUIC drops, transient 400).
+                await dbAddToArrayFieldVerified(SK.docs, docToSave).catch(e => {
+                  console.error("[docs] add+verify FAILED", e);
                   // Głośny alert — toast user przeoczył 10x. Doc NIE został zapisany.
-                  // User MUSI widzieć żeby spróbować ponownie zamiast odkryć "zniknięcie" później.
-                  alert(`❌ BŁĄD ZAPISU DOKUMENTU\n\nDokument NIE został zapisany w bazie.\n\nPowód: ${e.message || e}\n\nSprawdź połączenie z internetem i spróbuj ponownie.\nJeśli problem się powtarza — zrób screenshot tego komunikatu.`);
+                  alert(`❌ BŁĄD ZAPISU DOKUMENTU\n\nDokument NIE został zapisany w bazie (po 3 próbach z weryfikacją).\n\nPowód: ${e.message || e}\n\nSprawdź połączenie z internetem i spróbuj ponownie.\nJeśli problem się powtarza — zrób screenshot tego komunikatu.`);
                 });
               }}
               onDelete={(id) => dbDeleteFromArrayField(SK.docs, id).catch(e => {
