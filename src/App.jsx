@@ -275,36 +275,58 @@ async function dbUpdateVehicleField(vehicleId, patch) {
 }
 
 // Atomic delete z array field w fleet/data (imi, docs, rent, costs).
+// Shrink-protection (2026-05-13): rzuć error gdy delete usunie > 1 element
+// lub gdy id nie istniał (defensive — chroni przed bug w callerze / race condition).
 async function dbDeleteFromArrayField(fieldKey, id) {
   let prev, next;
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(DATA_REF());
     prev = (snap.data() || {})[fieldKey] || [];
     next = prev.filter(r => r && r.id !== id);
+    if (prev.length - next.length > 1) {
+      throw new Error(`🛡️ BLOCKED dbDeleteFromArrayField(${fieldKey}, ${id}): expected 1 removal, got ${prev.length - next.length}. Możliwy duplicate id w array — sprawdź dane.`);
+    }
+    if (prev.length === next.length) {
+      console.warn(`dbDeleteFromArrayField: id ${id} not found in ${fieldKey}, no-op (skipping commit)`);
+      return; // skip commit — nie ma co usunąć
+    }
     tx.update(DATA_REF(), { [fieldKey]: next });
   });
   try { logFleetWrite(fieldKey, prev, next, "atomic/dbDeleteFromArrayField"); } catch {}
 }
 
 // Atomic add do array field w fleet/data (imi, docs, rent, costs).
+// Shrink-protection: dodanie zawsze powiększa o 1, więc next.length === prev.length + 1.
 async function dbAddToArrayField(fieldKey, item) {
   let prev, next;
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(DATA_REF());
     prev = (snap.data() || {})[fieldKey] || [];
     next = [...prev, item];
+    if (next.length !== prev.length + 1) {
+      throw new Error(`🛡️ BLOCKED dbAddToArrayField(${fieldKey}): expected length ${prev.length}+1, got ${next.length}.`);
+    }
     tx.update(DATA_REF(), { [fieldKey]: next });
   });
   try { logFleetWrite(fieldKey, prev, next, "atomic/dbAddToArrayField"); } catch {}
 }
 
 // Atomic update item w array field (po id) w fleet/data — patch merge.
+// Shrink-protection: update NIGDY nie zmienia długości (map zachowuje liczbę).
+// Plus: jeśli id nie istniał, no-op (nie commit) — chroni przed bug w callerze.
 async function dbUpdateInArrayField(fieldKey, id, patch) {
   let prev, next;
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(DATA_REF());
     prev = (snap.data() || {})[fieldKey] || [];
+    if (!prev.some(r => r && r.id === id)) {
+      console.warn(`dbUpdateInArrayField: id ${id} not found in ${fieldKey}, no-op (skipping commit)`);
+      return;
+    }
     next = prev.map(r => r && r.id === id ? { ...r, ...patch } : r);
+    if (next.length !== prev.length) {
+      throw new Error(`🛡️ BLOCKED dbUpdateInArrayField(${fieldKey}, ${id}): length zmieniona ${prev.length}→${next.length}.`);
+    }
     tx.update(DATA_REF(), { [fieldKey]: next });
   });
   try { logFleetWrite(fieldKey, prev, next, "atomic/dbUpdateInArrayField"); } catch {}
@@ -312,12 +334,17 @@ async function dbUpdateInArrayField(fieldKey, id, patch) {
 
 // Atomic bulk replace całego array field (import, migracje). Używaj ostrożnie —
 // nadpisuje wszystko. Server emit po commit aktualizuje state przez onSnapshot.
-async function dbBulkReplaceArrayField(fieldKey, items) {
+// Shrink-protection (2026-05-13): wymagaj explicit {confirmShrink:true} gdy next < prev,
+// żeby przypadkowy bulk-replace pustym/krótszym arrayem nie zniszczył danych.
+async function dbBulkReplaceArrayField(fieldKey, items, { confirmShrink = false } = {}) {
   let prev, next;
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(DATA_REF());
     prev = (snap.data() || {})[fieldKey] || [];
     next = items;
+    if (next.length < prev.length && !confirmShrink) {
+      throw new Error(`🛡️ BLOCKED dbBulkReplaceArrayField(${fieldKey}): replace zmniejszyłoby ${prev.length}→${next.length} elementów. Jeśli intentional, przekaż {confirmShrink: true}.`);
+    }
     tx.update(DATA_REF(), { [fieldKey]: next });
   });
   try { logFleetWrite(fieldKey, prev, next, "atomic/dbBulkReplaceArrayField"); } catch {}
@@ -3909,17 +3936,19 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                   }
                 }
                 await dbAddToArrayField(SK.docs, docToSave).catch(e => {
-                  console.error("doc save", e);
-                  showToast("⚠️ Błąd zapisu dokumentu");
+                  console.error("[docs] add FAILED", e);
+                  // Głośny alert — toast user przeoczył 10x. Doc NIE został zapisany.
+                  // User MUSI widzieć żeby spróbować ponownie zamiast odkryć "zniknięcie" później.
+                  alert(`❌ BŁĄD ZAPISU DOKUMENTU\n\nDokument NIE został zapisany w bazie.\n\nPowód: ${e.message || e}\n\nSprawdź połączenie z internetem i spróbuj ponownie.\nJeśli problem się powtarza — zrób screenshot tego komunikatu.`);
                 });
               }}
               onDelete={(id) => dbDeleteFromArrayField(SK.docs, id).catch(e => {
-                console.error("doc del", e);
-                showToast("⚠️ Błąd usuwania dokumentu");
+                console.error("[docs] delete FAILED", e);
+                alert(`❌ BŁĄD USUWANIA DOKUMENTU\n\nDokument NIE został usunięty.\n\nPowód: ${e.message || e}\n\nSpróbuj ponownie. Jeśli komunikat o "BLOCKED" — to ochrona przed bug, zgłoś.`);
               })}
               onEdit={(id, data) => dbUpdateInArrayField(SK.docs, id, data).catch(e => {
-                console.error("doc edit", e);
-                showToast("⚠️ Błąd edycji dokumentu");
+                console.error("[docs] edit FAILED", e);
+                alert(`❌ BŁĄD EDYCJI DOKUMENTU\n\nZmiany NIE zostały zapisane.\n\nPowód: ${e.message || e}\n\nSpróbuj ponownie.`);
               })}
             />
           )}
