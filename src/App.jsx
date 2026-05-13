@@ -14168,8 +14168,15 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                         <div style={{display:"grid",gridTemplateColumns:"44px 1fr 68px 68px 52px",gap:8,padding:"5px 12px",alignItems:"center",opacity:isFut?0.28:1,background:mi%2===0?"#fff":"#fafbfc",borderBottom:isQEnd?"none":"1px solid #f3f4f6",transition:"background 0.15s"}}>
                           <div style={{fontSize:11,fontWeight:600,color:"#334155"}}>{m}</div>
                           <div style={{display:"flex",flexDirection:"column",gap:2}}>
-                            <div style={{width:bW26+"%",height:8,background:!isFut&&isGoodTrend(v26,v25,met.lowerIsBetter)?"linear-gradient(90deg,#3b82f6,#2563eb)":!isFut?"linear-gradient(90deg,#f97316,#ea580c)":"#e5e7eb",borderRadius:4,transition:"width 0.4s ease",minWidth:v26?3:0}}/>
-                            <div style={{width:bW25+"%",height:5,background:"#e2e8f0",borderRadius:3}}/>
+                            {/* Bar 2026 — niezamknięte miesiące dostają jaśniejszy odcień (user 2026-05-13)
+                                żeby wizualnie odróżnić od zamkniętych. Open = mi >= compareMaxMi. */}
+                            <div style={{width:bW26+"%",height:8,background:
+                              !v26 ? "#e5e7eb"
+                              : isGoodTrend(v26,v25,met.lowerIsBetter)
+                                ? (isOpen ? "linear-gradient(90deg,#bfdbfe,#93c5fd)" : "linear-gradient(90deg,#3b82f6,#2563eb)")
+                                : (isOpen ? "linear-gradient(90deg,#fed7aa,#fdba74)" : "linear-gradient(90deg,#f97316,#ea580c)"),
+                              borderRadius:4,transition:"width 0.4s ease",minWidth:v26?3:0}}/>
+                            <div style={{width:bW25+"%",height:5,background:isOpen?"#f1f5f9":"#e2e8f0",borderRadius:3}}/>
                           </div>
                           <div style={{fontSize:12,fontWeight:700,color:"#1d4ed8",textAlign:"right"}}>{fmtV(v26)}</div>
                           <div style={{fontSize:11,color:"#94a3b8",textAlign:"right"}}>{fmtV(v25)}</div>
