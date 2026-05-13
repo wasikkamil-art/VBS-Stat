@@ -14069,7 +14069,21 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
         const getVehVal   = (vid, y, mi) => met.fn(vid, y, mi);
         const fmtV = (v) => v===0 ? "—" : Math.abs(v)>=1000?(v/1000).toFixed(1)+"k" : v.toFixed(v<10&&v>-10?1:0);
         const fmtFull = (v) => !v ? "—" : v.toLocaleString("pl-PL",{maximumFractionDigits:0});
-        const qSum = (vals,q) => vals.slice(q*3,q*3+3).reduce((a,b)=>a+b,0);
+        // Apples-to-apples compare 2026 vs 2025 — tylko miesiące zamknięte w 2026
+        // User 2026-05-13: porównujemy tylko zamknięte okresy żeby nie wyciągać błędnych
+        // wniosków z niepełnych miesięcy/kwartałów. compareMaxMi = bieżący month index
+        // (0-indexed) — dla maja 2026 = 4 → compare zakres = Sty-Kwi (mi 0..3).
+        const _now = new Date();
+        const compareMaxMi = _now.getFullYear() === 2026 ? _now.getMonth() : 12;
+        // Sum tylko miesięcy w zakresie [startMi, endMi) AND zamkniętych
+        const sumClosed = (vals, startMi=0, endMi=12) => {
+          let s = 0;
+          const end = Math.min(endMi, compareMaxMi);
+          for (let mi = startMi; mi < end; mi++) s += (vals[mi] || 0);
+          return s;
+        };
+        // Ile zamkniętych miesięcy w zakresie [startMi, endMi)
+        const closedInRange = (startMi, endMi) => Math.max(0, Math.min(endMi, compareMaxMi) - startMi);
         const rows = yoyMode==="flota"
           ? [{ label:"Flota total", vals25: MS.map((_,mi)=>getFlotaVal(2025,mi)), vals26: MS.map((_,mi)=>getFlotaVal(2026,mi)) }]
           : vehicles.map(v=>({ label:v.plate, vals25: MS.map((_,mi)=>getVehVal(v.id,2025,mi)), vals26: MS.map((_,mi)=>getVehVal(v.id,2026,mi)) }));
@@ -14095,16 +14109,14 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
 
             {/* Per-row rendering */}
             {rows.map((row,ri)=>{
-              // calendarMonths = ile miesięcy 2026 minęło wg kalendarza (kwiecień = 4)
-              const calendarMonths = Math.min(new Date().getMonth() + 1, 12);
-              // activeMonths = ile miesięcy ma dane w 2026 (do wyświetlenia "X mies.")
-              const activeMonths = Math.max(row.vals26.filter(v=>v>0).length, 0);
-              // YTD zawsze porównuje ten sam okres wg kalendarza, niezależnie od dostępności danych
-              const ytd26 = row.vals26.slice(0,calendarMonths).reduce((a,b)=>a+b,0);
-              const ytd25 = row.vals25.slice(0,calendarMonths).reduce((a,b)=>a+b,0);
+              // Apples-to-apples (user 2026-05-13): YTD/Q/H/Rok liczone tylko z zamkniętych miesięcy
+              // w 2026 (compareMaxMi). 2025 sum z tych samych miesięcy żeby porównanie było fair.
+              const closedMonths = compareMaxMi; // ile zamkniętych miesięcy 2026 (4 dla maja 2026)
+              const ytd26 = sumClosed(row.vals26);
+              const ytd25 = sumClosed(row.vals25);
               const full25 = row.vals25.reduce((a,b)=>a+b,0);
               const pctYtd = ytd25 ? ((ytd26-ytd25)/Math.abs(ytd25)*100) : 0;
-              const projection = activeMonths>0 ? Math.round(ytd26/activeMonths*12) : 0;
+              const projection = closedMonths>0 ? Math.round(ytd26/closedMonths*12) : 0;
               const rowMax = Math.max(...row.vals25,...row.vals26);
 
               return (
@@ -14114,8 +14126,8 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                   {/* KPI Strip */}
                   <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
                     {[
-                      {label:"YTD 2026",value:fmtFull(ytd26)+" €",sub:activeMonths+" mies. · "+(full25?(ytd26/full25*100).toFixed(0):0)+"% rocznego 2025",vc:"#1d4ed8",bg:"#eff6ff",bc:"#bfdbfe"},
-                      {label:"YTD 2025",value:fmtFull(ytd25)+" €",sub:"okres porównywalny",vc:"#64748b",bg:"#f8fafc",bc:"#e5e7eb"},
+                      {label:"YTD 2026",value:fmtFull(ytd26)+" €",sub:closedMonths+" mies. zamknięte · "+(full25?(ytd26/full25*100).toFixed(0):0)+"% rocznego 2025",vc:"#1d4ed8",bg:"#eff6ff",bc:"#bfdbfe"},
+                      {label:"YTD 2025",value:fmtFull(ytd25)+" €",sub:closedMonths+" mies. porównywalne",vc:"#64748b",bg:"#f8fafc",bc:"#e5e7eb"},
                       {label:"ZMIANA YTD",value:(pctYtd>=0?"+":"")+pctYtd.toFixed(1)+"%",sub:(pctYtd>=0?"+":"")+fmtFull(ytd26-ytd25)+" €",vc:pctYtd>=0?"#15803d":"#dc2626",bg:pctYtd>=0?"#f0fdf4":"#fef2f2",bc:pctYtd>=0?"#bbf7d0":"#fecaca"},
                       {label:"PROJEKCJA ROCZNA",value:fmtFull(projection)+" €",sub:"vs "+fmtFull(full25)+" € w 2025",vc:"#6366f1",bg:"#f5f3ff",bc:"#ddd6fe"},
                     ].map((c,i)=>(
@@ -14138,7 +14150,9 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                   {MS.map((m,mi)=>{
                     const v25=row.vals25[mi], v26=row.vals26[mi];
                     const isFut=!v26;
-                    const pct=v25&&v26?((v26-v25)/Math.abs(v25)*100):null;
+                    const isOpen = mi >= compareMaxMi; // bieżący lub przyszły miesiąc 2026 = NIE porównywalny
+                    // YoY tylko gdy miesiąc zamknięty w 2026 (apples-to-apples)
+                    const pct=(!isOpen && v25 && v26) ? ((v26-v25)/Math.abs(v25)*100) : null;
                     const bW25=rowMax?(v25/rowMax*100):0;
                     const bW26=rowMax?(v26/rowMax*100):0;
                     const isQEnd=mi===2||mi===5||mi===8||mi===11;
@@ -14158,12 +14172,16 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                         </div>
                         {isQEnd&&(()=>{
                           const q=Math.floor(mi/3);
-                          const q25=qSum(row.vals25,q), q26=qSum(row.vals26,q);
-                          const hasQ=q26>0;
-                          const qPct=q25&&q26?((q26-q25)/Math.abs(q25)*100):null;
+                          // Apples-to-apples: sum tylko zamkniętych miesięcy w Q (oba lata te same indices)
+                          const q26 = sumClosed(row.vals26, q*3, q*3+3);
+                          const q25 = sumClosed(row.vals25, q*3, q*3+3);
+                          const monthsInQ = closedInRange(q*3, q*3+3);
+                          const hasQ = monthsInQ > 0 && q26 > 0;
+                          const qPct = (q25 && q26) ? ((q26-q25)/Math.abs(q25)*100) : null;
+                          const isPartial = monthsInQ < 3 && monthsInQ > 0;
                           return (
                             <div style={{display:"grid",gridTemplateColumns:"44px 1fr 68px 68px 52px",gap:8,padding:"5px 12px",background:"#f0f4ff",borderTop:"1px solid #e0e7ff",borderBottom:"1px solid #e0e7ff",alignItems:"center",opacity:hasQ?1:0.3,marginBottom:2}}>
-                              <div style={{fontSize:11,fontWeight:800,color:"#4338ca"}}>Q{q+1}</div>
+                              <div style={{fontSize:11,fontWeight:800,color:"#4338ca"}}>Q{q+1}{isPartial && <span style={{fontSize:9,fontWeight:600,color:"#7c3aed",marginLeft:4}}>({monthsInQ}/3)</span>}</div>
                               <div/>
                               <div style={{fontSize:12,fontWeight:700,color:"#1d4ed8",textAlign:"right"}}>{fmtV(q26)}</div>
                               <div style={{fontSize:11,fontWeight:500,color:"#94a3b8",textAlign:"right"}}>{fmtV(q25)}</div>
@@ -14177,17 +14195,19 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                     );
                   })}
 
-                  {/* Half-year cards */}
+                  {/* Half-year cards — apples-to-apples (tylko zamknięte miesiące) */}
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:10}}>
                     {[0,1].map(h=>{
-                      const h25=row.vals25.slice(h*6,h*6+6).reduce((a,b)=>a+b,0);
-                      const h26=row.vals26.slice(h*6,h*6+6).reduce((a,b)=>a+b,0);
-                      const hasH=h26>0;
-                      const hPct=h25&&h26?((h26-h25)/Math.abs(h25)*100):null;
+                      const h25 = sumClosed(row.vals25, h*6, h*6+6);
+                      const h26 = sumClosed(row.vals26, h*6, h*6+6);
+                      const monthsInH = closedInRange(h*6, h*6+6);
+                      const hasH = monthsInH > 0 && h26 > 0;
+                      const hPct = (h25 && h26) ? ((h26-h25)/Math.abs(h25)*100) : null;
+                      const isPartial = monthsInH < 6 && monthsInH > 0;
                       return (
                         <div key={h} style={{background:"#f8fafc",borderRadius:10,padding:"10px 14px",border:"1px solid #e5e7eb",opacity:hasH?1:0.3,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                           <div>
-                            <div style={{fontSize:10,fontWeight:700,color:"#64748b",marginBottom:2}}>H{h+1}</div>
+                            <div style={{fontSize:10,fontWeight:700,color:"#64748b",marginBottom:2}}>H{h+1}{isPartial && <span style={{fontSize:9,fontWeight:600,color:"#7c3aed",marginLeft:4}}>({monthsInH}/6)</span>}</div>
                             <div style={{display:"flex",gap:12}}>
                               <span style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{fmtV(h26)}</span>
                               <span style={{fontSize:13,color:"#94a3b8"}}>vs {fmtV(h25)}</span>
@@ -14199,13 +14219,13 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                     })}
                   </div>
 
-                  {/* Year total */}
+                  {/* Year total — apples-to-apples: sum closed months in both years (ytd26 vs ytd25) */}
                   <div style={{marginTop:8,background:"#f8fafc",borderRadius:10,padding:"10px 14px",border:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                     <div>
-                      <div style={{fontSize:10,fontWeight:700,color:"#64748b",marginBottom:2}}>ROK TOTAL</div>
+                      <div style={{fontSize:10,fontWeight:700,color:"#64748b",marginBottom:2}}>ROK TOTAL{closedMonths<12 && <span style={{fontSize:9,fontWeight:600,color:"#7c3aed",marginLeft:4}}>(do {MS[Math.max(0,closedMonths-1)]} — {closedMonths}/12 mies.)</span>}</div>
                       <div style={{display:"flex",gap:12,alignItems:"baseline"}}>
-                        <span style={{fontSize:16,fontWeight:800,color:"#1d4ed8"}}>{fmtV(row.vals26.reduce((a,b)=>a+b,0))} <span style={{fontSize:10,fontWeight:500}}>({activeMonths} mies.)</span></span>
-                        <span style={{fontSize:14,color:"#94a3b8"}}>vs {fmtV(full25)}</span>
+                        <span style={{fontSize:16,fontWeight:800,color:"#1d4ed8"}}>{fmtV(ytd26)} <span style={{fontSize:10,fontWeight:500}}>({closedMonths} mies. zamknięte)</span></span>
+                        <span style={{fontSize:14,color:"#94a3b8"}}>vs {fmtV(ytd25)} (te same mies.)</span>
                       </div>
                     </div>
                     {pctYtd?<span style={{fontSize:14,fontWeight:800,padding:"4px 12px",borderRadius:8,background:pctYtd>=0?"#f0fdf4":"#fef2f2",color:pctYtd>=0?"#15803d":"#dc2626",border:"1px solid "+(pctYtd>=0?"#bbf7d0":"#fecaca")}}>{pctYtd>=0?"+":""}{pctYtd.toFixed(1)}% YTD</span>:<span style={{color:"#d1d5db"}}>—</span>}
