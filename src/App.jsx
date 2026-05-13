@@ -13123,6 +13123,20 @@ const RENT_COSTS = [
 
 const MONTHS_PL = ["Styczeń","Luty","Marzec","Kwiecień","Maj","Czerwiec","Lipiec","Sierpień","Wrzesień","Październik","Listopad","Grudzień"];
 
+// Czy miesiąc jest "zamknięty" lub bieżący — filtruje przyszłe miesiące w widokach
+// Rentowność (flota/pojazd/trendy). User 2026-05-13: przyszłe miesiące mają hard-coded
+// projekcje stałych kosztów (ZUS/polisa/slickshift/telefon/uruchomienie) z seed
+// importAllCosts — myleace bo nie reflektują real frachtów/kosztów.
+// Zamknięte = przeszły rok lub bieżący miesiąc (i wcześniejsze) w bieżącym roku.
+function isMonthClosed(year, month) {
+  const now = new Date();
+  const currentY = now.getFullYear();
+  const currentM = now.getMonth();
+  if (year < currentY) return true;
+  if (year > currentY) return false;
+  return month <= currentM;
+}
+
 function rentKey(vehicleId, year, month) { return `${vehicleId}_${year}_${month}`; }
 
 function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRate, operacyjne = [], onSaveOperacyjne, onAdd, onUpdate, onDelete }) {
@@ -13244,8 +13258,9 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
     };
   };
 
-  const totalFrachty = (vid, y) => MONTHS_PL.reduce((s,_,m) => { const r = getRecord(vid,y,m); return s + (r?.frachty||0); }, 0);
-  const totalKoszt   = (vid, y) => MONTHS_PL.reduce((s,_,m) => { const r = getRecord(vid,y,m); return s + Object.values(r?.costs||{}).reduce((a,v)=>a+(v||0),0); }, 0);
+  // Filter isMonthClosed — KPI floty + sumy roczne tylko z zamkniętych/bieżącego miesięcy
+  const totalFrachty = (vid, y) => MONTHS_PL.reduce((s,_,m) => { if (!isMonthClosed(y,m)) return s; const r = getRecord(vid,y,m); return s + (r?.frachty||0); }, 0);
+  const totalKoszt   = (vid, y) => MONTHS_PL.reduce((s,_,m) => { if (!isMonthClosed(y,m)) return s; const r = getRecord(vid,y,m); return s + Object.values(r?.costs||{}).reduce((a,v)=>a+(v||0),0); }, 0);
   const totalZysk    = (vid, y) => totalFrachty(vid,y) - totalKoszt(vid,y);
 
   const fleetFrachty = (y) => vehicles.reduce((s,v) => s + totalFrachty(v.id,y), 0);
@@ -13349,6 +13364,14 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
                     <tr key={v.id} className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="px-4 py-2 font-semibold text-gray-800" style={{ fontFamily:"'DM Mono',monospace", fontSize:11 }}>{v.plate}</td>
                       {MONTHS_PL.map((_,mi) => {
+                        // Filter przyszłe miesiące — bieżący jest pokazany, dalsze "—"
+                        if (!isMonthClosed(selYear, mi)) {
+                          return (
+                            <td key={mi} className="text-center py-2 px-1">
+                              <span className="text-gray-200 text-xs">—</span>
+                            </td>
+                          );
+                        }
                         const r = getRecord(v.id, selYear, mi);
                         if (!r) return (
                           <td key={mi} className="text-center py-2 px-1">
@@ -13378,6 +13401,10 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
                   <tr style={{ background:"#f9fafb" }}>
                     <td className="px-4 py-2.5 font-bold text-gray-700 text-xs">SUMA</td>
                     {MONTHS_PL.map((_,mi) => {
+                      // Filter przyszłe miesiące w SUMA wierszu
+                      if (!isMonthClosed(selYear, mi)) {
+                        return <td key={mi} className="text-center py-2.5 px-1 font-bold text-xs text-gray-200">—</td>;
+                      }
                       const z = vehicles.reduce((s,v) => { const r=getRecord(v.id,selYear,mi); if(!r) return s; const f=r.frachty||0; const k=Object.values(r?.costs||{}).reduce((s,v)=>s+(v||0),0); return s+f-k; }, 0);
                       const hasAny = vehicles.some(v => getRecord(v.id,selYear,mi));
                       return <td key={mi} className="text-center py-2.5 px-1 font-bold text-xs" style={{ color: hasAny ? zyskColor(z) : "#d1d5db" }}>{hasAny ? (z>=0?"+":"")+Math.round(z).toLocaleString("pl-PL") : "—"}</td>;
@@ -13453,6 +13480,10 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
           {selVehicle && (() => {
             const v = vehicles.find(vv => vv.id === selVehicle);
             const yearData = MONTHS_PL.map((lbl, mi) => {
+              // Przyszłe miesiące — pusty stub, hasData=false (dashed border w chart)
+              if (!isMonthClosed(selYear, mi)) {
+                return { lbl: lbl.slice(0,3), frachty: 0, koszty: 0, zysk: 0, hasData: false };
+              }
               const r = getRecord(selVehicle, selYear, mi);
               const f = r?.frachty || 0;
               const k = r ? Object.values(r?.costs||{}).reduce((s,v)=>s+(v||0),0) : 0;
@@ -13462,10 +13493,10 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
             const annualK = yearData.reduce((s,d)=>s+d.koszty,0);
             const annualZ = annualF - annualK;
 
-            // Cost breakdown summed for year
+            // Cost breakdown summed for year (filter przyszłych miesięcy)
             const costBreakdown = RENT_COSTS.map(c => ({
               ...c,
-              total: MONTHS_PL.reduce((_,__,mi) => { const r=getRecord(selVehicle,selYear,mi); return _ + (r?.costs?.[c.id]||0); }, 0)
+              total: MONTHS_PL.reduce((_,__,mi) => { if (!isMonthClosed(selYear,mi)) return _; const r=getRecord(selVehicle,selYear,mi); return _ + (r?.costs?.[c.id]||0); }, 0)
             })).filter(c => c.total > 0).sort((a,b) => b.total - a.total);
 
             const maxBar = Math.max(...yearData.map(d => Math.max(d.frachty, d.koszty)), 1);
@@ -13562,12 +13593,14 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
                     </thead>
                     <tbody>
                       {MONTHS_PL.map((lbl, mi) => {
-                        const r = getRecord(selVehicle, selYear, mi);
+                        // Przyszłe miesiące — pokaż wiersz z "—" we wszystkich kolumnach (struktura zachowana)
+                        const isFuture = !isMonthClosed(selYear, mi);
+                        const r = isFuture ? null : getRecord(selVehicle, selYear, mi);
                         const f = r?.frachty || 0;
                         const k = r ? RENT_COSTS.reduce((s,c)=>s+(r.costs?.[c.id]||0),0) : 0;
                         const z = f - k;
                         return (
-                          <tr key={mi} className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer" onClick={() => openAdd(selVehicle, selYear, mi)}>
+                          <tr key={mi} className={`border-b border-gray-50 hover:bg-gray-50 ${isFuture ? "opacity-50" : "cursor-pointer"}`} onClick={() => !isFuture && openAdd(selVehicle, selYear, mi)}>
                             <td className="px-5 py-2.5 font-medium text-gray-700">{lbl}</td>
                             <td className="text-right px-3 py-2.5 text-blue-600 font-medium">{f > 0 ? fmt(f) : <span className="text-gray-200">—</span>}</td>
                             <td className="text-right px-3 py-2.5 text-gray-600">{k > 0 ? fmt(k) : <span className="text-gray-200">—</span>}</td>
@@ -13718,6 +13751,8 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
   }, [vehicles]);
   const toggleArr = (arr, setArr, val) => setArr(p => p.includes(val) ? p.filter(x=>x!==val) : [...p, val]);
   const getVal = (vid, year, mi, metId) => {
+    // Filter przyszłe miesiące — return null żeby Recharts/LineChart nie rysował punktu
+    if (!isMonthClosed(year, mi)) return null;
     // Single source of truth: getRecord handles all corrections (2025 Excel, 2026 fleet)
     const r = getRecord(vid, year, mi);
     const op = operacyjne.find(o => o.vehicleId===vid && o.year===year && o.month===mi+1);
@@ -13757,7 +13792,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
       });
     });
   }
-  const allVals = series.flatMap(s=>s.pts).filter(v=>v!==0);
+  const allVals = series.flatMap(s=>s.pts).filter(v=>v!==null && v!==0);
   const _min = allVals.length ? Math.min(...allVals) : 0;
   const minVal = _min >= 0 ? 0 : _min;
   const maxVal = allVals.length ? Math.max(...allVals) : 1;
