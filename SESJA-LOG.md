@@ -833,3 +833,67 @@ Wymaga **CF deploy z main repo** (memory `feedback_deploy_worktree.md` — z wor
 ### Memory zaktualizowane
 
 - `project_priority_compliance_data_verify.md` — status OPEN → IN PROGRESS, bugi #1 + #3+#4 oznaczone ✅ z commit hash, bug #2 OTWARTE z notatką "wymaga CF deploy z main repo"
+
+---
+
+## 2026-05-25 — VBS Faktury sesja: ETAP 1+2 + caching + anti-hallucination fix
+
+**Projekt**: vbs-invoices (`~/Desktop/vbs-invoices.nosync/`, osobny od FleetStat). 7 commitów lokalnych, **NADAL bez remote git** (TODO sprzed sesji nie zrobione).
+
+### Punkt startowy
+- Iter 2 promptu deployed wcześniej; 261 FV w bazie z parsing issues (forward Bartka/Dextraline odrzucany)
+- Scheduler wyłączony, czekał na decyzje user'a
+
+### Co zrobione (chronologicznie, 7 commitów)
+
+1. **`ba1b975` inspectMailbox callable** — debug structure maili bez Claude/zapisu (+ UI sekcja "🔍 Diagnoza struktury maili" w Dashboard). Pozwoliło zdiagnozować że mail Dextraline ma 5 top-level attachments (3 logo + FV + POD), scanner JE WIDZI — problem leży gdzie indziej.
+
+2. **`c4202cb` ETAP 1 fix forward FV**:
+   - `shouldAcceptInvoice` — usunięto twarde filtry `isMainDocument` i `senderMatchesSeller && isReferencedDocument`. Forward przez pośrednika (Bartek) odrzucał poprawne FV bo Claude oznaczał Fwd: jako "referencyjny".
+   - Pre-filtr tiny_image <15kB (logo skip przed Claude)
+   - Prompt: forward ≠ referencyjny, decyduje buyerNip=VBS
+   - **Walidacja**: FV Dextraline 500 EUR weszła ✅ (Invoice processed in log)
+
+3. **`0129ed8` ETAP 2 grupowanie CMR/POD jako załącznik**:
+   - Refactor pętli mailbox.js → classify-then-group (faza 1 classify, faza 2 podział główne/aux, faza 3 upload aux jako attachments[])
+   - `ATTACHABLE_DOC_TYPES = ['delivery_note', 'cmr', 'pod', 'order']`
+   - saveInvoice przyjmuje `attachments[]`
+   - InvoiceDetail sekcja "📎 Załączniki" z preview obrazów + linkiem
+   - **Walidacja**: AgroLuK FV/65/2026 1353€ + **3 CMR** dołączone (1000096481/483/484.jpg) ✅ User pokazał screen z 2 widocznymi CMR w UI
+
+4. **`20b8726` Prompt caching**:
+   - SYSTEM_PROMPT + STATIC_EXTRACTION_PROMPT z `cache_control: ephemeral`
+   - `buildEmailContextText()` dynamiczny PO ostatnim markerze
+   - Logger `cache_creation/read_input_tokens`
+   - max_tokens 3072→2048
+   - **Walidacja w logach**: 42/43 calls miały cacheRead=2188 (cache hit ~100%). **Realnie ~50% taniej per call** (od $0.031 do $0.015) — więcej niż przewidywane 25-30% bo zsumowały się: caching + tiny_image pre-filter + ETAP 2 + max_tokens redukcja.
+
+5. **`58f585d` PDF viewer FitH** — `iframe src={pdfUrl}#view=FitH` żeby Chrome PDF viewer skalował do szerokości (user zgłosił "nie da się pomniejszyć")
+
+6. **Lesson learned: `firebase deploy --only functions:X` ≠ shared lib**:
+   Przez całą sesję deployowałem `--only functions:scanNow`. `scanIMAPMailboxes` (scheduler) **NIE dostał nowego kodu** — przez kilka godzin używał kodu sprzed ETAP 1 (z `isMainDocument` filter). User zauważył po `sub_document: isMainDocument=false` w logach mimo że kod lokalny jest czysty. Fix: `firebase deploy --only functions` (wszystkie).
+   **Zasada na przyszłość**: jeśli edytujesz `functions/lib/*`, deployuj WSZYSTKIE funkcje.
+
+7. **`121ae14` FIX halucynacji Claude (krytyczne!)**:
+   User zobaczył FV "25057126 Getru 1805€" z **logo Instagrama jako PDF preview**. Z 1 maila powstały 3 różne "25057126" z różnymi NIPami (NL858045001B01, NL862536820B01, NL857867148B01) i kwotami (1763.65, 1768, 1805.01€). Claude halucynował dane FV z bodyExcerpt emaila widząc logo IG (~30kB, przeszło tiny_image <15kB).
+   3 warstwy fix:
+   - **MIN_IMAGE_SIZE 15→50kB** (logo IG/LinkedIn 20-40kB)
+   - **SKIP_FILENAME_PATTERNS**: image\\d+, logo*, signature*, unnamed*, attachment.pdf, social
+   - **Anti-hallucination prompt**: SYSTEM + zasada #0 — dane FV TYLKO z załącznika, kontekst emaila TYLKO do klasyfikacji typu, logo/ikona → isInvoice=false + wszystko null
+   Deploy ALL functions ✅
+
+### Stan końcowy
+- Wszystkie 4 CF deployed z najnowszym kodem (scanNow, scanIMAPMailboxes, clearAndReset, inspectMailbox)
+- 22 FV w bazie ZAŚMIECONE halucynacjami (przed fix) — user ma clear+rescan
+- Anthropic balance: $27.98 (start) → $27.33 (po teście 10) → ~$26.5? (po pełnym scan 12 FV faktury) — szczegóły TBD
+- Frontend dev server na port 5174 odpalony
+
+### Otwarte do następnej sesji
+1. **User**: clear+reset → pełen rescan z anti-hallucination fix → walidacja (mniej FV, brak duplikatów "25057126")
+2. **User decision**: następna sesja = frontend wizualizacja (user wybrał, pomysły w `project_invoice_ai_scanner.md` → "NASTĘPNA SESJA")
+3. **CMR-solo zakładka** (TODO sprzed sesji) — łącznie z frontend redesign
+4. **⚠️ KRYTYCZNE**: vbs-invoices BEZ remote git. 7 commitów tylko lokalnie. Stworzyć GitHub repo + push, lub przynajmniej backup `vbs-invoices.nosync/` do iCloud razem z FleetStat.
+
+### Memory zaktualizowane
+- `project_invoice_ai_scanner.md` — ETAP 1 fix + ETAP 2 + caching + lesson deploy + anti-hallucination fix, plan CMR-solo + frontend NASTĘPNA SESJA
+- `MEMORY.md` — index z aktualnym statusem
