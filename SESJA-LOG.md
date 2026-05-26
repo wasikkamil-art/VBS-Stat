@@ -897,3 +897,60 @@ Wymaga **CF deploy z main repo** (memory `feedback_deploy_worktree.md` — z wor
 ### Memory zaktualizowane
 - `project_invoice_ai_scanner.md` — ETAP 1 fix + ETAP 2 + caching + lesson deploy + anti-hallucination fix, plan CMR-solo + frontend NASTĘPNA SESJA
 - `MEMORY.md` — index z aktualnym statusem
+
+## 2026-05-26 — vbs-invoices: rescan walidacja + 3 bug fixy + cost optimization ($30+/mc → $5-8/mc)
+
+**Projekt**: vbs-invoices (`~/Desktop/vbs-invoices.nosync/`). 10 commitów lokalnych, **NADAL bez remote push** (PAT scope blocker).
+
+### Punkt startowy
+- Repo GitHub `wasikkamil-art/vbs-invoices` utworzony w trakcie sesji (private, pusty)
+- 25 FV w bazie po poprzednim scanie, z czego 5 halucynacji Getru (image002.png/006.jpg)
+- Scheduler off, czekał na clear+rescan
+
+### Co zrobione (chronologicznie, 3 commity sesji)
+
+1. **Audit + clear+rescan**: REST API query Firestore zdiagnozował 5 halucynacji + duplikat e100. User kliknął Wyczyść+reset → 0 → scan → 16 FV (czyste). Skasowany 1 duplikat FR123260 (REST DELETE).
+
+2. **`b3bb1df` 3 bug fixy**:
+   - **Dedup multi-NIP** (firestore.js + storage.js + mailbox.js): `findExistingInvoice(extracted, storageRefPath)` 2-key check. Eksport `computeStorageRef()` deterministyczny. Walidacja: AgroLuK rescan → matchedBy storageRef ✅
+   - **not_vbs filter** (mailbox.js): accept `isBuyerVBS=true` mimo `buyerNip=null`. Andamur zbiorcze przechodzi.
+   - **Capitalizacja seller** (utils/format.js + 4 UI): `fmtSellerName()` — Title Case dla CAPS, lowercase dla brand z cyframi (e100 zostaje).
+
+3. **KRYZYS KOSZTÓW**: User pokazał Anthropic Console — overnight (12h) $3.91 zmarnowane. Token volume 4.8M. Diagnoza z logów: każdy scheduler tick `cacheWrite: 2846, cacheRead: 0`. Cache TTL 5min vs scheduler 10min = cache MISS zawsze + premium write +25%. **Cache kosztował WIĘCEJ niż pomagał** ($0.036 z cache vs $0.017 bez).
+
+4. **`d398f45` Cost optimization (dwa fixy w jednym)**:
+   - **Cache fix**: usunięte `cache_control` z system + STATIC_EXTRACTION_PROMPT. System jako string. -53% per call.
+   - **Paczka A pre-filtry**: `BLACKLISTED_SENDER_PATTERNS` (TIMOCOM, noreply, marketing), `SKIP_SUBJECT_KEYWORDS` (monit, wezwanie, nota odsetkowa, newsletter, SIPSI), `SKIP_FILENAME_PATTERNS` rozszerzone (lastschrift, zahlungsavis, SIPSI, monit). `preClassifyEmail()` skip CAŁY mail przed Claude. Walidacja: BNP "Nowa nota odsetkowa" → subject_blacklist = $0 (wcześniej $0.036). -40% calls.
+
+5. **`d5260aa` Paczka B Haiku 4.5 pre-classifier**:
+   - Konsultowany skill claude-api: model `claude-haiku-4-5` alias OK, native PDF, structured outputs `output_config.format`
+   - `classifyAttachmentLite(buffer, contentType, emailContext, filename)` w claude.js — Haiku + JSON schema enforce → `{decision: 'yes'|'no'|'unsure', isInvoice, isLikelyVBS, reason}`. `max_tokens: 200`, koszt $0.0033/call (5x taniej Sonnet).
+   - Integracja mailbox.js FAZA 1 między filename pre-filter a Sonnet: jeśli `decision='no'` → SKIP, jeśli 'yes'/'unsure' → Sonnet. Defensive: na error idziemy do Sonnet.
+   - Toggle `useHaikuPrefilter` w scanConfig (default true, można wyłączyć REST/UI).
+   - **NIE walidowane w realnym ruchu** — w testach żaden PDF nie dotarł do Haiku (Paczka A i tiny_image złapały wszystko wcześniej, paradoksalnie dobre). Walidacja czeka na naturalny mail z FV.
+
+6. **Limits Anthropic**: workspace Invoices limit $30 → $50 (user), org limit $50 → $100 (user). Konsumowane: ~$35.55 z $100 (35%).
+
+7. **Scheduler ON + Haiku ON** (REST API): `schedulerEnabled: true, useHaikuPrefilter: true`. Scheduler chodzi co 10 min od ~17:00 CEST.
+
+### Projekcja kosztów
+- Przed: $25-40/mc (cache invalid + brak filtrów)
+- Po cache fix: $15-25/mc
+- Po Paczce A: $10-15/mc
+- Po Paczce B: **$5-8/mc** ← z dużym zapasem do celu $15
+
+### Stan końcowy
+- 17 FV w bazie (12 faktury, 5 info), 0 halucynacji, 0 null-amount, 0 duplikatów
+- Wszystkie 4 CF deployed z najnowszym kodem (3 deploy w sesji)
+- 10 commitów lokalnych vbs-invoices
+
+### Otwarte
+1. **⚠️ KRYTYCZNE PAT scope**: repo wasikkamil-art/vbs-invoices istnieje pusty. Fine-grained PAT nie ma scope. **10 commitów tylko lokalnie**. User musi wygenerować nowy classic PAT z scope `repo` LUB edytować fine-grained.
+2. **Walidacja Haiku**: scheduler ON, ale nie potwierdzone czy Haiku poprawnie klasyfikuje (nie miał świeżego PDF do testu). Sprawdzić logi za 2-3h pod `Haiku classify` / `haiku_not_invoice`.
+3. **Frontend backlog**: user dwa razy dismissował ankietę priorytetów. Czeka aż będzie gotów. Top opcje: filtry/sortowanie Skrzynka, Dashboard wykresy, mobile responsive, eksport CSV/PDF, CMR-solo zakładka, push notifications, soft auto-approve, deploy faktury.vbstransport.com.
+4. **Auto-reload OFF**: credit balance $13.98 → ~2700 calls. Po zerze CF failują. Rekomendacja: włączyć auto-reload (np. $20 gdy <$5).
+5. **Node 20 deprecation** (low priority): warning przy deploy, decommission 2026-10-30. Upgrade na Node 22.
+
+### Memory zaktualizowane
+- `project_invoice_ai_scanner.md` — rescan walidacja + 3 bug fixy + cost optimization (cache fix + Paczka A + Paczka B); aktualny stan bazy + scheduler/Haiku ON
+- `MEMORY.md` — index z aktualnym statusem
