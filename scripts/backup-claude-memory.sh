@@ -10,7 +10,11 @@
 #
 # Setup auto-run (Krok 2b z 2026-05-04 — TBD): launchd plist codziennie 22:00
 
-set -euo pipefail
+set -uo pipefail
+# UWAGA: NIE używamy `set -e` — `cp` do iCloud Drive okazjonalnie failuje
+# z "Resource deadlock avoided" (race z iCloud sync daemon). Nie chcemy żeby
+# pojedynczy fail killa całego skryptu. Track błędów ręcznie w ERRORS.
+ERRORS=0
 
 # === Konfiguracja ===
 SOURCE_MEMORY="$HOME/.claude/projects/-Users-kamilwasik-Desktop-VBS-Stat-nosync/memory"
@@ -51,17 +55,42 @@ else
 fi
 
 # === Backup .env.local (1 kopia, overwrite) ===
+# iCloud Drive ma znanego buga "Resource deadlock avoided" przy cp do plików
+# które są w trakcie sync. Workaround: rm -f destination + retry 3x z sleep.
 if [ -f "$SOURCE_ENV" ]; then
-    $DRY_RUN cp "$SOURCE_ENV" "$DEST_BASE/env/.env.local"
-    echo "✅ .env.local skopiowany: $DEST_BASE/env/.env.local"
+    DEST_ENV="$DEST_BASE/env/.env.local"
+    if [ -n "$DRY_RUN" ]; then
+        echo "[DRY] cp $SOURCE_ENV $DEST_ENV"
+    else
+        ENV_OK=0
+        for ATTEMPT in 1 2 3; do
+            rm -f "$DEST_ENV" 2>/dev/null || true
+            sleep 1
+            if cp "$SOURCE_ENV" "$DEST_ENV" 2>/dev/null; then
+                echo "✅ .env.local skopiowany (próba $ATTEMPT): $DEST_ENV"
+                ENV_OK=1
+                break
+            fi
+            echo "⚠️  cp .env.local fail (próba $ATTEMPT/3) — czekam 3s na iCloud..."
+            sleep 3
+        done
+        if [ "$ENV_OK" -eq 0 ]; then
+            echo "❌ .env.local NIE skopiowany po 3 próbach (resource deadlock?)"
+            ERRORS=$((ERRORS + 1))
+        fi
+    fi
 else
     echo "⚠️  Source .env.local nieobecny: $SOURCE_ENV (pomijam)"
 fi
 
-# === Manifest log (append-only) ===
+# === Manifest log (append-only) — zawsze zapisuje status (success/partial) ===
 MANIFEST="$DEST_BASE/manifest.txt"
 if [ -z "$DRY_RUN" ]; then
-    echo "$TIMESTAMP | snapshot $DATE | $FILE_COUNT memory files" >> "$MANIFEST"
+    STATUS_LABEL="success"
+    if [ "$ERRORS" -gt 0 ]; then
+        STATUS_LABEL="partial ($ERRORS errors)"
+    fi
+    echo "$TIMESTAMP | snapshot $DATE | ${FILE_COUNT:-0} memory files | $STATUS_LABEL" >> "$MANIFEST"
 fi
 
 # === Retention: usuń memory snapshots starsze niż RETENTION_DAYS ===
@@ -73,5 +102,12 @@ if [ -z "$DRY_RUN" ]; then
 fi
 
 echo
-echo "✅ Backup zakończony — $TIMESTAMP"
-echo "   Lokalizacja: $DEST_BASE"
+if [ "$ERRORS" -gt 0 ]; then
+    echo "⚠️  Backup zakończony z $ERRORS błędem(ami) — $TIMESTAMP"
+    echo "   Lokalizacja: $DEST_BASE"
+    echo "   Memory snapshot OK, ale sprawdź .env.local powyżej"
+    exit 0  # NIE failujemy launchd job — partial backup też wartościowy
+else
+    echo "✅ Backup zakończony — $TIMESTAMP"
+    echo "   Lokalizacja: $DEST_BASE"
+fi

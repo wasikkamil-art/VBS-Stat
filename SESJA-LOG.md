@@ -954,3 +954,164 @@ Wymaga **CF deploy z main repo** (memory `feedback_deploy_worktree.md` — z wor
 ### Memory zaktualizowane
 - `project_invoice_ai_scanner.md` — rescan walidacja + 3 bug fixy + cost optimization (cache fix + Paczka A + Paczka B); aktualny stan bazy + scheduler/Haiku ON
 - `MEMORY.md` — index z aktualnym statusem
+
+---
+
+## 2026-05-26 (popołudnie) — vbs-invoices: 2 bugi schedulera + frontend Skrzynka + PUSH GitHub
+
+**Projekt**: vbs-invoices. Kontynuacja porannej sesji. **Wszystkie 14 commitów PUSHED na github.com/wasikkamil-art/vbs-invoices ✅**.
+
+### Punkt startowy
+Scheduler+Haiku ON od ~17:00 wczoraj. 17 FV w bazie. Nie wiedzieliśmy czy Haiku faktycznie działa (poprzedni test nie miał świeżego PDF).
+
+### Co znaleźli + naprawione (4 commity tej sesji)
+
+1. **Audyt po nocy → 2 bugi** (z `firebase functions:log` + Firestore REST):
+   - **BUG #1 Haiku JSON truncation**: `max_tokens: 200` za małe. Haiku obcina output w środku polskiego `reason` → JSON niedomknięty → `parse_error` → defaulting do "unsure" → Sonnet fallback. Paczka B faktycznie nie działała.
+   - **BUG #2 IMAP UID swap zombie**: RFC 3501 — gdy `UID N:*` z N > maxUID, server swap'uje na `*:N`, zwraca highest mail. AgroLuK info (UID 59515) skanowany co 10 min → Sonnet $0.036 × 114 ticków ≈ **$4 nocy zmarnowane** na duplikat.
+
+2. **`e9afec8` Fix obu bugów**:
+   - Haiku: `max_tokens 200→400` + prompt wymusza `reason max 80 znaków po polsku, nie cytuj danych z faktury`
+   - IMAP: `messages.filter(m => m.uid > lastUid)` po `connection.search` + wczesny exit gdy 0 candidate
+   - Walidacja: w ciągu 20 min po deploy: `Mailbox info: 0 candidate messages (IMAP zwrócił 1, odfiltrowano 1 stale)` ✅ zombie umarł
+
+3. **`4f1663a` Fix mojego sub-buga**: po deploy user kliknął "Test 10 najnowszych" w UI → wynik 0/0/0. Mój filter LASTUID działał TEŻ w trybie test. Fix: `const effectiveLastUid = dryUidUpdate ? 0 : lastUid` — w test mode searchCriteria idzie po `scanConfig.startDate`, brak filtra.
+
+4. **Walidacja Haiku w PROD ✅**: po fix user re-test 10 najnowszych. **9 PDF przez Haiku, 3 z `decision='no'`**:
+   - 2× E100 PLN (`"Waluta PLN wyklucza FV"`)
+   - 1× NKB_Registry (`"Rejestr/wykaz faktur, nie samodzielna FV"`)
+   - Brak `parse_error` ani `haiku_error` w logach
+   - Koszt testu: ~$0.26 (9 Haiku + 6 Sonnet)
+   - **33% saving Sonnet calls** na tym batchu
+
+### Frontend (commity `217cda7` + `7cf22f7`)
+
+Po user briefing — priorytet: "**dobre pokazywanie w skrzynce — data przyjścia @ z jakiej skrzynki, ikonka co w nim jest (FV/CMR)**".
+
+1. **InvoiceList.jsx — Skrzynka rozszerzona**:
+   - Nowa kolumna **"Otrzymano"** (PIERWSZA, najważniejsza wg user): `fmtDate(emailDate)` + `fmtDateRelative` pod
+   - Nowa kolumna **"Skrzynka"**: badge faktury (emerald) / info (sky)
+   - Ikona **📎 N** obok sellerName gdy `attachments.length > 0`
+   - Default sort `orderBy('emailDate', 'desc')` w `useInvoices` (zmiana z `createdAt`)
+   - **Click headerem sortuje** 8 kolumn — asc/desc toggle, indicator ↑↓
+   - **Search input** — fulltext sellerName/buyerName/invoiceNumber/sellerNip
+   - **Mailbox filter dropdown** — wszystkie / faktury@ / info@
+   - "Resetuj" button gdy aktywne filtry, counter "X z Y FV"
+   - useMemo dla filtered list (nie liczy per render)
+
+2. **CMRList.jsx — nowa zakładka /cmr**:
+   - Flat-map invoices.attachments[] z inherit metadata FV
+   - Sort `emailDate desc`
+   - Karta per CMR: typ doc (cmr/pod/delivery_note z label), filename, skrzynka badge, "Otrzymano", powiązana FV (seller + nr + kwota), treść maila (od + temat, 1 linia każdy), preview obrazka (max-h-64), download link Storage
+   - Sidebar item "📄 CMR / POD" przed Kontrahenci
+   - Grid 1 col mobile / 2 col lg
+
+### PAT + push ✅
+
+User wygenerował classic PAT z scope=repo. Switch SSH→HTTPS+PAT, push 14 commitów. PAT siedzi teraz w `.git/config` plain text (jak FleetStat — user świadomy, standard u niego). Pre-push hook brak (vbs-invoices nie ma huska), więc nic nie zostało zablokowane.
+
+### Stan końcowy
+- 17 FV w bazie, nic nowego nie wpadło (skrzynka cicho)
+- Wszystkie 4 CF deployed: scanIMAPMailboxes, scanNow, inspectMailbox, clearAndReset
+- Scheduler ON co 10 min, Haiku prefilter ON
+- **14 commitów lokalnie = 14 na github.com/wasikkamil-art/vbs-invoices ✅**
+- 4 commity tej sesji: `e9afec8` bugi, `4f1663a` test mode fix, `217cda7` Skrzynka+CMR, `7cf22f7` filtry/sort
+
+### Otwarte do następnej sesji
+1. **Vercel deploy** — repo na GitHub jest. Import do Vercel (https://vercel.com → New Project → wasikkamil-art/vbs-invoices) + OVH CNAME `faktury.vbstransport.com → cname.vercel-dns.com`
+2. **Dashboard wykresy Recharts** — top kontrahenci bar / suma EUR miesięczna / status pie
+3. **Mobile responsive** — sidebar collapse, tabele → karty
+4. **Eksport CSV/PDF** za okres (do księgowej / druk)
+5. **Soft auto-approve** dla contractor.invoiceCount > 5 (zaufany)
+6. **Anthropic auto-reload** — credit ~$13.50, włączyć ($20 gdy <$5)
+7. **Node 20 deprecation** — upgrade na Node 22 do 2026-10-30
+
+### Memory zaktualizowane
+- `project_invoice_ai_scanner.md` — wpis na samej górze z całą sesją popołudniową
+- `MEMORY.md` — index z aktualnym statusem (Haiku walidowany, push zrobiony, frontend Skrzynka rozszerzona)
+
+---
+
+## 2026-05-26 (wieczór) — vbs-invoices: VERCEL DEPLOY https://faktury.fleetstat.pl + rozbudowa filtrów
+
+**Projekt**: vbs-invoices. Kontynuacja popołudnia. **PRODUKCJA LIVE na https://faktury.fleetstat.pl ✅**.
+
+### Punkt startowy
+Frontend Skrzynka rozszerzona + zakładka CMR/POD + filtry/sort już commit + push. Wszystkie 14 commitów na GitHub. Ale frontend NIE deployed na produkcji (Vercel project nie istniał).
+
+### Decyzja architektoniczna — subdomena fleetstat.pl
+
+Zmiana z planu początkowego (`faktury.vbstransport.com`) na **`faktury.fleetstat.pl`**. User uzasadnienie: planuje sprzedawać FleetStat na zewnątrz jako SaaS, **inne firmy też mogą chcieć tracking FV**. Dyskusja architektoniczna o 3 wymiarach:
+1. **Multi-tenancy**: dziś single-tenant (FleetStat dla VBS, vbs-invoices dla VBS). Sprzedaż na zewnątrz wymaga refactor `tenantId` w kolekcjach + Firestore rules.
+2. **Cross-product integration**: Suite (bundle, jeden login modułowy) vs Marketplace (osobne FV add-on) vs niezależne produkty
+3. **Failure isolation**: trzymane separowane (osobne Firebase projects vbs-stats vs vbs-invoices, osobne deploys) — TRZEBA zachować nawet po refaktorze multi-tenant
+
+**Faza 1 (teraz)**: subdomena `faktury.fleetstat.pl` jako brand `FleetStat Faktury` (parasol). Zero shared infra, osobny deploy + Firebase project. **Faza 2 (gdy sprzedaż)**: dorzucamy `tenantId`.
+
+### Vercel deploy + DNS + Firebase Auth (4 kroki)
+
+1. **Vercel import**: vercel.com → wasikkamil-art's projects → Import GitHub → vbs-invoices. Auto-detect Vite ✅. Env vars BRAK (firebase config publiczny). Build sukces ~1-2 min.
+
+2. **DNS w home.pl** (NOT OVH — fleetstat.pl jest u home.pl, w przeciwieństwie do vbstransport.com): panel.home.pl → Domeny → fleetstat.pl → DNS Zone → Dodaj CNAME. **Pułapka home.pl UI**: pola "Nazwa kanoniczna" (= TARGET) i "Host" (= subdomain) odwrócone od intuicji — user pierwotnie wpisał `faktury.` w Nazwa kanoniczna zamiast `cname.vercel-dns.com`. Naprawione. CNAME `faktury → cname.vercel-dns.com` propagacja globalna ~2 min.
+
+3. **Vercel Add Domain**: vercel.com → projekt → Domains (nowy UI — Domains jako osobny tab, NIE w Settings). Add Existing → `faktury.fleetstat.pl` → Production. SSL Let's Encrypt auto. "DNS Change Recommended" ostrzeżenie (nie blocker).
+
+4. **Firebase Auth authorized domains**: console.firebase.google.com/project/vbs-invoices/authentication/settings → Add domain → `vbs-invoices.vercel.app` + `faktury.fleetstat.pl`. Bez tego login wybucha z `auth/unauthorized-domain`.
+
+### ⚠️ Vercel BLOCKED 2 deploys — fix git author email
+
+Po commitach `385ec56` (filter zakres dat) + `d4227d3` (quick filter chipy) Vercel zablokował deploy:
+
+> "The deployment was blocked because the commit author email (kamilwasik@MacBook-Air-Kamil.local) is not valid. Ensure your git email matches your GitHub account."
+
+**Diagnoza**: macOS auto-ustawia `git config --global user.email = <username>@<hostname>.local` (z systemu, nigdy nie podane manualnie). Vercel od ~2026-05 sprawdza czy commit author email zarejestrowany na GitHubie — nieznany = block. Zabezpieczenie przed podszywaniem się pod cudze commity.
+
+**Fix**:
+```bash
+cd ~/Desktop/vbs-invoices.nosync
+git config user.email "wasik.kamil@gmail.com"  # per-repo
+git config user.name "Kamil Wasik"
+git rebase HEAD~2 --exec "git commit --amend --reset-author --no-edit"
+git push --force-with-lease origin main
+```
+
+Po force push Vercel wykrył nowych authorów → odblokował → deploy zakończony. Hashe się zmieniły: `385ec56→24c5a56`, `d4227d3→d50d985`. **Memory zapisana** (`reference_vercel_git_email.md`) — na przyszłość przy każdym nowym repo na macOS ustaw user.email PRZED pierwszym commit.
+
+### Frontend dorzucone w tej sesji
+
+1. **`24c5a56` Filter zakres dat w Skrzynce**:
+   - Dropdown wybór pola (emailDate default / issueDate / dueDate)
+   - 2 inputy type=date "od" / "do"
+   - Szybki reset zakresu (✕) + "Resetuj wszystko" prawy róg
+   - Porównanie stringowe ISO 8601 (poprawne lexicographically)
+
+2. **`d50d985` Quick filter chips na górze paska**:
+   - 3 chipy z counterem ile FV pasuje: ⚠️ Przeterminowane / 🔥 Dziś do zapłaty / 📆 Jutro do zapłaty
+   - Multi-select (OR logic) — kombinuj "wszystko co pali"
+   - Match po `inv.dueDate` vs today/tomorrow, pomijamy `status='paid'`
+   - Counter z surowych invoices (przed innymi filtrami) — widać od razu globalny stan
+   - Disabled gdy count=0 (jasne tło, nie klikalne)
+   - Kolory aktywnego: czerwony / bursztynowy / niebieski
+
+### Stan końcowy
+- **Produkcja LIVE**: https://faktury.fleetstat.pl (SSL ✅, Firebase Auth ✅)
+- Alias: https://vbs-invoices.vercel.app (backup, ten sam build)
+- **Auto-deploy**: każdy push na main vbs-invoices → Vercel build 1-2 min
+- 16 commitów na GitHub (14 popołudnie + 2 wieczorem po re-author force push)
+- Git config per-repo OK (nowe commity od razu valid email)
+- 17 FV w bazie, scheduler+Haiku ON (#143/145)
+
+### Otwarte do następnej sesji
+1. **Dashboard wykresy Recharts** — top kontrahenci bar / suma EUR miesięczna / status pie. ~2h
+2. **Mobile responsive** — sidebar collapse, tabele → karty, modale full-screen. ~2-3h. Krytyczne dla Wioletty/Przemka z tel.
+3. **Eksport CSV** — lista FV per okres dla księgowej. ~1h
+4. **Soft auto-approve** — contractor.invoiceCount > 5, pending → approved auto
+5. **Suma kwot filtrowanych** — pasek "12 z 17 FV · ∑ X EUR netto / Y brutto"
+6. **Multi-tenant refaktor** — gdy zbliża się sprzedaż FleetStat zewnętrzna
+7. **Vercel "DNS Change Recommended"** — ostrzeżenie do zbadania (nie blocker)
+8. **Anthropic auto-reload** — credit ~$13.50
+
+### Memory zaktualizowane
+- `project_invoice_ai_scanner.md` — wpis wieczorny z Vercel deploy + DNS + Blocked fix + frontend
+- `reference_vercel_git_email.md` — NOWA memory: pułapka macOS auto-email + procedura dla każdego nowego repo
+- `MEMORY.md` — index z aktualnym statusem (LIVE faktury.fleetstat.pl)
