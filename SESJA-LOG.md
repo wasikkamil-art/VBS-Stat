@@ -833,3 +833,71 @@ Wymaga **CF deploy z main repo** (memory `feedback_deploy_worktree.md` — z wor
 ### Memory zaktualizowane
 
 - `project_priority_compliance_data_verify.md` — status OPEN → IN PROGRESS, bugi #1 + #3+#4 oznaczone ✅ z commit hash, bug #2 OTWARTE z notatką "wymaga CF deploy z main repo"
+
+---
+
+## 2026-05-11/13 — MEGA-SESJA: compliance + szare=rest + home statusy + data-loss + import + rentowność/trendy
+
+**Kontekst startu**: priorytet ⭐ compliance verify (4 bugi z memory). Rozrosło się w wielowątkową sesję — 18 commitów. Data zmieniała się 3× w trakcie (11→12→13.05).
+
+### A. Compliance verify (3/4 bugów ✅) — potem DEFERRED
+
+- **Bug #1** `79ae3c7` — `coalesceRestGaps()` scala rest fragmenty oddzielone "ciszą" CSV (silnik OFF). Volodymyr weekend 45h53min był rozbity na sub-24h fragmenty → false alert "brak weekly rest". Fix lokalnie w `weeklyRestCompensation`.
+- **Bug #3+#4** `02a3e86` — `lastActualWeeklyRestEnd()` + deadline wg 561/2006 art.8.6 (`endMs + 6×24h` zamiast kalendarzowej niedzieli 00:00). Volodymyr: 17.05 09:43 zamiast 17.05 00:00.
+- **Bug #2** auto_gps fragmentation — OTWARTY (wymaga CF deploy z main). **DEFERRED 2026-05-13** — user ma inny pomysł (AI scanner FV nowy priorytet).
+
+### B. Filozofia "szare = rest" (user feedback)
+
+- `7152dc0` — `fillGapsAsRest()` w `computeDriverCompliance` — gap między segmentami = synthetic rest (silnik OFF = kierowca odpoczywa). Wpływa na wszystkie metryki (sumByType, lastDailyRestEnd, continuousDrive).
+- `11b04eb` — Aktywność dzienna (MultiDayActivityView) — gap'y wypełnione synthetic rest w sumach + paskach. Tło ribbon #e5e7eb → #dbeafe.
+- `b2aeadf` — pasek dnia bieżącego: przyszłość (od now do końca doby) = biały "future" segment, nie niebieski rest.
+
+### C. Home — statusy pojazdów (4 fixy)
+
+- `704781a` — aktywny fracht obejmuje opóźnione (usunięto `today <= dataRozladunku`). Wcześniej fracht "wisiał w luce" → fałszywe "Czeka na zlecenie".
+- `3f87591` — cap stale frachty (>14 dni overdue = ślepy, kierowca zapomniał odznaczyć) + grace period "opóźniony" od 2 dni.
+- `87eec23` — displayF dla "pauza"/"czeka" preferuje lastDoneF (ostatni rozładowany) zamiast nextF (przyszły 09.12). Plus "X dni" liczone z grace 24h (displayedDays = days-1).
+- `038ee1e` — data rozładunku zielona + ✓ gdy fracht zakończony (wizualne potwierdzenie).
+
+### D. Data loss prevention (OC znika 10× — user raport)
+
+DevTools pokazał failed Firestore commits (ERR_QUIC_PROTOCOL_ERROR + 400). Hipoteza: failed write → React state ma doc, Firestore nie → reload → "zniknął".
+- `0b9fb1c` — shrink-protection w atomic helpers (dbDelete/dbUpdate/dbBulkReplace rzucają error gdy nieoczekiwany shrink) + głośny `alert()` zamiast toast.
+- `c8fe1af` — `dbAddToArrayFieldVerified()` — read-back verification (write → wait 2s → getDoc → check → retry ×2). 3 warstwy obrony aktywne.
+
+### E. Backup workflow naprawiony
+
+GitHub Actions "Nocny backup Firebase" failował 6-12.05 (Bad credentials). Przyczyna: rotacja PAT 5.05 zerwała `BACKUP_TOKEN` (stary token miał dostęp do vbs-stat-backups, nowy tylko VBS-Stat). User wygenerował nowy fine-grained PAT dla vbs-stat-backups + zaktualizował secret. Test manual #64 ✅. **Lekcja w memory**: przy rotacji PAT sprawdzaj WSZYSTKIE secrets. **TODO przed 2026-06-02**: Node 20→24 w backup.yml (deprecation).
+
+### F. Import kosztów kwiecień 2026
+
+User przekazał `Auta VBS 2025 (18).xlsx` → Total_26 (matrix). Aplikacja nie obsługuje matrix natywnie (oczekuje flat). Skonwertowałem przez Python → `koszty_2026-04_flat.xlsx` (49 entries, 5 pojazdów). User wgrał przez UI "📥 Importuj z Excel". Sumy zgodne 1:1 z xlsx. **Workflow zapisany w memory** `feedback_import_kosztow_workflow.md` (mapping pojazdów v1-v5, kategorii, reguły: 1 miesiąc na raz, puste pomiń, kwoty z minusem, koszty pasywne zawsze).
+
+### G. Rentowność floty — tylko zamknięte miesiące
+
+- `6ba1acd` — helper `isMonthClosed()` filtruje przyszłe miesiące (hard-coded projekcje stałych kosztów cze-gru były mylące). Flota/Pojazd/Trendy.
+- `2baf944` — bieżący miesiąc (maj) pokazuje TYLKO frachty (koszty/zysk zamykane po końcu miesiąca). Helper `isMonthCurrent()`. 3 stany: closed/current/future.
+
+### H. Trendy YoY — apples-to-apples + kolory
+
+- `3330950` — porównanie tylko zamkniętych miesięcy (compareMaxMi). Q2 było 56.6k vs 134.1k pełne = -57.8% fake → teraz Kwi vs Kwi = +0.2%. Badge "(1/3)" dla częściowych Q/H.
+- `4ff3840` — inwersja kolorystyki dla "lower is better" metryk (koszty/spalanie/€/km/paliwo): spadek = zielony (sukces). Flaga `lowerIsBetter` + helpers `isGoodChange`/`isGoodTrend`.
+- `f30933d` — jaśniejsze bary dla niezamkniętych miesięcy (blue-200/300 + gray-100) żeby odróżnić od zamkniętych.
+
+### Stan końcowy 2026-05-13
+
+**Branch**: `claude/affectionate-buck-2399c6` — 18 commitów, wszystkie na origin + main (Vercel auto-deploy).
+**Produkcja**: fleetstat.pl — wszystkie zmiany live.
+
+**Memory zaktualizowane**:
+- `project_priority_compliance_data_verify.md` — DEFERRED, bugi #1/#3/#4 ✅, #2 otwarty
+- `reference_backup_discipline.md` — GitHub Actions backup + lekcja PAT rotacja + Node 20→24 TODO
+- `feedback_import_kosztow_workflow.md` — NOWY (workflow Excel koszty)
+- `MEMORY.md` — index + AI scanner FV jako nowy priorytet ⭐
+
+**Otwarte na kolejną sesję**:
+- 🟡 Bug #2 auto_gps fragmentation hysteresis (DEFERRED — wymaga CF deploy z main)
+- 🟡 Node 20→24 w `.github/workflows/backup.yml` (przed 2026-06-02)
+- 🟢 Hard-coded projekcje kosztów cze-gru 2026 w `costs` collection (App.jsx importAllCosts) — można wyczyścić z bazy (teraz tylko view filtruje)
+- ⭐ Nowy priorytet: AI scanner FV ze skrzynek email (`project_invoice_ai_scanner.md`)
+- Import kosztów maj 2026 — gdy user zamknie maj (kolejny plik Excel)
