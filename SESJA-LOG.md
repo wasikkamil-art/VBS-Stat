@@ -1115,3 +1115,136 @@ Po force push Vercel wykrył nowych authorów → odblokował → deploy zakońc
 - `project_invoice_ai_scanner.md` — wpis wieczorny z Vercel deploy + DNS + Blocked fix + frontend
 - `reference_vercel_git_email.md` — NOWA memory: pułapka macOS auto-email + procedura dla każdego nowego repo
 - `MEMORY.md` — index z aktualnym statusem (LIVE faktury.fleetstat.pl)
+
+---
+
+## 2026-05-27 — vbs-invoices: dueDate logic + notatki + Apple UI + ROLE + logo (mega iteracja produktowa)
+
+**Projekt**: vbs-invoices. Kontynuacja po Vercel deploy. Produkcja LIVE `https://faktury.fleetstat.pl`. 8 commitów. Wszystko deployed.
+
+### Co zrobione (chronologicznie)
+
+1. **DueDate fallback 60d dla FV transportowych** (`7b8857d` + `80d942b`):
+   - Problem: FV przewoźnika (OTT 0043) nie podaje terminu — jest na zleceniu (60d od dostarczenia dok.)
+   - `computeDueDate(extracted, emailMeta, attachments)` 4 poziomy: extracted → paymentDays+issueDate → **transport+brak → 60d od emailDate** → reszta brak → `missing`
+   - Transport = Claude `isTransportInvoice` (fracht/przewóz vs paliwo/telekom) LUB CMR/POD attachment
+   - Edycja ręczna terminu (DueDateField) z audit (dueDateEditedBy/At/Note). Indicatory: ⓘ amber (60d), ✎ blue (manual), ⚠ red (missing)
+   - Migracja OTT 0043 → 2026-07-18 (REST)
+
+2. **Notatki — historia zespołu** (`59d1057`): notes[] arrayUnion {text, author, createdAt ISO}. InvoiceDetail sekcja "📝 Notatki" + ikona 📝{count} w Skrzynce
+
+3. **Apple Light redesign — CAŁA apka** (`0124710` pilot Skrzynka + `c49519e` reszta):
+   - Globalne: paleta appbg #f5f5f7 / ink #1d1d1f / inkmuted #86868b / hairline #d2d2d7 / brand Apple blue #0071e3, font SF Pro, shadow-card, rounded-2xl
+   - Sidebar translucent backdrop-blur, wszystkie widoki (Skrzynka/Dashboard/Kontrahenci/CMR/Users/login/modal) spójnie: karty rounded-2xl, tabele bez linii, pill chipy pastele, inputy rounded-xl
+
+4. **System ról admin/podgląd** (`3f80ffd`):
+   - rules isAdmin() (users/{uid}.role=='admin'); invoices/contractors/settings write tylko admin; users self-create TYLKO podglad
+   - useUserRole.jsx (Context+hook, self-bootstrap), App nav+badge+banner, views/Users.jsx panel ról, InvoiceDetail+Dashboard gating akcji
+   - **Kamil = admin** (bootstrap REST: PATCH users/O6S79Pw6MgWbjs4m3xE8s0MMelZ2)
+
+5. **Logo FleetStat invoices** (`8dd551e`): public/logo-fleetstat-invoices.png (2529x753), sidebar+login, mix-blend-multiply
+
+### FleetStat repo (przy okazji disaster recovery)
+- **RECOVERY.md** (`94fdc02`) — procedura "stracony laptop": Apple ID + Google = master keys, iCloud Keychain ON, 3 rzeczy zapamiętać (Apple ID hasło, Google hasło, Google 2FA backup codes)
+- **backup-claude-memory.sh fix** — `set -e` usuwał manifest przy iCloud "Resource deadlock"; fix: retry 3x + exit 0 + partial status. Memory snapshoty OK (były codziennie, tylko .env.local failował)
+
+### Pułapki napotkane (lessons)
+- **Vercel BLOCKED deploy** za git author email `kamilwasik@MacBook-Air-Kamil.local` (macOS auto) → fix `git config user.email wasik.kamil@gmail.com` + rebase --exec amend + force push. Memory: reference_vercel_git_email.md
+- **useUserRole MUSI być .jsx** (JSX Provider, Vite wymaga rozszerzenia)
+- **Auth admin REST nie działa z gcloud** (brak Identity Toolkit scope) → uid wzięty z Firestore users collection po self-bootstrap
+- **home.pl DNS UI**: "Nazwa kanoniczna"=target, "Host"=subdomena (odwrotnie od intuicji)
+
+### Stan końcowy
+- Produkcja `https://faktury.fleetstat.pl` LIVE, 19 FV, scheduler+Haiku ON
+- Kamil = admin; Przemek/Wioletta = TODO user tworzy konta
+- ~24 commity na github.com/wasikkamil-art/vbs-invoices
+- Cała apka Apple Light + role + notatki + dueDate logic
+
+### Otwarte do następnego chatu
+1. Dashboard wykresy Recharts | 2. Mobile responsive | 3. Eksport CSV | 4. User tworzy konta Przemek/Wioletta | 5. Soft auto-approve | 6. Multi-tenant (gdy SaaS)
+
+---
+
+## 2026-06-02 — Research Trans.eu/Eurodebt + decyzja workflow paliwa + raport maj 2026
+
+**Projekt**: FleetStat (cwd `VBS-Stat.nosync`, branch `main`). Sesja przede wszystkim research + workflow paliwa miesięczny. **Zero zmian w kodzie apki** — tylko skrypt Python w chacie + nowa memory + ten wpis.
+
+### A) Research weryfikacji kontrahentów (odłożone, user sam zdecyduje)
+
+**Trans.eu API** (fetched via WebFetch + WebSearch):
+- API pokrywa: frachty (loads), pojazdy (vehicles), zlecenia transportowe, monitoring (Trace GeoJSON), dock scheduler, partners
+- Auth: OAuth2 + Trans ID, scopes (`offers.loads.manage`, `offers.vehicles.manage`)
+- Base URL: `https://offers.system.trans.eu/api/rest/v1`
+- ⚠️ **TransRisk / oceny kontrahentów NIE są w oficjalnym API** — sekcja Partners daje tylko zarządzanie relacjami (zaproś/zablokuj/aktywuj/lista/po ID/flota/pracownicy), żadnego scoringu
+- Etyka: NIE podsłuchujemy wewnętrznego endpointu UI (zasada jak `/rest-api/` widziszwszystko)
+- TODO jeśli wracamy: mail do `api@trans.eu` z pytaniem o pole TransRisk w "get contractor by id"
+
+**Eurodebt** (fetched via WebSearch):
+- **MA REST API** (x-api-key generowany w panelu Settings → Integrations)
+- Workflow 3-krokowy: klucz → POST z NIP → raport real-time lub przez webhook
+- Dedykowana funkcja Carrier Verification + generator PDF reports
+- User ma **płatną subskrypcję** → wystarczy sprawdzić panel czy plan zawiera API
+- TODO user: zalogować się do Eurodebt → Settings → Integrations → zobaczyć czy widzi "Generate API key"
+
+### B) Workflow paliwa miesięczny — DECYZJA i NOWY MEMORY
+
+**Pierwotny plan** (wcześniejsza tura sesji): Google Sheet + Service Account + Cloud Function `syncCostsFromGoogleSheet` + button "Synchronizuj" w UI Koszty FleetStat. ~3-4h setup jednorazowo.
+
+**Final decyzja po analizie ROI**: **NIE** — nadinwestycja dla 1 importu/miesiąc (oszczędność: 2 kliki/mc × 12 = 24/rok kosztem 3-4h pracy). Wybrany prostszy workflow:
+1. User pobiera raporty z 4 portali (Eurowag + E-100 + Andamur + NegoMetal)
+2. Wrzuca do chatu (@-reference lub drag&drop)
+3. Claude uruchamia **skrypt Python** (openpyxl + csv + NBP API), sumuje per pojazd EUR netto
+4. Podział na 3 buckety: **Paliwo (diesel) / AdBlue / Opłaty drogowe**
+5. User wkleja liczby do Total_26 do odpowiednich wierszy
+6. Total_26 zostaje jak jest dla pozostałych (leasing/ZUS/polisa/serwis/itd. + nieprzewidziane)
+
+**Nowy memory**: `feedback_paliwa_import_workflow.md` — pełen skrypt template (Python), mapowania kolumn 4 plików, lista pomijanych pojazdów (rozszerzona o UNIVERSAL5562), kursy NBP per dzień + fallback do -7 dni dla długich weekendów, konwersja CHF przez PLN jako mostek, sanity checks. **Następny import za miesiąc = odpalenie skryptu z templatu, ~30 sekund.**
+
+### C) Raport MAJ 2026 — wykonany ✅
+
+Pliki źródłowe (`~/Downloads/`):
+- `EW_Export_TR_2606153 1447.csv` — Eurowag (~95 transakcji)
+- `transaction-1577770.csv` — E-100 (separator `;`)
+- `MOJE ZUŻYCIE (2).xlsx` — Andamur (11 transakcji, sheet "Consumption" z 2 wierszami nagłówka)
+- `negometal_toll_transactions_website_export (34).xlsx` — NegoMetal (60 transakcji + 6 wierszy subtotali bez daty — KLUCZOWE pomijać!)
+
+**Wynik per pojazd w EUR netto (gotowe do wklejenia w Total_26)**:
+
+| Pojazd | Plate | Paliwo | AdBlue | Opłaty drogowe |
+|--------|-------|-------:|-------:|---------------:|
+| v1 | WGM 0475M | 2 343,81 | 38,84 | 295,73 |
+| v3 | WGM 5367K | 2 550,39 | 52,31 | 239,92 |
+| v4 | TK 314CL | 1 358,49 | 26,73 | 0,00 |
+| v5 | WGM 0507M | 2 426,96 | 35,58 | 124,53 |
+| **SUMA** | | **8 679,66** | **153,46** | **660,18** |
+
+- Paliwo litry: **5 153,13 L**, średnia **1,684 €/L** ✓ (sanity OK dla mixa PL/FR/DE/LU/ES)
+- AdBlue litry: **170,85 L**
+- Opłaty drogowe = NegoMetal (587,64) + E-100 opłaty (72,54: v5 Autostrada A2 58,41 + v3 Parking TIR 14,12)
+- Konwersja PLN/CHF → EUR po **NBP tabela A z dnia transakcji**, fallback `2026-05-01` (święto) → `2026-04-30` (kurs 4.2589)
+- CHF (Szwajcaria, 39,70 CHF dla v3) konwertowany **przez PLN jako mostek**: `amt × CHF/PLN / EUR/PLN`
+- ✓ Sanity NegoMetal: suma transakcji per pojazd per waluta = subtotale z pliku
+
+**Otwarte decyzje przy wklejaniu** (user decyduje, kwoty FROZEN):
+- AdBlue (153,46 EUR razem) → nowy wiersz `AdBlue` w Total_26 czy `inne`?
+- Autostrada A2 (58,41 v5, AWSA prywatna PL, NIE e-Toll system) → `Nego` / `E-Toll` / `inne`?
+- Parking TIR (14,12 v3) → `inne` z notatką
+
+### Lessons learned (dorzucone do memory `feedback_paliwa_import_workflow.md`)
+
+- **Per-day NBP vs single mid-month**: różnica ~0.02% dla maja 2026 (kursy stabilne 4.23-4.26 PLN/EUR), ale per-day zgodne z ZASADY-VBS-STAT.md
+- **NegoMetal subtotale**: wiersze bez daty to subtotale per pojazd per waluta z portala — pominięcie **kluczowe** (inaczej liczymy razem subtotal + transakcje = 2× wartość)
+- **UNIVERSAL5562**: dorzucone do SKIP_PLATES (CLAUDE.md miał tylko 5570; 5562 ma identyczny wzór = karta uniwersalna na benzynę dla aut osobowych)
+- **Plate format**: NegoMetal **ze spacją** (`WGM 0475M`), reszta **bez** — mapping PLATE_TO_VID musi mieć obie formy
+- **Długi weekend majowy**: świętą 1.05 + weekend → NBP nie publikuje 1-3.05, fallback do 30.04. Range NBP API musi sięgać w kwiecień (`YEAR-04-22` do `YEAR-MM-31`)
+- **CHF konwersja**: NBP nie daje bezpośrednio EUR/CHF, robić przez PLN: `CHF × NBP[CHF→PLN] / NBP[EUR→PLN]`
+
+### Pliki zmienione w tej sesji
+- `SESJA-LOG.md` — ten wpis + (poprzednio uncommitted) wpis 2026-05-27 (vbs-invoices: dueDate + notatki + Apple UI + ROLE + logo)
+- `~/.claude/projects/.../memory/feedback_paliwa_import_workflow.md` — NOWY
+- `~/.claude/projects/.../memory/MEMORY.md` — dodany link do powyższej memory
+
+### Następna sesja — co możliwe
+1. **Wklejenie maja do Total_26** (manualnie, user)
+2. **Workflow czerwiec 2026** zaplanowany na początek lipca — odpalenie skryptu template (~30 sek)
+3. **Backlog bez zmian**: Bug #2 compliance (auto_gps fragmentation, CF deploy), vbs-invoices ⭐ (mobile responsive, dashboard Recharts, eksport CSV), code splitting App.jsx (1.77 MB), Trans.eu+Eurodebt API jeśli user wraca do tematu
