@@ -158,6 +158,11 @@ ls "$HOME/Library/Mobile Documents/com~apple~CloudDocs/FleetStat-backup/memory/"
 mkdir -p ~/.claude/projects/-Users-kamilwasik-Desktop-VBS-Stat-nosync/memory
 cp -R "$HOME/Library/Mobile Documents/com~apple~CloudDocs/FleetStat-backup/memory/2026-05-27/"* \
    ~/.claude/projects/-Users-kamilwasik-Desktop-VBS-Stat-nosync/memory/
+
+# Transkrypty Claude Code (.jsonl) — pełna historia chatów (od 2026-06-04)
+# Rolling backup, więc folder /transcripts/ zawiera AKTUALNY stan (nie per-dzień)
+cp "$HOME/Library/Mobile Documents/com~apple~CloudDocs/FleetStat-backup/transcripts/"*.jsonl \
+   ~/.claude/projects/-Users-kamilwasik-Desktop-VBS-Stat-nosync/
 ```
 
 ### 7. Firebase CLI
@@ -229,6 +234,7 @@ Po każdej sesji rozwoju:
 | Kod FleetStat | `~/Desktop/VBS-Stat.nosync/` | GitHub `wasikkamil-art/VBS-Stat` |
 | Kod vbs-invoices | `~/Desktop/vbs-invoices.nosync/` | GitHub `wasikkamil-art/vbs-invoices` |
 | Memory Claude (oba projekty) | `~/.claude/projects/-Users-kamilwasik-Desktop-VBS-Stat-nosync/memory/` | iCloud `FleetStat-backup/memory/YYYY-MM-DD/` (dzienne snapshots, retention 30d) |
+| **Transkrypty Claude Code (.jsonl)** | `~/.claude/projects/-Users-kamilwasik-Desktop-VBS-Stat-nosync/*.jsonl` | iCloud `FleetStat-backup/transcripts/` (rolling, cumulative, bez retention — od 2026-06-04) |
 | `.env.local` FleetStat | `~/Desktop/VBS-Stat.nosync/.env.local` | iCloud `FleetStat-backup/env/.env.local` |
 | PAT GitHub (FleetStat) | `~/Desktop/VBS-Stat.nosync/.git/config` (plain text) | Tylko lokalnie — generowany nowy po stracie |
 | PAT GitHub (vbs-invoices) | `~/Desktop/vbs-invoices.nosync/.git/config` (plain text) | Tylko lokalnie — generowany nowy po stracie |

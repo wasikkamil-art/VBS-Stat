@@ -54,6 +54,30 @@ else
     echo "⚠️  Source memory nieobecny: $SOURCE_MEMORY (pomijam)"
 fi
 
+# === Backup transcripts Claude Code (rolling, bez per-dzień snapshotu) ===
+# .jsonl transkrypty są lokalne w ~/.claude/projects/.../, append-only.
+# Rolling rsync z --update: kopiuje tylko nowe/zmienione, NIE usuwa starych
+# (cumulative history — gdyby Claude Code rotował lokalnie, my zachowujemy w backupie).
+SOURCE_TRANSCRIPTS="$HOME/.claude/projects/-Users-kamilwasik-Desktop-VBS-Stat-nosync"
+DEST_TRANSCRIPTS="$DEST_BASE/transcripts"
+if [ -d "$SOURCE_TRANSCRIPTS" ]; then
+    $DRY_RUN mkdir -p "$DEST_TRANSCRIPTS"
+    if [ -n "$DRY_RUN" ]; then
+        SRC_COUNT=$(find "$SOURCE_TRANSCRIPTS" -maxdepth 1 -name "*.jsonl" | wc -l | xargs)
+        SRC_TOTAL=$(du -ch "$SOURCE_TRANSCRIPTS"/*.jsonl 2>/dev/null | tail -1 | awk '{print $1}')
+        echo "[DRY] rsync $SRC_COUNT .jsonl files (~$SRC_TOTAL) → $DEST_TRANSCRIPTS/"
+    else
+        # rsync --update: skip jeśli destination jest nowszy/identyczny; kopiuje nowe + zmienione
+        rsync -a --update "$SOURCE_TRANSCRIPTS"/*.jsonl "$DEST_TRANSCRIPTS/" 2>/dev/null || {
+            echo "⚠️  rsync transkryptów fail (kontynuuję)"
+            ERRORS=$((ERRORS + 1))
+        }
+        TC_COUNT=$(find "$DEST_TRANSCRIPTS" -maxdepth 1 -name "*.jsonl" 2>/dev/null | wc -l | xargs)
+        TC_SIZE=$(du -sh "$DEST_TRANSCRIPTS" 2>/dev/null | awk '{print $1}')
+        echo "✅ Transkrypty: $DEST_TRANSCRIPTS/ ($TC_COUNT plików, $TC_SIZE) — rolling, bez retention"
+    fi
+fi
+
 # === Backup .env.local (1 kopia, overwrite) ===
 # iCloud Drive ma znanego buga "Resource deadlock avoided" przy cp do plików
 # które są w trakcie sync. Workaround: rm -f destination + retry 3x z sleep.
