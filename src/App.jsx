@@ -3993,7 +3993,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             <div>
               <h2 className="text-xl font-bold text-gray-900 mb-1">GPS / Monitoring</h2>
               <p className="text-sm text-gray-400 mb-5">Atlas API · widziszwszystko.eu</p>
-              <GpsTab vehicles={vehicles} frachtyList={frachtyList} driverEvents={driverEvents} driverActivities={driverActivities} fuelEntries={fuelEntries} showToast={showToast} />
+              <GpsTab vehicles={vehicles} frachtyList={frachtyList} driverEvents={driverEvents} driverActivities={driverActivities} fuelEntries={fuelEntries} showToast={showToast} currentUser={user} isAdmin={isAdmin} />
             </div>
           )}
 
@@ -6602,7 +6602,7 @@ function EmailStatusTab({ showToast }) {
 // Sekcje: Mapa online, Kilometry/CAN, Trasy, Karta kierowcy, Pliki DDD
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivities = [], fuelEntries = [], showToast }) {
+function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivities = [], fuelEntries = [], showToast, currentUser = null, isAdmin = false }) {
   const [gpsDevices, setGpsDevices] = useState([]);
   const [gpsPositions, setGpsPositions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -6978,6 +6978,9 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
                       key={selectedDev?.fleetVehicle?.id}
                       vehicle={selectedDev?.fleetVehicle}
                       driverActivities={driverActivities}
+                      currentUser={currentUser}
+                      isAdmin={isAdmin}
+                      showToast={showToast}
                     />
                   }
                 />
@@ -8573,12 +8576,19 @@ function DddDailyRow({ day, data }) {
           overflow: "hidden",
         }}>
         {segments.map((s, i) => {
-          const color = s._color || DDD_COLORS[s.type] || "#9ca3af";
           const left = (s.fromMin / 1440) * 100;
           const width = (s.durMin / 1440) * 100;
           const startStr = dddUtcMinToLocalHHMM(s.fromMin, day);
           const endStr = dddUtcMinToLocalHHMM(s.fromMin + s.durMin, day);
           const label = s.type === "future" ? "Przyszłość" : DDD_TYPE_LABEL[s.type];
+          // Korekta (avail→rest): odpoczynek z ukośnym hatch + tooltip "skorygowano"
+          // — wizualnie odróżnialna od zwykłego odpoczynku, nigdy niewidoczna cicho.
+          const background = s.corrected
+            ? "repeating-linear-gradient(45deg, #2563eb, #2563eb 5px, #60a5fa 5px, #60a5fa 10px)"
+            : (s._color || DDD_COLORS[s.type] || "#9ca3af");
+          const title = s.corrected
+            ? `✏️ Skorygowano (dyspozycyjność → odpoczynek): ${startStr} → ${endStr} (${fmtHM(s.durMin)})${s.reason ? ` · ${s.reason}` : ""}`
+            : `${label}: ${startStr} → ${endStr} (${fmtHM(s.durMin)})${s.address ? ` · ${s.address}` : ""}`;
           return (
             <div
               key={i}
@@ -8587,9 +8597,9 @@ function DddDailyRow({ day, data }) {
                 left: `${left}%`,
                 width: `${width}%`,
                 height: "100%",
-                background: color,
+                background,
               }}
-              title={`${label}: ${startStr} → ${endStr} (${fmtHM(s.durMin)})${s.address ? ` · ${s.address}` : ""}`}
+              title={title}
             />
           );
         })}
@@ -8636,13 +8646,31 @@ function DddSummaryCard({ label, value, color, bg }) {
 // (zasilony z CSV widziszwszystko + auto_gps). Render ribbons jak DDD raport,
 // per pojazd (wielu kierowców łącznie). Cross-day split aktywności.
 // ═══════════════════════════════════════════════════════════════════════════════
-function MultiDayActivityView({ vehicle, driverActivities = [] }) {
+function MultiDayActivityView({ vehicle, driverActivities = [], currentUser = null, isAdmin = false, showToast = () => {} }) {
   const vehicleId = vehicle?.id || "__none__";
 
   const vehicleActivities = useMemo(
     () => driverActivities.filter(a => a.vehicleId === vehicleId),
     [driverActivities, vehicleId]
   );
+
+  // ── Korekty tachografu (source="correction") — adnotacja avail→rest ──
+  const corrections = useMemo(
+    () => vehicleActivities
+      .filter(a => a.source === "correction")
+      .sort((a, b) => Date.parse(b.startTs) - Date.parse(a.startTs)),
+    [vehicleActivities]
+  );
+  const [showCorrModal, setShowCorrModal] = useState(false);
+  const [corrFrom, setCorrFrom] = useState("");
+  const [corrTo, setCorrTo] = useState("");
+  const [corrReason, setCorrReason] = useState("");
+  const [corrSaving, setCorrSaving] = useState(false);
+  const fmtCorrTs = (iso) => {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  };
 
   const todayIso = new Date().toISOString().slice(0, 10);
   const sevenAgoIso = useMemo(() => {
@@ -8667,10 +8695,15 @@ function MultiDayActivityView({ vehicle, driverActivities = [] }) {
       }
       return totals[dateStr];
     };
+    // "Tacho wygrywa": ten sam filtr priorytetów co compliance (preferDddSegments).
+    // DDD wycina szum GPS (0-km dryf) tam gdzie jest tachograf; korekta (source="correction")
+    // wycina dyspozycyjność/szum w swoim zakresie i rysuje odpoczynek. Bez tego widok
+    // pokazywał surowy GPS sprzeczny z tachografem (mylące zielone "jazdy" 0 km na postoju).
+    const prepared = preferDddSegments(vehicleActivities.map(s => normalizeSegment(s, new Date())));
     let firstMs = null, lastMs = null;
-    for (const a of vehicleActivities) {
-      const sMs = Date.parse(a.startTs);
-      const eMs = Date.parse(a.endTs);
+    for (const a of prepared) {
+      const sMs = a.startMs;
+      const eMs = a.endMs;
       if (isNaN(sMs) || isNaN(eMs) || eMs <= sMs) continue;
       if (firstMs === null || sMs < firstMs) firstMs = sMs;
       if (lastMs === null || eMs > lastMs) lastMs = eMs;
@@ -8686,7 +8719,11 @@ function MultiDayActivityView({ vehicle, driverActivities = [] }) {
         if (durMin > 0) {
           const day = ensureDay(dateStr);
           day[a.type] = (day[a.type] || 0) + durMin;
-          day.segments.push({ type: a.type, fromMin, durMin, address: a.address || null });
+          day.segments.push({
+            type: a.type, fromMin, durMin, address: a.address || null,
+            corrected: a.source === "correction" || undefined,
+            reason: a.source === "correction" ? (a.correctionReason || null) : undefined,
+          });
           if (cur === sMs && a.distanceKm) day.km += a.distanceKm;
           if (a.driverName) day.drivers.add(a.driverName);
         }
@@ -8788,6 +8825,100 @@ function MultiDayActivityView({ vehicle, driverActivities = [] }) {
     return { drive, work, avail, rest, km };
   }, [visibleDays, dailyTotals]);
 
+  // Otwórz modal korekty — prefill z widocznego zakresu (user dostraja granice)
+  const openCorrModal = () => {
+    setCorrFrom(dateFrom ? `${dateFrom}T00:00` : "");
+    setCorrTo(dateTo ? `${dateTo}T23:59` : "");
+    setCorrReason("");
+    setShowCorrModal(true);
+  };
+
+  // Zapis korekty avail→rest. BARIERA: zakres nie może nachodzić na jazdę/pracę.
+  const saveCorrection = async () => {
+    if (corrSaving) return;
+    if (!corrFrom || !corrTo) { showToast("❌ Podaj zakres od–do"); return; }
+    if (!corrReason.trim()) { showToast("❌ Podaj powód korekty"); return; }
+    const startMs = new Date(corrFrom).getTime();
+    const endMs = new Date(corrTo).getTime();
+    if (isNaN(startMs) || isNaN(endMs) || endMs <= startMs) { showToast("❌ Zakres niepoprawny (koniec ≤ start)"); return; }
+
+    // BARIERA: korekta NIGDY nie może obejmować jazdy/pracy Z TACHOGRAFU (source="ddd").
+    // Szum GPS ("jazda" auto_gps w oknie, gdy tacho mówi dyspozycyjność) NIE blokuje —
+    // korekta go wytłumi tak jak robił to avail (tacho jest autorytatywne).
+    const conflict = vehicleActivities.find(a => {
+      if (a.source !== "ddd") return false;
+      if (a.type !== "drive" && a.type !== "work") return false;
+      const aS = Date.parse(a.startTs), aE = Date.parse(a.endTs);
+      if (isNaN(aS) || isNaN(aE)) return false;
+      return aS < endMs && aE > startMs; // nachodzenie
+    });
+    if (conflict) {
+      const f = (iso) => new Date(iso).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+      showToast(`❌ Zakres obejmuje ${conflict.type === "drive" ? "JAZDĘ" : "PRACĘ"} wg tachografu ${f(conflict.startTs)}–${f(conflict.endTs)} — zawęź. Tacho jazdy/pracy jest nietykalne.`);
+      return;
+    }
+
+    // Musi być co korygować: dyspozycyjność WG TACHOGRAFU (source="ddd") w zakresie.
+    // To celowo wąsko — korekta dotyczy błędu na karcie kierowcy, nie szumu GPS.
+    const overlap = vehicleActivities.filter(a => {
+      const aS = Date.parse(a.startTs), aE = Date.parse(a.endTs);
+      return !isNaN(aS) && !isNaN(aE) && aS < endMs && aE > startMs;
+    });
+    if (!overlap.some(a => a.source === "ddd" && a.type === "avail")) {
+      showToast("❌ Brak dyspozycyjności wg tachografu (DDD) w tym zakresie — nie ma czego korygować");
+      return;
+    }
+
+    // Kierowca: czyja karta w nachodzących segmentach, fallback aktywny kierowca pojazdu
+    const activeDriver = (vehicle?.driverHistory || []).find(d => !d.to);
+    const driverEmail = overlap.find(a => a.source === "ddd" && a.driverEmail)?.driverEmail
+      || overlap.find(a => a.driverEmail)?.driverEmail || activeDriver?.email || null;
+    const driverName = overlap.find(a => a.source === "ddd" && a.driverName)?.driverName
+      || overlap.find(a => a.driverName)?.driverName || activeDriver?.name || driverEmail || null;
+    if (!driverEmail) { showToast("❌ Nie ustalono kierowcy dla tego zakresu"); return; }
+
+    setCorrSaving(true);
+    try {
+      const startTs = new Date(startMs).toISOString();
+      const endTs = new Date(endMs).toISOString();
+      await addDoc(collection(db, "driverActivities"), {
+        source: "correction",
+        type: "rest",
+        originalType: "avail",
+        startTs,
+        endTs,
+        driverEmail,
+        driverName,
+        vehicleId: vehicle.id,
+        vehicleVrn: vehicle.plate || null,
+        correctionReason: corrReason.trim(),
+        correctedBy: currentUser?.email || null,
+        correctedByName: currentUser?.displayName || currentUser?.email || "admin",
+        correctedAt: new Date().toISOString(),
+      });
+      logAction("ddd_correction_add", "driverActivities", { vehicleId: vehicle.id, driverEmail, startTs, endTs, reason: corrReason.trim() });
+      showToast("✅ Korekta zapisana (dyspozycyjność → odpoczynek)");
+      setShowCorrModal(false);
+    } catch (e) {
+      console.error("saveCorrection error", e);
+      showToast("❌ Błąd zapisu korekty");
+    } finally {
+      setCorrSaving(false);
+    }
+  };
+
+  const deleteCorrection = async (id) => {
+    if (!window.confirm("Cofnąć tę korektę? Zakres wróci do stanu z tachografu (dyspozycyjność).")) return;
+    try {
+      await deleteDoc(doc(db, "driverActivities", id));
+      logAction("ddd_correction_delete", "driverActivities", { id, vehicleId: vehicle.id });
+      showToast("✅ Korekta cofnięta");
+    } catch (e) {
+      console.error("deleteCorrection error", e);
+      showToast("❌ Błąd cofania korekty");
+    }
+  };
+
   if (!vehicle?.id) {
     return (
       <div className="bg-white rounded-2xl border border-gray-100 p-6 text-center text-xs text-gray-400">
@@ -8850,8 +8981,75 @@ function MultiDayActivityView({ vehicle, driverActivities = [] }) {
               className={`px-3 py-1 rounded-lg font-semibold ${showAllDays ? "bg-violet-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
               Wszystkie dni ({allDaysInRange})
             </button>
+            {isAdmin && (
+              <button
+                onClick={openCorrModal}
+                title="Oznacz dyspozycyjność na bazie jako odpoczynek (cyfrowa adnotacja jak na wydruku)"
+                className="px-3 py-1 rounded-lg font-semibold bg-amber-100 text-amber-800 hover:bg-amber-200">
+                ✏️ Korekta tachografu
+              </button>
+            )}
           </div>
         </div>
+
+        {/* Korekty tachografu — lista adnotacji avail→rest (audyt + cofnięcie) */}
+        {corrections.length > 0 && (
+          <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+            <div className="text-xs font-bold text-amber-800 mb-2">✏️ Korekty tachografu ({corrections.length})</div>
+            <div className="space-y-1.5">
+              {corrections.map(c => (
+                <div key={c.id} className="flex items-start justify-between gap-2 text-[11px] text-gray-700 bg-white rounded-lg border border-amber-100 px-2 py-1.5">
+                  <div className="min-w-0">
+                    <div className="font-semibold">{fmtCorrTs(c.startTs)} → {fmtCorrTs(c.endTs)}</div>
+                    <div className="text-gray-500">dyspozycyjność → odpoczynek · „{c.correctionReason || "—"}"</div>
+                    <div className="text-gray-400">przez {c.correctedByName || c.correctedBy || "—"}{c.correctedAt ? ` · ${fmtCorrTs(c.correctedAt)}` : ""}</div>
+                  </div>
+                  {isAdmin && (
+                    <button onClick={() => deleteCorrection(c.id)} className="shrink-0 text-red-600 hover:text-red-700 hover:underline font-semibold print:hidden">
+                      Cofnij
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Modal korekty tachografu (avail → rest) */}
+        {showCorrModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 print:hidden" onClick={() => !corrSaving && setShowCorrModal(false)}>
+            <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-5" onClick={e => e.stopPropagation()}>
+              <h3 className="text-base font-bold text-gray-800 mb-1">✏️ Korekta tachografu</h3>
+              <p className="text-xs text-gray-500 mb-4">
+                Oznacz zakres <b>dyspozycyjności</b> jako <b>odpoczynek</b> — cyfrowy odpowiednik adnotacji na wydruku
+                („kierowca zostawił kartę w dyspozycyjności na bazie"). Oryginał z tachografu zostaje w archiwum, korekta jest w audycie.
+              </p>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Od</label>
+              <input type="datetime-local" value={corrFrom} onChange={e => setCorrFrom(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm mb-3" />
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Do</label>
+              <input type="datetime-local" value={corrTo} onChange={e => setCorrTo(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm mb-3" />
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Powód (wymagany)</label>
+              <textarea value={corrReason} onChange={e => setCorrReason(e.target.value)} rows={3}
+                placeholder="np. Kierowca zostawił kartę w trybie dyspozycyjności na bazie — w rzeczywistości odpoczynek (zgłoszone na wydruku)."
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm mb-2" />
+              <div className="text-[11px] text-amber-700 bg-amber-50 rounded-lg p-2 mb-4">
+                ⚠️ Działa tylko na dyspozycyjności <b>z tachografu (DDD)</b>. Zakres nie może obejmować jazdy/pracy z karty — taki zapis zostanie zablokowany. Szum GPS nie przeszkadza.
+              </div>
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setShowCorrModal(false)} disabled={corrSaving}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50">
+                  Anuluj
+                </button>
+                <button onClick={saveCorrection} disabled={corrSaving}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50">
+                  {corrSaving ? "Zapisywanie…" : "Zapisz korektę"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Zakres dat */}
         <div className="mb-3 flex items-center gap-2 flex-wrap text-xs print:hidden">

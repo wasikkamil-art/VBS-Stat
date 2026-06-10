@@ -164,7 +164,7 @@ export function lastWeeklyRestEnd(segments, now) {
   return d.getTime();
 }
 
-// ── Priorytet źródeł: DDD > ww_csv > manual > auto_gps ──
+// ── Priorytet źródeł: correction > DDD > ww_csv > manual > auto_gps ──
 // Wyższy priorytet "wycina" niższy z tych samych przedziałów czasowych.
 function _coverageFilter(segs) {
   const ranges = segs.map(s => [s.startMs, s.endMs]).sort((a, b) => a[0] - b[0]);
@@ -176,12 +176,33 @@ function _coverageFilter(segs) {
 }
 
 export function preferDddSegments(segments) {
-  // Priorytet 1: DDD wycina ww_csv, manual, auto_gps z pokrytych zakresów
-  const ddd = segments.filter(s => s.source === "ddd");
   let result = segments;
+
+  // Priorytet 0: KOREKTA — ręczna adnotacja admina (cyfrowy odpowiednik dopisku na
+  // wydruku tachografu, np. "kierowca zostawił kartę w dyspozycyjności na bazie =
+  // w rzeczywistości odpoczynek"). Segment source="correction" (zwykle type="rest")
+  // wycina z pokrytego zakresu avail/rest ORAZ szum GPS (auto_gps/ww_csv "jazda"/
+  // "praca" = dryf) — bo skoro tachograf zapisał w tym oknie dyspozycyjność, to GPS-owa
+  // "jazda" jest fałszywa (ten sam szum, który DDD i tak tłumi). Przeżywa reupload DDD,
+  // bo CF kasuje tylko source=="ddd" (functions/index.js).
+  // SAFETY: korekta NIGDY nie wycina jazdy/pracy z TACHOGRAFU (source="ddd") — tacho-
+  // prawda o prowadzeniu pojazdu jest nietykalna. Walidacja zapisu (App.jsx) i tak
+  // blokuje zakres nachodzący na DDD drive/work, więc tu to obrona w głębi.
+  const corr = result.filter(s => s.source === "correction");
+  if (corr.length > 0) {
+    const coveredByCorr = _coverageFilter(corr);
+    result = result.filter(s =>
+      s.source === "correction" ||
+      (s.source === "ddd" && (s.type === "drive" || s.type === "work")) ||
+      !coveredByCorr(s)
+    );
+  }
+
+  // Priorytet 1: DDD wycina ww_csv, manual, auto_gps z pokrytych zakresów (NIE correction)
+  const ddd = result.filter(s => s.source === "ddd");
   if (ddd.length > 0) {
     const coveredByDdd = _coverageFilter(ddd);
-    result = result.filter(s => s.source === "ddd" || !coveredByDdd(s));
+    result = result.filter(s => s.source === "ddd" || s.source === "correction" || !coveredByDdd(s));
   }
 
   // Priorytet 2: ww_csv wycina manual i auto_gps
@@ -189,7 +210,7 @@ export function preferDddSegments(segments) {
   if (ww.length > 0) {
     const coveredByWw = _coverageFilter(ww);
     result = result.filter(s => {
-      if (s.source === "ddd" || s.source === "ww_csv") return true;
+      if (s.source === "ddd" || s.source === "correction" || s.source === "ww_csv") return true;
       return !coveredByWw(s);
     });
   }
@@ -199,7 +220,7 @@ export function preferDddSegments(segments) {
   if (man.length > 0) {
     const coveredByMan = _coverageFilter(man);
     result = result.filter(s => {
-      if (s.source === "ddd" || s.source === "ww_csv" || s.source === "manual") return true;
+      if (s.source === "ddd" || s.source === "correction" || s.source === "ww_csv" || s.source === "manual") return true;
       return !coveredByMan(s);
     });
   }

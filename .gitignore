@@ -24,6 +24,10 @@ restore_*.js
 restore-*.js
 patch_*.py
 diagnose*.js
+diagnose*.mjs
+fix_*.mjs
+migrate_*.mjs
+gen_*.mjs
 audit-all.js
 import-*.js
 import_*.js

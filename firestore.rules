@@ -253,7 +253,9 @@ service cloud.firestore {
     // ═══════════════════════════════════════════════════════════════
     match /driverActivities/{docId} {
       allow read: if isAuth();
-      allow create: if isAuth();
+      // Korekta tachografu (source="correction", nadrzędna nad DDD) — tylko admin/dyspozytor.
+      // Pozostałe segmenty (auto_gps/manual/ddd przez CF/ww_csv) — każdy zalogowany (jak dotąd).
+      allow create: if isAuth() && (request.resource.data.source != "correction" || canEdit());
       allow update: if canEdit() || (isAuth() && resource.data.driverEmail == request.auth.token.email);
       allow delete: if canEdit();
     }
