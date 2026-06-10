@@ -9,6 +9,7 @@ import {
   REGULATION, ACTIVITY_TYPES,
   fmtHM, fmtTimeShort,
   computeDriverCompliance, computeDriverPlan,
+  suggestBaseReturnFromRest,
 } from "../utils/czasPracy";
 
 export default function TachografComplianceSection({ device, position, driverActivities = [], multiDayView = null, onUpdateVehicle, showToast }) {
@@ -56,6 +57,50 @@ export default function TachografComplianceSection({ device, position, driverAct
 
   const compliance = computeDriverCompliance(mySegs, periodStart, new Date());
   const plan = computeDriverPlan(compliance);
+
+  // Sugestie daty dla pola tachoCardStart (user 2026-06-10): (1) z tachografu —
+  // koniec ostatniego odpoczynku ≥56h = prawdopodobnie wyjazd z bazy; (2) z
+  // przeglądu — ręczna data "kiedy wyjeżdża". Klik tylko WSTAWIA propozycję,
+  // user zatwierdza (tacho = świętość).
+  const tachoSuggestion = suggestBaseReturnFromRest(compliance.segments, new Date(), 56 * 60);
+  const przegladSuggestion = vehicle?.tachoStart || null;
+  const msToDateInput = (ms) => {
+    const d = new Date(ms);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const ddmm = (ms) => {
+    const d = new Date(ms);
+    return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`;
+  };
+  // Długie odpoczynki (≥48h) czytelniej w dniach: "8d 12h" zamiast "204h 28min".
+  const fmtDur = (min) => {
+    if (min >= 48 * 60) {
+      const d = Math.floor(min / (24 * 60));
+      const h = Math.round((min % (24 * 60)) / 60);
+      return h ? `${d}d ${h}h` : `${d}d`;
+    }
+    return fmtHM(min);
+  };
+  const suggestionChips = (tachoSuggestion || przegladSuggestion) ? (
+    <div className="flex items-center flex-wrap gap-1.5 mt-2">
+      <span className="text-[10px] text-gray-400">💡 Sugestie:</span>
+      {tachoSuggestion && (
+        <button type="button" onClick={() => handleTachoCardChange(msToDateInput(tachoSuggestion.endMs))}
+          title="Koniec ostatniego długiego odpoczynku (≥56h) = prawdopodobnie wyjazd z bazy"
+          className="text-[10px] px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 transition-all">
+          ⏱️ Tacho: {ddmm(tachoSuggestion.endMs)} · {fmtDur(tachoSuggestion.durMin)}
+        </button>
+      )}
+      {przegladSuggestion && (
+        <button type="button" onClick={() => handleTachoCardChange(przegladSuggestion)}
+          title="Ręczna data wyjazdu z przeglądu (kiedy wyjeżdża)"
+          className="text-[10px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-all">
+          📋 Z przeglądu: {przegladSuggestion.split("-").slice(1).reverse().join(".")}
+        </button>
+      )}
+    </div>
+  ) : null;
+
   const currentMeta = ACTIVITY_TYPES[compliance.currentStateType] || null;
   const speed = Number(position?.speed) || 0;
   const nowMs = Date.now();
@@ -435,6 +480,7 @@ export default function TachografComplianceSection({ device, position, driverAct
                 style={{ fontFamily: "'DM Sans', sans-serif" }} />
             </div>
           )}
+          {suggestionChips}
           <div className="text-[10px] text-gray-400 mt-1.5 italic">Niezależne od daty wyjazdu w przeglądzie — własny licznik tachografu.</div>
         </div>
       </div>

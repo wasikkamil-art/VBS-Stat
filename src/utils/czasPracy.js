@@ -235,6 +235,34 @@ export function lastActualWeeklyRestEnd(segments, now) {
   return bestEndMs;
 }
 
+// Sugerowana data powrotu do bazy wg tachografu (dla ręcznego pola tachoCardStart).
+//
+// Filozofia (user 2026-06-10): regularny 45h tygodniowy odpoczynek kierowca robi
+// "w połowie pracy", w trasie. WYRAŹNIE dłuższy odpoczynek (domyślnie ≥56h) =
+// kierowca był na bazie/w domu → naturalna kotwica 28-dniowego powrotu do bazy.
+//
+// Zwraca endMs (moment WYJAZDU z bazy — koniec długiego odpoczynku, spójne z
+// semantyką tachoStart "kiedy wyjeżdża") + durMin ostatniego takiego odpoczynku,
+// albo null. Pomija synthetic fillgap (cisza CSV ≠ pewny odpoczynek na bazie) —
+// liczymy tylko realne segmenty (DDD/ww_csv/manual). To TYLKO sugestia: caller
+// wstawia ją w pole, ale user zatwierdza ręcznie (tacho = świętość).
+export function suggestBaseReturnFromRest(segments, now = new Date(), thresholdMin = 56 * 60, lookbackDays = 35) {
+  const nowMs = now.getTime();
+  const lookbackMs = nowMs - lookbackDays * 24 * 3600000;
+  const real = [...segments]
+    .filter(s => s.source !== "fillgap" && !s.synthetic)
+    .sort((a, b) => a.startMs - b.startMs);
+  const coalesced = coalesceRestGaps(real);
+  let best = null;
+  for (const s of coalesced) {
+    if (s.type !== "rest") continue;
+    if (s.endMs < lookbackMs || s.endMs > nowMs) continue;
+    if (s.durMin < thresholdMin) continue;
+    if (!best || s.endMs > best.endMs) best = { endMs: s.endMs, durMin: s.durMin };
+  }
+  return best;
+}
+
 // Wypełnij luki MIĘDZY znanymi segmentami synthetic rest ("fillgap").
 //
 // Kontekst (2026-05-11): user feedback — "szare pola w UI POWINNY być liczone
