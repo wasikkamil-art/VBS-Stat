@@ -11,7 +11,7 @@ import {
   computeDriverCompliance, computeDriverPlan,
 } from "../utils/czasPracy";
 
-export default function TachografComplianceSection({ device, position, driverActivities = [], multiDayView = null }) {
+export default function TachografComplianceSection({ device, position, driverActivities = [], multiDayView = null, onUpdateVehicle, showToast }) {
   const [, forceTick] = useState(0);
 
   // Tick co 30s żeby liczniki live się odświeżały (countdownów do przerwy/odpoczynku)
@@ -36,11 +36,23 @@ export default function TachografComplianceSection({ device, position, driverAct
   }
 
   const mySegs = driverActivities.filter(a => a.driverEmail === driverEmail);
-  const periodStart = (() => {
-    if (mySegs.length === 0) return null;
-    const sorted = [...mySegs].sort((a, b) => (a.startTs || "").localeCompare(b.startTs || ""));
-    return sorted[0]?.startTs;
-  })();
+  // Kotwica 28-dniowego "Powrót do bazy" = OSOBNE ręczne pole tachoCardStart
+  // ("data wg tachografu / włożenia karty"), NIEZALEŻNE od vehicle.tachoStart
+  // (przegląd "kiedy wyjeżdża"). Decyzja user 2026-06-10: tacho = świętość,
+  // przegląd = podgląd → dwa niezależne liczniki. Brak daty → period28 = null
+  // → UI pokazuje prompt do wpisania, NIE błędny licznik od najstarszego segmentu.
+  const periodStart = vehicle?.tachoCardStart || null;
+
+  const handleTachoCardChange = async (dateStr) => {
+    if (!onUpdateVehicle || !vehicle?.id) return;
+    try {
+      await onUpdateVehicle({ tachoCardStart: dateStr || null });
+      showToast?.(dateStr ? "✅ Data tacho zapisana" : "✅ Data tacho wyczyszczona");
+    } catch (e) {
+      console.error("[handleTachoCardChange]", e);
+      showToast?.("⚠️ Błąd zapisu daty tacho");
+    }
+  };
 
   const compliance = computeDriverCompliance(mySegs, periodStart, new Date());
   const plan = computeDriverPlan(compliance);
@@ -382,27 +394,49 @@ export default function TachografComplianceSection({ device, position, driverAct
           </div>
         </div>
 
-        {/* Powrót do bazy (28 dni) */}
-        {compliance.period28 && (
-          <div className="mt-5 pt-4 border-t border-gray-100">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-gray-700 flex items-center gap-1.5">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
-                Powrót do bazy (Pakiet Mobilności, 28 dni)
-              </span>
+        {/* Powrót do bazy (28 dni) — osobne ręczne pole tachoCardStart, NIEZALEŻNE od przeglądu */}
+        <div className="mt-5 pt-4 border-t border-gray-100">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-semibold text-gray-700 flex items-center gap-1.5">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+              Powrót do bazy (Pakiet Mobilności, 28 dni)
+            </span>
+            {compliance.period28 && (
               <span className="text-gray-500 tabular-nums">
                 <strong className="text-gray-900">{compliance.period28.daysLeft} dni</strong>
                 <span className="text-gray-400 ml-1">/ {REGULATION.RETURN_TO_BASE_DAYS}</span>
               </span>
-            </div>
-            <div className="mt-1">
-              <Bar val={REGULATION.RETURN_TO_BASE_DAYS - compliance.period28.daysLeft} max={REGULATION.RETURN_TO_BASE_DAYS} color={compliance.period28.daysLeft < 7 ? "red" : compliance.period28.daysLeft < 14 ? "yellow" : "violet"} />
-            </div>
-            <div className="text-[11px] text-gray-500 mt-1">
-              Deadline: {fmtDateTime(compliance.period28.deadlineMs)}
-            </div>
+            )}
           </div>
-        )}
+          {compliance.period28 ? (
+            <>
+              <div className="mt-1">
+                <Bar val={REGULATION.RETURN_TO_BASE_DAYS - compliance.period28.daysLeft} max={REGULATION.RETURN_TO_BASE_DAYS} color={compliance.period28.daysLeft < 7 ? "red" : compliance.period28.daysLeft < 14 ? "yellow" : "violet"} />
+              </div>
+              <div className="flex items-center justify-between text-[11px] text-gray-500 mt-1.5 gap-2">
+                <span>Deadline: {fmtDateTime(compliance.period28.deadlineMs)}</span>
+                <span className="flex items-center gap-1.5 flex-shrink-0">
+                  <span className="text-gray-400">wg karty:</span>
+                  <input type="date" value={vehicle.tachoCardStart}
+                    onChange={e => handleTachoCardChange(e.target.value)}
+                    className="text-[11px] outline-none bg-transparent text-gray-700 border border-gray-200 rounded px-1 py-0.5"
+                    style={{ fontFamily: "'DM Sans', sans-serif" }} />
+                  <button onClick={() => handleTachoCardChange("")}
+                    className="text-gray-400 hover:text-red-400 transition-all">Reset</button>
+                </span>
+              </div>
+            </>
+          ) : (
+            <div className="mt-2 flex items-center gap-2 px-2.5 py-1.5 rounded-lg" style={{ background: "#faf5ff", border: "1.5px dashed #e9d5ff" }}>
+              <span className="text-[11px] text-violet-700 flex-shrink-0">⏱️ Data wg tachografu (włożenie karty / ostatni powrót):</span>
+              <input type="date"
+                onChange={e => handleTachoCardChange(e.target.value)}
+                className="flex-1 text-xs outline-none bg-transparent text-violet-900 min-w-0"
+                style={{ fontFamily: "'DM Sans', sans-serif" }} />
+            </div>
+          )}
+          <div className="text-[10px] text-gray-400 mt-1.5 italic">Niezależne od daty wyjazdu w przeglądzie — własny licznik tachografu.</div>
+        </div>
       </div>
 
       {/* ═══════════════════════════════════════════════════ */}

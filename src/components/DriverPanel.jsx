@@ -59,11 +59,11 @@ function DriverCzasPracyDashboard({ user, vehicle, driverActivities = [], showTo
   };
 
   const mySegs = driverActivities.filter(a => a.driverEmail === user.email);
-  const periodStart = (() => {
-    if (mySegs.length === 0) return null;
-    const sorted = [...mySegs].sort((a, b) => (a.startTs || "").localeCompare(b.startTs || ""));
-    return sorted[0]?.startTs;
-  })();
+  // Powrót do bazy = osobne ręczne pole tachoCardStart (ustawiane przez admina
+  // w zakładce Tacho), NIEZALEŻNE od przeglądu "kiedy wyjeżdża". Brak daty →
+  // period28 null → blok ukryty (kierowca NIE widzi błędnego "0 dni / dziś powrót"
+  // liczonego od najstarszego segmentu). Decyzja user 2026-06-10: tacho = świętość.
+  const periodStart = vehicle?.tachoCardStart || null;
 
   const compliance = computeDriverCompliance(mySegs, periodStart, new Date());
   const plan = computeDriverPlan(compliance);

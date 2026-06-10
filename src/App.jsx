@@ -6968,6 +6968,11 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
                   device={selectedDev}
                   position={selectedPos}
                   driverActivities={driverActivities}
+                  showToast={showToast}
+                  onUpdateVehicle={async (patch) => {
+                    const vid = selectedDev?.fleetVehicle?.id;
+                    if (vid) await dbUpdateVehicleField(vid, patch);
+                  }}
                   multiDayView={
                     <MultiDayActivityView
                       key={selectedDev?.fleetVehicle?.id}
