@@ -1248,3 +1248,45 @@ Pliki źródłowe (`~/Downloads/`):
 1. **Wklejenie maja do Total_26** (manualnie, user)
 2. **Workflow czerwiec 2026** zaplanowany na początek lipca — odpalenie skryptu template (~30 sek)
 3. **Backlog bez zmian**: Bug #2 compliance (auto_gps fragmentation, CF deploy), vbs-invoices ⭐ (mobile responsive, dashboard Recharts, eksport CSV), code splitting App.jsx (1.77 MB), Trans.eu+Eurodebt API jeśli user wraca do tematu
+
+---
+
+## 2026-06-10 — Fix tacho "Powrót do bazy" + sugestie daty (PRODUKCJA)
+
+**Projekt**: FleetStat, branch `fix/tacho-powrot-do-bazy` → merge `main` (Vercel deploy prod). 2 commity: `35b87ba` (fix) + `5e0a8d9` (sugestie). Sesja zaczęła się od planu fuel recommender, user przekierował: "mam problem z tacho".
+
+### Problem (user)
+Zakładka "⏱️ Czas pracy kierowcy" → WGM 0475M → blok "Powrót do bazy" pokazywał **"0 dni / deadline 21.05"** (minęło ~3 tyg), a przegląd/karta pojazdu poprawnie **13 dni**. Dwa widoki się rozjeżdżały.
+
+### Przyczyna
+Dwa niezależne systemy liczenia powrotu do bazy (28 dni):
+- **Przegląd/karta** (App.jsx ~3221/~3320, DriverPanel ~1853) — od ręcznego `vehicle.tachoStart` ("kiedy wyjeżdża"). Działał OK.
+- **Tacho compliance** (czasPracy.js `period28`) — kotwica `periodStart` = **najstarszy segment w bazie** ("uproszczenie MVP"). Gdy danych >28 dni → utknął na starcie danych (≈22.04) → "0 dni" na zawsze.
+
+### Decyzja user
+**"Tacho to świętość, przegląd to podgląd" → dwa NIEZALEŻNE liczniki.** "Kiedy wyjeżdża" (palec dyspozytora) ≠ "kiedy kierowca włoży kartę" (tachograf). Odrzucił moje pierwotne A (scalić pod tachoStart). Wybrał **C = osobne ręczne pole w Tacho**.
+
+### Zmiany (deployed prod)
+1. **Nowe pole pojazdu `tachoCardStart`** (data wg tachografu), osobne od `tachoStart`.
+2. **TachografComplianceSection**: `periodStart = vehicle.tachoCardStart`; brak daty → prompt "⏱️ Data wg tachografu" zamiast "0 dni"; input edycja/reset; zapis przez `onUpdateVehicle` callback (App.jsx → `dbUpdateVehicleField`, bez cyklicznego importu).
+3. **DriverCzasPracyDashboard** (mobile): czyta to samo pole read-only; brak daty → blok ukryty (kierowca nie widzi fałszywego "dziś powrót!").
+4. **Sugestie daty** (przyciski pod polem, klik WSTAWIA, user zatwierdza):
+   - ⏱️ z tachografu: helper `suggestBaseReturnFromRest` (czasPracy.js) — koniec ostatniego odpoczynku **≥56h** (próg user: 45h robi w trasie, dłuższy = baza), lookback 35d, pomija synthetic fillgap, coalesce realnych rest.
+   - 📋 z przeglądu: kopiuje `tachoStart`.
+   - Długie odpoczynki format w dniach ("8d 12h" zamiast "204h 28min").
+5. **Przegląd/karta (`tachoStart`) — bez zmian.**
+
+### Weryfikacja
+Test lokalny (`npm run dev`, żywe dane user): data z tachografu (28.05) = data z przeglądu (28.05) → oba źródła się potwierdzają. Build zielony, 0 lint errors.
+
+### ⚠️ Pułapki / lekcje
+- **Mylące nazwy zakładek GPS/Monitoring**: "💾 Tachograf" = pliki DDD (GpsDddSection); prawdziwy tacho-compliance jest pod "⏱️ Czas pracy kierowcy" (TachografComplianceSection). User (i ja) gubiliśmy się gdzie jest pole — kosztowało kilka tur. **TODO UX**: poprawić nazwy/ikony zakładek.
+- **`tachoStart` mylące w kodzie**: nazwa "tacho" ale to ręczna data przeglądu; prawdziwa tacho = nowe `tachoCardStart`. Nie zmieniam `tachoStart` (wiele miejsc + Firebase data).
+- **GpsCzasPracySection.jsx = martwy kod** (nigdzie nie renderowany, stary "Czas pracy" scalony, ma stary bug periodStart). Zgłoszony chip cleanup (usunąć plik + lazy import App.jsx:34).
+- **`tachoCardStart` startuje puste** dla wszystkich aut → po deploy user wpisuje realne daty per auto (raz, w zakładce ⏱️).
+
+### Otwarte / następne
+- User wpisuje `tachoCardStart` dla pozostałych aut (v3/v4/v5) na fleetstat.pl.
+- Ew. dostrojenie progu ≥56h jeśli sugestia nie łapie bazy dla innych kierowców.
+- Cleanup GpsCzasPracySection (chip).
+- Backlog bez zmian (Total_26 maj, fuel recommender odłożony, vbs-invoices mobile, code splitting).
