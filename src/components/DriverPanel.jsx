@@ -153,8 +153,9 @@ function DriverCzasPracyDashboard({ user, vehicle, driverActivities = [], showTo
               sub={`limit ${fmtHM(plan.endOfDay.dailyLimit)} · ${fmtTimeShort(plan.endOfDay.atMs)}`} />
             <PlanRow emoji="🛏" bg="#f0fdf4" border="#bbf7d0" color="#14532d" title="Odpoczynek dzienny 11h"
               sub={`${fmtTimeShort(plan.dailyRest.startMs)} → ${fmtTimeShort(plan.dailyRest.endMs)}`} />
-            <PlanRow emoji="🛌" bg="#f5f3ff" border="#c7d2fe" color="#4c1d95" title="Odpoczynek tygodniowy 45h"
-              sub={`${fmtTimeShort(plan.weeklyRest.startMs)} → ${fmtTimeShort(plan.weeklyRest.endMs)}`} />
+            <PlanRow emoji="🛌" bg="#f5f3ff" border="#c7d2fe" color="#4c1d95"
+              title={plan.weeklyRest.mustBeRegular ? "Tygodniowy — musi być pełny ≥45h" : "Odpoczynek tygodniowy 45h"}
+              sub={`${fmtTimeShort(plan.weeklyRest.startMs)} → ${fmtTimeShort(plan.weeklyRest.endMs)}${plan.weeklyRest.mustBeRegular ? " · ostatni był skrócony" : ""}`} />
             {plan.returnToBase && (
               <PlanRow emoji="🏠" bg="#fef2f2" border="#fecaca" color="#7f1d1d" title="Powrót do bazy"
                 sub={`za ${plan.returnToBase.daysLeft} dni · deadline ${new Date(plan.returnToBase.deadlineMs).toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit" })}`} />

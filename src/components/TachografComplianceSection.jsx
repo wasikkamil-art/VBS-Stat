@@ -563,10 +563,17 @@ export default function TachografComplianceSection({ device, position, driverAct
             <div className="flex items-start gap-2 p-2 rounded-lg" style={{ background: "#f5f3ff", border: "1px solid #c7d2fe" }}>
               <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#ede9fe" }}>🛌</div>
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-bold text-violet-900">Odpoczynek tygodniowy 45h</div>
+                <div className="text-xs font-bold text-violet-900">
+                  Odpoczynek tygodniowy {plan.weeklyRest.mustBeRegular ? "— musi być pełny ≥45h" : "45h"}
+                </div>
                 <div className="text-[11px] text-violet-700">
                   {fmtTimeShort(plan.weeklyRest.startMs)} → {fmtTimeShort(plan.weeklyRest.endMs)}
                 </div>
+                {plan.weeklyRest.mustBeRegular && (
+                  <div className="text-[10px] text-amber-700 mt-0.5">
+                    ⚠️ Ostatni tygodniowy był skrócony{plan.weeklyRest.lastDurMin != null ? ` (${fmtHM(plan.weeklyRest.lastDurMin)})` : ""} — następny MUSI być pełny ≥45h{plan.weeklyRest.lastRegularEnd ? ` · ostatni pełny: ${fmtTimeShort(plan.weeklyRest.lastRegularEnd)}` : ""}
+                  </div>
+                )}
               </div>
             </div>
             {plan.returnToBase && (

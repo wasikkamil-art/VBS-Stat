@@ -235,6 +235,35 @@ export function lastActualWeeklyRestEnd(segments, now) {
   return bestEndMs;
 }
 
+// Ostatni tygodniowy odpoczynek DOWOLNEGO typu (≥24h) w lookback — wg 561/2006 art. 8.6
+// deadline kolejnego tygodniowego liczy się od KAŻDEGO tygodniowego (regularnego ≥45h
+// LUB skróconego 24-45h), nie tylko ≥45h. Zwraca też lastRegularEnd (ostatni ≥45h) i
+// isReduced (czy ostatni był skrócony → następny musi być pełny ≥45h, reguła 2 tygodni).
+// Zwraca {endMs, durMin, isReduced, lastRegularEnd} lub null. (opcja C, 2026-06-10)
+export function lastWeeklyRest(segments, now, lookbackDays = 21) {
+  const nowMs = now.getTime();
+  const lookbackMs = nowMs - lookbackDays * 24 * 3600000;
+  const coalesced = coalesceRestGaps(segments);
+  let lastWk = null, lastRegEnd = null;
+  for (const s of coalesced) {
+    if (s.type !== "rest") continue;
+    if (s.endMs < lookbackMs || s.endMs > nowMs) continue;
+    if (s.durMin >= REGULATION.WEEKLY_REST_REDUCED) {        // ≥24h (regularny lub skrócony)
+      if (!lastWk || s.endMs > lastWk.endMs) lastWk = { endMs: s.endMs, durMin: s.durMin };
+    }
+    if (s.durMin >= REGULATION.WEEKLY_REST_REGULAR) {        // ≥45h (regularny)
+      if (lastRegEnd === null || s.endMs > lastRegEnd) lastRegEnd = s.endMs;
+    }
+  }
+  if (!lastWk) return null;
+  return {
+    endMs: lastWk.endMs,
+    durMin: lastWk.durMin,
+    isReduced: lastWk.durMin < REGULATION.WEEKLY_REST_REGULAR,
+    lastRegularEnd: lastRegEnd,
+  };
+}
+
 // Sugerowana data powrotu do bazy wg tachografu (dla ręcznego pola tachoCardStart).
 //
 // Filozofia (user 2026-06-10): regularny 45h tygodniowy odpoczynek kierowca robi
@@ -571,6 +600,19 @@ export function computeDriverCompliance(rawSegments = [], periodStart = null, no
     // Używane przez computeDriverPlan do liczenia deadline kolejnego weekly rest
     // wg 561/2006 art. 8.6 (zamiast hard-coded niedziela kalendarzowa). null = fallback.
     lastActualWeeklyRestEnd: lastActualWeeklyRestEnd(segments, now),
+    // NEW (2026-06-10, opcja C): pełna reguła tygodniowego. lastEnd = ostatni ≥24h
+    // (kotwica deadline 6×24h), lastRegularEnd = ostatni ≥45h, nextMustBeRegular =
+    // true gdy ostatni tygodniowy był skrócony (→ następny musi być pełny ≥45h).
+    weeklyRestStatus: (() => {
+      const lw = lastWeeklyRest(segments, now);
+      return {
+        lastEnd: lw?.endMs ?? null,
+        lastDurMin: lw?.durMin ?? null,
+        lastWasReduced: lw?.isReduced ?? false,
+        lastRegularEnd: lw?.lastRegularEnd ?? null,
+        nextMustBeRegular: lw ? lw.isReduced : false,
+      };
+    })(),
     period28,
     sources: sourceStats,
     hasDdd,
@@ -601,11 +643,15 @@ export function computeDriverPlan(compliance, now = new Date()) {
   // 4. Odpoczynek tygodniowy — wg 561/2006 art. 8.6:
   // "Tygodniowy okres odpoczynku rozpoczyna się nie później niż po zakończeniu
   // sześciu okresów 24-godzinnych od końca poprzedniego tygodniowego okresu odpoczynku."
-  // Czyli deadline = lastActualWeeklyRestEnd + 6×24h (NIE niedziela kalendarzowa).
-  // Fallback (gdy brak rest≥45h w lookback 14d — nowy kierowca / brak danych): kalendarzowo.
+  // KLUCZOWE (opcja C, 2026-06-10): poprzedni tygodniowy to KAŻDY ≥24h (regularny LUB
+  // skrócony), nie tylko ≥45h. Deadline = weeklyRestStatus.lastEnd + 6×24h.
+  // mustBeRegular = ostatni był skrócony → następny musi być pełny ≥45h (reguła 2 tyg.).
+  // Fallback (brak tygodniowego w lookback — nowy kierowca / brak danych): kalendarzowo.
+  const wrStatus = compliance.weeklyRestStatus || {};
+  const weeklyAnchorMs = wrStatus.lastEnd ?? compliance.lastActualWeeklyRestEnd;
   let weeklyRestStartMs;
-  if (compliance.lastActualWeeklyRestEnd) {
-    weeklyRestStartMs = compliance.lastActualWeeklyRestEnd + 6 * 24 * 3600000;
+  if (weeklyAnchorMs) {
+    weeklyRestStartMs = weeklyAnchorMs + 6 * 24 * 3600000;
   } else {
     const weekStartDate = new Date(compliance.weekly.start);
     const weekEndDate = new Date(weekStartDate);
@@ -643,6 +689,10 @@ export function computeDriverPlan(compliance, now = new Date()) {
       startMs: weeklyRestStartMs,
       endMs: weeklyRestEndMs,
       durationMin: REGULATION.WEEKLY_REST_REGULAR,
+      mustBeRegular: wrStatus.nextMustBeRegular || false,
+      lastRegularEnd: wrStatus.lastRegularEnd ?? null,
+      lastWasReduced: wrStatus.lastWasReduced || false,
+      lastDurMin: wrStatus.lastDurMin ?? null,
     },
     returnToBase,
   };
