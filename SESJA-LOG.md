@@ -1290,3 +1290,42 @@ Test lokalny (`npm run dev`, żywe dane user): data z tachografu (28.05) = data 
 - Ew. dostrojenie progu ≥56h jeśli sugestia nie łapie bazy dla innych kierowców.
 - Cleanup GpsCzasPracySection (chip).
 - Backlog bez zmian (Total_26 maj, fuel recommender odłożony, vbs-invoices mobile, code splitting).
+
+---
+
+## 2026-06-10 (cd.) — Integracja DDD→compliance AKTYWNA + opcja C (skrócone tygodniowe)
+
+Kontynuacja tej samej sesji. User pytał „czy forward calc liczy dobrze". Diagnoza przez **skrypty firebase-admin** (`serviceAccountKey.json` jest lokalnie w repo root, gitignored — pełen dostęp do Firestore).
+
+### Odkrycie: compliance leciał z GPS, nie z DDD
+- `driverActivities` były **100% `auto_gps`** (poszatkowane na 1-min slivery, szum). DDD leżał tylko w `dddFiles` (archiwum), NIE w compliance.
+- Powód: cały pipeline DDD→`driverActivities` BYŁ zbudowany (CF `parseDddFile` 2026-05-08: match po cardNumber/nazwie → zapis segmentów `source="ddd"` + reupload-safety) ORAZ pole UI „Numer karty kierowcy (DDD)" (App.jsx ~15476) — **ale `driverHistory[].cardNumber` było puste u wszystkich** → match zawodził → zapis pomijany. Logi CF potwierdziły: „No driverEmail found for cardNumber=...".
+
+### Fix = SAME DANE (zero kodu/deployu)
+1. **`fix_driver_cards.js`** — wpisał `cardNumber` aktywnym kierowcom (z plików DDD): v1 Iwansky `UAD0000006RQ7001`, v3 Kolabau `1660617145710000`, v4 Teper `1590126102550000`, v5 Lukashchuk `UAD000000BFVJ000`. Backup `backup_vehicles_before_cards.json`.
+2. **`migrate_ddd_backfill.js`** (reusable template) — backfill 90 dni segmentów DDD → `driverActivities` (match po karcie jak CF, reupload-safety). **4784 segmenty** (v1:1101, v3:1088, v4:1267, v5:1328).
+3. Compliance teraz: `preferDddSegments` wycina GPS gdzie jest DDD (Volodymyr: 623 GPS → 318 DDD + 69 GPS ogon). **Przyszłe wgrania auto-linkują** (CF już wdrożona, brakowało tylko kart).
+- ⚠️ **REWIZJA decyzji** z `reference_ddd_parser.md` („DDD = archive, NIE live driverActivities") — teraz DDD ŻYWO zasila compliance przez cardNumber linkage.
+
+### Opcja C — skrócone tygodniowe odpoczynki (commit 359263a, PROD)
+- Problem: plan „następny tygodniowy" liczył od ≥45h, ignorując skrócone 24-45h → false „przeterminowany".
+- `czasPracy.js`: nowy `lastWeeklyRest` (≥24h, isReduced, lastRegularEnd) + `weeklyRestStatus`; plan kotwiczy na ostatnim ≥24h + flaga `mustBeRegular` (po skróconym następny musi być pełny ≥45h). UI: TachografComplianceSection + DriverPanel pokazują „musi być pełny ≥45h" + amber.
+- Weryfikacja (żywe dane): Volodymyr następny 14.06 (było 03.06 przeszłość), mustBeRegular=TAK, ostatni pełny 28.05.
+
+### Case Teper (TK 314CL) — błąd „dyspozycyjność na bazie"
+- 14-22.05 = **198h DYSPOZYCYJNOŚĆ** (8 dni, karta w „available" zamiast „rest" na bazie). User opisał wydruk „kierowca zapomniał".
+- Tacho teraz pokazuje to **uczciwie jako dyspozycyjność (NIE odpoczynek)** — GPS to chował (auto stojące=rest), DDD ujawnia prawdę. Widać w „Aktywność wielodniowa" (szare paski).
+- NIE psuje dziś compliance (po 22.05 ma realne pełne odpoczynki 26.05 + 01.06; avail 3 tyg temu, poza oknem). Teper na dziś OK: następny tygodniowy 13.06, musi być pełny ≥45h.
+- **Lekcja**: przypominać kierowcom — na bazie karta na ODPOCZYNEK, nie dyspozycyjność. Ew. przyszłość: ręczna korekta avail→rest z adnotacją.
+
+### Deploy / stan
+- Tacho fix + sugestie: commity 35b87ba/5e0a8d9 (PROD wcześniej).
+- DDD integration: **dane only**, zero commitów (feature była gotowa).
+- Opcja C: commit 359263a → main → PROD.
+- Skrypty diagnostyczne (`diagnose_*`, `fix_*`, `migrate_*`) gitignored, lokalne. `migrate_ddd_backfill.js` warto zachować (template na przyszłe backfille).
+
+### Otwarte / następne
+- Po nowym wgraniu DDD: sprawdzić że auto-linkuje (powinno — karty są).
+- Ew. więcej dni backfillu niż 90 (jeśli user chce dłuższą historię w multi-day).
+- Sprawdzić Kolabau/Lukashchuk czy nie mają świeżego błędu avail-na-bazie (user pytał, nie zrobione).
+- Cleanup GpsCzasPracySection (chip).
