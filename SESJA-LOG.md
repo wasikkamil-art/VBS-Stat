@@ -1329,3 +1329,56 @@ Kontynuacja tej samej sesji. User pytał „czy forward calc liczy dobrze". Diag
 - Ew. więcej dni backfillu niż 90 (jeśli user chce dłuższą historię w multi-day).
 - Sprawdzić Kolabau/Lukashchuk czy nie mają świeżego błędu avail-na-bazie (user pytał, nie zrobione).
 - Cleanup GpsCzasPracySection (chip).
+
+---
+
+## 2026-06-11 — Korekta avail→rest (opcja A) + filtr "tacho wygrywa" w widoku + case Mirka rozwiązany (PROD)
+
+**Projekt**: FleetStat, branch `feat/tacho-korekta-i-filtr-widoku` → merge `main` (Vercel) + `firebase deploy firestore:rules`. Commit `7cc3b7c`. Duża sesja: feature + analiza + deploy + grafiki + korekta na prodzie.
+
+### A) Korekta "dyspozycyjność na bazie" → odpoczynek (opcja A, PROD)
+Problem z poprzednich sesji: kierowca zostawia kartę w DYSPOZYCYJNOŚCI na bazie zamiast ODPOCZYNEK; DDD pokazuje to uczciwie jako avail → compliance słusznie NIE liczy jako odpoczynek. Potrzebny cyfrowy odpowiednik adnotacji na wydruku.
+
+**Wybór: opcja A** (z 3: A=osobny segment "correction" priorytet>DDD, B=flaga/edycja in-place, C=osobna kolekcja overlay). **Decydujący argument**: reupload DDD kasuje TYLKO `source=="ddd"` (functions/index.js:1571) → korekta jako osobny `source="correction"` **przeżywa reupload**; B by ją skasował. A reuse'uje istniejący `preferDddSegments` (najmniej kodu), C nadinżynieria.
+
+**Zmiany (commit 7cc3b7c):**
+- `czasPracy.js preferDddSegments`: nowy **priorytet 0 "correction"** — wycina avail/rest + szum GPS z zakresu, **chroni jazdę/pracę z DDD** (safety: tacho-prawda jazdy nietykalna). Tiery 1-3 też zachowują `correction`.
+- `App.jsx MultiDayActivityView`: przycisk "✏️ Korekta tachografu" (admin), modal od-do + wymagany powód, panel listy korekt z "Cofnij", render skorygowanego paska (niebieski hatch + tooltip). Walidacja zapisu = bariera (blokuje gdy zakres nachodzi na **DDD** drive/work; wymaga DDD avail w zakresie). driverEmail z segmentu DDD. Propsy `currentUser`/`isAdmin`/`showToast` przepuszczone przez GpsTab.
+- `firestore.rules`: `source=="correction"` create tylko `canEdit()` (admin/dyspo).
+
+### B) Filtr "tacho wygrywa" w widoku (PROD, ten sam commit)
+**Odkrycie przez usera**: widok "Aktywność wielodniowa" pokazywał zielone "jazdy" GPS (0 km dryf) na dniach gdy tacho mówi dyspozycyjność — bo widok rysował **surowe** segmenty WSZYSTKICH źródeł, NIE stosował `preferDddSegments` (compliance go ma, widok nie). Mylące.
+- **Fix**: `MultiDayActivityView` bucketing teraz robi `preferDddSegments(normalizeSegment(...))` przed renderem → DDD wycina szum GPS wszędzie gdzie jest tachograf. Usunięto ręczny `coveredByCorrection` skip (preferDddSegments to obsługuje). Widok = spójny z compliance.
+
+### ⚠️ Bug złapany przy weryfikacji (na żywych danych!)
+Pierwsza wersja bariery chroniła `drive/work` KAŻDEGO źródła → po korekcie wyskakiwał szum GPS "jazda" 3h26 (0 km) spod wyciętego avail. **Fix**: bariera/skip chroni jazdę tylko z `source=="ddd"` (tacho autorytatywne; GPS-owa "jazda" w oknie gdy tacho=dyspo to dryf, wycinamy). Lekcja: weryfikuj na realnych danych, nie tylko buildem.
+
+### C) Case Mirka (Teper TK 314CL) — rozwiązany na prodzie
+Diagnoza read-only (firebase-admin, `serviceAccountKey.json` lokalnie):
+- **Nie jeździł 18-21.05**: tacho 0 jazdy (3 pliki DDD zgodne: 28.05/07.06/09.06), GPS tylko 0-km dryf. **Dowód definitywny**: tacho AUTOMATYCZNIE zapisuje jazdę gdy auto jedzie (niezależnie od przełącznika) → skoro 0 jazdy = auto stało.
+- **Blok większy niż myśleliśmy**: nie 14-22 (8 dni/198h) tylko **08-21.05 = 14 dni czystej dyspozycyjności 24h** (+ kawałek 07.05). Obramowany jazdą: wjechał 06-07, stał 08-21, wyjechał 22-23. Wcześniejsze "222h" było przycięte oknem analizy (start 13.05).
+- **Skan floty**: TYLKO Mirek dotknięty. Iwansky/Kolabau/Lukashchuk czyści (zero długich bloków avail). → problem izolowany, prewencja nie pali się.
+- **KOREKTA ZASTOSOWANA NA PRODZIE**: `fix_teper_correction.mjs` (odtwarza zapis z UI: walidacja+correction doc+auditLog, atrybucja admin wasik.kamil@gmail.com, idempotent). Zakres 08.05→22.05 (336h), id=`DMQgT5U1SlLYmwtIEsrY`. Zweryfikowane: w zakresie został tylko `correction/rest`. Odwracalne ("Cofnij" w UI), oryginał DDD nietknięty.
+
+### D) Bug rekompensaty (ZGŁOSZONY jako chip task_c34dff72, iteracja 2)
+`weeklyRestCompensation()` (czasPracy.js) **ZAWYŻA** — traktuje KAŻDY odpoczynek ≥24h jako tygodniowy wymagający 45h. U Mirka naliczyło 47h06, w tym DWA "tygodniowe" w tym samym tygodniu 1-7.06 (niemożliwe — jeden na tydzień). Tacho Mirka pokazuje 23h39 rekompensaty (>21h max za jedną skróconą → ≥2 skrócone albo zaburzone dane; niepewne). **Wniosek dla kierowcy**: gdy liczba niepewna — bezpiecznie pełne 68h39 (nadmiar zawsze legalny). Fix: wykrywać JEDEN tygodniowy na tydzień stały pn-nd.
+
+### E) Infografiki + PDF dla Mirka
+Reguły rekompensaty zweryfikowane WebSearch (561/2006 art. 8.6): rekompensata **en bloc** (nie dzielić), doczepiona do odpoczynku **≥9h** (dzienny/tygodniowy), do końca **3. tygodnia**, max **21h** za jedną skróconą. Dwie grafiki HTML (sytuacja: 68h39=45h+23h39 + dwa zegary + plan Mirka; oraz "45h teraz + rekompensata później" — TAK pod 4 warunkami) → **landscape PDF** przez Playwright/Chromium (`gen_mirek_pdf.mjs`): 4 slajdy A4 + 2 osobne pliki w `~/Downloads/Mirek-*.pdf`. Weryfikacja layoutu przez preview screenshot (każdy slajd 794/794 px). HTML źródłowe `public/_mirek-*.html` — TYMCZASOWE, untracked, nie na prod.
+
+### Pułapki / lekcje
+- **Widok vs compliance rozjazd**: MultiDayActivityView rysował surowy GPS bez preferDddSegments → mylił usera. Teraz spójne.
+- **Tacho auto-zapisuje jazdę** niezależnie od przełącznika karty → brak jazdy na DDD = auto stało (mocny dowód, nie domysł).
+- **Bariera korekty = tylko DDD drive/work**, nie szum GPS (inaczej szum wyskakuje spod korekty).
+- **Read PDF wymaga poppler** (brak) → layout weryfikowany przez ekranowy podgląd + preview screenshot zamiast renderu PDF.
+- **gh token bez uprawnień PR** (createPullRequest fail) — backup branch + push działa, PR przez link/UI.
+- Skrypty `diagnose_*.mjs`/`fix_*.mjs`/`gen_*.mjs` dodane do `.gitignore` (były tylko `.js`).
+
+### Deploy / stan
+- Wszystko PROD: commit 7cc3b7c (frontend Vercel) + firestore rules. Pre-push lint+build zielone.
+- Korekta Mirka żywa na fleetstat.pl. Pozostali kierowcy czyści.
+
+### Otwarte / następne
+- **Prewencja** (odłożona — izolowany przypadek): alert kierowcy "stoisz na bazie X h, przełącz kartę na odpoczynek" w DriverPanel. Łapie błąd u źródła.
+- **Bug rekompensaty** (chip task_c34dff72): jeden tygodniowy na tydzień stały.
+- Cleanup: temp `public/_mirek-*.html` (powiedzieć→usunąć), GpsCzasPracySection martwy kod.
