@@ -10,14 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout backup repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: wasikkamil-art/vbs-stat-backups
           token: ${{ secrets.BACKUP_TOKEN }}
           path: backup-repo
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '24'
 
