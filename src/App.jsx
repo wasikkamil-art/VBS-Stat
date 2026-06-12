@@ -12261,8 +12261,10 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
             )}
           </div>
           <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
-            {doc.issueDate   && <span className="text-xs text-gray-400">Wystawiony: {fmtDate(doc.issueDate)}</span>}
-            {doc.expiryDate  && <span className="text-xs font-medium text-gray-600">Ważny do: {fmtDate(doc.expiryDate)}</span>}
+            {doc.issueDate && <span className="text-xs text-gray-400">Zawarcie: {fmtDate(doc.issueDate)}</span>}
+            {doc.coverageStart
+              ? <span className="text-xs font-medium text-gray-600">Ważna: {fmtDate(doc.coverageStart)} – {doc.expiryDate ? fmtDate(doc.expiryDate) : "?"}{d!==null && (d>=0 ? ` (${d} dni do wygaśnięcia)` : " (wygasła)")}</span>
+              : doc.expiryDate && <span className="text-xs font-medium text-gray-600">Ważny do: {fmtDate(doc.expiryDate)}{d!==null && (d>=0 ? ` (${d} dni)` : " (wygasła)")}</span>}
             {doc.insurer     && <span className="text-xs text-gray-400">🏢 {doc.insurer}</span>}
             {doc.policyNumber&& <span className="text-xs text-gray-400" style={{fontFamily:"'DM Mono',monospace"}}>#{doc.policyNumber}</span>}
             {doc.cost        && <span className="text-xs text-gray-400">💰 {Number(doc.cost).toLocaleString("pl-PL")} zł</span>}
@@ -12517,7 +12519,7 @@ Analizujesz obrazy/PDF i zwracasz JSON z polami dokumentu.
 Zawsze odpowiadaj TYLKO czystym JSON bez zadnego tekstu przed ani po.
 Typy dokumentow (pole "type"): oc, ac, gap, nnw, assistance, cargo, licencja, zezwolenie, przeglad, tachlegalizacja, prawo_jazdy, karta_kierowcy, umowa_leasing, umowa_gps, umowa_serwis, umowa_inna, inne
 Format daty: YYYY-MM-DD
-Dla ubezpieczen (oc,ac,gap,nnw,assistance,cargo) - wyodrebnij zakres pokrycia.
+Dla ubezpieczen (oc,ac,gap,nnw,assistance,cargo) - wyodrebnij OKRES OCHRONY: coverageStart (wazna OD / poczatek ochrony) oraz expiryDate (wazna DO / koniec ochrony). To NIE jest data wystawienia (issueDate). Wyodrebnij tez zakres pokrycia (coverage).
 Dla umow (umowa_*) - wyodrebnij dane kontrahenta, nr umowy, kwoty, okresy.
 Szukaj numerow rejestracyjnych pojazdow w dokumencie.`;
 
@@ -12525,8 +12527,9 @@ Szukaj numerow rejestracyjnych pojazdow w dokumencie.`;
 {
   "type": "typ dokumentu z listy",
   "label": "krotki opis np. OC Warta 2025 lub Umowa GPS widziszwszystko",
-  "issueDate": "data wystawienia YYYY-MM-DD lub null",
-  "expiryDate": "data waznosci / konca umowy YYYY-MM-DD lub null",
+  "issueDate": "data wystawienia / zawarcia umowy YYYY-MM-DD lub null",
+  "coverageStart": "poczatek ochrony / wazna OD (ubezpieczenia i umowy) YYYY-MM-DD lub null - UWAGA: to NIE jest data wystawienia",
+  "expiryDate": "data waznosci / wazna DO / konca umowy YYYY-MM-DD lub null",
   "insurer": "nazwa ubezpieczyciela / organu / kontrahenta lub null",
   "policyNumber": "numer polisy / dokumentu / umowy lub null",
   "cost": "kwota jednorazowa w PLN jako liczba lub null",
@@ -12588,6 +12591,7 @@ Szukaj numerow rejestracyjnych pojazdow w dokumencie.`;
         type:         parsed.type         || "inne",
         label:        parsed.label        || "",
         issueDate:    parsed.issueDate     || "",
+        coverageStart: parsed.coverageStart || "",
         expiryDate:   parsed.expiryDate    || "",
         insurer:      parsed.insurer       || "",
         policyNumber: parsed.policyNumber  || "",
@@ -12715,7 +12719,8 @@ Szukaj numerow rejestracyjnych pojazdow w dokumencie.`;
                     </div>
                     <MF label="Opis"><MInput value={item.edited.label} onChange={v=>updateEdited(item.id,"label",v)} placeholder="np. OC Warta 2025" /></MF>
                     <MF label="Ubezpieczyciel"><MInput value={item.edited.insurer} onChange={v=>updateEdited(item.id,"insurer",v)} placeholder="np. PZU" /></MF>
-                    <MF label="Wystawiony"><MInput type="date" value={item.edited.issueDate} onChange={v=>updateEdited(item.id,"issueDate",v)} /></MF>
+                    <MF label="Data zawarcia"><MInput type="date" value={item.edited.issueDate} onChange={v=>updateEdited(item.id,"issueDate",v)} /></MF>
+                    <MF label="Ważny od"><MInput type="date" value={item.edited.coverageStart} onChange={v=>updateEdited(item.id,"coverageStart",v)} /></MF>
                     <MF label="Ważny do"><MInput type="date" value={item.edited.expiryDate} onChange={v=>updateEdited(item.id,"expiryDate",v)} /></MF>
                     <MF label="Nr polisy / umowy"><MInput value={item.edited.policyNumber} onChange={v=>updateEdited(item.id,"policyNumber",v)} placeholder="POL/..." /></MF>
                     <MF label="Koszt (zł)"><MInput type="number" value={item.edited.cost} onChange={v=>updateEdited(item.id,"cost",v)} /></MF>
@@ -12806,6 +12811,7 @@ function AddDocModal({ vehicles, doc, onSave, onClose }) {
     type:         doc?.type         || "oc",
     label:        doc?.label        || "",
     issueDate:    doc?.issueDate    || today,
+    coverageStart: doc?.coverageStart || "",
     expiryDate:   doc?.expiryDate   || "",
     insurer:      doc?.insurer      || "",
     policyNumber: doc?.policyNumber || "",
@@ -12922,8 +12928,9 @@ function AddDocModal({ vehicles, doc, onSave, onClose }) {
           <MF label="Własny opis (opcjonalnie)">
             <MInput placeholder="np. OC Warta 2025/2026" value={form.label} onChange={v => set("label", v)} />
           </MF>
+          <MF label="Data zawarcia umowy"><MInput type="date" value={form.issueDate} onChange={v => set("issueDate", v)} /></MF>
           <div className="grid grid-cols-2 gap-3">
-            <MF label="Data wystawienia"><MInput type="date" value={form.issueDate} onChange={v => set("issueDate", v)} /></MF>
+            <MF label="Ważny od"><MInput type="date" value={form.coverageStart} onChange={v => set("coverageStart", v)} /></MF>
             <MF label="Ważny do ⚠️"><MInput type="date" value={form.expiryDate} onChange={v => set("expiryDate", v)} /></MF>
           </div>
 
