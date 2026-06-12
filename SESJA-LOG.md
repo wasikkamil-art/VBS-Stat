@@ -1382,3 +1382,45 @@ Reguły rekompensaty zweryfikowane WebSearch (561/2006 art. 8.6): rekompensata *
 - **Prewencja** (odłożona — izolowany przypadek): alert kierowcy "stoisz na bazie X h, przełącz kartę na odpoczynek" w DriverPanel. Łapie błąd u źródła.
 - **Bug rekompensaty** (chip task_c34dff72): jeden tygodniowy na tydzień stały.
 - Cleanup: temp `public/_mirek-*.html` (powiedzieć→usunąć), GpsCzasPracySection martwy kod.
+
+---
+
+## 2026-06-12 — Sesja wielowątkowa: backup fix + dokumenty „od–do" + bug rekompensaty (4 commity PROD)
+
+**Projekt**: FleetStat. 4 commity na main (Vercel): `822bb38`, `68cca4e`, `0dd193f`, `8949e07` + backfill Firestore + korekty docs/memory. Kilka pivotów wg potrzeb usera.
+
+### A) Prewencja avail→rest (banner) — ZBUDOWANE i COFNIĘTE
+Backlog #1. Banner w `DriverCzasPracyDashboard` (DriverPanel): bieżący OTWARTY status = dyspozycyjność >6h → żółta belka „Jesteś w DYSPOZYCYJNOŚCI od Xh" + one-tap „Przełącz na Odpoczynek" + dismiss. Trigger precyzyjny (auto-GPS nigdy nie daje avail → otwarty avail = świadomy klik). Build zielony, podgląd pokazany. **User: STOP — „chcę jak najmniej ingerencji kierowcy"** → banner cofnięty w całości (3 edycje odwrócone), NIE wdrożony. Memory: `feedback_minimal_driver_intervention`. Prewencja admin-side (korekta z 06-11) = właściwy kierunek.
+
+### B) DDD auto-import — przeanalizowane, ODŁOŻONE (zostaje ręcznie)
+User pytał o automatyzację pobierania `.ddd` z panelu widziszwszystko → import do FS. **Atlas API NIE ma endpointu DDD** (ATLAS_ALLOWED = tylko GPS). Pliki tylko w web-panelu, ręcznie (ikonka ⬇ per-plik; duży „Pobierz" wg zakresu dat bywa pusty — to myliło usera; data „11.06" = info „kiedy ostatni przeszedł", nie filtr). Pliki → `~/Downloads`. Opcje: A=mail od ww (jak CSV)→`wwReportInbound`, B=lokalny watcher folderu, C=bot panelu (ODRADZANE, etyka/ToS). **Decyzja: zostaje ręcznie**, docelowo email (A). Memory: `reference_ww_csv_import`.
+
+### C) Nocny backup Firebase — NAPRAWIONY (commit `822bb38`)
+Padał 4 noce (08-11.06, ostatni OK 07.06). Przyczyna: `npm install firebase-admin` BEZ pinu złapał **v14.0.0** (~08.06) → usunięte namespaced `admin.credential` → „Cannot read properties of undefined (reading 'cert')". Fix: modular API (`firebase-admin/app`+`/firestore`) + pin `@14`. Test read-only lokalnie (6 vehicles/1012 costs/status OK). **PAT**: token „vbs-stat (FleetStat)" nie miał perm **Workflows** → push pliku workflow odrzucony; user dodał `Workflows: RW`. Token nadal bez **Actions** → `gh workflow run` 403 → user odpalił przez web UI → zielony, świeży backup (`d2d0294` w vbs-stat-backups, 33818 wstawień). Memory: `reference_backup_discipline`.
+
+### D) Node 20 deprecation (commit `68cca4e`)
+2 annotacje = `actions/checkout@v4`+`setup-node@v4` na Node 20. Twardy deadline **16.06.2026** (GitHub wymusza Node 24). Bump → `@v5`.
+
+### E) Dokumenty: „ważność od" (coverageStart) (commit `0dd193f`) + backfill
+Skaner AI dokumentów (`extractWithAI`, App.jsx, claude-sonnet-4-6 przez `/api/claude`) gubił początek ochrony: miał `issueDate` (wystawienie) + `expiryDate` (do), brak „ważność OD". Test na 2 realnych polisach (curl→API + ground truth): **AI czyta daty BEZ błędów** — wystawienie 23.01 ≠ ochrona od 14.02 (różnica 3 tyg), ale „od" przepadało (brak pola w schemacie). Fix: `coverageStart` w prompt'cie (rozróżnia wystawienie vs ochrona), parsowaniu, formularzu kolejki, formularzu ręcznym, pasku `DocRow` („Zawarcie · Ważna od–do · X dni do wygaśnięcia"; fallback gdy brak od). Weryf. OC+AC (3 daty co do dnia). **Backfill**: 6/7 istniejących docs uzupełnione (transakcja Firestore + guard-raile długość/ID + kopia przed + weryfikacja; umowa GPS bez wyraźnego od → pominięta). Memory: `reference_doc_ai_scanner`. **⚠️ SECURITY**: `/api/claude` = otwarte proxy (CORS *, brak auth) → palenie klucza Anthropic; `task_7a16c81b`, blocker komercjalizacji.
+
+### F) Bug rekompensaty (commit `8949e07`) — NAPRAWIONY
+Backlog #2. `weeklyRestCompensation` liczyło KAŻDY rest ≥24h jako osobny tygodniowy → dwa długie odpoczynki w 1 tygodniu = podwójny dług (niemożliwe wg 561/2006). Fix: grupowanie po tygodniu pn-nd (`_mondayOf`), tygodniowy = najdłuższy ≥24h/tydzień, dług tylko ze skróconych (FIFO+deadline bez zmian). Weryf. read-only STARE vs NOWE na żywych segmentach: Mirek **40h05→4h22**, flota sensowna (Ivansky 20h31≤21h, Kolabu/Lukashuchuk 0; fix może tylko obniżyć). Zgodne z art. 8.6.
+
+### Pułapki / lekcje
+- **Unpinned dep w CI = cicha bomba** (firebase-admin v14 major złamał backup). Pinuj zależności.
+- PAT fine-grained: edycja pliku workflow wymaga perm **Workflows**; trigger runów wymaga **Actions** (osobne).
+- `node fetch` ucina duże body (PDF) → „undici terminated"; użyj **curl**. `.env.local` ANTHROPIC_API_KEY w **cudzysłowach** (strippować przy raw).
+- **AI czyta daty dobrze** — błąd był w schemacie (brak pola), nie w odczycie.
+- Firestore write na prod: **transakcja + guard-raile** (długość tablicy + zbiór ID) + kopia przed (data-loss history).
+- Read PDF lokalnie nie działa (brak poppler) — ekstrakcja przez API.
+
+### Deploy / stan
+- 4 commity PROD na main (Vercel live, bundle `index-CEe9mKQA.js`). Backup workflow zielony. Backfill docs live.
+- Memory: NOWE `feedback_minimal_driver_intervention`, `reference_doc_ai_scanner`; ZAKT. `reference_ww_csv_import`, `reference_backup_discipline`, `reference_ddd_parser`, MEMORY.md.
+
+### Otwarte / następne
+- **#3 cleanup** martwy kod `GpsCzasPracySection.jsx`.
+- **Security** `/api/claude` otwarte proxy (`task_7a16c81b`) — Firebase ID token auth + zawężenie CORS; sprawdzić też vbs-invoices. Blocker komercjalizacji.
+- DDD email-import (opcja A) gdy widziszwszystko doda wysyłkę `.ddd`.
+- temp `public/_mirek-*.html` (z 06-11) — do usunięcia.
