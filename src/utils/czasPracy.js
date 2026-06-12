@@ -424,6 +424,16 @@ export function effectiveWeeklyDriveLimit(segments, weekStartMs) {
   return Math.min(REGULATION.WEEKLY_DRIVE, Math.max(0, remaining));
 }
 
+// Poniedziałek 00:00 (lokalnie) tygodnia zawierającego dany ms — tydzień wg 561/2006
+// art. 4(i): pn 00:00 → nd 24:00. Klucz grupowania tygodniowych odpoczynków.
+function _mondayOf(ms) {
+  const d = new Date(ms);
+  const dow = (d.getDay() + 6) % 7; // 0=poniedziałek … 6=niedziela
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - dow);
+  return d.getTime();
+}
+
 // Wyrównanie za skrócone tygodniowe odpoczynki (Pakiet Mobilności, art. 8 ust. 6).
 // Kierowca może skrócić tygodniowy odpoczynek do 24h (zamiast 45h regularnego).
 // Brakujące godziny (45h - actual) muszą być wyrównane w ciągu 3 kolejnych
@@ -435,13 +445,25 @@ export function weeklyRestCompensation(segments, nowMs) {
   // nie kwalifikuje się jako weekly rest. Patrz coalesceRestGaps.
   const coalesced = coalesceRestGaps(segments);
   const lookbackMs = nowMs - 4 * 7 * 24 * 3600000; // 4 tygodnie wstecz
-  // Weekly rests = rest segments ≥ 24h (mniejsze to dzienne)
-  const weeklyRests = coalesced.filter(s =>
+  // Rest segments ≥ 24h kwalifikują się jako tygodniowy (mniejsze = dzienne).
+  const restsBig = coalesced.filter(s =>
     s.type === "rest" &&
     s.endMs >= lookbackMs &&
     s.endMs <= nowMs &&
     s.durMin >= 24 * 60
-  ).sort((a, b) => a.startMs - b.startMs);
+  );
+  // FIX (bug zawyżania, 2026-06-12): JEDEN tygodniowy odpoczynek na tydzień
+  // kalendarzowy (pn–nd). Wcześniej KAŻDY rest ≥24h liczył się jako osobny
+  // tygodniowy → dwa długie odpoczynki w jednym tygodniu = podwójny dług
+  // (niemożliwe wg 561/2006: jeden tygodniowy/tydzień). Reguła: tygodniowy danego
+  // tygodnia = NAJDŁUŻSZY rest ≥24h przypisany do tygodnia wg startu odpoczynku.
+  const byWeek = new Map();
+  for (const s of restsBig) {
+    const wk = _mondayOf(s.startMs);
+    const cur = byWeek.get(wk);
+    if (!cur || s.durMin > cur.durMin) byWeek.set(wk, s);
+  }
+  const weeklyRests = [...byWeek.entries()].sort((a, b) => a[0] - b[0]).map(e => e[1]);
 
   const targetMin = 45 * 60; // 2700 min = 45h regularny tygodniowy
   let owedMin = 0;
