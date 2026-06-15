@@ -1429,7 +1429,7 @@ Backlog #2. `weeklyRestCompensation` liczyło KAŻDY rest ≥24h jako osobny tyg
 
 ## 2026-06-15 — Security: /api/claude (main) zabezpieczony + audyt vbs-invoices (role-gating callable) — 2 repa PROD
 
-**Projekt**: FleetStat. Domknięcie backlogu #Security z 06-12. 2 repozytoria, 2 commity PROD: `4a5153d` (VBS-Stat/main→Vercel) + `fca7661` (vbs-invoices/main + `firebase deploy --only functions`). Step-by-step z testami przed każdym deployem.
+**Projekt**: FleetStat. Domknięcie backlogu #Security + #cleanup z 06-12. 2 repozytoria, 3 commity PROD: `4a5153d` (VBS-Stat /api/claude→Vercel) + `fca7661` (vbs-invoices functions + `firebase deploy`) + `1cc66c2` (VBS-Stat cleanup→Vercel). Step-by-step z testami przed każdym deployem.
 
 ### A) Main app `/api/claude` — otwarte proxy ZABEZPIECZONE (commit `4a5153d`, PROD)
 Backlog #Security (`task_7a16c81b`). `api/claude.js` był otwartym proxy: `Access-Control-Allow-Origin: *`, ZERO auth, forwardował dowolne body do Anthropic z kluczem właściciela → każdy znający URL palił klucz/limit. **Fix 3-częściowy**:
@@ -1442,6 +1442,9 @@ Backlog #Security (`task_7a16c81b`). `api/claude.js` był otwartym proxy: `Acces
 Memory zakładała „ten sam otwarty proxy". **Recon (Krok 0) obalił**: repo JEST lokalnie (`~/Desktop/vbs-invoices.nosync`; wcześniejszy „brak" = artefakt zsh nomatch glob). Architektura INNA: brak `api/`, klucz = **Firebase Secret** użyty server-side w Cloud Functions (`functions/lib/claude.js`). Callable mają `if(!request.auth)`. **Anonimowego palenia klucza TU NIE MA.**
 **Ale przy okazji znaleziony łagodniejszy gap**: `onCall` gatowały tylko „zalogowany", nie rolę → zalogowany nie-admin mógł wołać bezpośrednio (z pominięciem UI) `clearAndReset` (DESTRUKCYJNE: kasuje invoices+contractors), `scanNow` (koszt Claude), `inspectMailbox` (dane skrzynek). **Fix (user wybrał opcję B)**: `functions/lib/firestore.js` helper `isUserAdmin(uid)` czyta `users/{uid}.role` (1:1 jak `firestore.rules isAdmin()`; rola TYLKO w Firestore, brak custom claims) + `functions/index.js` bramka `assertAdmin(request)` (zalogowany+admin) w 3 callable. `node --check` OK → `firebase deploy --only functions` (projekt vbs-invoices, OSOBNY od vbs-stats). **Weryfikacja PROD**: bez auth 401 `unauthenticated`; admin skanuje → działa (licznik skanów +1, user potwierdził screenshotem 2×).
 
+### C) Cleanup martwy `GpsCzasPracySection.jsx` (commit `1cc66c2`, PROD)
+Backlog #3. Komponent (542 linie / 29 KB) był lazy-importowany w `App.jsx` ale **nigdzie nierenderowany** (`<GpsCzasPracySection` = 0 użyć) — zastąpiony przez `TachografComplianceSection` (06-05); orphaned import generował zbędny chunk 20 KB. Usunięto plik + lazy import + posprzątano 2 komentarze (`firebase.js`, `TachografComplianceSection.jsx`). Build 867 modułów (−1, chunk zniknął), lint 0 errors. Temp `public/_mirek-*.html` — sprawdzone, już nie istniały (sprzątnięte wcześniej). Memory: `project_tacho_powrot_do_bazy` zaktualizowana.
+
 ### Pułapki / lekcje
 - **Weryfikuj założenia z pamięci recon'em ZANIM ruszysz kod** — „ten sam otwarty proxy" było nieprawdą; faktury miały zupełnie inną architekturę. Recon (Krok 0) oszczędził „naprawiania" nieistniejącego problemu / zepsucia działającej apki.
 - **zsh nomatch**: `ls a* b* c*` gdy `b*` nie matchuje → zsh PRZERYWA całą komendę → fałszywy „brak" (vbs-invoices był na Desktopie cały czas). Używaj `2>/dev/null` per-glob lub `find`.
@@ -1451,10 +1454,9 @@ Memory zakładała „ten sam otwarty proxy". **Recon (Krok 0) obalił**: repo J
 
 ### Deploy / stan
 - VBS-Stat: `main` `4a5153d` (Vercel live). vbs-invoices: `main` `fca7661` + 4 funkcje redeployed (europe-west1, „Successful update").
-- Branche `claude/secure-api-claude` + `claude/admin-gate-callables` zmergowane FF — opcjonalnie do usunięcia.
+- Branche `claude/secure-api-claude`, `claude/cleanup-gpsczaspracy` (VBS-Stat) + `claude/admin-gate-callables` (vbs-invoices) zmergowane FF i **usunięte** (local+remote) przy domknięciu sesji.
 - Memory: ZAKT. `reference_doc_ai_scanner` (security oba repa, opis fix + dług Node 20). Chip `task_7a16c81b` = stale (sprzed restartu, nieusuwalny programowo — user może odrzucić ręcznie).
 
 ### Otwarte / następne
-- **#3 cleanup** martwy `GpsCzasPracySection.jsx` + temp `public/_mirek-*.html`.
 - **⚠️ Dług Node 20**: Cloud Functions runtime Node 20 **decommission 2026-10-30** (OBA repa) + `firebase-functions` outdated → upgrade przed deadline (po tym brak deploya bez upgrade'u). ~4,5 mc zapasu.
 - DDD email-import (opcja A) gdy widziszwszystko doda wysyłkę `.ddd`.
