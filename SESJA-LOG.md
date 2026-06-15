@@ -1424,3 +1424,37 @@ Backlog #2. `weeklyRestCompensation` liczyło KAŻDY rest ≥24h jako osobny tyg
 - **Security** `/api/claude` otwarte proxy (`task_7a16c81b`) — Firebase ID token auth + zawężenie CORS; sprawdzić też vbs-invoices. Blocker komercjalizacji.
 - DDD email-import (opcja A) gdy widziszwszystko doda wysyłkę `.ddd`.
 - temp `public/_mirek-*.html` (z 06-11) — do usunięcia.
+
+---
+
+## 2026-06-15 — Security: /api/claude (main) zabezpieczony + audyt vbs-invoices (role-gating callable) — 2 repa PROD
+
+**Projekt**: FleetStat. Domknięcie backlogu #Security z 06-12. 2 repozytoria, 2 commity PROD: `4a5153d` (VBS-Stat/main→Vercel) + `fca7661` (vbs-invoices/main + `firebase deploy --only functions`). Step-by-step z testami przed każdym deployem.
+
+### A) Main app `/api/claude` — otwarte proxy ZABEZPIECZONE (commit `4a5153d`, PROD)
+Backlog #Security (`task_7a16c81b`). `api/claude.js` był otwartym proxy: `Access-Control-Allow-Origin: *`, ZERO auth, forwardował dowolne body do Anthropic z kluczem właściciela → każdy znający URL palił klucz/limit. **Fix 3-częściowy**:
+- **Backend** `api/claude.js`: weryfikacja **Firebase ID tokena** (`firebase-admin/auth` `verifyIdToken`, init `{projectId:'vbs-stats'}` BEZ service accounta) — bez/zły token → 401; CORS `*` → whitelist (fleetstat.pl, www, *.vercel.app, localhost).
+- **Front** `src/firebase.js`: helper `callClaude(body)` dokłada `Authorization: Bearer <idToken>` (`auth.currentUser.getIdToken()`); 5 call-site'ów (App.jsx ×4 + ZlecenieUploadBtn.jsx) → `callClaude`.
+- **Test lokalny** (diagnose_*.mjs gitignored): mint realnego tokena przez service account → handler 401(brak)/401(zły)/200(ważny) + CORS echo. **Weryfikacja PROD**: bez tokena 401 „Brak tokena", z tokenem 200 (real Anthropic). Memory: `reference_doc_ai_scanner`.
+- ⚠️ Kanoniczna domena = `www.fleetstat.pl` (apex 307→www; curl bez `-L` widzi tylko „Redirecting…"). Apka woła `/api/claude` względnie (same-origin), redirect jej nie dotyczy.
+
+### B) Faktury `vbs-invoices` — NIE było proxy (założenie błędne); role-gating callable WDROŻONE (commit `fca7661`, deploy)
+Memory zakładała „ten sam otwarty proxy". **Recon (Krok 0) obalił**: repo JEST lokalnie (`~/Desktop/vbs-invoices.nosync`; wcześniejszy „brak" = artefakt zsh nomatch glob). Architektura INNA: brak `api/`, klucz = **Firebase Secret** użyty server-side w Cloud Functions (`functions/lib/claude.js`). Callable mają `if(!request.auth)`. **Anonimowego palenia klucza TU NIE MA.**
+**Ale przy okazji znaleziony łagodniejszy gap**: `onCall` gatowały tylko „zalogowany", nie rolę → zalogowany nie-admin mógł wołać bezpośrednio (z pominięciem UI) `clearAndReset` (DESTRUKCYJNE: kasuje invoices+contractors), `scanNow` (koszt Claude), `inspectMailbox` (dane skrzynek). **Fix (user wybrał opcję B)**: `functions/lib/firestore.js` helper `isUserAdmin(uid)` czyta `users/{uid}.role` (1:1 jak `firestore.rules isAdmin()`; rola TYLKO w Firestore, brak custom claims) + `functions/index.js` bramka `assertAdmin(request)` (zalogowany+admin) w 3 callable. `node --check` OK → `firebase deploy --only functions` (projekt vbs-invoices, OSOBNY od vbs-stats). **Weryfikacja PROD**: bez auth 401 `unauthenticated`; admin skanuje → działa (licznik skanów +1, user potwierdził screenshotem 2×).
+
+### Pułapki / lekcje
+- **Weryfikuj założenia z pamięci recon'em ZANIM ruszysz kod** — „ten sam otwarty proxy" było nieprawdą; faktury miały zupełnie inną architekturę. Recon (Krok 0) oszczędził „naprawiania" nieistniejącego problemu / zepsucia działającej apki.
+- **zsh nomatch**: `ls a* b* c*` gdy `b*` nie matchuje → zsh PRZERYWA całą komendę → fałszywy „brak" (vbs-invoices był na Desktopie cały czas). Używaj `2>/dev/null` per-glob lub `find`.
+- **firebase-admin `verifyIdToken` działa na Vercelu z init `{projectId}` BEZ service accounta** (potrzebuje tylko projectId + publicznych kluczy Google) — zweryfikowane mint+verify lokalnie. `jose` by nie zadziałał out-of-the-box (Firebase = x509, nie JWKS).
+- **Callable `onCall` NIE wymusza auth** — wymaga ręcznego `if(!request.auth)`; rola wymaga osobnego czytania Firestore (brak custom claims w vbs-invoices, inaczej niż main app gdzie `onRoleChange` syncuje claims).
+- **2 OSOBNE projekty Firebase**: `vbs-stats` (main) vs `vbs-invoices` (faktury) — service account jednego nie działa na drugim; deploy funkcji = `firebase deploy --only functions` (NIE przez Vercel/merge).
+
+### Deploy / stan
+- VBS-Stat: `main` `4a5153d` (Vercel live). vbs-invoices: `main` `fca7661` + 4 funkcje redeployed (europe-west1, „Successful update").
+- Branche `claude/secure-api-claude` + `claude/admin-gate-callables` zmergowane FF — opcjonalnie do usunięcia.
+- Memory: ZAKT. `reference_doc_ai_scanner` (security oba repa, opis fix + dług Node 20). Chip `task_7a16c81b` = stale (sprzed restartu, nieusuwalny programowo — user może odrzucić ręcznie).
+
+### Otwarte / następne
+- **#3 cleanup** martwy `GpsCzasPracySection.jsx` + temp `public/_mirek-*.html`.
+- **⚠️ Dług Node 20**: Cloud Functions runtime Node 20 **decommission 2026-10-30** (OBA repa) + `firebase-functions` outdated → upgrade przed deadline (po tym brak deploya bez upgrade'u). ~4,5 mc zapasu.
+- DDD email-import (opcja A) gdy widziszwszystko doda wysyłkę `.ddd`.
