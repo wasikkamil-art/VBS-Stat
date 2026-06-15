@@ -1,5 +1,5 @@
 // Firebase initialization — wydzielone z App.jsx 2026-04-28 (TODO #5c krok 2).
-// Pozwala lazy-loadowanym komponentom (DriverPanel, TrackerPublicView, GpsCzasPracySection)
+// Pozwala lazy-loadowanym komponentom (DriverPanel, TrackerPublicView, TachografComplianceSection)
 // importować Firebase services bez circular dependency z App.jsx.
 //
 // Eksportowane:

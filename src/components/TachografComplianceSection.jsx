@@ -1,7 +1,7 @@
 // TachografComplianceSection — admin sub-zakładka "Tachograf" w GPS/Monitoring tab.
 // Layout w stylu Webfleet (4 sekcje: Bieżący stan, Czas odpoczynku, Zmiana, Bieżący tydzień).
-// Stworzony 2026-05-04 jako alternatywa dla GpsCzasPracySection — stary widok zostaje
-// nienaruszony, ten jest opt-in (zakładka obok). Lazy-loadowane.
+// Stworzony 2026-05-04 jako alternatywa dla GpsCzasPracySection (stary widok usunięty
+// 2026-06-15 — był martwym kodem: lazy-importowany, nigdzie nierenderowany). Lazy-loadowane.
 
 import { useState, useEffect } from "react";
 

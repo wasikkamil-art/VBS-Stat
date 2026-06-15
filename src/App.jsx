@@ -31,7 +31,6 @@ import {
 // importowane tam jako lazy (Vite dedupe automatycznie).
 const DriverPanel = lazy(() => import("./components/DriverPanel"));
 const TrackerPublicView = lazy(() => import("./components/TrackerPublicView"));
-const GpsCzasPracySection = lazy(() => import("./components/GpsCzasPracySection"));
 const TachografComplianceSection = lazy(() => import("./components/TachografComplianceSection"));
 // FrachtyModal — admin modal zlecenia (~480 linii) + SendTrackerLinkModal (~220 linii).
 // Lazy — admin pobiera dopiero gdy „+ Dodaj fracht" lub edytuje.
