@@ -75,3 +75,23 @@ export function reinitMessaging() {
   try { messaging = getMessaging(app); return messaging; }
   catch (e) { console.warn("FCM reinit failed:", e?.message); return null; }
 }
+
+// --- Uwierzytelnione wywołanie proxy /api/claude ---
+// Dokłada Firebase ID token zalogowanego usera jako `Authorization: Bearer ...`.
+// Proxy `api/claude.js` weryfikuje ten token (firebase-admin) — bez niego zwraca 401.
+// To zamyka otwarte proxy (każdy mógł palić klucz Anthropic) — tylko zalogowani userzy vbs-stats.
+// Zwraca surowy Response z fetch, żeby wszystkie call-site'y zachowały własną obsługę odpowiedzi.
+// `body` = obiekt Anthropic Messages API ({ model, max_tokens, messages, system? }).
+export async function callClaude(body) {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Brak zalogowanego użytkownika — zaloguj się ponownie.");
+  const token = await user.getIdToken();
+  return fetch("/api/claude", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+}

@@ -4,7 +4,7 @@
 
 import { useState, useRef } from "react";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
-import { storage } from "../firebase";
+import { storage, callClaude } from "../firebase";
 
 export default function ZlecenieUploadBtn({ frachtId, onUploaded, label = "+ Dodaj zlecenie", fullWidth = false }) {
   // onUploaded(url, parsedData) — parsedData = { nrZlecenia, nrRef, zaladunekAdres, ... }
@@ -80,9 +80,7 @@ NIE podawaj cen frachtu, warunków płatności, NIP, danych spedytora ani warunk
         }]
       };
       try {
-        const resp = await fetch("/api/claude", {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
-        });
+        const resp = await callClaude(body);
         const data = await resp.json();
         const text = data.content?.find(b => b.type === "text")?.text || "{}";
         const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());

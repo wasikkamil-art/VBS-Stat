@@ -40,7 +40,7 @@ const FrachtyModal = lazy(() => import("./components/FrachtyModal"));
 // ─── FIREBASE ───────────────────────────────────────────────────────────────
 // Init wydzielony do src/firebase.js (2026-04-28 TODO #5c) — pozwala lazy-loaded
 // komponentom importować db/auth/storage/functions bez circular dependency z App.jsx.
-import { app, db, auth, storage, functions, messaging, pushDiag, reinitMessaging } from "./firebase";
+import { app, db, auth, storage, functions, messaging, pushDiag, reinitMessaging, callClaude } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, where, orderBy, arrayUnion, serverTimestamp, writeBatch, runTransaction, limit as firestoreLimit } from "firebase/firestore";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
@@ -10958,14 +10958,10 @@ async function parseOneInvoice(file) {
   const msgContent = isPdf
     ? [{ type:"document", source:{ type:"base64", media_type:"application/pdf", data: base64 } }, { type:"text", text: PAYMENT_AI_PROMPT }]
     : [{ type:"image",    source:{ type:"base64", media_type: file.type,         data: base64 } }, { type:"text", text: PAYMENT_AI_PROMPT }];
-  const res = await fetch("/api/claude", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 1500,
-      messages: [{ role: "user", content: msgContent }],
-    }),
+  const res = await callClaude({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 1500,
+    messages: [{ role: "user", content: msgContent }],
   });
   if (!res.ok) {
     const errText = await res.text();
@@ -11992,11 +11988,7 @@ Extract ALL fields exactly as they appear. Return ONLY clean JSON, no text befor
       ? [{ type:"document", source:{ type:"base64", media_type:"application/pdf", data:base64 } }, { type:"text", text:AI_PROMPT }]
       : [{ type:"image",    source:{ type:"base64", media_type:fileType, data:base64 } },            { type:"text", text:AI_PROMPT }];
 
-    const res  = await fetch("/api/claude", {
-      method:"POST",
-      headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({ model:"claude-sonnet-4-6", max_tokens:2000, system:AI_SYSTEM, messages:[{ role:"user", content:msgContent }] }),
-    });
+    const res  = await callClaude({ model:"claude-sonnet-4-6", max_tokens:2000, system:AI_SYSTEM, messages:[{ role:"user", content:msgContent }] });
     if (!res.ok) {
       const errText = await res.text();
       throw new Error(`API error ${res.status}: ${errText.slice(0,200)}`);
@@ -12555,15 +12547,11 @@ Szukaj numerow rejestracyjnych pojazdow w dokumencie.`;
             { type: "text", text: userPrompt }
           ];
 
-      const res = await fetch("/api/claude", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-6",
-          max_tokens: 1000,
-          system: systemPrompt,
-          messages: [{ role: "user", content: contentParts }],
-        }),
+      const res = await callClaude({
+        model: "claude-sonnet-4-6",
+        max_tokens: 1000,
+        system: systemPrompt,
+        messages: [{ role: "user", content: contentParts }],
       });
       if (!res.ok) { const e = await res.text(); throw new Error(`API ${res.status}: ${e.slice(0,200)}`); }
       const data = await res.json();
@@ -16212,11 +16200,7 @@ Jeśli nie możesz odczytać danego pola, wpisz null.`,
           }]
         };
 
-        const resp = await fetch("/api/claude", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
+        const resp = await callClaude(body);
         const data = await resp.json();
         const text = data.content?.find(b => b.type === "text")?.text || "{}";
         let fields = {};
