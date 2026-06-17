@@ -31,7 +31,7 @@ export default function ZlecenieUploadBtn({ frachtId, onUploaded, label = "+ Dod
       });
       const isPDF = file.type === "application/pdf";
       const body = {
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-6",
         max_tokens: 1200,
         messages: [{
           role: "user",
