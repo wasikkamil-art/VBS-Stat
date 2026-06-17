@@ -6,6 +6,20 @@
   box-sizing: border-box;
 }
 
+/* === Typografia — spójna z FOX / Faktury (Apple-light) === */
+html, body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text',
+    'Segoe UI', Roboto, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Apple-style: cieńsze, gładsze nagłówki */
+h1, h2, h3 {
+  letter-spacing: -0.02em;
+}
+
 /* === Print stylesheet — DddReportView (Etap 3 raportu DDD) === */
 @media print {
   /* Force kolory pasków activity ribbons (Chrome / Safari) */
