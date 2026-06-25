@@ -1460,3 +1460,55 @@ Backlog #3. Komponent (542 linie / 29 KB) był lazy-importowany w `App.jsx` ale 
 ### Otwarte / następne
 - **⚠️ Dług Node 20**: Cloud Functions runtime Node 20 **decommission 2026-10-30** (OBA repa) + `firebase-functions` outdated → upgrade przed deadline (po tym brak deploya bez upgrade'u). ~4,5 mc zapasu.
 - DDD email-import (opcja A) gdy widziszwszystko doda wysyłkę `.ddd`.
+
+---
+
+## 2026-06-25 — vbs-invoices: maraton (logo + radek + thread-aware CMR + SSH)
+
+**Projekt**: vbs-invoices (faktury.fleetstat.pl). Sesja ekstremalnie długa (~6h, budżet "krótko ~1h" przekroczony 6×). 11+ commitów PROD, 4 deploye CF, migracja security.
+
+### A) Logo + favicon
+- **Sidebar logo iteracje** (user nie wiedział co dobre — kilka rund live): 190 → 70 → 88 → 100 → 120 → 140 → **160px** (`commit e8cb0be`, ostateczny ~30px mniej niż oryginalny).
+- **Favicon** (commit `029b44b`): wycięto sam znak (lewa część wordmarku 753×753) z `logo-fleetstat-invoices.png` przez Pillow (zainstalowany lokalnie) → `favicon.ico` (16/32/48) + `favicon-32.png` + `apple-touch-icon.png` (180px na białym). `<link>` w `index.html`.
+
+### B) Skrzynka radek@vbstransport.com — pełen setup
+- 3 zmiany kodu (commit `87f2901`): `IMAP_RADEK_PASSWORD` (Firebase Secret), `getMailboxConfigs()` + radek, secret w 3 funkcjach (scanIMAPMailboxes, scanNow, inspectMailbox).
+- Hasło `Nowehaslo99` (wyciekło w transkrypcie — user zarekomendował rotację, ZROBIONE).
+- **OOM przy 4-mc startDate** → bump memory 512 MiB → 2 GiB (`9097e40`); później batch limit 50/tick w schedulerze (`79466f8`) + scheduler `every 1 min` + `maxInstances: 1` (`7695d23`) dla przyspieszonego backfillu.
+- **Radek ma 65 612 maili w INBOX** (gigant); 1-mc backfill = ~1944 kandydatów; po 30+ min backfilling.
+- `startDate` global: 2026-04-18 → 2026-02-25 → ostatecznie **2026-05-25** (1 mc wstecz, decyzja user po info że 4 mc = drogo + ryzyko timeoutu).
+
+### C) CMR/POD grouping — 3 warstwy bypass Haiku + thread-aware
+**Regresja po Paczce B** (Haiku prefilter z 2026-05-26): Haiku odrzucał CMR jako "not FV" zanim FAZA 2 grouping mógł je podpiąć jako załączniki głównej FV. Iteracja fixów:
+- **Warstwa 1 — filename hints** (`a6b2e38`): pliki z `/cmr|pod|list_przewoz|delivery_note|consignment/i` w nazwie omijają Haiku, idą prosto do Sonnet → `documentType` poprawnie ustawiony.
+- **Warstwa 2 — subject pattern** (`83bcc43`): subject typu `NNNN/RS|KW|AW|AS/MM/YYYY` (kody dyspozytorów VBS) → CAŁY mail omija Haiku. Domain rule od user (RS=Radek Skiba?, KW/AW/AS=inni dyspozytorzy).
+- **Reprocess CF + przycisk admin** (`4055e76`): nowa CF `reprocessAttachments` (2 GiB, 30 min timeout) + helper `reprocessInvoiceAttachments` w `lib/mailbox.js` + button "🔧 Uzupełnij brakujące CMR/POD" w Dashboardzie (fioletowy panel). Auto-szuka FV z pustym attachments + transport-subject, IMAP-fetch oryginalnego maila, klasyfikuje aux przez Sonnet, PATCH attachments[]. **Wynik 1. uruchomienia: 18/22 FV podpiętych (4 noAux)**.
+- **Warstwa 3 — thread-aware IMAP SUBJECT search** (`e82f862`): user-disclosed workflow: wątek transportowy często ma CMR/POD/zlecenie w OSOBNYCH mailach od FV (CMR po rozładunku, FV tygodnie później). Reprocess teraz wyciąga threadKey z `emailSubject`, robi IMAP `SUBJECT` search po nim, znajduje ALL sibling UIDy w wątku, klasyfikuje aux ze wszystkich → merge z istniejącymi attachments (dedup po storageRef, pole `fromThread: true`). Filter rozszerzony na WSZYSTKIE transport-subject FV. **Naprawia case RIREU 25832**: CMR przyszedł UID 59933 (9 czerwca), FV UID 60224 (25 czerwca) — system połączył.
+
+### D) UI badges (zamiast 📎 zszywacza)
+- InvoiceList + CMRList (`b99baf6` + `94bf902`): małe kolorowe kwadraciki obok nazwy sprzedawcy: **FV** (zawsze, brand-blue), **CMR** (emerald, dla `delivery_note|cmr`), **POD** (amber), **ZL** (violet, dla `order`), **INNE** (szary fallback). Liczba per typ tylko gdy >1 (np. "CMR 3"). User widzi STRUKTURĘ dokumentów wątku transportowego jednym rzutem oka.
+
+### E) Security — migracja PAT → SSH (wszystkie 3 repa)
+- **2× wycieki w transkrypcie** w tej sesji: (1) IMAP password radka `Nowehaslo99`, (2) PAT `ghp_zMch...` w git push error message, (3) nowy PAT `ghp_gqvVBm...` po user paste; oryginalny PAT też naturally expired today (2026-06-25).
+- **Decyzja**: SSH key zamiast PAT. Wygenerowano `ed25519` w `~/.ssh/id_ed25519` (no passphrase), `~/.ssh/config` z `UseKeychain` + `AddKeysToAgent`, klucz dodany do macOS Keychain. Public key dodany do GitHub.
+- **3 remote'y przepięte** (HTTPS+PAT → SSH): `vbs-invoices` (był z PAT embedded), `VBS-Stat`/FleetStat (był z PAT przez Keychain credential helper), `fox` (był z PAT przez Keychain credential helper). Test `ssh -T git@github.com` → `Hi wasikkamil-art!`. Fetch działa dla wszystkich 3.
+- Stary PAT (z transkryptu) — user **revoked + deleted** na GitHubie. Nowy backup PAT user zrobił dla future-use (API/automation) i zachował poza chat.
+
+### Pułapki / lekcje
+- **Vercel deploy lag** — kilka razy zdawało się że deploy nie zszedł, a faktycznie był (CDN edge cache podawał stary index.html). Bundle hash check (curl prod + grep) = wiarygodny indykator.
+- **Logo size live-iteration kosztowna** — user robił `190 → 70 → 88 → 100 → 120 → 140 → 160` z 6 deployami po kolei (mocki proponowane ale user wolał deploy+see). Lekcja: gdy user iteruje rapid pixel-tuning, zaproponować Once vs po każdej zmianie.
+- **Radek 65k mailbox** wymaga: 2 GiB CF memory, 30 min timeout (reprocess), batch limit 50/tick (scheduler), accelerated tick (every 1 min) tylko dla backfillu (revert do 10 min po dojechaniu).
+- **Thread-aware retroactive fix wymaga IMAP SUBJECT search** — przeszukuje całą skrzynkę po substring, działa dobrze ale wolne na 65k INBOX radka. Wyciąga sibling UIDy, dedup storageRef merge z istniejącymi.
+- **PAT wygasł dziś naturally** — pierwotnie myślałem że PAT w transkrypcie spowodował "push fail", ale tak naprawdę po prostu wygasł. SSH migration usuwa cały kategorię problemów.
+- **Forward-going thread-aware grouping NIE zaimplementowane** — Phase 1 (auto-link orphans przy zapisie nowej FV) odłożone. Obecnie tylko reprocess button (retro) działa thread-aware. Jak nowa FV przyjdzie z CMR w sibling mailu → user musi kliknąć "Uzupełnij brakujące CMR/POD" po jakimś czasie. Forward-going wymagałoby nowej kolekcji `orphanDocs` + auto-link logic w `scanMailbox`.
+
+### Deploy / stan
+- vbs-invoices: 11+ commitów PROD (favicon `029b44b` → ... → UI badges `94bf902`), 4 deploye CF z `lib/` zmianami (wszystkie funkcje), wszystkie na SSH remote teraz.
+- Backfill radek wciąż w toku (scheduler `every 1 min`, batch 50/tick, ~30+ ticków z ~39 oczekiwanych). Po dojechaniu — **revert scheduler na `every 10 minutes`** (kolejny commit + deploy CF).
+- Memory: NOWA `reference_github_ssh_setup.md`; ZAKT. `project_invoice_ai_scanner.md` (wpis 2026-06-25 na górze); MEMORY.md zaktualizowany (entry SSH po PAT incident).
+
+### Otwarte / następne
+- **Revert scheduler na `every 10 minutes`** po zakończeniu backfillu radka — zostawić 1-min permanentnie = zbędne obciążenie + cold-starty.
+- **Forward-going thread-aware grouping** (Phase 1) — jeśli user chce, nowa kolekcja `orphanDocs` + auto-link w `scanMailbox`. Obecnie tylko retro-button.
+- **Dług Node 20** (z 2026-06-15) — wciąż otwarty na OBA repa, deadline 2026-10-30.
+- **CLAUDE.md backup sekcja "Security PAT"** — nieaktualna (PAT już nie używamy). Update przy okazji.
