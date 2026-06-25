@@ -121,19 +121,16 @@ Folder pracy `*.nosync` jest **wykluczony z iCloud sync** (konwencja iCloud Driv
 **TYLKO LOKALNIE** ⚠️ (do osobnego backupu):
 - Memory Claude `~/.claude/projects/-Users-kamilwasik-Desktop-VBS-Stat-nosync/memory/` — 60 KB, 14 plików (preferencje + recovery procedures + TODO context). **Backup: `./scripts/backup-claude-memory.sh`** (versioned snapshot do iCloud `FleetStat-backup/memory/YYYY-MM-DD/`, retention 30 dni). TBD Krok 2b: launchd auto-run codziennie 22:00.
 - `.env.local` — Firebase / Anthropic credentials (backup razem ze skryptem `backup-claude-memory.sh` → `FleetStat-backup/env/.env.local`)
-- `.git/config` — zawiera GitHub PAT w plain text
+- `~/.ssh/id_ed25519` — prywatny klucz SSH do GitHuba (od 2026-06-25 wszystkie 3 repa na SSH). Odtwarzalny: `ssh-keygen` + dodanie public do GitHub Settings. `.git/config` ma już tylko remote SSH (`git@github.com:...`), bez sekretu
 - `node_modules/`, `dist/`, `.vite/` — odtwarzalne z `npm install` + `npm run build`, NIE backupować
 - `2026-*.json`, `import-*.json`, `frachty_*.json` — dane historyczne migracji (jednorazowe, ale warto skopiować raz)
 
 **Time Machine + external SSD** (~$80-150) = najmocniejszy fail-safe — backup wszystkiego automat, point-in-time recovery. Rekomendowane gdy nie ma się dyscypliny push'a.
 
-**Security PAT**: GitHub Personal Access Token siedzi w `.git/config` w plain text. Jeśli MacBook utracony, PAT wycieknie do publicznego transcript chatu (np. przez `git remote -v`), lub komputer jest udostępniony — natychmiast:
-```bash
-# 1. GitHub Settings → Developer settings → Personal access tokens → Revoke stary
-# 2. Wygeneruj nowy PAT (scope: repo, workflow)
-# 3. Zaktualizuj remote:
-git remote set-url origin https://{NEW_PAT}@github.com/wasikkamil-art/VBS-Stat.git
-```
+**Security — SSH (od 2026-06-25)**: wszystkie 3 repa (VBS-Stat/FleetStat, vbs-invoices, fox) używają **klucza SSH** (`ed25519`, macOS Keychain) zamiast PAT — po dwóch incydentach wycieku PAT w transkrypcie. `.git/config` NIE zawiera już żadnego sekretu (remote `git@github.com:...`), więc `git remote -v` w czacie jest bezpieczne.
+- **Jeśli `git push` fail → to NIE jest problem PAT** (już nie używamy). Sprawdź SSH: `ssh -T git@github.com` (oczekiwane: `Hi wasikkamil-art!`). Nie sugeruj PAT jako fixu.
+- Pełna procedura rotacji klucza SSH: memory `reference_github_ssh_setup.md`.
+- PAT bywa potrzebny TYLKO do automatyzacji (GitHub Actions / REST API / integracje 3rd party), nie do codziennego push/fetch.
 
 ## Konwencje kodu (obserwowane)
 

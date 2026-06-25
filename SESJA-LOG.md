@@ -1512,3 +1512,51 @@ Backlog #3. Komponent (542 linie / 29 KB) był lazy-importowany w `App.jsx` ale 
 - **Forward-going thread-aware grouping** (Phase 1) — jeśli user chce, nowa kolekcja `orphanDocs` + auto-link w `scanMailbox`. Obecnie tylko retro-button.
 - **Dług Node 20** (z 2026-06-15) — wciąż otwarty na OBA repa, deadline 2026-10-30.
 - **CLAUDE.md backup sekcja "Security PAT"** — nieaktualna (PAT już nie używamy). Update przy okazji.
+
+---
+
+## 2026-06-25 (cd. — sesja 2) — vbs-invoices: Phase 1 orphanDocs forward-going auto-link
+
+**Projekt**: vbs-invoices (faktury.fleetstat.pl). Sesja krótka (~1h, w budżecie). Kontynuacja po marathonie. Wybór user'a: A) orphanDocs auto-link (budżet 4h+). 1 commit PROD `6ad7a26` (5 plików, +476/-25), 5 CF redeployed, rules deployed, front na Vercel.
+
+### Co rozwiązuje (ból usera)
+Wcześniej: FV przychodzi z CMR w OSOBNYM mailu tego samego wątku transportowego (CMR po rozładunku, FV tygodnie później, osobne UID, ten sam threadKey `NNNN/RS|KW|AW|AS/MM/YYYY`) → user musiał ręcznie klikać "🔧 Uzupełnij brakujące CMR/POD" (reprocess CF, retro). Teraz: **automatycznie i dwukierunkowo** przez kolekcję `orphanDocs`.
+
+### Recon ZANIM kod (lekcja 06-15)
+Pełne przeczytanie `mailbox.js` (1032 l.), `firestore.js`, `storage.js`, `index.js`, `CMRList.jsx`, `firestore.rules`, `storage.rules`, `firebase.json`. Potwierdzone: `saveInvoice` 1 caller (bezpieczna zmiana sygnatury), storage rules pokrywają orphan files (ta sama ścieżka `invoices/{y}/{m}/`), brak potrzeby nowych composite indexów.
+
+### Implementacja (mailbox.js scanMailbox + firestore.js helpery)
+- **FAZA 3a** (mail BEZ głównej FV): CMR/POD/zlecenie (isAttachable) → `captureOrphan` zamiast wyrzucenia. Upload Storage + `saveOrphanDoc`. Jeśli FV z tym threadKey JUŻ istnieje (CMR po fakturze) → `appendInvoiceAttachments` od razu + orphan zapisany jako linked.
+- **FAZA 3c** (przyszła FV): `getUnlinkedOrphansByThread` → dociąga CMR z wcześniejszych maili wątku → attachments + `markOrphansLinked` (CMR przed fakturą = główny case).
+- `saveInvoice` zapisuje `threadKey` (potrzebne do forward-link). 8 istniejących FV ma threadKey z wczorajszego reprocessu → forward-link działa od razu.
+- Helpery firestore.js: `saveOrphanDoc` (idempotentny ID=sha1(storageRef)), `findInvoicesByThreadKey`, `getUnlinkedOrphansByThread` (filtr linkedInvoiceId==null w kodzie → bez composite indexu), `markOrphansLinked` (batch), `appendInvoiceAttachments` (dedup po storageRef).
+- **ZERO dodatkowych wywołań Claude** (aux już sklasyfikowane w FAZA 1). Każdy krok try/catch (nie wywala scanu). Liczniki `orphansSaved`/`orphansLinked`.
+
+### Frontend
+`useOrphanDocs` hook + sekcja "📭 CMR/POD bez faktury" w CMRList (bursztynowa karta `OrphanCard`). **Cross-check po storageRef** — orphan znika gdy jego plik wisi przy JAKIEJKOLWIEK FV (łapie też podpięcia przez reprocess). Manual attach UI = poza fazą (orphan-bez-threadKey: komunikat "podepniesz ręcznie").
+
+### Rules
+`orphanDocs`: read=authed, write=CF-only (Admin SDK).
+
+### Weryfikacja (sufit bez logowania / Javy / ADC)
+- `node --check` ×3 ✅ + `npm run build` (64 modułów, 0 błędów) ✅.
+- **Query na realnej infrze** (runQuery REST, gcloud token): `where threadKey ==` na invoices → trafia RIREU 25832; na orphanDocs (nowa kolekcja) → 0, oba BEZ błędu indexu (single-field auto-index potwierdzony).
+- Brak regresji: ticki schedulera pre/post-deploy czyste (0 errors).
+- **Front E2E wizualnie**: zasiany test orphan przez REST (`TEST_ORPHAN_DELETE`, realny PDF storageRef nie-attachment + threadKey pasujący do niczego) → user potwierdził screenshotem (sekcja + bursztynowa karta + threadKey status + download) → **skasowany, baza czysta**.
+- **Live capture→link czeka na realny ruch** — niewykonalne z CLI (brak wstrzyknięcia maila / tokena Firebase / Javy / ADC). Zadziała na pierwszym realnym CMR-bez-FV; monitoring logów schedulera.
+
+### Pułapki / lekcje
+- Bez ADC/Javy/creds izolowany live-E2E backendu z CLI niewykonalny → weryfikuj przez (a) runQuery REST na realnych danych (query+index nie wywalą feature'a po cichu), (b) zasianie test-doc przez REST + wizualne potwierdzenie frontu, (c) monitoring logów. Test orphan musi mieć storageRef NIE-attachment (inaczej cross-check go ukryje) + threadKey pasujący do niczego (zostaje "oczekujący").
+- Vite hash content-based → prod podający ten sam hash co lokalny build = pewny dowód że nowy front live (bez czekania na "deploy done").
+- Edit tool wymaga Read tym narzędziem (nie `cat`/Bash) zanim edycja — firestore.rules/SESJA-LOG trzeba było Read.
+
+### Deploy / stan
+- vbs-invoices: `main` `6ad7a26` (Vercel live, bundle `index-Ijj9F9CM.js`). 5 CF redeployed (rewizja `scanimapmailboxes-00023-jem`). Rules deployed. Branch `claude/orphan-docs-autolink` zmergowany FF + usunięty.
+- Memory: ZAKT. `project_invoice_ai_scanner.md` (frontmatter + wpis 2026-06-25 cd. na górze), MEMORY.md indeks.
+
+### Otwarte / następne
+- **Live confirmation orphan auto-link** — czeka na pierwszy realny CMR-bez-FV (monitoring logów). Można też kliknąć "Test 10 najnowszych".
+- **Backlog UI** (z 2026-05-27, wciąż otwarte): dashboard wykresy Recharts, mobile responsive, eksport CSV księgowej.
+- **Manual attach orphana-bez-threadKey** w InvoiceDetail (button "podepnij") + cleanup stale orphans — opcjonalne, gdy się pojawią.
+- **Dług Node 20** — OBA repa, deadline 2026-10-30.
+- **CLAUDE.md sekcja "Security PAT"** — nadal nieaktualna (option C z tej sesji, niewybrana).
