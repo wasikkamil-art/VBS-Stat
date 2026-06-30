@@ -16163,15 +16163,9 @@ function DocUploadCell({ frachtId, docType, existingUrl, onUploaded }) {
       // 2. Jeśli FV — odczytaj przez AI (Claude Vision)
       if (isFV) {
         setStatus("reading");
-        const base64 = await new Promise((res, rej) => {
-          const reader = new FileReader();
-          reader.onload = () => res(reader.result.split(",")[1]);
-          reader.onerror = rej;
-          reader.readAsDataURL(file);
-        });
-
+        // URL ze Storage zamiast base64 — Anthropic pobiera plik sam (patrz ZlecenieUploadBtn:
+        // base64 dużych PDF przekraczał limit body Vercela → 413 → ciche puste pola).
         const isPDF = file.type === "application/pdf";
-        const mediaType = isPDF ? "application/pdf" : file.type;
 
         const body = {
           model: "claude-sonnet-4-6",
@@ -16181,7 +16175,7 @@ function DocUploadCell({ frachtId, docType, existingUrl, onUploaded }) {
             content: [
               {
                 type: isPDF ? "document" : "image",
-                source: { type: "base64", media_type: mediaType, data: base64 },
+                source: { type: "url", url },
               },
               {
                 type: "text",

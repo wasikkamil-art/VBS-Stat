@@ -21,14 +21,11 @@ export default function ZlecenieUploadBtn({ frachtId, onUploaded, label = "+ Dod
       await uploadBytes(sRef, file);
       const url = await getDownloadURL(sRef);
 
-      // AI parsowanie zlecenia — wyciąga pełne dane operacyjne
+      // AI parsowanie zlecenia — wyciąga pełne dane operacyjne.
+      // Wysyłamy URL z Firebase Storage (nie base64): Anthropic pobiera plik sam,
+      // a body proxy jest minimalne. Base64 dużych PDF (>~4,5 MB) przekraczał limit
+      // body funkcji Vercela (413) — proxy nie ruszało i formularz zostawał pusty.
       setStatus("reading");
-      const base64 = await new Promise((res, rej) => {
-        const reader = new FileReader();
-        reader.onload = () => res(reader.result.split(",")[1]);
-        reader.onerror = rej;
-        reader.readAsDataURL(file);
-      });
       const isPDF = file.type === "application/pdf";
       const body = {
         model: "claude-sonnet-4-6",
@@ -36,7 +33,7 @@ export default function ZlecenieUploadBtn({ frachtId, onUploaded, label = "+ Dod
         messages: [{
           role: "user",
           content: [
-            { type: isPDF ? "document" : "image", source: { type: "base64", media_type: file.type, data: base64 } },
+            { type: isPDF ? "document" : "image", source: { type: "url", url } },
             { type: "text", text: `Przeanalizuj to zlecenie transportowe i wyciągnij dane operacyjne.
 Odpowiedz TYLKO w formacie JSON (bez markdown):
 {
@@ -85,7 +82,12 @@ NIE podawaj cen frachtu, warunków płatności, NIP, danych spedytora ani warunk
         const text = data.content?.find(b => b.type === "text")?.text || "{}";
         const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
         onUploaded(url, parsed);
-      } catch { onUploaded(url, { nrZlecenia: null }); }
+      } catch (e) {
+        // AI nie odczytało (błąd API/parsowania) — plik jest już w Storage,
+        // formularz zostaje pusty do ręcznego uzupełnienia. Logujemy zamiast cicho połykać.
+        console.error("ZlecenieUploadBtn: AI nie odczytało zlecenia:", e);
+        onUploaded(url, { nrZlecenia: null });
+      }
 
       setStatus("done");
     } catch (err) {
