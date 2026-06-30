@@ -42,7 +42,7 @@ const FrachtyModal = lazy(() => import("./components/FrachtyModal"));
 import { app, db, auth, storage, functions, messaging, pushDiag, reinitMessaging, callClaude } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, where, orderBy, arrayUnion, serverTimestamp, writeBatch, runTransaction, limit as firestoreLimit } from "firebase/firestore";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
-import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
+import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { getToken, onMessage } from "firebase/messaging";
 import { httpsCallable } from "firebase/functions";
 
@@ -12478,32 +12478,35 @@ function BulkUploadModal({ vehicles, onSave, onClose }) {
   const dropRef  = useRef();
   const fileRef  = useRef();
 
-  const readFile = (file) => new Promise((res) => {
-    const reader = new FileReader();
-    reader.onload = (e) => res(e.target.result);
-    reader.readAsDataURL(file);
-  });
-
   const addFiles = async (files) => {
     const allowed = ["application/pdf","image/jpeg","image/png","image/jpg","image/webp"];
-    const items = [];
+    const uploaderUid = auth.currentUser?.uid || "anon";
     for (const file of files) {
       if (!allowed.includes(file.type)) continue;
       if (file.size > 8 * 1024 * 1024) continue;
-      const fileData = await readFile(file);
-      items.push({ id: uid(), fileName: file.name, fileType: file.type, fileData, status: "pending", extracted: null, edited: null });
+      const id = uid();
+      // Upload do Storage OD RAZU — AI dostaje URL zamiast base64 (omija limit body Vercela 413
+      // na dużych PDF). Pliki niezapisane sprzątane: removeItem / handleSaveAll / handleClose.
+      let fileUrl = null, storagePath = null;
+      try {
+        const ext = file.name?.split(".").pop() || "pdf";
+        storagePath = `docs/${uploaderUid}/${id}.${ext}`;
+        const sRef = storageRef(storage, storagePath);
+        await uploadBytes(sRef, file);
+        fileUrl = await getDownloadURL(sRef);
+      } catch (err) {
+        console.error("Bulk: upload do Storage nie powiódł się:", err);
+      }
+      const item = { id, fileName: file.name, fileType: file.type, fileUrl, storagePath, status: fileUrl ? "pending" : "error", extracted: null, edited: null };
+      setQueue(q => [...q, item]);
+      if (fileUrl) extractWithAI(item);
     }
-    setQueue(q => [...q, ...items]);
-    // kick off AI extraction for each
-    items.forEach(item => extractWithAI(item));
   };
 
   const extractWithAI = async (item) => {
     setQueue(q => q.map(x => x.id===item.id ? {...x, status:"analyzing"} : x));
     try {
       const isPdf = item.fileType === "application/pdf";
-      const mediaType = item.fileType;
-      const base64 = item.fileData.split(",")[1];
 
       const systemPrompt = `Jestes asystentem do rozpoznawania dokumentow transportowych, ubezpieczeniowych i umow.
 Analizujesz obrazy/PDF i zwracasz JSON z polami dokumentu.
@@ -12536,15 +12539,11 @@ Szukaj numerow rejestracyjnych pojazdow w dokumencie.`;
   "warunki": "krotki opis warunkow/uslug lub null"
 }`;
 
-      const contentParts = isPdf
-        ? [
-            { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } },
-            { type: "text", text: userPrompt }
-          ]
-        : [
-            { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
-            { type: "text", text: userPrompt }
-          ];
+      // URL ze Storage zamiast base64 (limit body Vercela 413 na dużych PDF).
+      const contentParts = [
+        { type: isPdf ? "document" : "image", source: { type: "url", url: item.fileUrl } },
+        { type: "text", text: userPrompt }
+      ];
 
       const res = await callClaude({
         model: "claude-sonnet-4-6",
@@ -12586,7 +12585,8 @@ Szukaj numerow rejestracyjnych pojazdow w dokumencie.`;
         notes:        parsed.notes         || "",
         confidence:   parsed.confidence    || "low",
         reminders:    [],
-        fileData:     item.fileData,
+        fileUrl:      item.fileUrl,
+        fileData:     null,
         fileName:     item.fileName,
         fileType:     item.fileType,
         // Insurance coverage
@@ -12611,7 +12611,11 @@ Szukaj numerow rejestracyjnych pojazdow w dokumencie.`;
     setQueue(q => q.map(x => x.id===id ? {...x, edited:{...x.edited,[field]:val}} : x));
   };
 
-  const removeItem = (id) => setQueue(q => q.filter(x => x.id!==id));
+  const removeItem = (id) => {
+    const item = queue.find(x => x.id === id);
+    if (item?.storagePath) deleteObject(storageRef(storage, item.storagePath)).catch(() => {});
+    setQueue(q => q.filter(x => x.id !== id));
+  };
 
   const handleDrop = (e) => {
     e.preventDefault();
@@ -12623,7 +12627,16 @@ Szukaj numerow rejestracyjnych pojazdow w dokumencie.`;
 
   const handleSaveAll = () => {
     setSaving(true);
+    // posprzątaj pliki pozycji których NIE zapisujemy (błędne/niegotowe) — bez sierot w Storage
+    queue.filter(x => !(x.status === "done" && x.edited) && x.storagePath)
+      .forEach(x => deleteObject(storageRef(storage, x.storagePath)).catch(() => {}));
     onSave(readyItems.map(x => ({ ...x.edited, id: x.id })));
+  };
+
+  const handleClose = () => {
+    // anulowanie / zamknięcie — usuń wszystkie wgrane, jeszcze niezapisane pliki
+    queue.filter(x => x.storagePath).forEach(x => deleteObject(storageRef(storage, x.storagePath)).catch(() => {}));
+    onClose();
   };
 
   return (
@@ -12638,7 +12651,7 @@ Szukaj numerow rejestracyjnych pojazdow w dokumencie.`;
             <h3 className="text-base font-bold text-gray-900">🤖 Wgraj dokumenty z AI</h3>
             <p className="text-xs text-gray-400 mt-0.5">AI automatycznie odczyta dane — Ty potwierdzasz przed zapisem</p>
           </div>
-          <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs">✕</button>
+          <button onClick={handleClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs">✕</button>
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
