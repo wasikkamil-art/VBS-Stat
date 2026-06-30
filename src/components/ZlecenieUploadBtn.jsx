@@ -107,6 +107,7 @@ NIE podawaj cen frachtu, warunków płatności, NIP, danych spedytora ani warunk
         </button>
       )}
       {status === "uploading" && <span className="text-xs text-gray-400 animate-pulse">⬆️ wysyłam…</span>}
+      {status === "reading"   && <span className="text-xs animate-pulse" style={{ color: "#7c3aed" }}>🤖 AI czyta zlecenie… (~15s)</span>}
       {status === "done"      && <span className="text-xs text-green-600">✅ wgrane!</span>}
       {status === "error"     && <button onClick={() => setStatus("idle")} className="text-xs text-red-500">⚠️ błąd — spróbuj ponownie</button>}
       <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" className="hidden" onChange={handleFile} />
