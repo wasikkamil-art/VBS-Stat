@@ -1,10 +1,11 @@
 // FleetStat Service Worker — PWA support
-// CACHE_VERSION zmienia się z każdym buildem — wymusza pobranie nowych plików
-// v5 (2026-04-30): emergency bump — wymusza świeży bundle u wszystkich klientów
-// po fixie array race condition (useEffect:1235 utrata 10 frachtów 27-30.04).
-// Klienci z otwartymi zakładkami muszą dostać nowy kod zanim odblokuję
-// firestore.rules na fleet/data — inaczej znów nadpisaliby tablicę.
-const CACHE_NAME = 'fleetstat-v5';
+// v6 (2026-07-01): index.html → NETWORK FIRST (był stale-while-revalidate, serwował
+// stary shell → stare hashe assetów → stary bundle po deployu). Od v6 shell jest
+// zawsze świeży online, więc KOLEJNE deploye propagują się same — bez ręcznego
+// "wyczyść dane witryny". Ten bump to jednorazowe przejście v5→v6 (wymusza instalację
+// nowego SW u klientów z otwartymi kartami; dalej bump niepotrzebny do propagacji).
+// v5 (2026-04-30): emergency bump po fixie array race condition (utrata frachtów 27-30.04).
+const CACHE_NAME = 'fleetstat-v6';
 
 // Install — od razu przejmij kontrolę
 self.addEventListener('install', (e) => {
@@ -22,7 +23,8 @@ self.addEventListener('activate', (e) => {
 
 // Strategie:
 //   1) Hashed assets Vite (assets/*-HASH.js|css) — CACHE FIRST (immutable, hash w nazwie)
-//   2) index.html — STALE-WHILE-REVALIDATE (szybko z cache, w tle pobiera świeży)
+//   2) index.html / nawigacje — NETWORK FIRST (świeży shell online → nowe hashe → nowy
+//      bundle; offline → cache fallback). Kluczowe dla auto-propagacji deployów.
 //   3) Firebase/Firestore/API — pomijamy (network only, brak SW)
 //   4) Reszta (fonty, ikony) — network first, cache fallback
 self.addEventListener('fetch', (e) => {
@@ -51,21 +53,18 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // 2) index.html i navigations — stale-while-revalidate
+  // 2) index.html i navigations — NETWORK FIRST (świeży shell online; offline → cache)
   const isHtml = e.request.mode === 'navigate'
     || (e.request.headers.get('accept') || '').includes('text/html');
   if (isHtml) {
     e.respondWith(
-      caches.match(e.request).then(cached => {
-        const networkPromise = fetch(e.request).then(res => {
-          if (res.ok) {
-            const clone = res.clone();
-            caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone));
-          }
-          return res;
-        }).catch(() => cached);
-        return cached || networkPromise;
-      })
+      fetch(e.request).then(res => {
+        if (res.ok) {
+          const clone = res.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone));
+        }
+        return res;
+      }).catch(() => caches.match(e.request).then(c => c || caches.match('/index.html')))
     );
     return;
   }

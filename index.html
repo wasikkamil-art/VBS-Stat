@@ -41,6 +41,15 @@
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('/sw.js').catch(() => {});
         });
+        // Gdy nowy SW przejmie kontrolę (skipWaiting + clients.claim po deployu) —
+        // przeładuj raz, żeby otwarte karty dostały nowy kod bez ręcznego czyszczenia.
+        // Guard `refreshing` chroni przed pętlą reloadów.
+        let refreshing = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (refreshing) return;
+          refreshing = true;
+          window.location.reload();
+        });
       }
     </script>
   </body>
