@@ -1560,3 +1560,30 @@ Pełne przeczytanie `mailbox.js` (1032 l.), `firestore.js`, `storage.js`, `index
 - **Manual attach orphana-bez-threadKey** w InvoiceDetail (button "podepnij") + cleanup stale orphans — opcjonalne, gdy się pojawią.
 - **Dług Node 20** — OBA repa, deadline 2026-10-30.
 - **CLAUDE.md sekcja "Security PAT"** — nadal nieaktualna (option C z tej sesji, niewybrana).
+
+## 2026-07-01 — FleetStat: multi-stop rozładunki (parser AI + DriverPanel) + Service Worker fix (2 commity PROD)
+
+Trigger: zlecenie ZL0658/06/26 (Basten Logistik) miało **4 rozładunki** (Offenhausen zał. → Grass LU / Eupen BE / Vilvoorde BE / Merchtem BE), a „AI zaczytało tylko 2 u Mirka, resztę Arek dopisywał ręcznie".
+
+### Diagnoza (read-only, potwierdzona na żywo)
+`diagnose_zl0658.mjs` (firebase-admin, gitignored) na `fleet/data → fleetv2_frachty`, fracht `m5ja15cl` (v4): R1/R2 = robota AI ("Według CMR", godz z okien PDF), R3/R4 = ręczne (skrót "WG CMR", zbite spacje, data poprawiona 07-01→07-02 przez człowieka). **Werdykt: AI złapało 2 z 4 (cap schematu), reszta wklepana ręcznie.** Root cause: parser miał sloty tylko na 2 rozładunki; model danych + FrachtyModal (showR2..R5) + mapa/trasa uniosły już 5 — wąskie gardło = wyłącznie parser + DriverPanel.
+
+### Fix 1 — parser AI zlecenia (commit `480dbd9`, `ZlecenieUploadBtn.jsx`)
+Schemat +R3/R4/R5 (firma/kod/miasto/adres/telefon/data/godz × 3) + instrukcja multi-stop „1..5 w kolejności trasy, nie zwijaj" + `max_tokens` 1200→1800 (5 stopów bez ucięcia JSON→cichy pusty formularz). Odbiorca `...onlyNew` (App.jsx:16800/17390) i formularz już to obsługują — zero zmian downstream. Ograniczenie świadome: **daty** — AI weźmie „01.07" ze wszystkich okien PDF, rozbicie na dni (Arek: 07-01/07-02) dalej ręczne.
+
+### Fix 2 — DriverPanel multi-stop R1..R5 (commit `480dbd9`, `DriverPanel.jsx`)
+Dwa zahardkodowane kafle (R1 + opcjonalny R2 na `hasR2`) → **pętla `stopData.map` po R1..R5**. `stopNums=[1..5].filter(istnieje)`, sekwencyjne odblokowanie (stop N po dotarciu N-1), km koniec + zdjęcie uszkodzeń + brama „Zakończ trasę" na REALNIE ostatnim stopie, `cmrComplete = wszystkie stopy mają CMR`. Backend eventów (`updateFrachtStatus`/`uploadDriverPhoto`) już przyjmował dowolne `r` — cap był tylko w renderze. Backward compat: single-stop `r=null` (legacy events r==null||1 → R1), istniejące 2-stopowe (r=1/2) bez zmian. Chunk DriverPanel 92.4→86.95 kB (usunięty duplikat). 0 lint errors.
+
+### Fix 3 — Service Worker (commit `29290e5`, `public/sw.js` + `index.html`) = zamyka TODO #1
+Problem: po każdym deployu userzy trzymali stary kod, ręczne „wyczyść dane witryny" (kosztowało ~30 min debugu „nie działa" = stary cache).
+- `sw.js`: index.html/nawigacje **stale-while-revalidate → NETWORK FIRST** (świeży shell online → nowe hashe → nowy bundle; offline→cache). CACHE_NAME **v5→v6** (jednorazowe przejście, wymusza instalację nowego SW u otwartych kart; dalej bump niepotrzebny). Hashed assets zostają cache-first (immutable).
+- `index.html`: listener `controllerchange` → jednorazowy reload (guard `refreshing` przeciw pętli) gdy nowy SW przejmie kontrolę.
+- Efekt: **kolejne deploye propagują się same**. Ryzyko flagged: auto-reload zabierze niezapisany formularz jeśli deploy trafi dokładnie gdy kierowca coś wpisuje (rzadkie, standardowy trade-off PWA).
+
+### Deploy / stan
+2 pushe na `main`: `480dbd9` (parser+DriverPanel), `29290e5` (SW). Oba pre-push (lint+build) zielone, Vercel auto-deploy. Diagnoza `diagnose_zl0658.mjs` lokalna (gitignored).
+
+### Otwarte / następne (follow-up multi-stop — świadomie odłożone)
+- **Admin Trip Summary (App.jsx, ~10 refs R2-cap) + publiczny TrackerPublicView (1 ref)** — dalej R1+R2. Kierowca odklika dotarcie R3/R4, ale timeline admina i publiczny link tych stopów NIE renderują jeszcze. Domknięcie spójności multi-stop = następna sesja.
+- **Weryfikacja PROD (niewykonalne z CLI)**: (a) kierowca otwiera multi-stop fracht na telefonie → 4 kafle + sekwencja; (b) po deployu sprawdzić czy nowy kod wchodzi bez ręcznego czyszczenia (transakcja v5→v6 może wymagać jednego reloadu, KOLEJNE same).
+- Z listy startowej wciąż: #2 dwa skanery AI na base64 (analyzeFile delegacje ~11981 + parseOneInvoice płatności ~10946 — latentny 413), #3 Node 20 CF (deadline 2026-10-30, oba repa), #4 cleanup 16 branchy claude/*.
