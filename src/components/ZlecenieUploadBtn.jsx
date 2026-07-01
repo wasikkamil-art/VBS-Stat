@@ -29,7 +29,7 @@ export default function ZlecenieUploadBtn({ frachtId, onUploaded, label = "+ Dod
       const isPDF = file.type === "application/pdf";
       const body = {
         model: "claude-sonnet-4-6",
-        max_tokens: 1200,
+        max_tokens: 1800,
         messages: [{
           role: "user",
           content: [
@@ -60,6 +60,27 @@ Odpowiedz TYLKO w formacie JSON (bez markdown):
   "rozladunekTelefon2": "telefon 2. rozładunku lub null",
   "dataRozladunku2": "YYYY-MM-DD 2. rozładunku lub null",
   "godzRozladunku2": "HH:MM 2. rozładunku lub null",
+  "rozladunekFirma3": "nazwa firmy 3. rozładunku lub null",
+  "dokodPocztowy3": "kod pocztowy 3. rozładunku lub null",
+  "dokodMiasto3": "miasto 3. rozładunku lub null",
+  "rozladunekAdres3": "ulica 3. rozładunku lub null",
+  "rozladunekTelefon3": "telefon 3. rozładunku lub null",
+  "dataRozladunku3": "YYYY-MM-DD 3. rozładunku lub null",
+  "godzRozladunku3": "HH:MM 3. rozładunku lub null",
+  "rozladunekFirma4": "nazwa firmy 4. rozładunku lub null",
+  "dokodPocztowy4": "kod pocztowy 4. rozładunku lub null",
+  "dokodMiasto4": "miasto 4. rozładunku lub null",
+  "rozladunekAdres4": "ulica 4. rozładunku lub null",
+  "rozladunekTelefon4": "telefon 4. rozładunku lub null",
+  "dataRozladunku4": "YYYY-MM-DD 4. rozładunku lub null",
+  "godzRozladunku4": "HH:MM 4. rozładunku lub null",
+  "rozladunekFirma5": "nazwa firmy 5. rozładunku lub null",
+  "dokodPocztowy5": "kod pocztowy 5. rozładunku lub null",
+  "dokodMiasto5": "miasto 5. rozładunku lub null",
+  "rozladunekAdres5": "ulica 5. rozładunku lub null",
+  "rozladunekTelefon5": "telefon 5. rozładunku lub null",
+  "dataRozladunku5": "YYYY-MM-DD 5. rozładunku lub null",
+  "godzRozladunku5": "HH:MM 5. rozładunku lub null",
   "zleceniodawcaFirma": "nazwa firmy zleceniodawcy lub null",
   "zleceniodawcaOsoba": "imię i nazwisko osoby kontaktowej zleceniodawcy lub null",
   "zleceniodawcaTelefon": "telefon zleceniodawcy lub null",
@@ -72,6 +93,7 @@ Odpowiedz TYLKO w formacie JSON (bez markdown):
   "zaladunekTyp": "typ załadunku (bok, tył, góra) lub null",
   "uwagi": "uwagi operacyjne istotne dla kierowcy (BEZ cen, BEZ warunków płatności) lub null"
 }
+Rozładunków może być od 1 do 5 — wypełnij DOKŁADNIE tyle, ile jest w zleceniu, w kolejności trasy (pierwszy rozładunek = pola bez cyfry, kolejne = 2/3/4/5). Nieużyte komplety rozładunków zostaw jako null. NIE zwijaj kilku rozładunków w jeden.
 NIE podawaj cen frachtu, warunków płatności, NIP, danych spedytora ani warunków umowy.` }
           ]
         }]
