@@ -411,11 +411,11 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList, eventsByFracht = {}) {
   const rows = activeVehicles.map(({ v, vehicleInfo, plate2, statusText, statusColor, statusBg, details }) => {
     return `
       <tr>
-        <td style="padding:14px 20px;border-bottom:1px solid #f3f4f6;">
-          <div style="font-size:15px;font-weight:700;color:#111827;line-height:1.35;margin-bottom:6px;word-break:break-word;">
+        <td style="padding:16px 24px;border-bottom:1px solid #f0f0f2;">
+          <div style="font-size:15px;font-weight:700;color:#1d1d1f;line-height:1.35;margin-bottom:6px;word-break:break-word;">
             ${vehicleInfo || v.type || "—"}
           </div>
-          <div style="font-size:13px;color:#6b7280;line-height:1.45;word-break:break-word;">
+          <div style="font-size:13px;color:#6e6e73;line-height:1.45;word-break:break-word;">
             <span style="display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;color:${statusColor};background:${statusBg};white-space:nowrap;vertical-align:middle;margin-right:8px;">
               ${statusText}
             </span>
@@ -432,25 +432,32 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList, eventsByFracht = {}) {
 <!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
-<body style="margin:0;padding:0;background:#f8f9fb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-  <div style="max-width:600px;margin:20px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+<body style="margin:0;padding:28px 14px;background:#f5f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:18px;overflow:hidden;border:1px solid #ececed;box-shadow:0 10px 30px rgba(0,0,0,0.06),0 2px 6px rgba(0,0,0,0.04);">
 
     <!-- LOGO VBS -->
-    <div style="text-align:center;padding:20px 20px 0 20px;">
-      <img src="https://fleetstat.pl/vbs-logo.png" alt="VBS Transport" style="max-width:180px;height:auto;display:inline-block;">
+    <div style="text-align:center;padding:26px 20px 0 20px;">
+      <img src="https://fleetstat.pl/vbs-logo.png" alt="VBS Transport" style="max-width:170px;height:auto;display:inline-block;">
     </div>
 
     <!-- HEADER -->
-    <div style="background:linear-gradient(135deg,#1e293b,#334155);padding:28px 36px;color:#fff;margin-top:16px;">
-      <h1 style="margin:0;font-size:22px;font-weight:700;">🚛 FleetStat — Status floty</h1>
-      <p style="margin:8px 0 0;font-size:14px;color:#94a3b8;">${dateStr} · ${timeStr}</p>
+    <div style="padding:22px 36px 26px;margin-top:16px;text-align:center;border-top:1px solid #f0f0f2;border-bottom:1px solid #f0f0f2;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 auto;">
+        <tr>
+          <td style="vertical-align:middle;padding-right:18px;">
+            <img src="https://fleetstat.pl/logodologowania.png" alt="FleetStat" width="140" style="display:block;width:140px;height:auto;">
+          </td>
+          <td style="vertical-align:middle;padding-left:18px;border-left:2px solid #e5e7eb;font-size:19px;font-weight:700;color:#1d1d1f;">Status floty</td>
+        </tr>
+      </table>
+      <p style="margin:16px 0 0;font-size:13px;color:#86868b;">${dateStr} · ${timeStr}</p>
     </div>
 
     <!-- PODSUMOWANIE -->
-    <div style="padding:16px 32px;background:#f8fafc;border-bottom:1px solid #e5e7eb;">
-      <span style="font-size:13px;color:#6b7280;">
-        W trasie: <strong>${activeVehicles.filter(d => d.statusType === "trasa").length}</strong> ·
-        Pauza/Baza: <strong>${activeVehicles.filter(d => d.statusType === "pauza").length}</strong>
+    <div style="padding:16px 32px;text-align:center;background:#fafafa;border-bottom:1px solid #f0f0f2;">
+      <span style="font-size:13px;color:#6e6e73;">
+        W trasie: <strong style="color:#1d1d1f;">${activeVehicles.filter(d => d.statusType === "trasa").length}</strong> &nbsp;·&nbsp;
+        Pauza/Baza: <strong style="color:#1d1d1f;">${activeVehicles.filter(d => d.statusType === "pauza").length}</strong>
       </span>
     </div>
 
@@ -462,9 +469,9 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList, eventsByFracht = {}) {
     </table>
 
     <!-- FOOTER -->
-    <div style="padding:16px 32px;background:#f9fafb;text-align:center;">
-      <p style="margin:0;font-size:11px;color:#9ca3af;">
-        Wygenerowano automatycznie przez <a href="https://fleetstat.pl" style="color:#3b82f6;text-decoration:none;">FleetStat</a>
+    <div style="padding:18px 32px;background:#fafafa;text-align:center;border-top:1px solid #f0f0f2;">
+      <p style="margin:0;font-size:11px;color:#86868b;">
+        Wygenerowano automatycznie przez <a href="https://fleetstat.pl" style="color:#0071e3;text-decoration:none;">FleetStat</a>
       </p>
     </div>
   </div>
