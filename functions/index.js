@@ -215,7 +215,20 @@ exports.addDriverByEmail = onCall(
 // ═══════════════════════════════════════════════════════════════
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onRequest }  = require("firebase-functions/v2/https");
-const sgMail = require("@sendgrid/mail");
+// Resend REST API — wysyłka email (zastąpiło @sendgrid/mail; trial SendGrid wygasł
+// 1.06.2026 → wszystkie wysyłki 401 Unauthorized). Node 20 ma globalny fetch.
+// Batch endpoint: 1..100 wiadomości jednym żądaniem, każda z własnym `to`
+// (odbiorcy nie widzą się nawzajem — jak stare sgMail.sendMultiple).
+async function sendEmailsResend(apiKey, messages) {
+  const res = await fetch("https://api.resend.com/emails/batch", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify(messages),
+  });
+  const body = await res.text();
+  if (!res.ok) throw new Error(`Resend ${res.status}: ${body.slice(0, 300)}`);
+  return body ? JSON.parse(body) : {};
+}
 
 // Helper: pobierz dziś w formacie YYYY-MM-DD (Warsaw timezone)
 function getTodayISO() {
@@ -231,7 +244,25 @@ function fmtDate(d) {
 }
 
 // Helper: generuj HTML emaila
-function buildEmailHTML(vehicles, frachtyList, pauzyList) {
+// Status rozładunku — parytet z frontendem (src/utils/frachtStatus.js computeFrachtStatus).
+// CommonJS CF nie importuje ESM utila → port inline. Hierarchia: statusRozladunkuManual
+// (admin override) > statusRozladunku legacy > najnowszy driverEvent rozladowano (nie
+// cofnięty) > w_trasie. Bez tego email czytał tylko puste `statusRozladunku` → auta
+// rozładowane (ręcznie lub przez kierowcę) pokazywały się błędnie jako "W trasie".
+function isFrachtRozladowanyCF(fracht, events = []) {
+  if (!fracht) return false;
+  if (fracht.statusRozladunkuManual) return fracht.statusRozladunkuManual === "rozladowano";
+  if (fracht.statusRozladunku === "rozladowano") return true;
+  if (Array.isArray(events) && events.length > 0) {
+    const roz = events
+      .filter(e => e && (e.type === "rozladowano" || e.type === "cofnij_rozladowano"))
+      .sort((a, b) => (b.ts || "").localeCompare(a.ts || ""));
+    if (roz.length > 0 && roz[0].type === "rozladowano") return true;
+  }
+  return false;
+}
+
+function buildEmailHTML(vehicles, frachtyList, pauzyList, eventsByFracht = {}) {
   const todayISO = getTodayISO();
 
   // Oblicz statusy osobno, żeby mieć dostęp do danych w podsumowaniu
@@ -244,18 +275,18 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
     // Aktywny fracht — w trasie
     const activeF = vFrachty.find(r => {
       if (!r.dataZaladunku || !r.dataRozladunku) return false;
-      if (r.statusRozladunku === "rozladowano") return false;
+      if (isFrachtRozladowanyCF(r, eventsByFracht[r.id])) return false;
       return r.dataZaladunku <= todayISO && todayISO <= r.dataRozladunku;
     });
 
     // Następny fracht (przyszły załadunek)
     const nextF = vFrachty
-      .filter(r => r.dataZaladunku && r.dataZaladunku > todayISO && r.statusRozladunku !== "rozladowano")
+      .filter(r => r.dataZaladunku && r.dataZaladunku > todayISO && !isFrachtRozladowanyCF(r, eventsByFracht[r.id]))
       .sort((a, b) => a.dataZaladunku.localeCompare(b.dataZaladunku))[0] || null;
 
     // Ostatni rozładowany fracht
     const lastDoneF = vFrachty
-      .filter(r => r.statusRozladunku === "rozladowano" || (r.dataRozladunku && r.dataRozladunku < todayISO))
+      .filter(r => isFrachtRozladowanyCF(r, eventsByFracht[r.id]) || (r.dataRozladunku && r.dataRozladunku < todayISO))
       .sort((a, b) => (b.dataRozladunku || "").localeCompare(a.dataRozladunku || ""))[0] || null;
 
     // Aktywna pauza
@@ -303,7 +334,7 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
       statusType = "trasa";
       // Pokaż OSTATNI rozładunek w ciągu (jeśli po aktywnym jest nextF — tam auto jedzie na końcu)
       const pendingFrachty = vFrachty
-        .filter(r => r.statusRozladunku !== "rozladowano" && r.dataRozladunku && r.dataRozladunku >= todayISO)
+        .filter(r => !isFrachtRozladowanyCF(r, eventsByFracht[r.id]) && r.dataRozladunku && r.dataRozladunku >= todayISO)
         .sort((a, b) => (b.dataRozladunku || "").localeCompare(a.dataRozladunku || ""));
       const lastPending = pendingFrachty[0] || activeF;
       const rozlKod = [lastPending.dokod, lastPending.dokod2, lastPending.dokod3].filter(s => s && s.trim()).pop() || "—";
@@ -336,7 +367,7 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
       statusType = "trasa";
       // Pokaż OSTATNI rozładunek z przyszłych frachtów (tam auto jedzie na końcu)
       const futureFrachty = vFrachty
-        .filter(r => r.statusRozladunku !== "rozladowano" && r.dataRozladunku && r.dataRozladunku >= todayISO)
+        .filter(r => !isFrachtRozladowanyCF(r, eventsByFracht[r.id]) && r.dataRozladunku && r.dataRozladunku >= todayISO)
         .sort((a, b) => (b.dataRozladunku || "").localeCompare(a.dataRozladunku || ""));
       const lastFuture = futureFrachty[0] || nextF;
       const nextKod = [lastFuture.dokod, lastFuture.dokod2, lastFuture.dokod3].filter(s => s && s.trim()).pop() || "—";
@@ -445,14 +476,15 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList) {
 async function sendFleetStatusEmail() {
   const db = getFirestore();
 
-  // 1. Pobierz SendGrid API key z konfiguracji
+  // 1. Pobierz klucz API email z konfiguracji (Resend; klucz re_... trzymany w polu
+  //    sendgridApiKey dla zgodności z istniejącym panelem, resendApiKey opcjonalnie).
   const configSnap = await db.doc("config/email").get();
-  if (!configSnap.exists || !configSnap.data().sendgridApiKey) {
-    console.error("Brak SendGrid API Key w config/email");
-    return { success: false, error: "Brak konfiguracji SendGrid" };
+  const config = configSnap.exists ? configSnap.data() : {};
+  const apiKey = config.resendApiKey || config.sendgridApiKey;
+  if (!apiKey) {
+    console.error("Brak klucza API email w config/email");
+    return { success: false, error: "Brak konfiguracji email" };
   }
-  const config = configSnap.data();
-  sgMail.setApiKey(config.sendgridApiKey);
 
   // 2. Pobierz aktywnych odbiorców
   const recipientsSnap = await db.collection("emailRecipients").where("active", "==", true).get();
@@ -476,8 +508,19 @@ async function sendFleetStatusEmail() {
   const pauzySnap = await db.collection("pauzy").get();
   const pauzyList = pauzySnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
+  // 4b. Pobierz driverEvents → status rozładunku (parytet z frontendem). Email nie może
+  //     polegać tylko na statusRozladunkuManual — trasy zamknięte przez kierowcę mają
+  //     status wyłącznie w eventach. Grupuj per frachtId (kolekcja mała, ~250 dok.).
+  const eventsSnap = await db.collection("driverEvents").get();
+  const eventsByFracht = {};
+  eventsSnap.docs.forEach(d => {
+    const e = d.data();
+    if (!e.frachtId) return;
+    (eventsByFracht[e.frachtId] = eventsByFracht[e.frachtId] || []).push(e);
+  });
+
   // 5. Generuj HTML
-  const html = buildEmailHTML(vehicles, frachtyList, pauzyList);
+  const html = buildEmailHTML(vehicles, frachtyList, pauzyList, eventsByFracht);
 
   const todayPL = new Date().toLocaleDateString("pl-PL", {
     day: "numeric", month: "long", timeZone: "Europe/Warsaw"
@@ -488,12 +531,10 @@ async function sendFleetStatusEmail() {
 
   // 6. Wyślij
   try {
-    await sgMail.sendMultiple({
-      to: recipients,
-      from: config.senderEmail || "fleetstat@fleetstat.pl",
-      subject: `🚛 FleetStat — Status floty · ${todayPL} · ${timeStr}`,
-      html: html,
-    });
+    const from = config.senderEmail || "flotaVBS@fleetstat.pl";
+    const subject = `🚛 FleetStat — Status floty · ${todayPL} · ${timeStr}`;
+    // Osobny mail na każdego odbiorcę (batch) — odbiorcy nie widzą się nawzajem.
+    await sendEmailsResend(apiKey, recipients.map(r => ({ from, to: [r], subject, html })));
     console.log(`✅ Email wysłany do ${recipients.length} odbiorców: ${recipients.join(", ")}`);
 
     // 7. Zapisz log wysyłki
@@ -3192,17 +3233,17 @@ exports.finalizeTrip = onCall(
     }
 
     const configSnap = await db.doc("config/email").get();
-    if (!configSnap.exists || !configSnap.data().sendgridApiKey) {
-      console.error("[finalizeTrip] No SendGrid config");
+    const config = configSnap.exists ? configSnap.data() : {};
+    const apiKey = config.resendApiKey || config.sendgridApiKey;
+    if (!apiKey) {
+      console.error("[finalizeTrip] No email API config");
       await updateFracht();
       await db.collection("emailLogs").add({
         sentAt: nowIso, type: "trip_summary", frachtId, source, recipients: [recipientEmail],
-        status: "error", error: "no_sendgrid_config",
+        status: "error", error: "no_email_config",
       });
-      return { ok: true, emailSent: false, reason: "no_sendgrid_config" };
+      return { ok: true, emailSent: false, reason: "no_email_config" };
     }
-    const config = configSnap.data();
-    sgMail.setApiKey(config.sendgridApiKey);
 
     // emailContent flags z fracht (z defaults gdy legacy/brak)
     const emailContent = (fracht.emailContent && typeof fracht.emailContent === "object")
@@ -3220,17 +3261,15 @@ exports.finalizeTrip = onCall(
       : `🚛 Trasa zakończona — ${nrZlecenia}`;
 
     try {
-      await sgMail.send({
-        to: recipientEmail,
-        from: config.senderEmail || "fleetstat@fleetstat.pl",
+      // Resend domyślnie NIE przepisuje linków (brak click-tracking) → token Firebase
+      // Storage w URL zostaje nienaruszony (przy SendGrid trzeba było to wyłączać ręcznie,
+      // inaczej redirect gubił token → 404 u klienta).
+      await sendEmailsResend(apiKey, [{
+        from: config.senderEmail || "flotaVBS@fleetstat.pl",
+        to: [recipientEmail],
         subject,
         html,
-        // WAŻNE: wyłącz SendGrid click tracking — przepisuje linki na sendgrid.net/ls/click?...
-        // co psuje token Firebase Storage w URL (token gubi się przy redirekcie) → 404 dla klienta.
-        trackingSettings: {
-          clickTracking: { enable: false, enableText: false },
-        },
-      });
+      }]);
       console.log(`[finalizeTrip] Email sent to ${recipientEmail} (source=${source}, roundTrip=${isRoundTripFinal}): ${frachtId}`);
       // Round-trip: tripEmailSentAt na obu frachtach (idempotency block dla partnera też,
       // żeby gdy partner kliknie "Wyślij podsumowanie" manual nie wysłał drugiego maila).
