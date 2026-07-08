@@ -1587,3 +1587,33 @@ Problem: po każdym deployu userzy trzymali stary kod, ręczne „wyczyść dane
 - **Admin Trip Summary (App.jsx, ~10 refs R2-cap) + publiczny TrackerPublicView (1 ref)** — dalej R1+R2. Kierowca odklika dotarcie R3/R4, ale timeline admina i publiczny link tych stopów NIE renderują jeszcze. Domknięcie spójności multi-stop = następna sesja.
 - **Weryfikacja PROD (niewykonalne z CLI)**: (a) kierowca otwiera multi-stop fracht na telefonie → 4 kafle + sekwencja; (b) po deployu sprawdzić czy nowy kod wchodzi bez ręcznego czyszczenia (transakcja v5→v6 może wymagać jednego reloadu, KOLEJNE same).
 - Z listy startowej wciąż: #2 dwa skanery AI na base64 (analyzeFile delegacje ~11981 + parseOneInvoice płatności ~10946 — latentny 413), #3 Node 20 CF (deadline 2026-10-30, oba repa), #4 cleanup 16 branchy claude/*.
+
+## 2026-07-07 — Email floty: migracja SendGrid→Resend + fix statusu + redesign Apple-light (2 commity PROD)
+
+Trigger: user zauważył że maile „Statusy floty" (auto 3×/dzień 8/14/20) nie wychodzą — ostatni 1 czerwca.
+
+### Diagnoza (emailLogs, read-only)
+Ostatni `sent` 2026-06-01 06:00, pierwszy błąd tego samego dnia 12:00 → **114× „Unauthorized"**. Scheduler odpala się co do minuty — problem ZA nim: **SendGrid trial wygasł 1.06.2026** → klucz API 401. Ten sam klucz napędzał też podsumowania tras do klientów (`finalizeTrip`) → **5 klientów nie dostało trip-summary** (m.in. `m5ja15cl` = ZL0658 Basten Logistik). Free tier SendGrida już nie istnieje (tylko 60-dniowy trial, najtańszy płatny ~$20/mc za 100k maili — przepłacanie przy realnym ~500/mc).
+
+### Migracja na Resend (commit `c680aa0`)
+Decyzja user: Resend (darmowy 3000/mc). Setup przez user krok-po-kroku: konto resend.com → domena fleetstat.pl region EU → 3 rekordy DNS w home.pl (DKIM `resend._domainkey`, MX+SPF na `send.fleetstat.pl`) → Verified → API key `re_...` wklejony w panel (pole `sendgridApiKey` — nazwa została). Kod: helper `sendEmailsResend` (czysty `fetch` do REST batch endpoint, Node 22 globalny fetch, **bez zależności npm**; `@sendgrid/mail` usunięty = cleanup C). 2 miejsca: `sendFleetStatusEmail` (batch, osobny mail/odbiorcę) + `finalizeTrip` (single, drop trackingSettings — Resend nie przepisuje linków → token Storage cały). Klucz `config.resendApiKey || config.sendgridApiKey`. **Pre-flight test przed deployem**: wysłany testowy mail przez REST → HTTP 200 + realna dostawa do inboxa → dopiero deploy. Deployed: sendFleetEmail8/14/20, sendFleetEmailNow, finalizeTrip (europe-west1).
+
+### Fix statusu w mailu (ten sam commit `c680aa0`)
+User: „WGM 0507M ma wbitą bazę, a mail pokazuje W trasie/WŁOCŁAWEK". `buildEmailHTML` czytał **puste pole `statusRozladunku`**, a realny status jest w `statusRozladunkuManual` (admin) lub `driverEvents` (kierowca) — od refactora 2026-04-28. Fix: port helpera `isFrachtRozladowanyCF` (parytet z `src/utils/frachtStatus.js` computeFrachtStatus) + pobranie driverEvents (246 dok., grupa per frachtId) + 5 miejsc filtrów. **Symulacja na realnych danych przed deployem**: W trasie 3 / Baza 1 (zgodne z Przeglądem).
+
+### Redesign Apple-light + logo (commit `0ba2066`)
+Iteracyjnie z user (kilka rund + screeny): emoji 🚛 → logo FleetStat (`public/logodologowania.png`, hostowane na fleetstat.pl przez Vercel). Masthead wyśrodkowany (VBS + logo│Status floty + data). Apple-light: karta radius 18px + warstwowy miękki cień + hairline ramka `#ececed` na tle `#f5f5f7`; palety Apple grey (`#1d1d1f`/`#6e6e73`/`#86868b`), separatory `#f0f0f2`, link stopki Apple blue `#0071e3`. Wiersze pojazdów zostają do lewej. Logo ciemne → najpierw próba na białym chipie (odrzucone jako „naklejka"), finalnie jasny nagłówek (logo natywnie na białym). Podgląd w widgecie odpadł (CSP blokuje obrazki z fleetstat.pl) → iteracja przez realny „Wyślij teraz".
+
+### Lekcje / gotchy
+- `emailLogs` (status sent/error + error.message) = złoty ślad do diagnozy wysyłki. `vehicleCount` odróżnia fleet-status od trip_summary.
+- Weryfikacja bez deployu: (a) pre-flight REST send realnym kluczem z config na własny adres, (b) symulacja logiki statusu na realnych danych. Deploy dopiero po zielonym.
+- CF już na **Node.js 22** (2nd Gen) — runtime część długu #3 załatwiona; zostaje bump paczki firebase-functions.
+- Email image: tylko hostowany HTTPS (nie SVG/inline); box-shadow widać w Apple Mail, Gmail pomija → hairline ramka trzyma definicję karty w obu.
+
+### Deploy / pamięć
+2 pushe na main: `c680aa0`, `0ba2066` (+ wcześniejszy push multi-stop/SW z tej samej sesji: `480dbd9`, `29290e5`, `fc719cb`). Pamięć: nowa `reference_email_resend.md` + indeks MEMORY.md.
+
+### Otwarte / następne
+- **5 zaległych podsumowań do klientów** (okres awarii) — resend ręczny „Wyślij podsumowanie" w trasie; recent = Basten Logistik `m5ja15cl`. User zdecyduje które.
+- **⚠️ Inbound SendGrid**: CSV import `imports@inbox.fleetstat.pl` (widziszwszystko) używał SendGrid Inbound Parse — ten sam trial mógł go ubić 1.06. NIESPRAWDZONE — do weryfikacji przy powrocie do importów CSV.
+- Follow-up multi-stop (admin Trip Summary + TrackerPublicView R3–R5) wciąż otwarty (z sesji 2026-07-01).
