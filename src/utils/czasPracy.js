@@ -142,8 +142,15 @@ export function continuousDriveSince(segments, now) {
 // Granica "doby kierowcy" — 24h cofa się od punktu obecnego lub od ostatniego 11h+ odpoczynku
 export function lastDailyRestEnd(segments, now) {
   const nowMs = now.getTime();
-  for (let i = segments.length - 1; i >= 0; i--) {
-    const s = segments[i];
+  // Scal odpoczynki przed sprawdzeniem progu — tak jak funkcje tygodniowe
+  // (lastWeeklyRest / lastActualWeeklyRestEnd). Odpoczynek dobowy przez północ jest
+  // w danych DDD dzielony na dwa pod-segmenty <9h; bez koalescencji był pomijany, a
+  // shift.start (i dzienne sumy) kotwiczyły na starszym odpoczynku — bug „skąd 14":
+  // łapało wieczorny kawałek 07-13 (14:35→24:00, 565min) kończący się 00:00 UTC =
+  // 14.07 02:00 PL, zamiast realnego 16.07 04:04 UTC.
+  const coalesced = coalesceRestGaps(segments);
+  for (let i = coalesced.length - 1; i >= 0; i--) {
+    const s = coalesced[i];
     if (s.type === "rest" && s.durMin >= REGULATION.DAILY_REST_REDUCED && s.endMs <= nowMs) {
       return s.endMs;
     }
