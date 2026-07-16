@@ -1617,3 +1617,22 @@ Iteracyjnie z user (kilka rund + screeny): emoji 🚛 → logo FleetStat (`publi
 - **5 zaległych podsumowań do klientów** (okres awarii) — resend ręczny „Wyślij podsumowanie" w trasie; recent = Basten Logistik `m5ja15cl`. User zdecyduje które.
 - **⚠️ Inbound SendGrid**: CSV import `imports@inbox.fleetstat.pl` (widziszwszystko) używał SendGrid Inbound Parse — ten sam trial mógł go ubić 1.06. NIESPRAWDZONE — do weryfikacji przy powrocie do importów CSV.
 - Follow-up multi-stop (admin Trip Summary + TrackerPublicView R3–R5) wciąż otwarty (z sesji 2026-07-01).
+
+## 2026-07-16 — Parser DDD: fix zawyżonego dnia pobrania karty (commit `88d2a02` PROD)
+
+Trigger: user wgrał nowy plik DDD dla WGM 0475M (Volodymyr Ivanskyy), prosił o weryfikację czy compliance liczy dobrze czas pracy.
+
+### Diagnoza (read-only na `dddFiles` + `driverActivities`)
+Parse `success` (karta UAD0000006RQ7001, okres 2025-12-19→2026-07-16, 2329 aktywności). Dni historyczne OK (jazda/praca/odp zgodne z km). **ALE dzień pobrania karty (ostatni dzień pliku) zawyżony**: 07-16 pokazywał **jazda 18h34** (fizycznie niemożliwe). Wzorzec SYSTEMATYCZNY w każdym uploadzie: ostatni segment „drive" rozciągnięty do północy (07-16: `od 10:16 drive 13h44→24:00`; 07-15: 13h22; 07-13: 13h37). Root: **readesm-js domyka ostatnią otwartą czynność dnia do 1440 min** — dla dnia zgrania to fałsz (karta przestała rejestrować ~10:29 = godzina z nazwy pliku `C_20260716_1029`, nie o 24:00). Skutek: false compliance violation (przekroczony dzienny limit), zawyżony tydzień, błędny „pozostały czas jazdy dziś".
+
+### Fix (`parseDddFile` / `computeDddDailyReport`)
+Czas pobrania z nazwy pliku (`^[A-Za-z]_YYYYMMDD_HHMM`, strefa = UTC tachografu jak segmenty) → urwij ostatni segment dnia pobrania, **TYLKO gdy realnie sięga północy** (`lastEnd>=1440` i cutoff w segmencie) — bezpieczne, nie rusza dni zakończonych. Trim przed liczeniem `summary`, więc propaguje do sum, ribbonu (`dailyTotals`) i compliance (`driverActivities` source=ddd). Nowy param `computeDddDailyReport(parsed, vehicles, downloadCutoff)`.
+
+### Weryfikacja (przed deployem + po re-uploadzie)
+- Symulacja na realnych danych PRZED deployem: 07-16 18h34→5h03, 07-15 15h52→3h40, 07-13 17h37→5h25 (wszystkie <10h).
+- Po re-uploadzie: 07-16 ribbon **5h03**, `driverActivities` source=ddd 17 wpisów jazda **5h03** kończące się dokładnie **10:29** (ostatni segment 10:16→10:29, przycięty 824→13min). GPS (auto_gps) dolicza po 10:29 osobno — `preferDddSegments` preferuje DDD w oknie karty.
+
+### Gotchy / lekcje
+- Pole compliance activities = `startTs`/`endTs` (nie `start`). Źródła mieszane: `ddd` + `auto_gps` w tym samym dniu (GPS pokrywa po zgraniu karty; DDD autorytatywne w oknie karty).
+- Fix wymaga **re-uploadu** istniejących plików (poprawka działa na nowe parsowania; stary rekord ma zawyżony dzień pobrania). Nowe uploady już czyste — user nic nie musi robić.
+- Nazwa pliku `C_YYYYMMDD_HHMM` = wiarygodne źródło czasu pobrania (VBS reader tak nazywa); godzina w UTC (spójna z `fromMin` segmentów).
