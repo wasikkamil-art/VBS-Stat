@@ -1404,7 +1404,7 @@ function extractDddVehicleRecords(parsed, vehicles = []) {
 //   activityCode 3 = driving    → "drive"
 //
 // Czas Gen2 tachografu jest w UTC. Lokalny PL = UTC+1 zima / UTC+2 lato.
-function computeDddDailyReport(parsed, vehicles = []) {
+function computeDddDailyReport(parsed, vehicles = [], downloadCutoff = null) {
   const typeMap = { 0: "rest", 1: "avail", 2: "work", 3: "drive" };
   const dailyRecords = parsed?.CardDriverActivity?.CardActivityDailyRecord?.dailyRecords;
   const dailyTotals = {};
@@ -1476,6 +1476,25 @@ function computeDddDailyReport(parsed, vehicles = []) {
     }
   }
 
+  // Fix dnia POBRANIA karty: readesm-js rozciąga ostatnią (otwartą) czynność dnia
+  // do północy (fromMin+durMin = 1440). Dla dnia zgrania to fałsz — karta przestała
+  // rejestrować w momencie pobrania (~godzina z nazwy pliku C_YYYYMMDD_HHMM), nie o 24:00.
+  // Bez tego dzień pobrania pokazywał np. 18h34 jazdy (13h+ phantom) → false compliance.
+  // Urywamy TYLKO gdy ostatni segment realnie sięga północy i cutoff mieści się w nim.
+  if (downloadCutoff && dailyTotals[downloadCutoff.day]) {
+    const slot = dailyTotals[downloadCutoff.day];
+    const segs = slot.segments;
+    if (segs.length) {
+      const last = segs[segs.length - 1];
+      const lastEnd = last.fromMin + last.durMin;
+      if (lastEnd >= 1440 && downloadCutoff.min > last.fromMin && downloadCutoff.min < lastEnd) {
+        const trimmedDur = downloadCutoff.min - last.fromMin;
+        slot[last.type] -= (last.durMin - trimmedDur);
+        last.durMin = trimmedDur;
+      }
+    }
+  }
+
   // Total summary
   const summary = {
     totalDriveMin: 0, totalWorkMin: 0, totalRestMin: 0, totalAvailMin: 0,
@@ -1544,8 +1563,16 @@ exports.parseDddFile = onCall(
     const vehicles = fleetSnap.data()?.fleetv2_vehicles || [];
 
     const metadata = extractDddMetadata(parsed);
+    // Czas pobrania karty z nazwy pliku (C_YYYYMMDD_HHMM_...) — do urwania ostatniej
+    // czynności dnia pobrania (readesm rozciąga ją do północy → fałszywa jazda).
+    // Godzina jest w tej samej strefie co segmenty (UTC tachografu).
+    const fname = originalFileName || storagePath.split("/").pop() || "";
+    const dlMatch = fname.match(/^[A-Za-z]_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})/);
+    const downloadCutoff = dlMatch
+      ? { day: `${dlMatch[1]}-${dlMatch[2]}-${dlMatch[3]}`, min: (+dlMatch[4]) * 60 + (+dlMatch[5]) }
+      : null;
     const { dailyTotals, vehicleRecords, summary, totalSegments } =
-      computeDddDailyReport(parsed, vehicles);
+      computeDddDailyReport(parsed, vehicles, downloadCutoff);
 
     // Zapisz dokument z pełnymi danymi raportu w jednym dddFiles document
     const dddDoc = {
