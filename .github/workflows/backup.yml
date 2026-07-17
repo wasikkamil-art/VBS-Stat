@@ -9,12 +9,25 @@ jobs:
   backup:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout backup repo
-        uses: actions/checkout@v5
-        with:
-          repository: wasikkamil-art/vbs-stat-backups
-          token: ${{ secrets.BACKUP_TOKEN }}
-          path: backup-repo
+      - name: Checkout backup repo (retry)
+        env:
+          BACKUP_TOKEN: ${{ secrets.BACKUP_TOKEN }}
+        run: |
+          # Manualny clone z retry — actions/checkout nie ponawia przy transient
+          # 500 GitHuba (padło 2026-07-16 na stronie "Unicorn!"). Krok "Commit backup"
+          # i tak sam ustawia remote z tokenem, więc nie polegamy na persist-credentials.
+          # Token maskowany przez Actions (secrets.*), wzorzec spójny z commit step.
+          for i in 1 2 3; do
+            rm -rf backup-repo
+            if git clone --depth 1 "https://wasikkamil-art:${BACKUP_TOKEN}@github.com/wasikkamil-art/vbs-stat-backups.git" backup-repo; then
+              echo "Checkout backup repo OK (próba $i)"
+              exit 0
+            fi
+            echo "::warning::Checkout backup repo — próba $i nie powiodła się, retry za 15s..."
+            sleep 15
+          done
+          echo "::error::Checkout backup repo padł po 3 próbach"
+          exit 1
 
       - name: Setup Node
         uses: actions/setup-node@v5
