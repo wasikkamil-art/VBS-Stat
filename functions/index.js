@@ -2288,6 +2288,27 @@ exports.trackerData = onRequest(
       const hasR2 = maxR > 1;
       const sfxR = (i) => (i === 1 ? "" : String(i));
 
+      // UWAGA: numeracja stopów bywa DZIURAWA — w produkcji zdarza się fracht
+      // z wypełnionym R1, R3, R4 i pustym R2 (dyspozytor pominął slot).
+      // `stopIdx` = tylko realnie wypełnione sloty, z zachowanym prawdziwym `r`
+      // (bo eventy kierowcy niosą ten indeks). Klientowi pokazujemy numerację
+      // sekwencyjną `pos` (1,2,3), żeby publiczny tracker nie wyglądał na zepsuty.
+      const slotFilled = (i) => {
+        const s = sfxR(i);
+        return !!(
+          (fracht[`dokodPocztowy${s}`] && String(fracht[`dokodPocztowy${s}`]).trim()) ||
+          (fracht[`dokodMiasto${s}`] && String(fracht[`dokodMiasto${s}`]).trim()) ||
+          (fracht[`dokod${s}`] && String(fracht[`dokod${s}`]).trim()) ||
+          (fracht[`rozladunekGeo${s}`] && String(fracht[`rozladunekGeo${s}`]).trim())
+        );
+      };
+      const stopIdx = [];
+      for (let i = 1; i <= maxR; i++) if (slotFilled(i)) stopIdx.push(i);
+      if (!stopIdx.length) stopIdx.push(1);
+      const nStops = stopIdx.length;
+      // prawdziwy `r` → pozycja 1..nStops (do mapowania na kroki steppera)
+      const posOf = (r) => stopIdx.indexOf(r) + 1;
+
       // Jedno query driverEvents — używane do: (a) activeStep, (b) zdjęcia do galerii
       let events = [];
       try {
@@ -2338,10 +2359,10 @@ exports.trackerData = onRequest(
         const arrivals = events.filter(e => e.type === "dotarcie_rozladunek").sort(sortTs);
         const undos = events.filter(e => e.type === "cofnij_dotarcie_rozladunek").sort(sortTs);
         const legacy = arrivals.filter(e => e.r == null);
-        for (let i = 1; i <= maxR; i++) {
+        for (const [pos0, i] of stopIdx.entries()) {
           let ev = arrivals.filter(e => e.r === i).pop();
-          // legacy fallback: bez `r` — bierz i-te dotarcie w kolejności czasu
-          if (!ev && legacy.length) ev = legacy[i - 1] || null;
+          // legacy fallback: bez `r` — bierz kolejne dotarcie wg pozycji stopu
+          if (!ev && legacy.length) ev = legacy[pos0] || null;
           if (!ev) continue;
           const un = undos.filter(u => (u.r == null || u.r === i)).pop();
           if (un && (un.value || un.ts) > (ev.value || ev.ts)) continue;
@@ -2370,8 +2391,8 @@ exports.trackerData = onRequest(
         // "Dostarczono" zanim kierowca faktycznie rozładował.
         // Wyjątek maxR=1: stepper nie ma osobnego kroku "Rozładunek 1", więc dotarcie
         // od zawsze awansuje do "Dostarczono" (zachowane dla zgodności).
-        const capArrived = maxR > 1 ? maxR + 1 : maxR + 2;
-        if (rozladowano) activeStep = maxR + 2;
+        const capArrived = nStops > 1 ? nStops + 1 : nStops + 2;
+        if (rozladowano) activeStep = nStops + 2;
         else if (arrivedCount > 0) activeStep = Math.min(capArrived, 2 + arrivedCount);
         else if (startRoz) activeStep = 2;
         else if (dotarcieZal) activeStep = 1;
@@ -2387,10 +2408,10 @@ exports.trackerData = onRequest(
         // Przypisanie CMR-a do stopu: jawne `r` na evencie, a dla legacy (bez `r`)
         // chronologicznie — zdjęcie należy do ostatniego stopu, na który już dotarł.
         const stopOfPhoto = (e) => {
-          if (e.r != null) return Math.min(maxR, Math.max(1, e.r));
+          if (e.r != null && stopIdx.includes(e.r)) return e.r;
           const t = e.value || e.ts || "";
           let s = 1;
-          for (let i = 1; i <= maxR; i++) if (arrivalTs[i] && t >= arrivalTs[i]) s = i;
+          for (const i of stopIdx) if (arrivalTs[i] && t >= arrivalTs[i]) s = i;
           return s;
         };
 
@@ -2417,7 +2438,7 @@ exports.trackerData = onRequest(
         if (show.cmrRoz) {
           if (hasR2) {
             // cmrRozR1..cmrRozR5 — stary front czyta tylko R1/R2, nowy iteruje po maxR
-            for (let i = 1; i <= maxR; i++) {
+            for (const i of stopIdx) {
               if (cmrRozPerStop[i]?.length) photos[`cmrRozR${i}`] = cmrRozPerStop[i];
             }
           } else if (urls.cmrRoz.length) {
@@ -2437,10 +2458,11 @@ exports.trackerData = onRequest(
       };
       // Stopy R1..maxR — jedno źródło dla steppera, kart dat i galerii CMR.
       const stops = [];
-      for (let i = 1; i <= maxR; i++) {
+      for (const [pos0, i] of stopIdx.entries()) {
         const s = sfxR(i);
         stops.push({
-          r: i,
+          r: i,               // prawdziwy indeks slotu (eventy kierowcy niosą ten numer)
+          pos: pos0 + 1,      // numer do pokazania klientowi (bez dziur)
           plannedMs: toMs(fracht[`dataRozladunku${s}`], fracht[`godzRozladunku${s}`]),
           miasto: (fracht[`dokodMiasto${s}`] || fracht[`dokod${s}`] || "").trim() || null,
           firma: (fracht[`rozladunekFirma${s}`] || "").trim() || null,
@@ -2460,7 +2482,7 @@ exports.trackerData = onRequest(
           vehiclePlate,
           vehicleMaxWeight,
           status: "zakonczony",
-          activeStep: maxR + 2,
+          activeStep: nStops + 2,
           hasR2,
           maxR,
           stops,
@@ -2499,7 +2521,7 @@ exports.trackerData = onRequest(
       // Cele R2..maxR (R1 wyżej). dest[i] = null gdy nie udało się zgeokodować —
       // taki stop wypada z trasy, ale zostaje na stepperze.
       const dest = { 1: destR1 };
-      for (let i = 2; i <= maxR; i++) {
+      for (const i of stopIdx.filter(x => x > 1)) {
         const s = sfxR(i);
         let d = parseGeoStringBackend(fracht[`rozladunekGeo${s}`]);
         if (!d) {
@@ -2540,19 +2562,18 @@ exports.trackerData = onRequest(
         start = await geocodeAddress(q || fracht.zaladunekKod);
       }
 
-      // 8. Routing — dla multi-rozładunku przez R1 jako waypoint do R2 (cel końcowy).
-      // Gdy kierowca juz zrealizowal R1 (activeStep >= 3), pomijamy go w waypoints —
-      // inaczej OSRM liczy detour wstecz przez R1 i daje fałszywy duzy dystans
-      // (np. 1400 km zamiast realnych 10 km gdy auto stoi tuz przed R2).
-      // Stop uznajemy za zaliczony gdy ma potwierdzone dotarcie ALBO gdy activeStep
-      // już go minął (2+k = po k-tym rozładunku).
-      const stopDone = (i) => !!arrivalTs[i] || activeStep >= 2 + i;
+      // 8. Routing — trasa prowadzi przez wszystkie JESZCZE NIE zaliczone stopy.
+      // Zaliczone pomijamy, inaczej OSRM liczy detour wstecz i daje fałszywy dystans
+      // (np. 1400 km zamiast realnych 10 km gdy auto stoi tuz przed kolejnym punktem).
+      // Stop zaliczony = ma potwierdzone dotarcie ALBO activeStep minął jego krok.
+      // UWAGA: krok liczymy z POZYCJI stopu, nie z surowego `r` — numeracja bywa dziurawa.
+      const stopDone = (i) => !!arrivalTs[i] || activeStep >= 2 + posOf(i);
       const pendingIdx = [];
-      for (let i = 1; i <= maxR; i++) if (dest[i] && !stopDone(i)) pendingIdx.push(i);
+      for (const i of stopIdx) if (dest[i] && !stopDone(i)) pendingIdx.push(i);
       // Gdy wszystkie zaliczone (a fracht jeszcze nie zamknięty) — celuj w ostatni stop
-      const routeIdx = pendingIdx.length ? pendingIdx : [maxR].filter(i => dest[i]);
+      const routeIdx = pendingIdx.length ? pendingIdx : [stopIdx[stopIdx.length - 1]].filter(i => dest[i]);
       const allIdx = [];
-      for (let i = 1; i <= maxR; i++) if (dest[i]) allIdx.push(i);
+      for (const i of stopIdx) if (dest[i]) allIdx.push(i);
 
       const waypoints = [pos, ...routeIdx.map(i => dest[i])];
       const routeCurrent = await osrmMultiRoute(waypoints.length > 1 ? waypoints : [pos, destR1]);
@@ -2573,7 +2594,7 @@ exports.trackerData = onRequest(
       // Postęp do NAJBLIŻSZEGO oczekującego stopu — działa dla dowolnej liczby
       // rozładunków. Stare pola kmToR1/percentToR1 zostają niżej dla starego frontu.
       let nextStopIdx = null, kmToNext = null, kmTotalNext = null, percentToNext = null;
-      if (maxR > 1 && pendingIdx.length) {
+      if (nStops > 1 && pendingIdx.length) {
         nextStopIdx = pendingIdx[0];
         const target = dest[nextStopIdx];
         const routeToNext = await osrmMultiRoute([pos, target]);
@@ -2665,6 +2686,7 @@ exports.trackerData = onRequest(
         maxR,
         stops,
         nextStopIdx,
+        nextStopPos: nextStopIdx ? posOf(nextStopIdx) : null,
         kmToNext,
         kmTotalNext,
         percentToNext,

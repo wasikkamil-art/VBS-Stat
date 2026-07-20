@@ -225,7 +225,7 @@ export default function TrackerPublicView({ token }) {
     ? [
         { label: "Dojazd do załadunku", icon: "🚚" },
         { label: "Załadowano",           icon: "📦" },
-        ...stops.map(s => ({ label: `Rozładunek ${s.r}`, icon: "📍" })),
+        ...stops.map((s, k) => ({ label: `Rozładunek ${s.pos || k + 1}`, icon: "📍" })),
         { label: "Dostarczono",          icon: "✅" },
       ]
     : [
@@ -330,15 +330,18 @@ export default function TrackerPublicView({ token }) {
   // Multi-stop: osobna karta na każdy rozładunek. Single: jedna "Planowana dostawa".
   // Etap uznajemy za zaliczony gdy stepNum minął krok tego stopu (2 + r).
   const unloadBoxes = hasR2
-    ? stops.filter(s => s.plannedMs).map(s => (
-        <Fragment key={`box-${s.r}`}>
-          {dateCard(
-            `Rozładunek ${s.r}`,
-            s.plannedMs,
-            stepNum >= 2 + s.r ? (s.r === maxR ? "✅ Dostarczono" : "✅ Rozładowano") : null
-          )}
-        </Fragment>
-      ))
+    ? stops.filter(s => s.plannedMs).map((s, k) => {
+        const pos = s.pos || k + 1;
+        return (
+          <Fragment key={`box-${s.r}`}>
+            {dateCard(
+              `Rozładunek ${pos}`,
+              s.plannedMs,
+              stepNum >= 2 + pos ? (pos === stops.length ? "✅ Dostarczono" : "✅ Rozładowano") : null
+            )}
+          </Fragment>
+        );
+      })
     : (d.plannedMs ? [dateCard("Planowana dostawa", d.plannedMs, stepNum >= 3 ? "✅ Dostarczono" : null)] : []);
 
   return (
@@ -374,7 +377,7 @@ export default function TrackerPublicView({ token }) {
           <div style={{ marginTop: 22 }}>
             {/* Pasek do NAJBLIŻSZEGO oczekującego rozładunku (fallback: do R1 ze starego CF) */}
             {(() => {
-              const nextIdx = d.nextStopIdx || 1;
+              const nextIdx = d.nextStopPos || d.nextStopIdx || 1;
               const useNext = typeof d.percentToNext === "number";
               const pctNext = useNext ? d.percentToNext : d.percentToR1;
               const kmNext = useNext ? d.kmToNext : d.kmToR1;
@@ -411,7 +414,7 @@ export default function TrackerPublicView({ token }) {
             {/* Cała trasa — do ostatniego rozładunku */}
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", letterSpacing: 0.3, textTransform: "uppercase" }}>Rozładunek {maxR} (łącznie)</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", letterSpacing: 0.3, textTransform: "uppercase" }}>Rozładunek {stops.length} (łącznie)</div>
                 {kmRem != null && (
                   <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>
                     <span style={{ color: "#111827", fontWeight: 700 }}>{kmRem} km</span> · {pct}%
@@ -531,9 +534,10 @@ export default function TrackerPublicView({ token }) {
       {d.photos?.cmrRoz?.length > 0 && (
         <TrackerPhotoCard title="📄 CMR z rozładunku" urls={d.photos.cmrRoz} />
       )}
-      {Array.from({ length: maxR }, (_, k) => k + 1).map(i => (
-        d.photos?.[`cmrRozR${i}`]?.length > 0 && (
-          <TrackerPhotoCard key={`cmr-${i}`} title={`📄 CMR z rozładunku ${i}`} urls={d.photos[`cmrRozR${i}`]} />
+      {/* Klucz zdjęć to prawdziwy slot `r`, ale klientowi pokazujemy numer kolejny */}
+      {stops.map((s, k) => (
+        d.photos?.[`cmrRozR${s.r}`]?.length > 0 && (
+          <TrackerPhotoCard key={`cmr-${s.r}`} title={`📄 CMR z rozładunku ${s.pos || k + 1}`} urls={d.photos[`cmrRozR${s.r}`]} />
         )
       ))}
       {d.photos?.damage?.length > 0 && (
