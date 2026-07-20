@@ -1951,3 +1951,60 @@ Przy każdej regule opartej o claim — NAJPIERW `listUsers()` i zobacz prawdę.
 2. **`firebase.json` jest w `.gitignore`** (linia 63) → konfiguracja deployu (w tym nowy blok
    `"storage"`) **nie jest w repo**. Po świeżym klonie `firebase deploy --only storage` nie
    zadziała bez ręcznego dopisania. Do przemyślenia czy nie odgitignorować.
+
+## 2026-07-20 (cd. 5) — DIAGNOZA: dlaczego claimy kierowców rozjechały się z Firestore
+
+Zadanie czysto diagnostyczne — **żadnych zmian w kodzie ani danych.**
+
+### Przyczyna źródłowa (jedna linia)
+`functions/index.js:25`
+```js
+const VALID_ROLES = ["admin", "dyspozytor", "podglad"];   // ← BRAK "kierowca"
+```
+A UI oferuje `kierowca` jako pełnoprawną rolę (`App.jsx:9496-9498`, `ALL_ROLES`).
+
+### Łańcuch (zweryfikowany w kodzie i danych)
+1. Admin klika „Kierowca" w panelu → `changeRole()` (`App.jsx:9418`).
+2. `setUserRole` (callable) rzuca `invalid-argument` — `kierowca` nie przechodzi `VALID_ROLES`
+   (`functions/index.js:129`).
+3. Front **łapie wyjątek i robi fallback: zapis wprost do Firestore** (`App.jsx:9428`),
+   po czym pokazuje **„✅ Rola zaktualizowana"**. Z perspektywy admina wygląda na sukces.
+4. Trigger `onRoleChange` startuje, trafia na **ten sam** `VALID_ROLES` (`:72`), loguje
+   „Nieprawidłowa rola" i **wychodzi bez ustawienia claimu**.
+5. Efekt: Firestore `kierowca`, claim zostaje **`podglad`** — czyli rola z self-bootstrapu
+   przy pierwszym logowaniu (`App.jsx:861`: nowy user = `podglad`).
+
+`addDriverByEmail` (`functions/index.js`) jest **jedyną ścieżką ustawiającą claim `kierowca`
+poprawnie** — nasi 4 kierowcy przez nią nie przeszli.
+
+### Dlaczego nikt tego nie zauważył — maskujący fallback
+`App.jsx:890-898`: listener `onSnapshot` na `users/{uid}` widzi rozjazd, robi force refresh,
+a gdy claim się nie zmienia → **`setRole(data.role)`**, czyli bierze rolę z Firestore.
+Dlatego kierowcy **normalnie dostają DriverPanel** mimo claimu `podglad`.
+Potwierdzone empirycznie: Teper klikał eventy **dziś o 07:21**.
+(Efekt uboczny: przy każdym logowaniu prawdopodobnie mignięcie widoku „podgląd" przed panelem.)
+
+### Realny wpływ DZIŚ
+| Warstwa | Skutek |
+|---|---|
+| UI aplikacji | **działa** — fallback z Firestore |
+| `firestore.rules` | **zero różnicy** — reguły nie odwołują się ani do `kierowca`, ani do `podglad` (tylko `admin`/`dyspozytor`/zalogowany) |
+| `storage.rules` (nowe dziś) | **tu się wywróciło** — dlatego 3 ścieżki kierowcy musiały zostać na `isAuth()` |
+
+Czyli rozjazd jest **latentny**, nie psuje dziś produkcji — ale blokuje zacieśnienie Storage
+i jest pułapką dla każdej przyszłej reguły rozróżniającej rolę `kierowca`.
+
+### Audyt nie pomógł (i to też jest ustalenie)
+W `auditLog` są **tylko 2 wpisy `role_change`**, oba `deoen@o2.pl` z 2026-05-05 — czyli z dnia,
+w którym audyt dodano (P3 incydentu). Role kierowców ustawiono **wcześniej**, więc nie ma po nich
+śladu. Logi CF `onRoleChange` też już wyrotowane. Diagnoza oparta na kodzie + stanie faktycznym.
+
+### Gotowy fix (NIE zastosowany — czeka na decyzję)
+1. `functions/index.js:25` → dopisać `"kierowca"` do `VALID_ROLES`, redeploy `onRoleChange` + `setUserRole`.
+2. Jednorazowy re-sync claimów dla 4 kont (`setCustomUserClaims` wg `users/{uid}.role`).
+3. Potem zacieśnić `storage.rules` z `isAuth()` na `(isKierowca() || canEdit())` (TODO w pliku).
+4. Rozważyć: fallback w `changeRole` (`App.jsx:9426`) **cicho udaje sukces** przy błędzie CF —
+   powinien odróżniać „CF niedostępna" od „CF odrzuciła dane" i w drugim wypadku **nie kłamać**.
+
+Ryzyko kroku 1-2 jest niskie (reguły Firestore nie rozróżniają tych ról), ale to zmiana
+uprawnień serwerowych → świadomie zostawiona do decyzji.
