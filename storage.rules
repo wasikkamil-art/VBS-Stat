@@ -27,6 +27,7 @@ service firebase.storage {
     function isAuth()     { return request.auth != null; }
     function role()       { return request.auth.token.role; }
     function canEdit()    { return isAuth() && (role() == "admin" || role() == "dyspozytor"); }
+    function isKierowca() { return isAuth() && role() == "kierowca"; }
     function maxMB(m)     { return request.resource.size < m * 1024 * 1024; }
 
     // ── BACKUPY — pełne zrzuty Firestore ──────────────────────────────────
@@ -62,18 +63,15 @@ service firebase.storage {
     }
 
     // ── KIEROWCY ──────────────────────────────────────────────────────────
-    // ⚠️ TODO (2026-07-20): te trzy ścieżki przyjmują zapis od KAŻDEGO zalogowanego,
-    // a nie tylko od roli `kierowca`, bo **claimy są rozjechane z Firestore**:
-    // wszyscy 4 kierowcy mają w tokenie `role: "podglad"`, a w `users/{uid}.role`
-    // wpisane `kierowca`. Warunek `isKierowca()` odciąłby im wgrywanie CMR-ów
-    // i plików DDD z telefonu. Dla tych ścieżek to i tak NIE jest regresja —
-    // przed 2026-07-20 cały bucket był otwarty dla każdego zalogowanego.
-    // Po naprawieniu claimów zacieśnić do `(isKierowca() || canEdit())`.
+    // Claimy zsynchronizowane 2026-07-20 (fix `VALID_ROLES` + re-sync 4 kont),
+    // więc `isKierowca()` jest już wiarygodne — patrz SESJA-LOG 2026-07-20 (cd. 5/6).
 
     // Zdjęcia z trasy: `driverPhotos/{frachtId}/{typ}_{ts}_{nazwa}`.
+    // Odczyt zostaje dla każdego zalogowanego — ścieżka jest po frachcie,
+    // nie po użytkowniku, a kierowca musi widzieć własne zdjęcia.
     match /driverPhotos/{frachtId}/{fileName} {
       allow read:  if isAuth();
-      allow write: if isAuth() && maxMB(15);
+      allow write: if (isKierowca() || canEdit()) && maxMB(15);
     }
 
     // Pliki DDD z tachografu: `driverDdd/{ts}_{nazwa}` (płaskie).
@@ -81,12 +79,13 @@ service firebase.storage {
     // to dane z karty kierowcy, inni kierowcy nie mają po co ich widzieć.
     match /driverDdd/{fileName} {
       allow read:  if canEdit();
-      allow write: if isAuth() && maxMB(50);
+      allow write: if (isKierowca() || canEdit()) && maxMB(50);
     }
 
     // Dokumenty kierowcy: `driverDocs/{email}/{typ}_{ts}_{nazwa}` — ścieżka
     // niesie e-mail, więc ograniczamy każdego do WŁASNEGO katalogu.
-    // To działa niezależnie od claimu `role`, bo opiera się na `token.email`.
+    // Warunek po `token.email` działa NIEZALEŻNIE od claimu `role` — celowo,
+    // jako druga linia obrony gdyby claimy znów się rozjechały.
     match /driverDocs/{email}/{fileName} {
       allow read:  if canEdit() || (isAuth() && request.auth.token.email == email);
       allow write: if (canEdit() || (isAuth() && request.auth.token.email == email)) && maxMB(15);

@@ -2008,3 +2008,42 @@ w którym audyt dodano (P3 incydentu). Role kierowców ustawiono **wcześniej**,
 
 Ryzyko kroku 1-2 jest niskie (reguły Firestore nie rozróżniają tych ról), ale to zmiana
 uprawnień serwerowych → świadomie zostawiona do decyzji.
+
+## 2026-07-20 (cd. 6) — NAPRAWA rozjazdu claimów + zacieśnienie storage.rules
+
+### Wykonane (w tej kolejności — kolejność ma znaczenie)
+1. **`functions/index.js:25`** — `VALID_ROLES` uzupełnione o `"kierowca"`.
+   Deploy `onRoleChange` + `setUserRole`.
+2. **Re-sync 4 claimów PRZEZ TRIGGER** (nie Admin SDK) — świadomie, żeby przy okazji
+   udowodnić, że poprawka działa end-to-end. **4/4 zsynchronizowane.**
+3. **`storage.rules` zacieśnione** — trzy ścieżki kierowcy z `isAuth()` wróciły na
+   `(isKierowca() || canEdit())`. Test: **39/39**, w tym nowe przypadki „STALE token
+   podglad → DENY". Wdrożone.
+4. **`App.jsx:9425` — koniec kłamiącego fallbacku.** `changeRole` rozróżnia teraz
+   „CF niedostępna" (fallback + `⚠️ Custom Claim niezsynchronizowany`) od „CF ODMÓWIŁA"
+   (`invalid-argument`/`permission-denied`/… → **żadnego zapisu**, czerwony komunikat
+   z treścią błędu). To był właściwy powód, dla którego problem żył miesiącami.
+
+Stan końcowy claimów: **10/10 kont zgodnych** z `users/{uid}.role`
+(3× admin, 3× dyspozytor, 4× kierowca). **Nikt nie ma już roli `podglad`.**
+
+### 🔑 Gotcha warta zapamiętania
+**Zapis TEJ SAMEJ wartości do Firestore NIE odpala triggera.** Pierwsza próba re-syncu
+(`update({ role: "kierowca" })` na dokumencie, który już miał `kierowca`) dała **0/4** —
+w logach CF **zero wywołań**. Firestore nie tworzy nowej wersji dokumentu, gdy dane się
+nie zmieniają, więc `onDocumentWritten` nie ma na co zareagować. Dopiero dołożenie realnie
+zmieniającego się pola (`claimsResyncAt`) odpaliło trigger → 4/4.
+Przy każdym „dotknij dokument, żeby wymusić trigger" — **musi polecieć realna zmiana.**
+
+### Okno przejściowe (świadomie zaakceptowane)
+Kierowcy z tokenem sprzed re-syncu mają jeszcze claim `podglad` i do odświeżenia tokena
+**nie wgrają CMR-a**. Łagodzone dwoma mechanizmami: `onRoleChange` zapisuje `claimsUpdatedAt`
+→ listener w `App.jsx:879` robi force refresh u zalogowanych; a token Firebase i tak wygasa
+po 1 h. Ostatnia aktywność kierowcy tego dnia: 07:21, deploy ~16:00 → ryzyko minimalne.
+
+### Otwarte drobiazgi
+- W Auth jest **konto bez e-maila i bez dokumentu w `users`** (widoczne jako „(brak)").
+  Nie ma claimu `role` → nic nie zapisze. Do sprawdzenia czym jest (test? anonimowe?).
+- `functions/index.js` ma teraz jedno źródło prawdy dla ról, ale `ALL_ROLES` w `App.jsx:9496`
+  to **osobna lista**. Rozjazd między nimi to dokładnie ten sam błąd co dziś — kandydat
+  na wspólną stałą albo test.

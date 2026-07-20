@@ -22,7 +22,12 @@ const crypto                  = require("crypto");
 // Inicjalizacja Firebase Admin
 initializeApp();
 
-const VALID_ROLES = ["admin", "dyspozytor", "podglad"];
+// UWAGA: musi zawierać KAŻDĄ rolę oferowaną w UI (`ALL_ROLES` w App.jsx).
+// Brak `kierowca` na tej liście powodował cichy rozjazd claimów przez miesiące:
+// `setUserRole` odrzucał rolę → front robił fallback na zapis wprost do Firestore
+// i meldował sukces → `onRoleChange` odrzucał tak samo → claim zostawał stary
+// (`podglad` z self-bootstrapu). Diagnoza: SESJA-LOG 2026-07-20 (cd. 5).
+const VALID_ROLES = ["admin", "dyspozytor", "podglad", "kierowca"];
 
 // ═══════════════════════════════════════════════════════════════
 // 1. FIRESTORE TRIGGER — synchronizuje rolę z Custom Claims

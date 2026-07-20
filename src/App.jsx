@@ -9423,12 +9423,28 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
       setUsers(p => p.map(u => u.uid === uid ? { ...u, role: newRole } : u));
       showToast("✅ Rola zaktualizowana (Custom Claims)");
     } catch(e) {
+      // Rozróżniamy DWA różne przypadki — wcześniej oba kończyły się fallbackiem
+      // i komunikatem „✅ Rola zaktualizowana", przez co **odrzucenie przez Cloud
+      // Function wyglądało jak sukces**. Tak przez miesiące rozjeżdżały się claimy:
+      // CF odrzucała rolę `kierowca`, front zapisywał ją do Firestore i meldował OK,
+      // a Custom Claim zostawał stary (SESJA-LOG 2026-07-20 cd. 5).
+      const code = String(e?.code || "");
+      const odrzucone = code.includes("invalid-argument") || code.includes("permission-denied")
+        || code.includes("failed-precondition") || code.includes("unauthenticated");
+      if (odrzucone) {
+        // CF świadomie ODMÓWIŁA — zapis do Firestore rozjechałby tylko dane z uprawnieniami.
+        console.error("setUserRole odrzucona przez Cloud Function:", code, e?.message);
+        showToast(`❌ Cloud Function odrzuciła zmianę roli: ${e?.message || code}`);
+        return;
+      }
+      // CF faktycznie niedostępna (sieć / cold start / internal) — fallback ma sens,
+      // ale mówimy wprost, że Custom Claim NIE został zsynchronizowany.
       console.warn("Cloud Function niedostępna, fallback na Firestore:", e);
       try {
         await setDoc(doc(db, "users", uid), { role: newRole }, { merge: true });
         logAction("update", "users", { targetUid: uid, newRole, method: "firestoreFallback" });
         setUsers(p => p.map(u => u.uid === uid ? { ...u, role: newRole } : u));
-        showToast("✅ Rola zaktualizowana");
+        showToast("⚠️ Rola zapisana, ale Custom Claim niezsynchronizowany — sprawdź Cloud Function");
       } catch(e2) {
         showToast("❌ Błąd zapisu roli");
       }
