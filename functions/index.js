@@ -22,12 +22,12 @@ const crypto                  = require("crypto");
 // Inicjalizacja Firebase Admin
 initializeApp();
 
-// UWAGA: musi zawierać KAŻDĄ rolę oferowaną w UI (`ALL_ROLES` w App.jsx).
-// Brak `kierowca` na tej liście powodował cichy rozjazd claimów przez miesiące:
-// `setUserRole` odrzucał rolę → front robił fallback na zapis wprost do Firestore
-// i meldował sukces → `onRoleChange` odrzucał tak samo → claim zostawał stary
-// (`podglad` z self-bootstrapu). Diagnoza: SESJA-LOG 2026-07-20 (cd. 5).
-const VALID_ROLES = ["admin", "dyspozytor", "podglad", "kierowca"];
+// Role czytamy ze WSPÓLNEJ definicji dzielonej z frontem (`roles.shared.json`),
+// który po tej samej liście sięga przez `src/utils/roles.js`. Nie wpisywać ról
+// na sztywno — rozjazd dwóch list to był bug żyjący miesiącami: `VALID_ROLES`
+// nie zawierało `kierowca`, więc nadanie tej roli cicho nie synchronizowało
+// Custom Claim. Diagnoza: SESJA-LOG 2026-07-20 (cd. 5).
+const VALID_ROLES = require("./roles.shared.json").ROLES.map(r => r.id);
 
 // ═══════════════════════════════════════════════════════════════
 // 1. FIRESTORE TRIGGER — synchronizuje rolę z Custom Claims

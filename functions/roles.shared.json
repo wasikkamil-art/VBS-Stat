@@ -1,0 +1,44 @@
+{
+  "_zrodlo_prawdy": "JEDYNA definicja ról w projekcie. Czytają ją OBIE strony: functions/index.js (VALID_ROLES) i front przez src/utils/roles.js. Nie duplikuj tej listy nigdzie indziej.",
+  "_dlaczego_w_functions": "firebase deploy wysyła WYŁĄCZNIE katalog functions/ — plik trzymany gdziekolwiek indziej nie trafiłby do Cloud Functions. Dlatego kanoniczne dane leżą tutaj, a front importuje je przez src/utils/roles.js.",
+  "_historia": "Do 2026-07-20 istniały DWIE rozjechane listy: VALID_ROLES w functions/index.js (bez 'kierowca') i ALL_ROLES w App.jsx (z 'kierowca'). Skutek: nadanie roli kierowcy było odrzucane przez Cloud Function, front po cichu zapisywał ją do Firestore i meldował sukces, a Custom Claim zostawał stary. Rozjazd żył miesiącami. Patrz SESJA-LOG 2026-07-20 (cd. 5).",
+
+  "ROLES": [
+    {
+      "id": "admin",
+      "label": "Admin",
+      "icon": "👑",
+      "desc": "Pełny dostęp",
+      "color": "#92400e",
+      "bg": "#fef3c7",
+      "biuro": true
+    },
+    {
+      "id": "dyspozytor",
+      "label": "Dyspozytor",
+      "icon": "🚚",
+      "desc": "Edycja frachtów i kosztów",
+      "color": "#1d4ed8",
+      "bg": "#eff6ff",
+      "biuro": true
+    },
+    {
+      "id": "podglad",
+      "label": "Podgląd",
+      "icon": "👁",
+      "desc": "Tylko odczyt, bez finansów",
+      "color": "#6b7280",
+      "bg": "#f3f4f6",
+      "biuro": true
+    },
+    {
+      "id": "kierowca",
+      "label": "Kierowca",
+      "icon": "🧑‍✈️",
+      "desc": "Panel kierowcy — zlecenia, CMR, czas pracy",
+      "color": "#059669",
+      "bg": "#ecfdf5",
+      "biuro": false
+    }
+  ]
+}

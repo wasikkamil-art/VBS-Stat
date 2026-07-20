@@ -2047,3 +2047,46 @@ po 1 h. Ostatnia aktywność kierowcy tego dnia: 07:21, deploy ~16:00 → ryzyko
 - `functions/index.js` ma teraz jedno źródło prawdy dla ról, ale `ALL_ROLES` w `App.jsx:9496`
   to **osobna lista**. Rozjazd między nimi to dokładnie ten sam błąd co dziś — kandydat
   na wspólną stałą albo test.
+
+## 2026-07-20 (cd. 7) — Wspólna stała ról zamiast dwóch list
+
+Domknięcie przyczyny z cd. 5: zamiast pilnować dwóch list, jest **jedna**.
+
+### Rozwiązanie
+`functions/roles.shared.json` = jedyne źródło prawdy (id + prezentacja UI: label/icon/desc/color/bg/biuro).
+- **Backend**: `const VALID_ROLES = require("./roles.shared.json").ROLES.map(r => r.id);`
+- **Front**: `src/utils/roles.js` (eksportuje `ALL_ROLES`, `ROLES_BIURO`, `VALID_ROLE_IDS`,
+  `isValidRole`, `roleById`) → `App.jsx` importuje stamtąd; usunięte lokalne `ROLES_BIURO`/`ALL_ROLES`.
+
+**Dlaczego plik leży w `functions/`, a nie w `shared/` czy w roocie:** `firebase deploy` wysyła
+**wyłącznie katalog `functions/`**. Plik trzymany gdziekolwiek indziej nie trafiłby do Cloud
+Functions i `require` wywaliłby się na produkcji. Front importuje go przez **jeden** moduł
+(`src/utils/roles.js`), żeby ta nietypowa ścieżka nie rozlazła się po kodzie.
+Vite wbudowuje JSON w bundel w czasie builda — zero zależności runtime od `functions/`.
+
+### 🔴 Pułapka złapana w trakcie
+`.gitignore:48` ma blanket **`*.json`** z whitelistą wyjątków → `functions/roles.shared.json`
+**był ignorowany**. Bez wyjątku plik nie trafiłby do repo, a każdy świeży klon / deploy z czystego
+checkoutu wywaliłby **WSZYSTKIE Cloud Functions** na `Cannot find module './roles.shared.json'`.
+Dodane `!functions/roles.shared.json`. Zweryfikowane: `git check-ignore` już nie łapie,
+`require()` z rozpakowanego archiwum działa.
+
+### Weryfikacja
+- build zielony, 0 errors (front + functions)
+- `Panel kierowcy` obecne w `dist/assets/index-*.js` → JSON faktycznie w bundlu
+- backend liczy z pliku: `['admin','dyspozytor','podglad','kierowca']`
+- deploy `onRoleChange` + `setUserRole`, potem trigger odpalony **bez zmiany czyjejkolwiek roli**
+  (sam znacznik `claimsResyncAt`) → log CF **13:34:27 „Rola kierowca … już ustawiona, pomijam"**.
+  To dowód, że funkcja wstała z nowym `require` i uznaje `kierowca` za prawidłową —
+  przy starej liście byłoby „Nieprawidłowa rola".
+
+### ⚠️ Wpadka po drodze (i naprawa)
+Pierwsza wersja testu e2e wybrała **pierwszy** dokument z rolą `kierowca` — trafiła na osierocony
+`kierowca.test@gmail.com` (dokument bez konta Auth, `docId != uid`) i **zdążyła zmienić mu rolę
+na `podglad`** zanim się wywróciła na `getUser`. Przywrócone (`role: "kierowca"`), zweryfikowane.
+Lekcja: skrypt dotykający produkcji ma **najpierw filtrować cele**, potem pisać — nie odwrotnie.
+
+### Nietknięte świadomie (inny problem)
+`functions/index.js:1186/1547/1822` mają `["admin","dyspozytor"].includes(callerRole)` —
+to **sprawdzenia uprawnień**, nie rejestr ról. Nie duplikują listy ról, tylko wyrażają politykę
+„kto może wywołać". Ujednolicenie ich to osobny temat (np. helper `canEdit(callerRole)`).

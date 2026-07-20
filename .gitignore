@@ -50,6 +50,10 @@ scripts/*
 !package-lock.json
 !public/manifest.json
 !firestore.indexes.json
+# Wspólna definicja ról — czytają ją functions/index.js (require) ORAZ front
+# przez src/utils/roles.js. Bez tego wyjątku plik nie trafiłby do repo, a każdy
+# świeży klon / deploy wywaliłby WSZYSTKIE Cloud Functions na "Cannot find module".
+!functions/roles.shared.json
 !vercel.json
 !jsconfig.json
 !tsconfig.json

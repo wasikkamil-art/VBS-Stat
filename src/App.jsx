@@ -6,6 +6,8 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 import { parseGeoString, formatOrderForDriverCopy, allDokody } from "./utils/orderFormatters";
 // Helpery statusu frachtu (single source of truth, wydzielone 2026-04-28 #5c krok 2)
 import { computeFrachtStatus, isFrachtRozladowany, isStaleUnfinished, hasZaladunekActive, getMaxRouteIndex } from "./utils/frachtStatus";
+// Role — wspólna definicja z Cloud Functions (patrz src/utils/roles.js)
+import { ALL_ROLES, ROLES_BIURO } from "./utils/roles";
 // Audit log helper (wydzielone 2026-04-28 #5c krok 2 — używane w 53+ miejscach)
 import { logAction, logFleetWrite } from "./utils/logAction";
 // safeHref — sanityzacja URL (wydzielone 2026-04-29 #5c krok 6, 10 użyć)
@@ -9503,16 +9505,9 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
     }
   }
 
-  const ROLES_BIURO = [
-    { id: "admin",      label: "Admin",      icon: "👑", desc: "Pełny dostęp",                      color: "#92400e", bg: "#fef3c7" },
-    { id: "dyspozytor", label: "Dyspozytor", icon: "🚚", desc: "Edycja frachtów i kosztów",          color: "#1d4ed8", bg: "#eff6ff" },
-    { id: "podglad",    label: "Podgląd",    icon: "👁",  desc: "Tylko odczyt, bez finansów",        color: "#6b7280", bg: "#f3f4f6" },
-  ];
-
-  const ALL_ROLES = [
-    ...ROLES_BIURO,
-    { id: "kierowca",   label: "Kierowca",   icon: "🧑‍✈️", desc: "Panel kierowcy — zlecenia, CMR, czas pracy", color: "#059669", bg: "#ecfdf5" },
-  ];
+  // ROLES_BIURO / ALL_ROLES pochodzą ze wspólnej definicji (src/utils/roles.js →
+  // functions/roles.shared.json) — tej samej, z której Cloud Functions budują
+  // VALID_ROLES. Dzięki temu UI nie może zaoferować roli, którą backend odrzuci.
 
   const biuroUsers   = users.filter(u => u.role !== "kierowca");
   const driverUsers  = users.filter(u => u.role === "kierowca");
