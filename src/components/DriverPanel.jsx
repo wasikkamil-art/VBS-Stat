@@ -21,6 +21,7 @@ import {
   fmtHM, fmtTimeShort,
   computeDriverCompliance, computeDriverPlan,
 } from "../utils/czasPracy";
+import { allDokody } from "../utils/orderFormatters";
 import TripSummaryPanel from "./TripSummaryPanel";
 
 function DriverCzasPracyDashboard({ user, vehicle, driverActivities = [], showToast }) {
@@ -386,7 +387,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
 
   const formatKody = (f) => {
     const zal = [f.zaladunekKod, f.zaladunekKod2, f.zaladunekKod3].filter(s => s && s.trim()).join(" / ");
-    const roz = [f.dokod, f.dokod2, f.dokod3].filter(s => s && s.trim()).join(" / ");
+    const roz = allDokody(f).join(" / ");
     return { zal: zal || "—", roz: roz || "—" };
   };
 

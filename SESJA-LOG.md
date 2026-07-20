@@ -1669,3 +1669,62 @@ Proponowałem dorobić wskaźnik „AI czyta zlecenie (~15s)" — **JUŻ ISTNIEJ
 - **Dług**: bump paczki `firebase-functions` (CF main app już Node 22) + **vbs-invoices CF wciąż Node 20** → decommission **2026-10-30**.
 - 2 skanery AI wciąż na base64 (`analyzeFile` delegacje, `parseOneInvoice` płatności) — latentny 413.
 - Cleanup 16 starych branchy `claude/*`.
+
+## 2026-07-20 (cd.) — Domknięcie multi-stop: admin Trip Summary + timeline + tracker publiczny (R1..R5)
+
+Kontynuacja tej samej doby. Zadanie #1 z listy otwartych: kierowca od 01.07 (`480dbd9`) odklikuje R3/R4,
+ale admin i publiczny link tego nie widziały. Audyt wykazał, że dziura jest **większa niż „brak renderu"**.
+
+### 🔴 Znaleziony bug (nie kosmetyka)
+`src/utils/tripStats.js` brał **ostatnie** `dotarcie_rozladunek` (faktycznie ostatni stop, np. R4)
+i porównywał je z **planem R1** (`f.dataRozladunku`) → **każdy multi-stop = fałszywe spóźnienie**
+w statystykach admina. Cloud Function liczyła to POPRAWNIE (`maxR`) → panel admina i mail do
+zleceniodawcy mówiły co innego o tym samym frachcie.
+
+Dowód na danych syntetycznych (4 stopy, dotarcie na R4 +5 min od planu):
+`punktRoz` = „Na czas (+5 min)" po fixie vs **„Spóźnienie 12h 5min"** przed.
+
+### Zrobione
+- **#1 `tripStats.js`** — `getMaxRouteIndex` + `effectiveAt(type, r)` (świadome `r`, z obsługą `cofnij_`),
+  punktualność wobec planu **maxR**, `planEnd`/okno spalania też z maxR. Nowe pola w zwrotce:
+  `maxR` + `stopy[]` (punktualność per stop). Ocena ogólna: spóźnienie na **dowolnym** stopie liczy się
+  (wcześniej tylko ostatni). `TripSummaryPanel` renderuje kafel per rozładunek gdy maxR>1.
+- **#2 timeline admina** (`App.jsx` ~17494) — było `hasR2` + kubełki `underR1`/`underR2`; eventy z
+  `r===3/4/5` **wypadały w próżnię** (CMR-y i uwagi z R3+ niewidoczne). Teraz `underR[i]` dla i=1..maxR,
+  legacy bez `r` przydzielane chronologicznie (granica = dotarcie na następny stop), render w pętli.
+- **#3 tracker publiczny + CF `trackerData`** — para front/back wdrożona razem:
+  - CF: `maxR` zamiast `hasR2`, `arrivalTs{}` per stop (jawne `r` + legacy chronologiczny fallback),
+    stepper `maxR+3` kroków, `stops[]` w odpowiedzi, CMR `cmrRozR1..R5`, cele `dest{}` R1..R5,
+    routing przez **oczekujące** stopy (pomija zaliczone → koniec detourów wstecz),
+    nowe `nextStopIdx`/`kmToNext`/`percentToNext` (postęp do najbliższego stopu).
+  - Front: stepper i karty dat generowane z `stops[]`, galeria CMR w pętli, pasek postępu do najbliższego stopu.
+  - **Wsteczna zgodność zachowana**: `hasR2`, `plannedR1Ms/R2Ms`, `percentToR1`, `cmrRozR1/R2` zostają
+    w odpowiedzi CF (SW może serwować stary front); front ma fallback gdy CF jeszcze nie wdrożona.
+- **#4 `FrachtyModal`** — `setShowR2` odpalał się tylko na kluczu `dokod2`, a parser AI emituje
+  `dokodPocztowy2..5` → dane R2..R5 wchodziły do stanu, ale sekcje zostawały **zwinięte**
+  (dyspozytor ich nie widział ani nie mógł poprawić). Teraz rozwijanie kaskadowe wg tego co parser wypełnił.
+- **#5 cap `dokod3`** — 9 miejsc ucinało listę „dokąd" na 3 stopach. Nowe helpery `unloadStops()`
+  + `allDokody()` w `orderFormatters.js`; w CF lokalny `lastDokod()`.
+- **#6 WhatsApp do kierowcy** — `formatOrderForWhatsapp` miał JEDNĄ sekcję ROZŁADUNEK (R1),
+  choć `formatOrderForDriverCopy` obok robił R1..R5. Teraz „ROZŁADUNEK 2/4" + GPS/tel per stop.
+  Pinezka `delivery` zostaje na R1 (następny cel nawigacji).
+
+### Lekcje
+- **Test parytetu złapał realny błąd w moim fixie**: pierwsza wersja `activeStep` ogłaszała klientowi
+  **„Dostarczono" po samym dotarciu** na ostatni stop, bez odklikania rozładunku (40 przypadków, 4 rozjazdy).
+  Cofnięte: `capArrived = maxR>1 ? maxR+1 : maxR+2`. Po fixie **40/40 parytetu** ze starą formułą dla maxR∈{1,2}.
+  Wniosek: przy zmianie logiki widocznej dla KLIENTA pisz test parytetu stara-vs-nowa, nie ufaj przeglądowi kodu.
+- Stara formuła była **niespójna**: dla maxR=1 dotarcie = „Dostarczono", dla maxR=2 już nie.
+  Zachowałem tę niespójność świadomie (maxR=1 nie ma osobnego kroku „Rozładunek 1" na stepperze).
+- Kolejność deployu ma znaczenie: **najpierw CF, potem front**. CF jest wstecznie zgodna
+  (stary front działa na nowej funkcji), odwrotnie nie.
+
+### ⚠️ Niezweryfikowane end-to-end
+Testy były na **logice czystej** (node, dane syntetyczne), nie na renderze. Tracker publiczny
+i timeline admina wymagają realnego zlecenia 3+ stopowego do potwierdzenia wizualnego.
+**Do sprawdzenia przy najbliższym multi-stopie w produkcji.**
+
+### Otwarte (bez zmian)
+5 zaległych podsumowań do klientów · inbound CSV `imports@inbox.fleetstat.pl` (niesprawdzone) ·
+re-upload starych DDD · bump `firebase-functions` + vbs-invoices Node 20 (decommission 2026-10-30) ·
+2 skanery AI na base64 (latentny 413) · cleanup 16 branchy `claude/*`.

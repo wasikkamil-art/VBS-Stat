@@ -17,6 +17,43 @@ export function parseGeoString(geo) {
   return { lat, lng };
 }
 
+// ── unloadStops ──
+// Rozkłada płaskie pola R1..R5 (`dokodPocztowy`, `dokodMiasto`, `rozladunekAdres`,
+// suffix "" dla R1 i "2".."5" dla reszty) na listę punktów rozładunku.
+// Zwraca TYLKO stopy które mają jakikolwiek adres — więc długość tablicy = liczba
+// realnych rozładunków. Jedno źródło prawdy dla WhatsAppa, kopiowania i list w App.jsx.
+export function unloadStops(fracht) {
+  if (!fracht) return [];
+  const out = [];
+  for (let i = 1; i <= 5; i++) {
+    const sfx = i === 1 ? "" : String(i);
+    const kod = fracht[`dokodPocztowy${sfx}`];
+    const miasto = fracht[`dokodMiasto${sfx}`];
+    const adres = fracht[`rozladunekAdres${sfx}`];
+    const legacy = fracht[`dokod${sfx}`];
+    const full = [adres, [kod, miasto].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+    const addr = (full || legacy || "").trim();
+    if (!addr) continue;
+    out.push({
+      i, addr,
+      krotki: ([kod, miasto].filter(Boolean).join(" ") || legacy || "").trim(),
+      geo: fracht[`rozladunekGeo${sfx}`],
+      tel: fracht[`rozladunekTelefon${sfx}`],
+      data: fracht[`dataRozladunku${sfx}`],
+      godz: fracht[`godzRozladunku${sfx}`],
+      firma: fracht[`rozladunekFirma${sfx}`],
+    });
+  }
+  return out;
+}
+
+// ── allDokody ──
+// Krótkie etykiety "dokąd" dla wszystkich stopów (R1..R5) — do list i tabel.
+// Zastępuje rozsiane po kodzie `[f.dokod, f.dokod2, f.dokod3]` (ucinało R4/R5).
+export function allDokody(fracht) {
+  return unloadStops(fracht).map(s => s.krotki).filter(Boolean);
+}
+
 // ── formatOrderForDriverCopy ──
 // Bogaty tekstowy format zlecenia gotowy do wklejenia kierowcy w Signal/SMS/email
 // (poza WhatsApp który używa templatu Meta — patrz formatOrderForWhatsapp).
@@ -129,7 +166,7 @@ export function formatOrderForWhatsapp(fracht) {
   const fmtD = (d) => d ? d.split("-").reverse().join(".") : "—";
   const fmtT = (t) => t || "—";
   const addrZal = (fracht.zaladunekAdres || [fracht.zaladunekKod, fracht.zaladunekKod2, fracht.zaladunekKod3].filter(Boolean).join(" / ") || "").trim();
-  const addrRoz = (fracht.rozladunekAdres || [fracht.dokod, fracht.dokod2, fracht.dokod3].filter(Boolean).join(" / ") || "").trim();
+  const addrRoz = (fracht.rozladunekAdres || allDokody(fracht).join(" / ") || "").trim();
   const pickupGeo = parseGeoString(fracht.zaladunekGeo);
   const deliveryGeo = parseGeoString(fracht.rozladunekGeo);
 
@@ -141,11 +178,20 @@ export function formatOrderForWhatsapp(fracht) {
   if (pickupGeo) lines.push(`GPS: ${pickupGeo.lat.toFixed(5)}, ${pickupGeo.lng.toFixed(5)}`);
   if (fracht.zaladunekTelefon) lines.push(`Tel: ${fracht.zaladunekTelefon}`);
   lines.push("");
-  lines.push(`📍 ROZŁADUNEK — ${fmtD(fracht.dataRozladunku)} ${fmtT(fracht.godzRozladunku)}`);
-  if (addrRoz) lines.push(addrRoz);
-  if (deliveryGeo) lines.push(`GPS: ${deliveryGeo.lat.toFixed(5)}, ${deliveryGeo.lng.toFixed(5)}`);
-  if (fracht.rozladunekTelefon) lines.push(`Tel: ${fracht.rozladunekTelefon}`);
-  lines.push("");
+  // Rozładunki R1..R5 — kierowca musi widzieć wszystkie stopy, nie tylko pierwszy.
+  // Pinezka `delivery` zostaje na R1 (następny cel nawigacji); kolejne stopy mają GPS w treści.
+  const rozStops = unloadStops(fracht);
+  const multi = rozStops.length > 1;
+  (rozStops.length ? rozStops : [{ i: 1, addr: addrRoz, geo: fracht.rozladunekGeo, tel: fracht.rozladunekTelefon, data: fracht.dataRozladunku, godz: fracht.godzRozladunku, firma: fracht.rozladunekFirma }])
+    .forEach(p => {
+      const naglowek = multi ? `📍 ROZŁADUNEK ${p.i}/${rozStops.length}` : "📍 ROZŁADUNEK";
+      lines.push(`${naglowek} — ${fmtD(p.data)} ${fmtT(p.godz)}${p.firma ? ` — ${p.firma}` : ""}`);
+      if (p.addr) lines.push(p.addr);
+      const g = parseGeoString(p.geo);
+      if (g) lines.push(`GPS: ${g.lat.toFixed(5)}, ${g.lng.toFixed(5)}`);
+      if (p.tel) lines.push(`Tel: ${p.tel}`);
+      lines.push("");
+    });
 
   const towarParts = [];
   if (fracht.towarIloscPalet) towarParts.push(`${fracht.towarIloscPalet} ${fracht.towarOpis || "palet"}`);

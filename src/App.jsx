@@ -3,9 +3,9 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 // v2025.03.31 — YoY Scorecard rebuild
 
 // Helpery formatowania zlecenia (wydzielone z monolitu 2026-04-28, TODO #5c)
-import { parseGeoString, formatOrderForDriverCopy } from "./utils/orderFormatters";
+import { parseGeoString, formatOrderForDriverCopy, allDokody } from "./utils/orderFormatters";
 // Helpery statusu frachtu (single source of truth, wydzielone 2026-04-28 #5c krok 2)
-import { computeFrachtStatus, isFrachtRozladowany, isStaleUnfinished, hasZaladunekActive } from "./utils/frachtStatus";
+import { computeFrachtStatus, isFrachtRozladowany, isStaleUnfinished, hasZaladunekActive, getMaxRouteIndex } from "./utils/frachtStatus";
 // Audit log helper (wydzielone 2026-04-28 #5c krok 2 — używane w 53+ miejscach)
 import { logAction, logFleetWrite } from "./utils/logAction";
 // safeHref — sanityzacja URL (wydzielone 2026-04-29 #5c krok 6, 10 użyć)
@@ -3107,7 +3107,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
                       // Dane trasy z ostatniego pending / aktywnego / następnego frachtu
                       const skad = displayF ? [displayF.zaladunekKod,displayF.zaladunekKod2,displayF.zaladunekKod3].filter(s=>s&&s.trim()).join(" / ") || displayF.skad || "—" : "—";
-                      const dokad = displayF ? [displayF.dokod,displayF.dokod2,displayF.dokod3].filter(s=>s&&s.trim()).join(" / ") || displayF.dokad || "—" : "—";
+                      const dokad = displayF ? allDokody(displayF).join(" / ") || displayF.dokad || "—" : "—";
                       const cena = displayF?.cenaEur ? parseFloat(displayF.cenaEur) : null;
                       const km = displayF?.kmWszystkie ? parseInt(displayF.kmWszystkie) : (displayF?.kmLadowne ? parseInt(displayF.kmLadowne) : null);
                       const eurKm = cena && km ? (cena/km).toFixed(2) : null;
@@ -7077,7 +7077,7 @@ function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fu
 
   const formatKody = (f) => {
     const zal = [f.zaladunekKod, f.zaladunekKod2, f.zaladunekKod3].filter(s => s && s.trim()).join(" / ") || "—";
-    const roz = [f.dokod, f.dokod2, f.dokod3].filter(s => s && s.trim()).join(" / ") || "—";
+    const roz = allDokody(f).join(" / ") || "—";
     return { zal, roz };
   };
 
@@ -17238,7 +17238,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                 </div>
               </div>
               <div className="flex flex-wrap gap-2 mb-3">
-                <span className="text-xs px-2 py-1 rounded-lg bg-gray-50 text-gray-600">📍 {[[r.zaladunekKod,r.zaladunekKod2,r.zaladunekKod3].filter(s=>s&&s.trim()).join("/"), [r.dokod,r.dokod2,r.dokod3].filter(s=>s&&s.trim()).join("/")].filter(Boolean).join(" → ") || "—"}</span>
+                <span className="text-xs px-2 py-1 rounded-lg bg-gray-50 text-gray-600">📍 {[[r.zaladunekKod,r.zaladunekKod2,r.zaladunekKod3].filter(s=>s&&s.trim()).join("/"), allDokody(r).join("/")].filter(Boolean).join(" → ") || "—"}</span>
                 {r.kmLadowne && <span className="text-xs px-2 py-1 rounded-lg bg-blue-50 text-blue-700">🛣 {r.kmLadowne} km lad.</span>}
                 <span className="text-xs px-2 py-1 rounded-lg font-semibold" style={{background: stBg, color: stColor}}>{stEmoji} {stRozl === "rozladowano" ? "Rozładowano" : stRozl === "w_trasie" ? "W trasie" : "Problem"}</span>
               </div>
@@ -17291,7 +17291,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                   <td className="px-1.5 py-1.5 whitespace-nowrap text-gray-500">{r.dataZaladunku||"-"}</td>
                   <td className="px-1.5 py-1.5 whitespace-nowrap text-gray-500">{r.dataRozladunku||"-"}</td>
                   <td className="px-1.5 py-1.5 whitespace-nowrap" style={{maxWidth:120,overflow:"hidden",textOverflow:"ellipsis"}}>{[r.zaladunekKod,r.zaladunekKod2,r.zaladunekKod3].filter(s=>s&&s.trim()).join(" / ")||[r.skad].filter(Boolean).join("")||"-"}</td>
-                  <td className="px-1.5 py-1.5 whitespace-nowrap" style={{maxWidth:120,overflow:"hidden",textOverflow:"ellipsis"}}>{[r.dokod,r.dokod2,r.dokod3].filter(s=>s&&s.trim()).join(" / ")||"-"}</td>
+                  <td className="px-1.5 py-1.5 whitespace-nowrap" style={{maxWidth:120,overflow:"hidden",textOverflow:"ellipsis"}}>{allDokody(r).join(" / ")||"-"}</td>
                   <td className="px-2 py-2 whitespace-nowrap">
                     {(() => {
                       const evts = eventsByFracht[r.id] || [];
@@ -17491,50 +17491,51 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                               );
                             };
 
-                            // Czy fracht ma 2 rozładunki (dataRozladunku2 / dokod2 / rozladunekGeo2)
-                            const hasR2 = !!(
-                              (r.dokodPocztowy2 && String(r.dokodPocztowy2).trim()) ||
-                              (r.dokodMiasto2 && String(r.dokodMiasto2).trim()) ||
-                              (r.dokod2 && String(r.dokod2).trim()) ||
-                              (r.rozladunekGeo2 && String(r.rozladunekGeo2).trim()) ||
-                              (r.dataRozladunku2 && String(r.dataRozladunku2).trim())
+                            // Ile rozładunków ma fracht (R1..R5). `dataRozladunku{n}` też
+                            // liczy się jako definicja stopu (stopy bywają wpisane bez adresu).
+                            const maxR = Math.max(
+                              getMaxRouteIndex(r),
+                              ...[2, 3, 4, 5].map(i => (r[`dataRozladunku${i}`] && String(r[`dataRozladunku${i}`]).trim()) ? i : 1)
                             );
+                            const hasMulti = maxR > 1;
 
-                            // Eventy 'dotarcie_rozladunek' — preferuj nowe pole `r` (1 lub 2),
-                            // fallback do chronologii dla legacy events (bez `r`).
-                            // dotRoz1Ev: event z r==null lub r===1 (legacy bez r liczy się jako R1).
-                            // dotRoz2Ev: tylko event z r===2 (nowy format po fix multi-stop mobile).
+                            // Eventy 'dotarcie_rozladunek' — preferuj pole `r` (1..5),
+                            // fallback do chronologii dla legacy events (bez `r` = R1).
                             const sortByTs = (a, b) => (a.value || a.ts || "").localeCompare(b.value || b.ts || "");
-                            const dotRoz1Ev = evts.filter(e => e.type === "dotarcie_rozladunek" && (e.r == null || e.r === 1)).sort(sortByTs).pop();
-                            const dotRoz2Ev = hasR2 ? evts.filter(e => e.type === "dotarcie_rozladunek" && e.r === 2).sort(sortByTs).pop() : null;
+                            const tsOf = (e) => (e ? (e.value || e.ts) : null);
+                            const dotRozEv = {};   // { 1: ev, 2: ev, ... }
+                            const phaseStart = {}; // { 1: ts,  2: ts,  ... }
+                            for (let i = 1; i <= maxR; i++) {
+                              dotRozEv[i] = evts
+                                .filter(e => e.type === "dotarcie_rozladunek" && (i === 1 ? (e.r == null || e.r === 1) : e.r === i))
+                                .sort(sortByTs).pop() || null;
+                              phaseStart[i] = tsOf(dotRozEv[i]);
+                            }
 
-                            const phaseR1Start = dotRoz1Ev ? (dotRoz1Ev.value || dotRoz1Ev.ts) : null;
-                            const phaseR2Start = dotRoz2Ev ? (dotRoz2Ev.value || dotRoz2Ev.ts) : null;
                             // Punkt podziału załadunek/rozładunek = pierwsze dotarcie na rozładunek
-                            const phaseSplitTs = phaseR1Start;
+                            const phaseSplitTs = phaseStart[1];
 
                             const otherEvts = evts.filter(e => !["dotarcie_zaladunek","start_rozladunek","dotarcie_rozladunek"].includes(e.type));
                             // Splitting:
-                            // - Eventy z r===1 lub r===2: idą do underR1/underR2 (explicit). Legacy bez r: chronologia.
+                            // - Eventy z jawnym `r`: trafiają do swojego kubełka (R1..R5).
+                            // - Legacy bez `r`: przydział po chronologii (między dotarciem na Rn a Rn+1).
                             // - beforeUnload: tylko legacy events (bez r) sprzed phaseSplitTs.
                             const beforeUnload = otherEvts.filter(e => e.r == null && (!phaseSplitTs || (e.value || e.ts) < phaseSplitTs));
-                            const underR1 = hasR2
-                              ? otherEvts.filter(e => {
-                                  if (e.r === 1) return true;
-                                  if (e.r === 2) return false; // explicit R2 nigdy w R1
-                                  // Legacy (no r): chronologia między R1 a R2
-                                  return phaseR1Start && (e.value || e.ts) >= phaseR1Start && (!phaseR2Start || (e.value || e.ts) < phaseR2Start);
-                                })
-                              : [];
-                            const underR2 = hasR2
-                              ? otherEvts.filter(e => {
-                                  if (e.r === 2) return true;
-                                  if (e.r === 1) return false;
-                                  // Legacy (no r): po phaseR2Start
-                                  return phaseR2Start && (e.value || e.ts) >= phaseR2Start;
-                                })
-                              : [];
-                            const afterUnload = hasR2 ? [] : otherEvts.filter(e => e.r == null && phaseSplitTs && (e.value || e.ts) >= phaseSplitTs);
+                            // underR[i] — eventy przypisane do stopu i. Wcześniej istniały tylko
+                            // kubełki R1/R2, więc CMR-y i uwagi z R3..R5 znikały z timeline'u admina.
+                            const underR = {};
+                            for (let i = 1; i <= maxR; i++) {
+                              if (!hasMulti) { underR[i] = []; continue; }
+                              // następny stop, który ma zarejestrowane dotarcie (do granicy chronologicznej)
+                              let nextStart = null;
+                              for (let j = i + 1; j <= maxR; j++) if (phaseStart[j]) { nextStart = phaseStart[j]; break; }
+                              underR[i] = otherEvts.filter(e => {
+                                if (e.r != null) return e.r === i;
+                                const t = e.value || e.ts;
+                                return phaseStart[i] && t >= phaseStart[i] && (!nextStart || t < nextStart);
+                              });
+                            }
+                            const afterUnload = hasMulti ? [] : otherEvts.filter(e => e.r == null && phaseSplitTs && (e.value || e.ts) >= phaseSplitTs);
 
                             return (
                           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -17632,19 +17633,26 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                                 );
                               };
 
-                              if (hasR2) {
+                              if (hasMulti) {
+                                // Sekcja per stop R1..maxR. Edycja ręczna dotarcia tylko dla R1 —
+                                // openManualEv nie zapisuje `r`, więc dla dalszych stopów byłaby dwuznaczna.
                                 return (
                                   <>
-                                    {renderUnloadSection("Rozładunek 1", r.dataRozladunku, r.godzRozladunku, dotRoz1Ev, false, true)}
-                                    {underR1.map((ev, i) => renderSubEvent(ev, ev.id || `ur1-${i}`))}
-                                    {renderUnloadSection("Rozładunek 2", r.dataRozladunku2, r.godzRozladunku2, dotRoz2Ev, true, false)}
-                                    {underR2.map((ev, i) => renderSubEvent(ev, ev.id || `ur2-${i}`))}
+                                    {Array.from({ length: maxR }, (_, k) => k + 1).map(i => {
+                                      const sfx = i === 1 ? "" : String(i);
+                                      return (
+                                        <Fragment key={`roz-${i}`}>
+                                          {renderUnloadSection(`Rozładunek ${i}`, r[`dataRozladunku${sfx}`], r[`godzRozladunku${sfx}`], dotRozEv[i], i === maxR, i === 1)}
+                                          {(underR[i] || []).map((ev, j) => renderSubEvent(ev, ev.id || `ur${i}-${j}`))}
+                                        </Fragment>
+                                      );
+                                    })}
                                   </>
                                 );
                               }
                               return (
                                 <>
-                                  {renderUnloadSection("Rozładunek", r.dataRozladunku, r.godzRozladunku, dotRoz1Ev, true, true)}
+                                  {renderUnloadSection("Rozładunek", r.dataRozladunku, r.godzRozladunku, dotRozEv[1], true, true)}
                                   {afterUnload.map((ev, i) => renderSubEvent(ev, ev.id || `au-${i}`))}
                                 </>
                               );

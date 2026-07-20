@@ -34,7 +34,7 @@ export default function TripSummaryPanel({ fracht, vehicle, driverEvents = [], f
   const stats = computeTripStats(fracht, vehicle, driverEvents, fuelEntries);
   if (!stats) return null;
 
-  const { punktZal, punktRoz, czasTrasyMin, czasPlanowanyMin, kmRzeczywiste, kmPlanowane, sredniaPredkosc, spalanie, ocenaOgolna } = stats;
+  const { punktZal, punktRoz, maxR = 1, stopy = [], czasTrasyMin, czasPlanowanyMin, kmRzeczywiste, kmPlanowane, sredniaPredkosc, spalanie, ocenaOgolna } = stats;
 
   // Czy jest sens w ogóle renderować — wymagamy przynajmniej jednej metryki
   const hasAny = punktZal || punktRoz || czasTrasyMin || kmRzeczywiste || spalanie;
@@ -106,15 +106,25 @@ export default function TripSummaryPanel({ fracht, vehicle, driverEvents = [], f
             status={punktZalStatus === "late" ? "alarm" : "ok"}
           />
         )}
-        {/* Punktualność rozładunku */}
-        {punktRoz && (
-          <TripTile
-            label="Rozładunek"
-            value={punktRoz.onTime ? "Na czas" : `+${punktRoz.minutes} min`}
-            sub={punktRoz.onTime ? "w tolerancji 15 min" : "spóźnienie"}
-            status={punktRozStatus === "late" ? "alarm" : "ok"}
-          />
-        )}
+        {/* Punktualność rozładunków — multi-stop: kafel per stop (R1..R5) */}
+        {maxR > 1
+          ? stopy.filter(s => s.punkt).map(s => (
+              <TripTile
+                key={s.r}
+                label={`Rozładunek ${s.r}`}
+                value={s.punkt.onTime ? "Na czas" : `+${s.punkt.minutes} min`}
+                sub={s.punkt.onTime ? "w tolerancji 15 min" : "spóźnienie"}
+                status={s.punkt.status === "late" ? "alarm" : "ok"}
+              />
+            ))
+          : punktRoz && (
+              <TripTile
+                label="Rozładunek"
+                value={punktRoz.onTime ? "Na czas" : `+${punktRoz.minutes} min`}
+                sub={punktRoz.onTime ? "w tolerancji 15 min" : "spóźnienie"}
+                status={punktRozStatus === "late" ? "alarm" : "ok"}
+              />
+            )}
         {/* Czas trasy */}
         {czasTrasyMin != null && (
           <TripTile

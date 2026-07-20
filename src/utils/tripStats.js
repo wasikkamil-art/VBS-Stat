@@ -12,6 +12,8 @@
 //   - computeTripStats(fracht, vehicle, driverEvents, fuelEntries) — główna funkcja
 //   - fmtTripDuration(min)
 
+import { getMaxRouteIndex } from "./frachtStatus.js";
+
 export const TRIP_TOLERANCE_MIN = 15; // ≤15 min spóźnienia = "na czas"
 export const SPALANIE_DEFAULT_NORMA = 30;   // fallback gdy pojazd nie ma ustawionego progu (l/100km)
 export const SPALANIE_DEFAULT_ALARM = 38;
@@ -118,12 +120,42 @@ export function computeTripStats(fracht, vehicle, driverEvents = [], fuelEntries
     return ev;
   };
 
+  // ── Multi-stop (R1..R5) ────────────────────────────────────────────────
+  // Eventy rozładunku niosą `r` = numer stopu. Legacy (single-stop) mają r == null.
+  // Wariant `effective` świadomy stopu — filtruje eventy i ich "cofnij_" po `r`.
+  const maxR = getMaxRouteIndex(f);
+  const matchesStop = (ev, r) => (r === 1 ? (ev.r == null || ev.r === 1) : ev.r === r);
+  const effectiveAt = (type, r) => {
+    const ev = evs.filter(e => e.type === type && matchesStop(e, r)).pop();
+    const un = evs.filter(e => e.type === `cofnij_${type}` && matchesStop(e, r)).pop();
+    if (!ev) return null;
+    if (un && un.ts > ev.ts) return null;
+    return ev;
+  };
+  // Sufiks pól planu dla danego stopu: R1 = "", R2..R5 = "2".."5"
+  const sfxOf = (r) => (r === 1 ? "" : String(r));
+
   const dotarcieZal = effective("dotarcie_zaladunek");
   const startRoz = effective("start_rozladunek");       // kierowca ruszył z załadunku
-  const dotarcieRoz = effective("dotarcie_rozladunek"); // dotarł na rozładunek
+  const dotarcieRoz = effectiveAt("dotarcie_rozladunek", maxR); // dotarł na OSTATNI rozładunek
   // Legacy/admin eventy (mogą istnieć w starych danych lub być ustawione ręcznie)
   const zaladowano = effective("zaladowano");
   const rozladowano = effective("rozladowano");
+
+  // Punktualność per stop — do timeline'u admina i podsumowania multi-stop
+  const stopy = [];
+  for (let r = 1; r <= maxR; r++) {
+    const sfx = sfxOf(r);
+    const ev = effectiveAt("dotarcie_rozladunek", r);
+    const ts = ev?.value || ev?.ts || null;
+    stopy.push({
+      r,
+      planDate: f[`dataRozladunku${sfx}`] || null,
+      planTime: f[`godzRozladunku${sfx}`] || null,
+      ts,
+      punkt: calcTripPunctuality(f[`dataRozladunku${sfx}`], f[`godzRozladunku${sfx}`], ts),
+    });
+  }
 
   // Punktualnosc liczymy TYLKO z eventow `dotarcie_*` (realny moment dotarcia,
   // klikniety przez kierowce w terenie albo recznie wpisany przez admina/dyspozytora).
@@ -134,7 +166,9 @@ export function computeTripStats(fracht, vehicle, driverEvents = [], fuelEntries
 
   // Punktualność — liczona z dotarć (kierowca klika "dotarłem")
   const punktZal = calcTripPunctuality(f.dataZaladunku, f.godzZaladunku, zalTs);
-  const punktRoz = calcTripPunctuality(f.dataRozladunku, f.godzRozladunku, rozTs);
+  // UWAGA: plan bierzemy z OSTATNIEGO stopu (maxR), bo `rozTs` to dotarcie na maxR.
+  // Porównywanie dotarcia na R4 z planem R1 dawało fałszywe spóźnienia (fix 2026-07-20).
+  const punktRoz = stopy[stopy.length - 1]?.punkt || null;
 
   // Czas trasy: od momentu gdy kierowca ruszył z załadunku (start_rozladunek)
   // do momentu dotarcia na rozładunek (dotarcie_rozladunek) — czysty czas jazdy
@@ -150,7 +184,7 @@ export function computeTripStats(fracht, vehicle, driverEvents = [], fuelEntries
   // Czas planowany: z dataZaladunku+godzZaladunku do dataRozladunku+godzRozladunku
   let czasPlanowanyMin = null;
   const planStart = parsePlannedDateTime(f.dataZaladunku, f.godzZaladunku);
-  const planEnd = parsePlannedDateTime(f.dataRozladunku, f.godzRozladunku);
+  const planEnd = parsePlannedDateTime(f[`dataRozladunku${sfxOf(maxR)}`], f[`godzRozladunku${sfxOf(maxR)}`]);
   if (planStart && planEnd) {
     const diff = Math.round((planEnd - planStart) / 60000);
     if (diff > 0) czasPlanowanyMin = diff;
@@ -170,8 +204,9 @@ export function computeTripStats(fracht, vehicle, driverEvents = [], fuelEntries
 
   // Spalanie — w okresie trasy
   let spalanie = null;
-  if (vehicle?.id && f.dataZaladunku && (f.dataRozladunku || tEnd)) {
-    const endDateISO = f.dataRozladunku || new Date(tEnd).toISOString().slice(0, 10);
+  const planEndDate = f[`dataRozladunku${sfxOf(maxR)}`] || f.dataRozladunku;
+  if (vehicle?.id && f.dataZaladunku && (planEndDate || tEnd)) {
+    const endDateISO = planEndDate || new Date(tEnd).toISOString().slice(0, 10);
     const fc = computeFuelConsumption(vehicle.id, f.dataZaladunku, endDateISO, fuelEntries);
     if (fc) {
       spalanie = { ...fc, status: classifyFuel(fc.avgL100km, vehicle) };
@@ -179,9 +214,11 @@ export function computeTripStats(fracht, vehicle, driverEvents = [], fuelEntries
   }
 
   // Ocena ogólna — najgorszy ze statusów
+  // Spóźnienie na DOWOLNYM stopie liczy się do oceny (nie tylko na ostatnim)
+  const anyStopLate = stopy.some(s => s.punkt?.status === "late");
   const statuses = [
     punktZal?.status === "late" ? "late" : null,
-    punktRoz?.status === "late" ? "late" : null,
+    anyStopLate ? "late" : null,
     spalanie?.status === "alarm" ? "alarm" : spalanie?.status === "warn" ? "warn" : null,
   ].filter(Boolean);
   let ocenaOgolna = "ok";
@@ -190,6 +227,7 @@ export function computeTripStats(fracht, vehicle, driverEvents = [], fuelEntries
 
   return {
     punktZal, punktRoz,
+    maxR, stopy,          // multi-stop: punktualność per rozładunek (R1..maxR)
     czasTrasyMin, czasPlanowanyMin,
     kmRzeczywiste, kmPlanowane,
     sredniaPredkosc,

@@ -210,18 +210,22 @@ export default function TrackerPublicView({ token }) {
   const nr = d.nrZlecenia || "—";
   const status = d.status; // "przed_trasa" | "w_trasie" | "zakonczony"
 
-  // Stepper — dynamiczny: 4 kroki (bez R2) lub 5 kroków (z R2)
-  // hasR2 z backendu wskazuje czy są 2 rozładunki
-  const hasR2 = !!d.hasR2;
+  // Stepper — dynamiczny: maxR + 3 kroki (Dojazd, Załadowano, R1..Rn, Dostarczono).
+  // `maxR` z backendu; `hasR2` to starsze pole (fallback gdy CF nie wdrożone).
+  const maxR = Number(d.maxR) || (d.hasR2 ? 2 : 1);
+  const hasR2 = maxR > 1;
+  // stops[] z backendu; fallback buduje listę z samych numerów gdy pole nieobecne
+  const stops = Array.isArray(d.stops) && d.stops.length
+    ? d.stops
+    : Array.from({ length: maxR }, (_, k) => ({ r: k + 1, plannedMs: k === 0 ? d.plannedR1Ms : d.plannedR2Ms }));
   const activeIdx = typeof d.activeStep === "number"
     ? d.activeStep
-    : (status === "zakonczony" ? (hasR2 ? 4 : 3) : status === "w_trasie" ? 2 : 0);
+    : (status === "zakonczony" ? maxR + 2 : status === "w_trasie" ? 2 : 0);
   const steps = hasR2
     ? [
         { label: "Dojazd do załadunku", icon: "🚚" },
         { label: "Załadowano",           icon: "📦" },
-        { label: "Rozładunek 1",         icon: "📍" },
-        { label: "Rozładunek 2",         icon: "📍" },
+        ...stops.map(s => ({ label: `Rozładunek ${s.r}`, icon: "📍" })),
         { label: "Dostarczono",          icon: "✅" },
       ]
     : [
@@ -323,11 +327,19 @@ export default function TrackerPublicView({ token }) {
     </div>
   );
   const loadDateBox = d.plannedLoadMs ? dateCard("Załadunek", d.plannedLoadMs, stepNum >= 1 ? "✅ Załadowano" : null) : null;
-  // Gdy hasR2: osobne karty dla R1 i R2. Gdy tylko R1: jedna karta "Planowana dostawa".
-  const unloadR1Box = hasR2
-    ? (d.plannedR1Ms ? dateCard("Rozładunek 1", d.plannedR1Ms, stepNum >= 3 ? "✅ Rozładowano" : null) : null)
-    : (d.plannedMs ? dateCard("Planowana dostawa", d.plannedMs, stepNum >= 3 ? "✅ Dostarczono" : null) : null);
-  const unloadR2Box = hasR2 && d.plannedR2Ms ? dateCard("Rozładunek 2", d.plannedR2Ms, stepNum >= 4 ? "✅ Dostarczono" : null) : null;
+  // Multi-stop: osobna karta na każdy rozładunek. Single: jedna "Planowana dostawa".
+  // Etap uznajemy za zaliczony gdy stepNum minął krok tego stopu (2 + r).
+  const unloadBoxes = hasR2
+    ? stops.filter(s => s.plannedMs).map(s => (
+        <Fragment key={`box-${s.r}`}>
+          {dateCard(
+            `Rozładunek ${s.r}`,
+            s.plannedMs,
+            stepNum >= 2 + s.r ? (s.r === maxR ? "✅ Dostarczono" : "✅ Rozładowano") : null
+          )}
+        </Fragment>
+      ))
+    : (d.plannedMs ? [dateCard("Planowana dostawa", d.plannedMs, stepNum >= 3 ? "✅ Dostarczono" : null)] : []);
 
   return (
     <Shell>
@@ -358,30 +370,35 @@ export default function TrackerPublicView({ token }) {
         <Stepper />
 
         {/* Paski postępu — dla 2 rozładunków dwa osobne, dla 1 rozładunku jeden główny */}
-        {hasR2 && status === "w_trasie" && typeof d.percentToR1 === "number" ? (
+        {hasR2 && status === "w_trasie" && (typeof d.percentToNext === "number" || typeof d.percentToR1 === "number") ? (
           <div style={{ marginTop: 22 }}>
-            {/* R1 — gdy activeStep >= 3 (R1 ukończony) pokazujemy pełen pasek + Rozładowano ✓ */}
+            {/* Pasek do NAJBLIŻSZEGO oczekującego rozładunku (fallback: do R1 ze starego CF) */}
             {(() => {
-              const r1Done = (d.activeStep ?? 0) >= 3;
+              const nextIdx = d.nextStopIdx || 1;
+              const useNext = typeof d.percentToNext === "number";
+              const pctNext = useNext ? d.percentToNext : d.percentToR1;
+              const kmNext = useNext ? d.kmToNext : d.kmToR1;
+              // gdy wszystkie stopy zaliczone (brak nextStopIdx z CF) — pełen pasek
+              const stopDone = useNext ? !d.nextStopIdx : (d.activeStep ?? 0) >= 3;
               return (
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", letterSpacing: 0.3, textTransform: "uppercase" }}>Rozładunek 1</div>
-                    {r1Done ? (
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", letterSpacing: 0.3, textTransform: "uppercase" }}>Rozładunek {nextIdx}</div>
+                    {stopDone ? (
                       <div style={{ fontSize: 12, fontWeight: 700, color: "#15803d" }}>
                         ✅ Rozładowano
                       </div>
-                    ) : d.kmToR1 != null && (
+                    ) : kmNext != null && (
                       <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>
-                        <span style={{ color: "#111827", fontWeight: 700 }}>{d.kmToR1} km</span> · {d.percentToR1}%
+                        <span style={{ color: "#111827", fontWeight: 700 }}>{kmNext} km</span> · {pctNext}%
                       </div>
                     )}
                   </div>
                   <div style={{ height: 8, background: "#e2e8f0", borderRadius: 999, overflow: "hidden" }}>
                     <div style={{
-                      width: `${r1Done ? 100 : d.percentToR1}%`,
+                      width: `${stopDone ? 100 : (pctNext || 0)}%`,
                       height: "100%",
-                      background: r1Done
+                      background: stopDone
                         ? "linear-gradient(90deg,#22c55e,#15803d)"
                         : "linear-gradient(90deg,#38bdf8,#0ea5e9)",
                       borderRadius: 999,
@@ -391,10 +408,10 @@ export default function TrackerPublicView({ token }) {
                 </div>
               );
             })()}
-            {/* R2 — łącznie */}
+            {/* Cała trasa — do ostatniego rozładunku */}
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", letterSpacing: 0.3, textTransform: "uppercase" }}>Rozładunek 2 (łącznie)</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", letterSpacing: 0.3, textTransform: "uppercase" }}>Rozładunek {maxR} (łącznie)</div>
                 {kmRem != null && (
                   <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>
                     <span style={{ color: "#111827", fontWeight: 700 }}>{kmRem} km</span> · {pct}%
@@ -412,7 +429,7 @@ export default function TrackerPublicView({ token }) {
               </div>
             </div>
             <div style={{ marginTop: 10, padding: "8px 12px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, fontSize: 11, color: "#92400e", lineHeight: 1.5 }}>
-              ℹ Przewidywany czas dotarcia do rozładunku 2 może ulec zmianie — zależy od czasu rozładunku przy pierwszym adresie.
+              ℹ Przewidywany czas dotarcia do ostatniego rozładunku może ulec zmianie — zależy od czasu rozładunku przy wcześniejszych adresach.
             </div>
 
             {/* GPS link */}
@@ -466,11 +483,10 @@ export default function TrackerPublicView({ token }) {
         )}
 
         {/* Daty */}
-        {(loadDateBox || unloadR1Box || unloadR2Box) && (
+        {(loadDateBox || unloadBoxes.length > 0) && (
           <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
             {loadDateBox}
-            {unloadR1Box}
-            {unloadR2Box}
+            {unloadBoxes}
           </div>
         )}
 
@@ -504,7 +520,7 @@ export default function TrackerPublicView({ token }) {
       {/* Galerie zdjęć — osobne karty per kategoria, w kolejności drogi kierowcy:
           1. CMR z załadunku
           2. Zdjęcie towaru z załadunku
-          3. CMR z rozładunku (lub R1 + R2 gdy fracht ma 2 rozładunki)
+          3. CMR z rozładunku (lub osobno R1..Rn gdy fracht ma kilka rozładunków)
           4. Zdjęcie towaru po rozładunku (uszkodzenia, opcjonalne) */}
       {d.photos?.cmrZal?.length > 0 && (
         <TrackerPhotoCard title="📄 CMR z załadunku" urls={d.photos.cmrZal} />
@@ -515,12 +531,11 @@ export default function TrackerPublicView({ token }) {
       {d.photos?.cmrRoz?.length > 0 && (
         <TrackerPhotoCard title="📄 CMR z rozładunku" urls={d.photos.cmrRoz} />
       )}
-      {d.photos?.cmrRozR1?.length > 0 && (
-        <TrackerPhotoCard title="📄 CMR z rozładunku 1" urls={d.photos.cmrRozR1} />
-      )}
-      {d.photos?.cmrRozR2?.length > 0 && (
-        <TrackerPhotoCard title="📄 CMR z rozładunku 2" urls={d.photos.cmrRozR2} />
-      )}
+      {Array.from({ length: maxR }, (_, k) => k + 1).map(i => (
+        d.photos?.[`cmrRozR${i}`]?.length > 0 && (
+          <TrackerPhotoCard key={`cmr-${i}`} title={`📄 CMR z rozładunku ${i}`} urls={d.photos[`cmrRozR${i}`]} />
+        )
+      ))}
       {d.photos?.damage?.length > 0 && (
         <TrackerPhotoCard title="⚠️ Zdjęcie towaru po rozładunku" urls={d.photos.damage} />
       )}

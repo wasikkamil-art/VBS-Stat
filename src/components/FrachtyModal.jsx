@@ -281,11 +281,22 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
       } else if (k === "dokod" && !f.dokodPocztowy) {
         const [kp, km] = splitKM(sv); set("dokodPocztowy", kp); set("dokodMiasto", km);
       } else if (k === "dokod2" && !f.dokodPocztowy2) {
-        const [kp, km] = splitKM(sv); set("dokodPocztowy2", kp); set("dokodMiasto2", km); setShowR2(true);
+        const [kp, km] = splitKM(sv); set("dokodPocztowy2", kp); set("dokodMiasto2", km);
       } else if (!f[k]) {
         set(k, sv);
       }
     });
+    // Rozwiń sekcje R2..R5 dla stopów, które parser faktycznie wypełnił.
+    // Parser emituje `dokodPocztowy2..5` (nie `dokod2`), więc bez tego dane
+    // wchodziły do stanu, ale dyspozytor ich nie widział ani nie mógł poprawić.
+    const filled = (i) => {
+      const has = (key) => { const v = parsed[key]; return v != null && String(v).trim() !== ""; };
+      return has(`dokodPocztowy${i}`) || has(`dokodMiasto${i}`) || has(`dokod${i}`) || has(`rozladunekFirma${i}`);
+    };
+    const setters = { 2: setShowR2, 3: setShowR3, 4: setShowR4, 5: setShowR5 };
+    for (let i = 2; i <= 5; i++) if (filled(i)) setters[i](true);
+    // Sekcja R{n} ma sens tylko gdy widoczne są poprzednie — rozwiń kaskadowo
+    for (let i = 5; i >= 3; i--) if (filled(i)) { for (let j = 2; j < i; j++) setters[j](true); }
   };
 
   return (

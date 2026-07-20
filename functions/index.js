@@ -327,6 +327,19 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList, eventsByFracht = {}) {
     let statusType = "wolny";
     let details = "";
 
+    // Etykieta ostatniego rozładunku w ciągu R1..R5 (patrz getMaxRouteIndex).
+    // Wcześniej lista urywała się na `dokod3` → auta z 4-5 stopami pokazywały zły cel.
+    const lastDokod = (f) => {
+      let out = null;
+      for (let i = 1; i <= 5; i++) {
+        const sfx = i === 1 ? "" : String(i);
+        const kod = [f[`dokodPocztowy${sfx}`], f[`dokodMiasto${sfx}`]].filter(s => s && String(s).trim()).join(" ").trim()
+          || (f[`dokod${sfx}`] || "").trim();
+        if (kod) out = kod;
+      }
+      return out;
+    };
+
     if (activeF) {
       statusText = "🚛 W trasie";
       statusColor = "#15803d";
@@ -337,7 +350,7 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList, eventsByFracht = {}) {
         .filter(r => !isFrachtRozladowanyCF(r, eventsByFracht[r.id]) && r.dataRozladunku && r.dataRozladunku >= todayISO)
         .sort((a, b) => (b.dataRozladunku || "").localeCompare(a.dataRozladunku || ""));
       const lastPending = pendingFrachty[0] || activeF;
-      const rozlKod = [lastPending.dokod, lastPending.dokod2, lastPending.dokod3].filter(s => s && s.trim()).pop() || "—";
+      const rozlKod = lastDokod(lastPending) || "—";
       const rozlDate = lastPending.dataRozladunku ? fmtDate(lastPending.dataRozladunku) : "";
       details = rozlDate ? `${rozlKod} · ${rozlDate}` : rozlKod;
     } else if (vehiclePauza || isCurrentlyAtBaza) {
@@ -355,7 +368,7 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList, eventsByFracht = {}) {
         // Weź kod z ostatniego rozładowanego frachtu (tam kierowca faktycznie stoi)
         const refF = lastDoneF || activeF;
         if (refF) {
-          locationKod = [refF.dokod, refF.dokod2, refF.dokod3].filter(s => s && s.trim()).pop() || BAZA_KOD;
+          locationKod = lastDokod(refF) || BAZA_KOD;
         }
       }
       details = `Dostępny od: ${fmtDate(effectivePauza.end)} · ${locationKod}`;
@@ -370,7 +383,7 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList, eventsByFracht = {}) {
         .filter(r => !isFrachtRozladowanyCF(r, eventsByFracht[r.id]) && r.dataRozladunku && r.dataRozladunku >= todayISO)
         .sort((a, b) => (b.dataRozladunku || "").localeCompare(a.dataRozladunku || ""));
       const lastFuture = futureFrachty[0] || nextF;
-      const nextKod = [lastFuture.dokod, lastFuture.dokod2, lastFuture.dokod3].filter(s => s && s.trim()).pop() || "—";
+      const nextKod = lastDokod(lastFuture) || "—";
       const nextDate = lastFuture.dataRozladunku ? fmtDate(lastFuture.dataRozladunku) : "";
       details = nextDate ? `${nextKod} · ${nextDate}` : nextKod;
     } else {
@@ -383,7 +396,7 @@ function buildEmailHTML(vehicles, frachtyList, pauzyList, eventsByFracht = {}) {
       statusType = "wolny";
       // Pokaż ostatni kod rozładunku + datę rozładunku
       const lastKod = lastDoneF
-        ? ([lastDoneF.dokod, lastDoneF.dokod2, lastDoneF.dokod3].filter(s => s && s.trim()).pop() || "—")
+        ? (lastDokod(lastDoneF) || "—")
         : "—";
       const lastDate = lastDoneF?.dataRozladunku ? fmtDate(lastDoneF.dataRozladunku) : "";
       details = lastDoneF ? (lastDate ? `${lastKod} · ${lastDate}` : lastKod) : "Brak frachtów";
@@ -2268,13 +2281,12 @@ exports.trackerData = onRequest(
       const mw2 = parseInt(vehicleForDisplay?.maxWeight2) || 0;
       const vehicleMaxWeight = mw1 + mw2 > 0 ? (mw1 + mw2) : null;
 
-      // Czy są dwa rozładunki — potrzebne do activeStep (5 kroków vs 4)
-      const hasR2 = !!(
-        (fracht.dokodPocztowy2 && String(fracht.dokodPocztowy2).trim()) ||
-        (fracht.dokodMiasto2 && String(fracht.dokodMiasto2).trim()) ||
-        (fracht.dokod2 && String(fracht.dokod2).trim()) ||
-        (fracht.rozladunekGeo2 && String(fracht.rozladunekGeo2).trim())
-      );
+      // Ile rozładunków (R1..R5) — steruje liczbą kroków steppera (maxR + 3).
+      // `hasR2` zostaje w odpowiedzi dla wstecznej zgodności: Service Worker może
+      // jeszcze serwować starą wersję frontu, która zna tylko R1+R2.
+      const maxR = getMaxRouteIndex(fracht);
+      const hasR2 = maxR > 1;
+      const sfxR = (i) => (i === 1 ? "" : String(i));
 
       // Jedno query driverEvents — używane do: (a) activeStep, (b) zdjęcia do galerii
       let events = [];
@@ -2318,9 +2330,28 @@ exports.trackerData = onRequest(
         }
       }
 
-      // Aktywny krok:
-      //   Dla 1 rozładunku (0..3): Dojazd, Załadowano, W trasie, Dostarczono
-      //   Dla 2 rozładunków (0..4): Dojazd, Załadowano, Rozładunek 1, Rozładunek 2, Dostarczono
+      // Dotarcia per stop (R1..maxR). Nowe eventy niosą `r`; legacy (bez `r`)
+      // przypisujemy chronologicznie — n-te dotarcie = n-ty rozładunek.
+      const arrivalTs = {};   // { 1: ts, 2: ts, ... } — tylko stopy z potwierdzonym dotarciem
+      {
+        const sortTs = (a, b) => ((a.value || a.ts) || "").localeCompare((b.value || b.ts) || "");
+        const arrivals = events.filter(e => e.type === "dotarcie_rozladunek").sort(sortTs);
+        const undos = events.filter(e => e.type === "cofnij_dotarcie_rozladunek").sort(sortTs);
+        const legacy = arrivals.filter(e => e.r == null);
+        for (let i = 1; i <= maxR; i++) {
+          let ev = arrivals.filter(e => e.r === i).pop();
+          // legacy fallback: bez `r` — bierz i-te dotarcie w kolejności czasu
+          if (!ev && legacy.length) ev = legacy[i - 1] || null;
+          if (!ev) continue;
+          const un = undos.filter(u => (u.r == null || u.r === i)).pop();
+          if (un && (un.value || un.ts) > (ev.value || ev.ts)) continue;
+          arrivalTs[i] = ev.value || ev.ts;
+        }
+      }
+
+      // Aktywny krok — stepper ma maxR + 3 pozycje:
+      //   0 Dojazd do załadunku, 1 Załadowano, 2 W trasie do R1,
+      //   2+k po dotarciu na k-ty rozładunek, maxR+2 Dostarczono
       let activeStep = 0;
       {
         const effective = (type) => {
@@ -2332,21 +2363,19 @@ exports.trackerData = onRequest(
         };
         const dotarcieZal = !!effective("dotarcie_zaladunek");
         const startRoz = !!effective("start_rozladunek");
-        const dotarcieRoz = !!effective("dotarcie_rozladunek");
         const rozladowano = !!effective("rozladowano") || fracht.statusRozladunku === "rozladowano";
-        if (hasR2) {
-          // 5-stopniowy: 0 Dojazd, 1 Załadowano, 2 W trasie do R1, 3 Po R1 / W trasie do R2, 4 Dostarczono
-          if (rozladowano) activeStep = 4;
-          else if (dotarcieRoz) activeStep = 3; // dotarł do R1, teraz jedzie do R2
-          else if (startRoz) activeStep = 2;
-          else if (dotarcieZal) activeStep = 1;
-          else activeStep = 0;
-        } else {
-          if (rozladowano || dotarcieRoz) activeStep = 3;
-          else if (startRoz) activeStep = 2;
-          else if (dotarcieZal) activeStep = 1;
-          else activeStep = 0;
-        }
+        const arrivedCount = Object.keys(arrivalTs).length;
+        // "Dostarczono" (maxR+2) TYLKO po rozładowano. Samo dotarcie na ostatni stop
+        // zatrzymuje się na kroku tego stopu (maxR+1) — inaczej klient widziałby
+        // "Dostarczono" zanim kierowca faktycznie rozładował.
+        // Wyjątek maxR=1: stepper nie ma osobnego kroku "Rozładunek 1", więc dotarcie
+        // od zawsze awansuje do "Dostarczono" (zachowane dla zgodności).
+        const capArrived = maxR > 1 ? maxR + 1 : maxR + 2;
+        if (rozladowano) activeStep = maxR + 2;
+        else if (arrivedCount > 0) activeStep = Math.min(capArrived, 2 + arrivedCount);
+        else if (startRoz) activeStep = 2;
+        else if (dotarcieZal) activeStep = 1;
+        else activeStep = 0;
       }
 
       // Zdjęcia — tylko te kategorie, które admin zaznaczył w trackerShow.
@@ -2355,24 +2384,26 @@ exports.trackerData = onRequest(
       const show = fracht.trackerShow || {};
       const photos = {};
       if (show.cmrZal || show.cmrRoz || show.towar || show.damage) {
-        let phaseR2StartTs = null;
-        if (hasR2) {
-          const dotRozSorted = events.filter(e => e.type === "dotarcie_rozladunek")
-            .sort((a, b) => ((a.value || a.ts) || "").localeCompare((b.value || b.ts) || ""));
-          const dotRoz2 = dotRozSorted[1];
-          if (dotRoz2) phaseR2StartTs = dotRoz2.value || dotRoz2.ts;
-        }
+        // Przypisanie CMR-a do stopu: jawne `r` na evencie, a dla legacy (bez `r`)
+        // chronologicznie — zdjęcie należy do ostatniego stopu, na który już dotarł.
+        const stopOfPhoto = (e) => {
+          if (e.r != null) return Math.min(maxR, Math.max(1, e.r));
+          const t = e.value || e.ts || "";
+          let s = 1;
+          for (let i = 1; i <= maxR; i++) if (arrivalTs[i] && t >= arrivalTs[i]) s = i;
+          return s;
+        };
 
-        const urls = { cmrZal: [], cmrRoz: [], cmrRozR1: [], cmrRozR2: [], towar: [], damage: [] };
+        const urls = { cmrZal: [], cmrRoz: [], towar: [], damage: [] };
+        const cmrRozPerStop = {}; // { 1: [...], 2: [...], ... }
         for (const e of events) {
           if (!e.photoUrl) continue;
           if (e.type === "cmr_zaladunek_photo") {
             urls.cmrZal.push(e.photoUrl);
           } else if (e.type === "cmr_rozladunek_photo" || e.type === "cmr_photo") {
             if (hasR2) {
-              const evTs = e.value || e.ts || "";
-              if (phaseR2StartTs && evTs >= phaseR2StartTs) urls.cmrRozR2.push(e.photoUrl);
-              else urls.cmrRozR1.push(e.photoUrl);
+              const s = stopOfPhoto(e);
+              (cmrRozPerStop[s] = cmrRozPerStop[s] || []).push(e.photoUrl);
             } else {
               urls.cmrRoz.push(e.photoUrl);
             }
@@ -2385,8 +2416,10 @@ exports.trackerData = onRequest(
         if (show.cmrZal && urls.cmrZal.length) photos.cmrZal = urls.cmrZal;
         if (show.cmrRoz) {
           if (hasR2) {
-            if (urls.cmrRozR1.length) photos.cmrRozR1 = urls.cmrRozR1;
-            if (urls.cmrRozR2.length) photos.cmrRozR2 = urls.cmrRozR2;
+            // cmrRozR1..cmrRozR5 — stary front czyta tylko R1/R2, nowy iteruje po maxR
+            for (let i = 1; i <= maxR; i++) {
+              if (cmrRozPerStop[i]?.length) photos[`cmrRozR${i}`] = cmrRozPerStop[i];
+            }
           } else if (urls.cmrRoz.length) {
             photos.cmrRoz = urls.cmrRoz;
           }
@@ -2402,10 +2435,22 @@ exports.trackerData = onRequest(
         const p = Date.parse(`${date}T${t}:00+02:00`);
         return isNaN(p) ? null : p;
       };
-      const plannedR1Ms = toMs(fracht.dataRozladunku, fracht.godzRozladunku);
-      const plannedR2Ms = hasR2 ? toMs(fracht.dataRozladunku2, fracht.godzRozladunku2) : null;
-      // Końcowa dostawa = ostatni rozładunek (R2 jeśli istnieje, inaczej R1)
-      const plannedMs = hasR2 ? (plannedR2Ms || plannedR1Ms) : plannedR1Ms;
+      // Stopy R1..maxR — jedno źródło dla steppera, kart dat i galerii CMR.
+      const stops = [];
+      for (let i = 1; i <= maxR; i++) {
+        const s = sfxR(i);
+        stops.push({
+          r: i,
+          plannedMs: toMs(fracht[`dataRozladunku${s}`], fracht[`godzRozladunku${s}`]),
+          miasto: (fracht[`dokodMiasto${s}`] || fracht[`dokod${s}`] || "").trim() || null,
+          firma: (fracht[`rozladunekFirma${s}`] || "").trim() || null,
+          arrivedTs: arrivalTs[i] || null,
+        });
+      }
+      const plannedR1Ms = stops[0]?.plannedMs ?? null;
+      const plannedR2Ms = hasR2 ? (stops[1]?.plannedMs ?? null) : null;
+      // Końcowa dostawa = ostatni rozładunek z ustawionym terminem (fallback: R1)
+      const plannedMs = [...stops].reverse().find(s => s.plannedMs)?.plannedMs ?? plannedR1Ms;
       const plannedLoadMs = toMs(fracht.dataZaladunku, fracht.godzZaladunku);
 
       // 3. Quick return — zakończone
@@ -2415,8 +2460,10 @@ exports.trackerData = onRequest(
           vehiclePlate,
           vehicleMaxWeight,
           status: "zakonczony",
-          activeStep: hasR2 ? 4 : 3,
+          activeStep: maxR + 2,
           hasR2,
+          maxR,
+          stops,
           plannedMs,
           plannedR1Ms,
           plannedR2Ms,
@@ -2449,15 +2496,20 @@ exports.trackerData = onRequest(
       }
       if (!destR1) return res.status(500).json({ error: "no_destination" });
 
-      let destR2 = null;
-      if (hasR2) {
-        destR2 = parseGeoStringBackend(fracht.rozladunekGeo2);
-        if (!destR2) {
-          const q = [fracht.rozladunekAdres2, fracht.dokodPocztowy2, fracht.dokodMiasto2]
+      // Cele R2..maxR (R1 wyżej). dest[i] = null gdy nie udało się zgeokodować —
+      // taki stop wypada z trasy, ale zostaje na stepperze.
+      const dest = { 1: destR1 };
+      for (let i = 2; i <= maxR; i++) {
+        const s = sfxR(i);
+        let d = parseGeoStringBackend(fracht[`rozladunekGeo${s}`]);
+        if (!d) {
+          const q = [fracht[`rozladunekAdres${s}`], fracht[`dokodPocztowy${s}`], fracht[`dokodMiasto${s}`]]
             .filter(Boolean).join(", ");
-          destR2 = await geocodeAddress(q || fracht.dokod2);
+          d = await geocodeAddress(q || fracht[`dokod${s}`]);
         }
+        dest[i] = d || null;
       }
+      const destR2 = dest[2] || null;
 
       // 6. Brak pozycji — jeszcze nie wyjechał
       if (!pos) {
@@ -2468,6 +2520,8 @@ exports.trackerData = onRequest(
           status: "przed_trasa",
           activeStep,
           hasR2,
+          maxR,
+          stops,
           plannedMs,
           plannedR1Ms,
           plannedR2Ms,
@@ -2490,17 +2544,23 @@ exports.trackerData = onRequest(
       // Gdy kierowca juz zrealizowal R1 (activeStep >= 3), pomijamy go w waypoints —
       // inaczej OSRM liczy detour wstecz przez R1 i daje fałszywy duzy dystans
       // (np. 1400 km zamiast realnych 10 km gdy auto stoi tuz przed R2).
-      const finalDest = hasR2 && destR2 ? destR2 : destR1;
-      const r1AlreadyDone = hasR2 && activeStep >= 3;
-      const waypoints = hasR2 && destR2
-        ? (r1AlreadyDone ? [pos, destR2] : [pos, destR1, destR2])
-        : [pos, destR1];
-      const routeCurrent = await osrmMultiRoute(waypoints);
+      // Stop uznajemy za zaliczony gdy ma potwierdzone dotarcie ALBO gdy activeStep
+      // już go minął (2+k = po k-tym rozładunku).
+      const stopDone = (i) => !!arrivalTs[i] || activeStep >= 2 + i;
+      const pendingIdx = [];
+      for (let i = 1; i <= maxR; i++) if (dest[i] && !stopDone(i)) pendingIdx.push(i);
+      // Gdy wszystkie zaliczone (a fracht jeszcze nie zamknięty) — celuj w ostatni stop
+      const routeIdx = pendingIdx.length ? pendingIdx : [maxR].filter(i => dest[i]);
+      const allIdx = [];
+      for (let i = 1; i <= maxR; i++) if (dest[i]) allIdx.push(i);
+
+      const waypoints = [pos, ...routeIdx.map(i => dest[i])];
+      const routeCurrent = await osrmMultiRoute(waypoints.length > 1 ? waypoints : [pos, destR1]);
       if (!routeCurrent) return res.status(500).json({ error: "osrm_failed" });
 
       let kmTotal = routeCurrent.distanceKm;
       if (start) {
-        const totalWp = hasR2 && destR2 ? [start, destR1, destR2] : [start, destR1];
+        const totalWp = [start, ...allIdx.map(i => dest[i])];
         const routeTotal = await osrmMultiRoute(totalWp);
         if (routeTotal && routeTotal.distanceKm > 0) kmTotal = routeTotal.distanceKm;
       }
@@ -2510,6 +2570,28 @@ exports.trackerData = onRequest(
 
       // Dla 2 rozładunków: osobne km i % do R1 (żeby klient widział postęp
       // dotarcia do pierwszego punktu, niezależnie od finalnego celu w R2).
+      // Postęp do NAJBLIŻSZEGO oczekującego stopu — działa dla dowolnej liczby
+      // rozładunków. Stare pola kmToR1/percentToR1 zostają niżej dla starego frontu.
+      let nextStopIdx = null, kmToNext = null, kmTotalNext = null, percentToNext = null;
+      if (maxR > 1 && pendingIdx.length) {
+        nextStopIdx = pendingIdx[0];
+        const target = dest[nextStopIdx];
+        const routeToNext = await osrmMultiRoute([pos, target]);
+        if (routeToNext) {
+          kmToNext = Math.round(routeToNext.distanceKm);
+          // Baza odniesienia: poprzedni zaliczony stop, a dla pierwszego — załadunek
+          const prevIdx = [...allIdx].filter(i => i < nextStopIdx).pop() || null;
+          const origin = prevIdx ? dest[prevIdx] : start;
+          if (origin) {
+            const routeLeg = await osrmMultiRoute([origin, target]);
+            if (routeLeg && routeLeg.distanceKm > 0) {
+              kmTotalNext = Math.round(routeLeg.distanceKm);
+              percentToNext = Math.min(100, Math.round((Math.max(0, kmTotalNext - kmToNext) / kmTotalNext) * 100));
+            }
+          }
+        }
+      }
+
       let kmToR1 = null, kmTotalR1 = null, percentToR1 = null;
       if (hasR2 && destR2) {
         // Jeśli activeStep ≥ 3 → R1 jest już zrealizowany (kierowca pojechał do R2).
@@ -2580,6 +2662,12 @@ exports.trackerData = onRequest(
         status: "w_trasie",
         activeStep,
         hasR2,
+        maxR,
+        stops,
+        nextStopIdx,
+        kmToNext,
+        kmTotalNext,
+        percentToNext,
         lat: pos.lat,
         lng: pos.lng,
         kmTotal: Math.round(kmTotal),
