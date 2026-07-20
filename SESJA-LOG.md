@@ -1793,3 +1793,11 @@ odklikał ostatniego rozładunku) — a nie brak mechanizmu.
 Jest już `isStaleUnfinished` w `src/utils/frachtStatus.js` — do rozważenia: fallback wyłączający
 tracker dla stale-unfinished, żeby nie polegać wyłącznie na kliknięciu kierowcy
 (uwaga: [[feedback_minimal_driver_intervention]] — user woli automat/admin-side, nie nudge do kierowcy).
+
+### 🛑 DECYZJA: tracker publiczny ODŁOŻONY
+User: „wrócimy do trackerów jak klient będzie wymagał, na chwilę obecną to jakieś **1% klientów
+chce tracker**". Nie inwestujemy dalej — ani w fallback `isStaleUnfinished`, ani w cokolwiek
+innego wokół trackera — **dopóki konkretny klient tego nie zażąda**.
+
+Stan zamrożenia: multi-stop R1–R5 w trackerze **zrobiony i zweryfikowany na produkcji**,
+wszystkie stare trackery wyłączone, nowe działają bez zmian. Nie ma niedokończonej roboty.
