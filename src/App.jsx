@@ -6870,15 +6870,20 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
   }
 
   return (
-    <div className="flex gap-4" style={{ minHeight: "calc(100vh - 180px)" }}>
-      {/* ── LEWY PANEL: lista pojazdów GPS ── */}
-      <div className="w-56 flex-shrink-0">
+    // Na telefonie układ musi się SKŁADAĆ w kolumnę — wcześniej był sztywny wiersz
+    // z panelem `w-56 flex-shrink-0`, przez co na ekranie 390 px zostawało ~150 px
+    // na treść i strona przewijała się w bok.
+    <div className="flex flex-col md:flex-row gap-4 md:min-h-[calc(100vh-180px)]">
+      {/* ── LEWY PANEL: lista pojazdów GPS (na telefonie: pasek na górze) ── */}
+      <div className="w-full md:w-56 md:flex-shrink-0">
         <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Pojazdy GPS</span>
             <span className="text-xs text-gray-400">{gpsDevices.length}</span>
           </div>
-          <div className="max-h-[calc(100vh-280px)] overflow-y-auto">
+          {/* Na telefonie lista pojazdów nie może zająć całego ekranu — niska
+              maksymalna wysokość, żeby treść pod spodem była od razu widoczna. */}
+          <div className="max-h-56 md:max-h-[calc(100vh-280px)] overflow-y-auto">
             {gpsDevices.map(dev => {
               const devId = dev.deviceId || dev.id;
               const pos = getDevicePosition(devId);
@@ -6971,10 +6976,13 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
             </div>
 
             {/* Sub-tabs */}
-            <div className="flex gap-1 mb-4 bg-white rounded-2xl border border-gray-100 p-1.5">
+            {/* Na telefonie: poziomy przewijany pasek z etykietami w jednej linii.
+                Wcześniej `flex-1` rozpychał wszystkie trzy równo, przez co
+                „Czas pracy kierowcy" łamało się na trzy linijki. */}
+            <div className="flex gap-1 mb-4 bg-white rounded-2xl border border-gray-100 p-1.5 overflow-x-auto no-scrollbar">
               {SUB_TABS.map(st => (
                 <button key={st.id} onClick={() => setSubTab(st.id)}
-                  className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold transition-all ${subTab === st.id ? "bg-violet-600 text-white shadow-sm" : "text-gray-500 hover:bg-gray-50"}`}>
+                  className={`flex-shrink-0 md:flex-1 whitespace-nowrap py-2.5 px-3 rounded-xl text-xs font-semibold transition-all ${subTab === st.id ? "bg-violet-600 text-white shadow-sm" : "text-gray-500 hover:bg-gray-50"}`}>
                   <span className="mr-1">{st.icon}</span> {st.label}
                 </button>
               ))}
@@ -8377,14 +8385,16 @@ function DddReportView({ dddFile, onClose }) {
   return (
     <div>
       {/* Toolbar — ukryty w drukowanym PDF */}
-      <div className="flex items-center justify-between mb-4 print:hidden">
+      {/* `whitespace-nowrap` — bez tego na wąskim ekranie oba napisy łamały się
+          pionowo, litera po literze („Wróć / do / listy / plików"). */}
+      <div className="flex items-center justify-between gap-2 mb-4 print:hidden">
         <button onClick={onClose}
-          className="text-sm font-semibold text-violet-600 hover:text-violet-700 hover:underline">
-          ← Wróć do listy plików
+          className="text-sm font-semibold text-violet-600 hover:text-violet-700 hover:underline whitespace-nowrap">
+          ← Wróć do listy
         </button>
         <button onClick={() => window.print()}
-          className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-sm font-bold">
-          🖨️ Drukuj jako PDF
+          className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-sm font-bold whitespace-nowrap">
+          🖨️ Drukuj PDF
         </button>
       </div>
 
