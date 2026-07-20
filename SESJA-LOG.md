@@ -1728,3 +1728,31 @@ i timeline admina wymagają realnego zlecenia 3+ stopowego do potwierdzenia wizu
 5 zaległych podsumowań do klientów · inbound CSV `imports@inbox.fleetstat.pl` (niesprawdzone) ·
 re-upload starych DDD · bump `firebase-functions` + vbs-invoices Node 20 (decommission 2026-10-30) ·
 2 skanery AI na base64 (latentny 413) · cleanup 16 branchy `claude/*`.
+
+### ✅ Weryfikacja end-to-end na PRODUKCJI (po deployu)
+Deploy: `firebase deploy --only functions:trackerData` → push `main` (`b3c5abc`) → Vercel.
+
+Diagnostyka floty (`diagnose_tracker_stops.mjs`, read-only): 671 frachtów, rozkład stopów
+`{1: 652, 2: 16, 4: 3}` — **multi-stop to margines, ale realny**. 6 frachtów ma `trackerToken`.
+
+**Znaleziony przy weryfikacji problem z DANYMI (nie z kodem):** fracht `orpxuu3h`
+(token `2fe4ddde`) ma wypełnione **R1, R3, R4 i PUSTY R2** — dyspozytor pominął slot.
+Pierwsza wersja fixu rysowała klientowi **pusty krok „Rozładunek 2"** na publicznym trackerze.
+→ commit `b3c5abc`: `stopIdx` = tylko wypełnione sloty; stop niesie prawdziwy `r`
+(eventy kierowcy używają tego indeksu) ORAZ `pos` = numer kolejny bez dziur (to widzi klient).
+`activeStep`/`stopDone` liczą z pozycji, nie z surowego `r`.
+
+Potwierdzone na żywo na `https://fleetstat.pl/t/2fe4ddde...`:
+- stepper **6 kroków**: Dojazd → Załadowano → Rozładunek 1 → 2 → 3 → Dostarczono
+- karty dat: Załadunek + Rozładunek 1/2/3 (29.05 / 12.06 / 13.06)
+- paski: „ROZŁADUNEK 1" (najbliższy, 1189 km) + „ROZŁADUNEK 3 (ŁĄCZNIE)" (2394 km)
+- pusty slot R2 **zniknął**; CF zwraca `r=1/pos=1 CESKA TREBOVA, r=3/pos=2 EDEGEM, r=4/pos=3 OURENDE`
+
+### ⚠️ Higiena danych — do decyzji użytkownika
+Fracht `orpxuu3h` (plan rozładunku 13.06) **wciąż ma status `w_trasie`** i publiczny tracker
+włączony → każdy z linkiem widzi **„Przewidywane opóźnienie 943 h"**. To NIE jest efekt tej
+sesji (zachowanie sprzed zmian), ale wygląda fatalnie przed klientem.
+**Do rozważenia**: auto-wygaszanie trackera po X dniach od planowanego rozładunku
+albo masowe domknięcie zaległych frachtów. Pozostałe 2 sprawdzone trackery mają
+`trackerEnabled === false` (odpowiedź `{"error":"disabled"}`) — czyli mechanizm wyłączania istnieje,
+tylko ten jeden został włączony.
