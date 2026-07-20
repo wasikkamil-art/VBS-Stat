@@ -1801,3 +1801,57 @@ innego wokół trackera — **dopóki konkretny klient tego nie zażąda**.
 
 Stan zamrożenia: multi-stop R1–R5 w trackerze **zrobiony i zweryfikowany na produkcji**,
 wszystkie stare trackery wyłączone, nowe działają bez zmian. Nie ma niedokończonej roboty.
+
+## 2026-07-20 (cd. 2) — Koszt GCP: diagnoza + krok 1 (okno `driverActivities` dla kierowców)
+
+Trigger: alert budżetowy Google Cloud „90% of budget reached" (budżet 25 zł, okres 1–31.07,
+alert z 17.07). Budżet = próg alertowy, **niczego nie wyłącza**.
+
+### Diagnoza (REST + Monitoring API; `gcloud` CLI wywala się na Pythonie 3.9)
+| Metryka | Wartość | Darmowy limit |
+|---|---|---|
+| Odczyty Firestore | **987 450/dobę** | 50 000/dobę |
+| Zapisy | 6 249/dobę | 20 000 ✅ |
+| Kasowania | 199/dobę | ✅ |
+| GCS (Storage) | 0,425 GB | 5 GB ✅ |
+| Artifact Registry | 0,15 GB | 0,5 GB ✅ |
+| Cloud Run min instances | **wszędzie 0** | brak kosztu bezczynności ✅ |
+
+Rozbicie odczytów po typie: **QUERY 984 298**, LOOKUP 3 153. Czyli zapytania kolekcyjne.
+
+**Wykluczone**: `scheduledGpsPoll` (chodzi co minutę, ale czyta tylko 2 dokumenty na przebieg
+= 2 880 LOOKUP/dobę — zgadza się z pomiarem), magazyn, obrazy funkcji, idle Cloud Run.
+Firestore **PITR włączony** (po incydencie 2026-05-06) — płatne, ale marginalne przy tej skali; NIE ruszać.
+
+**Przyczyna**: `App.jsx:1454` subskrybował **całą kolekcję `driverActivities` bez filtra i limitu**.
+Rozmiary kolekcji: `driverActivities` **20 338** (reszta: auditLog 2 316, emailLogs 409,
+driverEvents 302, pozostałe <100). 984 298 ÷ 20 338 ≈ **48 pełnych odczytów kolekcji na dobę**
+= tyle razy dziennie ktoś ładuje aplikację. Kolekcja rośnie ~70 dok./dobę z auto-detekcji GPS,
+więc koszt rósłby sam.
+
+### Audyt zasięgu przed cięciem (subagent) — najgłębsze realne potrzeby
+`weeklyRestCompensation` ~31 dni · `suggestBaseReturnFromRest` lookback 35 dni + długość
+odpoczynku ≥56h → **~39 dni** · `lastWeeklyRest` 21 dni · `period28`/powrót do bazy liczony
+z `vehicle.tachoCardStart`, **nie z segmentów** (niewrażliwy na okno).
+
+**BLOKADA dla admina**: `MultiDayActivityView` (`App.jsx:8648`) pozwala wybrać **dowolną datę
+wstecz**, a `min`/`max` pickera biorą się z najstarszego segmentu w **załadowanej tablicy**
+(`:8783`). Okno obcięłoby historię **PO CICHU** — bez błędu, z nagłówkiem „Dane od X do Y"
+podającym obcięty zakres jako pełny. Dodatkowo lista `corrections` (`:8659`) to ścieżka
+audytowa bez limitu czasowego — korekta sprzed pół roku zniknęłaby i nie dałoby się jej cofnąć.
+Admin też **nie może** dostać filtra po `driverEmail` — `MultiDayActivityView` filtruje po
+`vehicleId`, a pojazd miewa kilku kierowców (`driverHistory`).
+
+### Krok 1 WDROŻONY — okno tylko dla roli KIEROWCA
+`App.jsx`: `ACTIVITIES_WINDOW_DAYS = 60`; kierowca dostaje
+`where(driverEmail == swój) + where(startTs >= now-60d)`, admin/dyspozytor **bez zmian** (cała kolekcja).
+Indeks złożony `driverEmail+startTs` **już istniał** — nic nie trzeba było wdrażać.
+
+Pomiar na produkcji (5 kierowców): **20 339 → średnio 1 086 dokumentów** na załadowanie
+panelu = **−94,7%**. Przy okazji naprawia transfer na telefonach kierowców
+(dotąd ciągnęli 20 tys. dokumentów, żeby zobaczyć własne segmenty).
+
+### Krok 2 — DO ZROBIENIA (nie ruszone)
+Admin wciąż czyta całość. Warunek wstępny: dać `MultiDayActivityView` + liście korekt
+**własne leniwe zapytanie** (`vehicleId` + wybrany zakres dat) zamiast konsumpcji globalnego
+listenera. Dopiero wtedy można nałożyć okno na admina bez cichego obcięcia historii.

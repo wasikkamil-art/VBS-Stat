@@ -1177,6 +1177,11 @@ const DEFAULT_TABS_BY_ROLE = {
 // Zakładki zawsze admin-only (nie da się ich przyznać przez checkboxy)
 const ADMIN_ONLY_TABS = ["users", "email", "kierowcy"];
 
+// Okno czasowe subskrypcji `driverActivities` dla roli KIEROWCA (dni wstecz).
+// Nie schodzić poniżej ~40 — `suggestBaseReturnFromRest` ma lookback 35 dni,
+// a `weeklyRestCompensation` liczy 4 tygodnie wstecz od poniedziałku.
+const ACTIVITIES_WINDOW_DAYS = 60;
+
 function App({ user, role, appUsers = [], allowedTabs = null }) {
   const isAdmin      = role === "admin";
   const [showExportModal, setShowExportModal] = useState(false);
@@ -1450,12 +1455,34 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   }, []);
 
   // ── DRIVER ACTIVITIES — segmenty czasu pracy (jazda / praca / dyspozycyjność / odpoczynek) ──
+  // KOSZT: kolekcja rośnie bez końca (20 338 dokumentów w lipcu 2026, +~70/dobę z auto-detekcji
+  // GPS). Subskrypcja całości generowała ~1 mln odczytów Firestore/dobę = 20× ponad darmowy
+  // limit 50k i praktycznie cały rachunek GCP (patrz SESJA-LOG 2026-07-20).
+  //
+  // KIEROWCA dostaje tylko własne segmenty z okna 60 dni. Najgłębsze realne zapotrzebowanie
+  // to ~39 dni (`suggestBaseReturnFromRest` lookback 35 d + długość odpoczynku ≥56h);
+  // `weeklyRestCompensation` potrzebuje ~31 dni. 60 dni daje zapas na segmenty przecinające
+  // granicę okna. Filtrujemy po `startTs` (indeks driverEmail+startTs już istnieje).
+  //
+  // ADMIN/DYSPOZYTOR czyta na razie całość — `MultiDayActivityView` pozwala wybrać DOWOLNĄ
+  // datę wstecz, a granice pickera biorą się z załadowanej tablicy, więc okno obcięłoby
+  // historię PO CICHU (bez błędu). Docelowo ten widok ma dostać własne zapytanie
+  // (vehicleId + wybrany zakres) — do tego czasu nie ruszamy admina.
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "driverActivities"), (snap) => {
+    if (isKierowca && !user?.email) return;
+    const base = collection(db, "driverActivities");
+    const q = isKierowca
+      ? query(
+          base,
+          where("driverEmail", "==", user.email),
+          where("startTs", ">=", new Date(Date.now() - ACTIVITIES_WINDOW_DAYS * 86400000).toISOString())
+        )
+      : base;
+    const unsub = onSnapshot(q, (snap) => {
       setDriverActivities(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }, (err) => console.error("driverActivities onSnapshot error", err));
     return () => unsub();
-  }, []);
+  }, [isKierowca, user?.email]);
 
   // ── DRIVER EVENTS — potwierdzenia załadunków/rozładunków od kierowców ──
   useEffect(() => {
