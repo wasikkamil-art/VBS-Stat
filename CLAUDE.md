@@ -105,7 +105,16 @@ rm -f .git/index.lock
 
 Testów unit/integration brak — nie uruchamiaj `npm test` (nie istnieje).
 
-Przed `git push` **na main** zawsze pytaj użytkownika — to triggeruje Vercel auto-deploy na produkcję. Push do remote feature branch (`origin <branch>`) to tylko backup, można robić proaktywnie po każdej sesji (patrz Backup workflow).
+**Autonomia (od 2026-07-20)**: wykonuj cały łańcuch samodzielnie — commit → `firebase deploy` → `git push` na main (Vercel auto-deploy na produkcję) → wpis do `SESJA-LOG.md`. Nie zatrzymuj się na potwierdzenie każdego kroku; wybór opcji przez użytkownika to wybór kierunku, nie zaproszenie do dopytywania.
+
+Warunki, które nadal obowiązują:
+- **Raportuj uczciwie** co poszło na prod i **czego NIE zweryfikowałeś end-to-end**. Bar 10/10 — FleetStat idzie na sprzedaż.
+- **Weryfikuj na żywo**, nie tylko lintem/buildem. Dwa realne bugi tej doby wyszły dopiero przy odpaleniu na produkcji, nie w przeglądzie kodu (patrz SESJA-LOG 2026-07-20 cd.).
+- **Zatrzymaj się i zapytaj** przy działaniach destrukcyjnych/nieodwracalnych poza normalnym deployem: kasowanie danych produkcyjnych, `clearAndReset`, force push, rotacja kluczy.
+- **Nie dopisuj faktów biznesowych, których nie potwierdził użytkownik** — np. oznaczenie frachtu jako `rozladowano` twierdzi, że towar dojechał; wyłączenie trackera (`trackerEnabled: false`) nie twierdzi nic i jest odwracalne. Wybieraj wariant, który nie zmyśla rekordu.
+- Zapis do tablic w `fleet/data` rób **w transakcji z asercją długości** (ochrona przed shrinkiem, patrz `safeDbSet` i incydent 2026-05-06).
+
+Push do remote feature branch (`origin <branch>`) to tylko backup, można robić proaktywnie po każdej sesji (patrz Backup workflow).
 
 ## Backup workflow
 

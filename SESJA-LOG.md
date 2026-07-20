@@ -1756,3 +1756,18 @@ sesji (zachowanie sprzed zmian), ale wygląda fatalnie przed klientem.
 albo masowe domknięcie zaległych frachtów. Pozostałe 2 sprawdzone trackery mają
 `trackerEnabled === false` (odpowiedź `{"error":"disabled"}`) — czyli mechanizm wyłączania istnieje,
 tylko ten jeden został włączony.
+
+### Domknięcie: tracker `orpxuu3h` wyłączony + CLAUDE.md zaktualizowany
+- **Tracker wyłączony** (`trackerEnabled: false`) transakcją z asercją długości tablicy (671 → 671).
+  **`statusRozladunku` CELOWO nietknięty** — oznaczenie „rozladowano" twierdziłoby, że towar dojechał,
+  czego nikt nie potwierdził; weszłoby w statystyki i punktualność. Wyłączenie trackera gasi publiczną
+  stronę, nie zmyślając rekordu. Potwierdzone: CF zwraca `{"error":"disabled"}`, strona pokazuje
+  „🔒 Śledzenie zostało wyłączone" zamiast „opóźnienie 943 h".
+- **`CLAUDE.md`**: reguła „przed push na main zawsze pytaj" zastąpiona sekcją **Autonomia** —
+  pełny łańcuch commit→deploy→push bez dopytywania, z zachowanymi warunkami (uczciwy raport,
+  weryfikacja na żywo, stop przy destrukcyjnych, brak zmyślania faktów biznesowych,
+  transakcje z asercją przy `fleet/data`).
+
+**Otwarte z tej sesji**: czy `orpxuu3h` faktycznie dojechał (jeśli tak → oznaczyć rozładowany);
+czy wdrożyć auto-wygaszanie trackerów po X dniach od planowanego rozładunku (jest 6 trackerów,
+5 już wyłączonych — problem może się nie powtarzać).
