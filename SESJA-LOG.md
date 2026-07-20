@@ -1855,3 +1855,40 @@ panelu = **−94,7%**. Przy okazji naprawia transfer na telefonach kierowców
 Admin wciąż czyta całość. Warunek wstępny: dać `MultiDayActivityView` + liście korekt
 **własne leniwe zapytanie** (`vehicleId` + wybrany zakres dat) zamiast konsumpcji globalnego
 listenera. Dopiero wtedy można nałożyć okno na admina bez cichego obcięcia historii.
+
+## 2026-07-20 (cd. 3) — Skanery AI: base64 → URL-source (koniec latentnego 413)
+
+Ostatnie dwa skanery jadące na base64 przez `/api/claude`: `parseOneInvoice` (płatności)
+i `analyzeFile` (delegacje IMI). Reszta była naprawiona 21.06 (commity `4a0288a`/`6c87a32`).
+
+### Dlaczego to bolało
+Body funkcji na Vercelu ma limit **~4,5 MB**, a base64 powiększa plik o **+33%** → każdy skan
+powyżej **~3,3 MB** kończył się `413 FUNCTION_PAYLOAD_TOO_LARGE`, pokazywanym userowi jako
+niejasne „API 413". Strażnicy rozmiaru w kodzie były **wyżej niż realny limit** (10 MB dla faktur,
+15 MB dla IMI), więc user dostawał błąd zamiast komunikatu „za duży".
+Typowy skan z telefonu to 3–8 MB — czyli trafiało regularnie.
+
+### Zrobione
+- **`parseOneInvoice(file, fileUrl)`** — gdy plik jest w Storage, leci `{type:"url"}`. Zostaje
+  fallback base64 (gdy upload padnie) z **jawnym limitem 3 MB i czytelnym komunikatem** zamiast 413.
+- **Oba wywołania płatności** (`handleFile` + bulk) — było `Promise.all([parse, upload])`
+  (równolegle), jest `upload → parse(url)`. Kosztuje ~1 s na plik, ale duże skany w ogóle przechodzą.
+  W bulku pliki nadal lecą równolegle względem siebie.
+- **`analyzeFile` (IMI)** — analogicznie URL-source z fallbackiem.
+- **NOWE: oryginał IMI ląduje w Storage** (`uploadImiFile`, ścieżka `imi/`). Wcześniej dokument
+  delegowania po sparsowaniu **przepadał** — w rekordzie zostawała sama `fileName`. Teraz rekord
+  niesie `fileUrl` + `filePath`. To wykracza poza fix 413, ale przy dokumencie istotnym
+  przy kontroli brak oryginału był realną dziurą.
+- Reguły Storage sprawdzone — `imi/` przechodzi (`allow read, write: if request.auth != null`),
+  nic nie trzeba wdrażać.
+
+### Weryfikacja — dowód na produkcji, oba kierunki
+Największy PDF w Storage: **4,84 MB** (jako base64 → 6,45 MB).
+- **base64 → `HTTP 413 FUNCTION_PAYLOAD_TOO_LARGE`** (curl `--data @plik`, bo node fetch ucina duże body)
+- **URL-source → `HTTP 200`**, Claude odczytał dokument („Trzy." = 3 strony), 3,7 s
+
+### Gotcha odkryta przy testowaniu
+`https://fleetstat.pl` robi **307 → `www.fleetstat.pl`**, a przekierowanie **cross-origin gubi
+nagłówek `Authorization`** → `/api/claude` zwraca `401 Brak tokena uwierzytelnienia`.
+Przy testach proxy strzelaj **bezpośrednio w `www.fleetstat.pl`**. Apka tego nie dotyczy
+(woła relatywnie `/api/claude`, same-origin).

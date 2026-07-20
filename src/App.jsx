@@ -1059,6 +1059,17 @@ async function uploadPaymentFile(file) {
   };
 }
 
+// Oryginał zaświadczenia IMI (delegowanie kierowcy) do Storage.
+// Dwa powody: AI czyta plik z URL-a zamiast base64 (limit 413 na /api/claude),
+// a sam dokument zostaje dostępny do wglądu — wcześniej po parsowaniu przepadał.
+async function uploadImiFile(file) {
+  const safeName = file.name.replace(/[^\w.-]/g, "_");
+  const name = `imi/${Date.now()}_${Math.random().toString(36).slice(2,8)}_${safeName}`;
+  const ref = storageRef(storage, name);
+  await uploadBytes(ref, file);
+  return { fileUrl: await getDownloadURL(ref), filePath: name };
+}
+
 function SprawaFileUpload({ sprawaId, subfolder, onUploaded, label = "📎 Dodaj załącznik" }) {
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef(null);
@@ -10793,11 +10804,10 @@ function InstanceOverrideForm({ inst, onSave, onSaveFile }) {
     setAiLoading(true);
     setAiError("");
     try {
-      // Parsuj AI + upload pliku równolegle
-      const [aiResult, uploadResult] = await Promise.all([
-        parseOneInvoice(file),
-        uploadPaymentFile(file).catch(e => { console.error("upload fail", e); return null; }),
-      ]);
+      // Upload NAJPIERW, potem AI czyta plik z URL-a (nie przez base64 — limit 413 na Vercelu).
+      // Sekwencyjnie zamiast równolegle: kosztuje ~1s, ale duże skany w ogóle przechodzą.
+      const uploadResult = await uploadPaymentFile(file).catch(e => { console.error("upload fail", e); return null; });
+      const aiResult = await parseOneInvoice(file, uploadResult?.fileUrl);
       setParsed(aiResult);
       setFileMeta(uploadResult);
       setInvoiceNumber(aiResult.invoiceNumber || "");
@@ -10970,20 +10980,38 @@ Reguły:
 
 // Parsuj jedną fakturę przez AI (PDF / obraz → JSON)
 // Wydzielone na poziom modułu żeby mogło być reużywane w InstanceOverrideForm i PaymentForm.
-async function parseOneInvoice(file) {
+// Parsuje fakturę przez AI. Gdy podany `fileUrl` (plik jest już w Storage) — wysyłamy
+// SAM URL zamiast base64. Base64 przechodzi przez body funkcji /api/claude na Vercelu,
+// gdzie limit to ~4,5 MB; kodowanie powiększa plik o ~33%, więc skan >~3,3 MB kończył się
+// błędem 413 pokazywanym userowi jako niejasne „API 413". Patrz commity 4a0288a/6c87a32,
+// gdzie tak samo naprawiono skaner zleceń i dokumentów.
+async function parseOneInvoice(file, fileUrl = null) {
   if (file.size > 10 * 1024 * 1024) throw new Error(`${file.name}: plik za duży (max 10 MB)`);
   const isPdf = file.type === "application/pdf";
   const isImg = /^image\/(png|jpe?g|webp)$/.test(file.type);
   if (!isPdf && !isImg) throw new Error(`${file.name}: nieobsługiwany format`);
-  const base64 = await new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result).split(",")[1]);
-    r.onerror = reject;
-    r.readAsDataURL(file);
-  });
-  const msgContent = isPdf
-    ? [{ type:"document", source:{ type:"base64", media_type:"application/pdf", data: base64 } }, { type:"text", text: PAYMENT_AI_PROMPT }]
-    : [{ type:"image",    source:{ type:"base64", media_type: file.type,         data: base64 } }, { type:"text", text: PAYMENT_AI_PROMPT }];
+
+  // Fallback base64 tylko gdy upload do Storage padł — z jawnym limitem zamiast 413
+  if (!fileUrl && file.size > 3 * 1024 * 1024) {
+    throw new Error(`${file.name}: nie udało się wysłać pliku do magazynu, a jest za duży (${(file.size/1048576).toFixed(1)} MB) na odczyt bezpośredni. Spróbuj ponownie.`);
+  }
+
+  const source = fileUrl
+    ? { type: "url", url: fileUrl }
+    : {
+        type: "base64",
+        media_type: isPdf ? "application/pdf" : file.type,
+        data: await new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(String(r.result).split(",")[1]);
+          r.onerror = reject;
+          r.readAsDataURL(file);
+        }),
+      };
+  const msgContent = [
+    { type: isPdf ? "document" : "image", source },
+    { type: "text", text: PAYMENT_AI_PROMPT },
+  ];
   const res = await callClaude({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 1500,
@@ -11055,14 +11083,13 @@ function PaymentForm({ initial, isEdit, onSave, onClose, onSkipNext, onQueueAppe
     setAiLoading(true);
     setAiProgress({ done: 0, total: files.length });
     try {
-      // Parsuj + upload równolegle — każdy plik osobno leci przez AI i do Storage
+      // Upload NAJPIERW, potem AI z URL-a (base64 wywalał się na 413 przy skanach >~3,3 MB).
+      // Pliki nadal lecą równolegle względem siebie — sekwencyjny jest tylko upload→AI per plik.
       let done = 0;
       const results = await Promise.allSettled(
         files.map(async (f) => {
-          const [parsed, fileMeta] = await Promise.all([
-            parseOneInvoice(f),
-            uploadPaymentFile(f).catch(e => { console.error("upload fail", f.name, e); return null; }),
-          ]);
+          const fileMeta = await uploadPaymentFile(f).catch(e => { console.error("upload fail", f.name, e); return null; });
+          const parsed = await parseOneInvoice(f, fileMeta?.fileUrl);
           done++;
           setAiProgress({ done, total: files.length });
           return { ...parsed, _file: fileMeta };
@@ -12005,14 +12032,19 @@ Extract ALL fields exactly as they appear. Return ONLY clean JSON, no text befor
     });
   };
 
+  // Gdy plik trafił do Storage — AI czyta go z URL-a. Base64 idzie przez body /api/claude
+  // (limit Vercela ~4,5 MB, kodowanie +33%), więc skany >~3,3 MB kończyły się błędem 413.
   const analyzeFile = async (item) => {
-    const { fileData, fileType, id } = item;
-    const base64 = fileData.split(",")[1];
+    const { fileData, fileType, fileUrl } = item;
     const isPdf  = fileType === "application/pdf";
 
-    const msgContent = isPdf
-      ? [{ type:"document", source:{ type:"base64", media_type:"application/pdf", data:base64 } }, { type:"text", text:AI_PROMPT }]
-      : [{ type:"image",    source:{ type:"base64", media_type:fileType, data:base64 } },            { type:"text", text:AI_PROMPT }];
+    const source = fileUrl
+      ? { type: "url", url: fileUrl }
+      : { type: "base64", media_type: isPdf ? "application/pdf" : fileType, data: fileData.split(",")[1] };
+    const msgContent = [
+      { type: isPdf ? "document" : "image", source },
+      { type: "text", text: AI_PROMPT },
+    ];
 
     const res  = await callClaude({ model:"claude-sonnet-4-6", max_tokens:2000, system:AI_SYSTEM, messages:[{ role:"user", content:msgContent }] });
     if (!res.ok) {
@@ -12041,7 +12073,15 @@ Extract ALL fields exactly as they appear. Return ONLY clean JSON, no text befor
     for (const file of [...files]) {
       if (!allowed.includes(file.type) || file.size > 15*1024*1024) continue;
       const fileData = await readFile(file);
-      items.push({ id: uid(), fileName: file.name, fileType: file.type, fileData, status:"pending" });
+      // Oryginał do Storage: (1) AI czyta go z URL-a zamiast base64 (limit 413),
+      // (2) dokument delegowania zostaje dostępny — wcześniej po sparsowaniu ginął,
+      //     w rekordzie zapisywała się tylko nazwa pliku.
+      const up = await uploadImiFile(file).catch(e => { console.error("upload IMI fail", file.name, e); return null; });
+      items.push({
+        id: uid(), fileName: file.name, fileType: file.type, fileData,
+        fileUrl: up?.fileUrl || "", filePath: up?.filePath || "",
+        status: "pending",
+      });
     }
     if (!items.length) return;
     setQueue(q => [...q, ...items]);
@@ -12062,6 +12102,8 @@ Extract ALL fields exactly as they appear. Return ONLY clean JSON, no text befor
             vehicleId: vehicles[0]?.id || "",
             createdAt: new Date().toISOString(),
             fileName: item.fileName,
+            fileUrl: item.fileUrl || "",
+            filePath: item.filePath || "",
           };
           onSave(record);
           setQueue(q => q.map(x => x.id===item.id ? {...x, status:"saved", result:parsed} : x));
