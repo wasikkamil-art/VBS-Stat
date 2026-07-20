@@ -1771,3 +1771,25 @@ tylko ten jeden został włączony.
 **Otwarte z tej sesji**: czy `orpxuu3h` faktycznie dojechał (jeśli tak → oznaczyć rozładowany);
 czy wdrożyć auto-wygaszanie trackerów po X dniach od planowanego rozładunku (jest 6 trackerów,
 5 już wyłączonych — problem może się nie powtarzać).
+
+### Masowe zamknięcie starych trackerów (decyzja user: „stare nieistotne, nowe mają działać")
+Wyłączone **wszystkie 6** istniejących trackerów (`trackerEnabled: false`), transakcja z asercją
+długości (671 → 671). `statusRozladunku` nietknięty w żadnym. Weryfikacja: wszystkie tokeny
+zwracają `{"error":"disabled"}`, ponowny dry-run pokazuje `Do wyłączenia: 0`.
+
+Frachty: `0080/06/2026`, `orpxuu3h`, `569654-604823`, `278/S/2026/K`, `2454/2026`, `ZL1392/04/26`
+(najstarszy rozładunek 27.04, najnowszy 16.06).
+
+**Nowe trackery NIE są dotknięte** — potwierdzone w kodzie:
+- `FrachtyModal.jsx:701` — generowanie nowego tokenu ustawia jawnie `trackerEnabled: true`
+- CF `functions/index.js:2271` blokuje tylko przy `=== false`; **brak pola = włączony**
+- Odwracalne z UI: `App.jsx:16918` ma toggle (zielony/czerwony), token zostaje przy wyłączeniu
+
+**Odkrycie przy okazji — auto-wygaszanie JUŻ ISTNIEJE**: `functions/index.js:3339` i `:3359`
+(`finalizeTrip`) ustawiają `trackerEnabled: false` automatycznie przy domknięciu trasy.
+Czyli te 6 „wiszących" to zlecenia, które **nigdy nie zostały sfinalizowane** (kierowca nie
+odklikał ostatniego rozładunku) — a nie brak mechanizmu.
+→ **Właściwy fix to nie „wygaszanie po X dniach", tylko domykanie niesfinalizowanych tras.**
+Jest już `isStaleUnfinished` w `src/utils/frachtStatus.js` — do rozważenia: fallback wyłączający
+tracker dla stale-unfinished, żeby nie polegać wyłącznie na kliknięciu kierowcy
+(uwaga: [[feedback_minimal_driver_intervention]] — user woli automat/admin-side, nie nudge do kierowcy).
