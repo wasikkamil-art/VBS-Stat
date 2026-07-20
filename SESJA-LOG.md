@@ -1636,3 +1636,36 @@ Czas pobrania z nazwy pliku (`^[A-Za-z]_YYYYMMDD_HHMM`, strefa = UTC tachografu 
 - Pole compliance activities = `startTs`/`endTs` (nie `start`). Źródła mieszane: `ddd` + `auto_gps` w tym samym dniu (GPS pokrywa po zgraniu karty; DDD autorytatywne w oknie karty).
 - Fix wymaga **re-uploadu** istniejących plików (poprawka działa na nowe parsowania; stary rekord ma zawyżony dzień pobrania). Nowe uploady już czyste — user nic nie musi robić.
 - Nazwa pliku `C_YYYYMMDD_HHMM` = wiarygodne źródło czasu pobrania (VBS reader tak nazywa); godzina w UTC (spójna z `fromMin` segmentów).
+
+---
+
+## 2026-07-20 — Security `/api/claude` + role-gating vbs-invoices + cleanup + fix wycofanego modelu (4 commity PROD)
+
+⚠️ **Uwaga o datach**: briefing na starcie tej sesji opisywał „stan po 2026-06-12", a repo miało już pracę do 2026-07-16. Wpis TEJ SAMEJ sesji został omyłkowo złożony wyżej jako **„2026-06-15"** (commity docs `5d49837`/`2dc3f96`) — treść tam jest poprawna, data myląca. **Commit-hashe = źródło prawdy.**
+
+### Zrobione (wszystko zweryfikowane na PROD)
+- **`4a5153d` SECURITY `/api/claude`** — było OTWARTE proxy (`Access-Control-Allow-Origin: *`, ZERO auth) forwardujące dowolne body do Anthropic z kluczem właściciela. Fix: weryfikacja **Firebase ID tokena** (`firebase-admin/auth` `verifyIdToken`, init `{projectId:'vbs-stats'}` **BEZ service accounta**) + CORS `*` → whitelist. Front: helper `callClaude(body)` w `src/firebase.js` dokłada `Authorization: Bearer`; 5 call-site'ów przerobionych. Weryfikacja prod: bez tokena **401**, z tokenem **200**.
+- **`fca7661` (repo vbs-invoices) role-gating callable** — audyt obalił założenie „ten sam otwarty proxy": faktury go NIE mają (klucz = Firebase Secret, CF server-side, `onCall` mają `request.auth`). Ale gatowały tylko „zalogowany", NIE rolę → nie-admin mógł wołać bezpośrednio `clearAndReset` (DESTRUKCYJNE), `scanNow`, `inspectMailbox`. Fix: `assertAdmin(request)` + `isUserAdmin(uid)` czytający `users/{uid}.role`. Deploy `firebase deploy --only functions`. Weryfikacja: bez auth 401, admin skan działa (licznik +1).
+- **`1cc66c2` cleanup** — usunięty martwy `GpsCzasPracySection.jsx` (542 linie; lazy-import bez renderu → zbędny chunk 20 kB).
+- **`1be3195` fix WYCOFANEGO MODELU** — `ZlecenieUploadBtn` miał zaszyty `claude-sonnet-4-20250514` → Anthropic **404 `not_found_error`** → pusty formularz frachtu („AI nie zaczytuje"). → `claude-sonnet-4-6`. Audyt modeli obu repo: reszta żywa (`claude-haiku-4-5-20251001`, `claude-sonnet-4-5-20250929`, `claude-haiku-4-5`).
+
+### Lekcje
+- **Przy „AI nie zaczytuje" NAJPIERW sprawdź status modelu** (curl → `404 not_found` = wycofany), zanim podejrzysz auth/proxy/cache. Preferuj **aliasy** (`claude-sonnet-4-6`) nad datowane snapshoty (`-YYYYMMDD`) — te bywają wycofywane.
+- Wycofany model zwracał 404 **natychmiast** → maskował, że realne czytanie PDF trwa **~13s**. Po fixie user widział `pending` i sądził że zawiesiło.
+- `verifyIdToken` działa na Vercelu z init `{projectId}` **bez service accounta** (tylko projectId + publiczne klucze Google). `jose` by nie zadziałał out-of-the-box (Firebase = x509, nie JWKS).
+- `onCall` **nie wymusza auth** — trzeba ręcznie `if(!request.auth)`; rola = osobny odczyt Firestore (vbs-invoices nie ma custom claims, inaczej niż main app).
+- **vbs-invoices = OSOBNY projekt Firebase** (`~/Desktop/vbs-invoices.nosync`); service account vbs-stats tam nie działa; deploy funkcji = `firebase deploy --only functions` (NIE przez Vercel/merge).
+- Najszybsza droga do prawdy: pobrać realny uploadowany plik ze **Storage** (firebase-admin) i przepchnąć przez proxy **curl'em** (`--data @plik`) — **node fetch ucina duże body**.
+- **Tacho (rozmowa z kierowcą)**: „ustawienie przeszłości" JEST możliwe, ale **tylko przy wkładaniu karty** (tachograf pyta o okres gdy karty nie było = manual entry). Z kartą w środku zapis leci wyłącznie do przodu. Stąd deklaracje „jazda → pauza + dyspozycyjność" (case Mirka). To manipulacja zapisu = ryzyko przy kontroli ITD.
+
+### ⚠️ Korekta rekomendacji z tej sesji
+Proponowałem dorobić wskaźnik „AI czyta zlecenie (~15s)" — **JUŻ ISTNIEJE** (commit `93d54b9`). **Nie duplikować.** Podobnie `sw.js` jest już **v6 network-first** (07-01), więc stare „stale-while-revalidate" nie obowiązuje.
+
+### Otwarte / następne (realny stan po doczytaniu 07-01 / 07-07 / 07-16)
+- **Domknięcie multi-stop**: admin Trip Summary (App.jsx ~10 refs R2-cap) + `TrackerPublicView` dalej R1+R2 — kierowca odklikuje R3/R4, ale timeline admina i publiczny link ich NIE renderują.
+- **5 zaległych podsumowań do klientów** (awaria maili 01.06–07.07) — ręczny „Wyślij podsumowanie"; user wybiera które (recent: Basten Logistik `m5ja15cl`).
+- ⚠️ **Inbound CSV `imports@inbox.fleetstat.pl`** — mógł paść razem z trialem SendGrida 1.06. **NIESPRAWDZONE.**
+- **Re-upload starych plików DDD** — fix zawyżonego dnia pobrania (07-16) działa tylko na nowe parsowania.
+- **Dług**: bump paczki `firebase-functions` (CF main app już Node 22) + **vbs-invoices CF wciąż Node 20** → decommission **2026-10-30**.
+- 2 skanery AI wciąż na base64 (`analyzeFile` delegacje, `parseOneInvoice` płatności) — latentny 413.
+- Cleanup 16 starych branchy `claude/*`.
