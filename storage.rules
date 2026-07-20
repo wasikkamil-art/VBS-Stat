@@ -1,0 +1,107 @@
+rules_version = '2';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FIREBASE STORAGE — reguły dostępu (wprowadzone 2026-07-20)
+// ═══════════════════════════════════════════════════════════════════════════
+// PRZED: `match /{allPaths=**} { allow read, write: if request.auth != null; }`
+// — każdy zalogowany (łącznie z rolą `kierowca` i `podglad`) mógł czytać, nadpisywać
+// i kasować DOWOLNY plik: cudze CMR-y, umowy, pozwy, delegacje, a przede wszystkim
+// `backups/` czyli pełne zrzuty Firestore.
+//
+// Role czytamy z Custom Claims tokena Auth (`request.auth.token.role`) — tak samo
+// jak `firestore.rules`. Synchronizacja claimów: Cloud Function `onRoleChange`.
+//
+// ⚠️ WAŻNE OGRANICZENIE, o którym trzeba pamiętać:
+// Linki `getDownloadURL()` niosą token w URL-u i **omijają te reguły** — kto ma link,
+// ten otworzy plik także bez logowania. Tak działa publiczny tracker i skanery AI
+// (`{type:"url"}`). Reguły chronią przed dostępem PO ŚCIEŻCE, listowaniem katalogu
+// i nadpisaniem/skasowaniem cudzych plików — nie unieważniają rozdanych linków.
+//
+// Aplikacja woła `getDownloadURL()` WYŁĄCZNIE zaraz po uploadzie (zweryfikowane:
+// 13 wywołań, każde po `uploadBytes`), a `listAll()` nie występuje nigdzie —
+// dlatego zaostrzenie odczytu nie psuje żadnego widoku.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isAuth()     { return request.auth != null; }
+    function role()       { return request.auth.token.role; }
+    function canEdit()    { return isAuth() && (role() == "admin" || role() == "dyspozytor"); }
+    function maxMB(m)     { return request.resource.size < m * 1024 * 1024; }
+
+    // ── BACKUPY — pełne zrzuty Firestore ──────────────────────────────────
+    // Zapisuje wyłącznie Cloud Function `dailyBackup` przez Admin SDK, który
+    // omija reguły. Klient nie ma tu żadnego interesu → odmawiamy wszystkiego.
+    // To była najpoważniejsza dziura: każdy zalogowany mógł pobrać całą bazę.
+    match /backups/{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // ── DANE FIRMOWE — tylko admin i dyspozytor ───────────────────────────
+    // Rola `podglad` traci dostęp PO ŚCIEŻCE, ale nadal otwiera pliki przez
+    // zapisane w Firestore linki `fileUrl` — więc widoki działają bez zmian.
+    match /payments/{allPaths=**} {
+      allow read:  if canEdit();
+      allow write: if canEdit() && maxMB(25);
+    }
+    match /documents/{allPaths=**} {
+      allow read:  if canEdit();
+      allow write: if canEdit() && maxMB(25);
+    }
+    match /docs/{allPaths=**} {
+      allow read:  if canEdit();
+      allow write: if canEdit() && maxMB(25);
+    }
+    match /sprawy/{allPaths=**} {
+      allow read:  if canEdit();
+      allow write: if canEdit() && maxMB(25);
+    }
+    match /imi/{allPaths=**} {
+      allow read:  if canEdit();
+      allow write: if canEdit() && maxMB(25);
+    }
+
+    // ── KIEROWCY ──────────────────────────────────────────────────────────
+    // ⚠️ TODO (2026-07-20): te trzy ścieżki przyjmują zapis od KAŻDEGO zalogowanego,
+    // a nie tylko od roli `kierowca`, bo **claimy są rozjechane z Firestore**:
+    // wszyscy 4 kierowcy mają w tokenie `role: "podglad"`, a w `users/{uid}.role`
+    // wpisane `kierowca`. Warunek `isKierowca()` odciąłby im wgrywanie CMR-ów
+    // i plików DDD z telefonu. Dla tych ścieżek to i tak NIE jest regresja —
+    // przed 2026-07-20 cały bucket był otwarty dla każdego zalogowanego.
+    // Po naprawieniu claimów zacieśnić do `(isKierowca() || canEdit())`.
+
+    // Zdjęcia z trasy: `driverPhotos/{frachtId}/{typ}_{ts}_{nazwa}`.
+    match /driverPhotos/{frachtId}/{fileName} {
+      allow read:  if isAuth();
+      allow write: if isAuth() && maxMB(15);
+    }
+
+    // Pliki DDD z tachografu: `driverDdd/{ts}_{nazwa}` (płaskie).
+    // Wgrywa kierowca (mobile) albo admin (GpsDddSection). Czyta tylko biuro —
+    // to dane z karty kierowcy, inni kierowcy nie mają po co ich widzieć.
+    match /driverDdd/{fileName} {
+      allow read:  if canEdit();
+      allow write: if isAuth() && maxMB(50);
+    }
+
+    // Dokumenty kierowcy: `driverDocs/{email}/{typ}_{ts}_{nazwa}` — ścieżka
+    // niesie e-mail, więc ograniczamy każdego do WŁASNEGO katalogu.
+    // To działa niezależnie od claimu `role`, bo opiera się na `token.email`.
+    match /driverDocs/{email}/{fileName} {
+      allow read:  if canEdit() || (isAuth() && request.auth.token.email == email);
+      allow write: if (canEdit() || (isAuth() && request.auth.token.email == email)) && maxMB(15);
+    }
+
+    // ── CZAT — załączniki w pokojach, każdy zalogowany ────────────────────
+    match /chat/{roomId}/{fileName} {
+      allow read:  if isAuth();
+      allow write: if isAuth() && maxMB(15);
+    }
+
+    // ── DOMYŚLNIE: NIC ────────────────────────────────────────────────────
+    // Nowa ścieżka w kodzie = świadoma decyzja + wpis wyżej, nie cichy dostęp.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

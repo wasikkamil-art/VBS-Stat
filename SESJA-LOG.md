@@ -1892,3 +1892,62 @@ Największy PDF w Storage: **4,84 MB** (jako base64 → 6,45 MB).
 nagłówek `Authorization`** → `/api/claude` zwraca `401 Brak tokena uwierzytelnienia`.
 Przy testach proxy strzelaj **bezpośrednio w `www.fleetstat.pl`**. Apka tego nie dotyczy
 (woła relatywnie `/api/claude`, same-origin).
+
+## 2026-07-20 (cd. 4) — Storage: reguły dostępu zamiast otwartego bucketu
+
+Wypłynęło przy fixie skanerów AI (sprawdzałem, czy ścieżka `imi/` przejdzie).
+
+### Stan PRZED
+```
+match /{allPaths=**} { allow read, write: if request.auth != null; }
+```
+Każdy zalogowany — **łącznie z kierowcą i rolą `podglad`** — mógł czytać, nadpisywać
+i kasować **dowolny** plik. Najpoważniejsze: `backups/` (90 plików, 30,8 MB) to **pełne
+zrzuty Firestore**; `listAll()` i `getDownloadURL()` były dozwolone, więc dało się je
+wylistować i pobrać. Firestore miał role-gating, Storage **żadnego**.
+
+### Rozpoznanie przed pisaniem reguł
+9 prefiksów: `payments` 223 pliki · `documents` 183 · `driverPhotos` 126 · `backups` 90 ·
+`driverDdd` 37 · `sprawy` 14 · `docs` 10 · `chat` 3 · `driverDocs` 1 (+ nowy `imi`).
+Zweryfikowane, że aplikacja woła `getDownloadURL()` **wyłącznie zaraz po uploadzie**
+(13 wywołań, każde po `uploadBytes`) i **nigdzie nie używa `listAll()`** → zaostrzenie
+odczytu nie psuje żadnego widoku.
+
+### Wdrożone
+`backups` = nikt z klienta (pisze tylko CF przez Admin SDK, który omija reguły) ·
+`payments`/`documents`/`docs`/`sprawy`/`imi` = admin+dyspozytor · `driverDocs` ograniczone
+do **własnego katalogu po `token.email`** · `driverPhotos`/`driverDdd`/`chat` = zalogowani ·
+domyślnie **deny** · limity rozmiaru per ścieżka.
+
+Weryfikacja **przed** wdrożeniem: **39 przypadków przez Rules TestRuleset API, 39/39**.
+
+### 🔴 WPADKA — i czego uczy
+Pierwsza wersja używała `isKierowca()` (claim `role == "kierowca"`). Testy przeszły 33/33,
+bo testowałem **założony** stan claimów. Po wdrożeniu sprawdziłem stan **rzeczywisty**:
+
+| konto | claim w tokenie | rola w Firestore |
+|---|---|---|
+| volodymyr.ivansky | `podglad` | **kierowca** |
+| siarhei.kolabu | `podglad` | **kierowca** |
+| miroslaw.teper | `podglad` | **kierowca** |
+| volodymyr.lukashuchuk | `podglad` | **kierowca** |
+
+**Wszyscy 4 kierowcy mają claim `podglad`.** Przez kilka minut na produkcji obowiązywały
+reguły, które **odcinały kierowcom wgrywanie CMR-ów i plików DDD**. Natychmiast poprawione
+(`isAuth()` na trzech ścieżkach kierowcy — dla nich to i tak nie regresja, bucket był otwarty)
+i ponownie wdrożone. `driverDocs` zostaje ograniczone po `token.email`, bo to działa
+**niezależnie od claimu**.
+
+**Lekcja: test reguł na wyobrażonym stanie tożsamości jest bezwartościowy.**
+Rules API sprawdza logikę reguł, nie to, co realnie siedzi w tokenach.
+Przy każdej regule opartej o claim — NAJPIERW `listUsers()` i zobacz prawdę.
+
+### ⚠️ OTWARTE — dwa niezależne problemy
+1. **Claimy kierowców rozjechane z Firestore** (`podglad` vs `kierowca`). To dotyczy też
+   `firestore.rules`, które chodzą po tym samym claimie — czyli kierowcy mają dziś w Firestore
+   uprawnienia roli `podglad`, nie `kierowca`. Trzeba ustalić, czy `onRoleChange` nie zadziałał,
+   czy konta powstały jako `podglad` i zostały awansowane tylko w Firestore.
+   **Nie ruszałem — zmiana claimu zmienia uprawnienia Firestore, to osobna decyzja.**
+2. **`firebase.json` jest w `.gitignore`** (linia 63) → konfiguracja deployu (w tym nowy blok
+   `"storage"`) **nie jest w repo**. Po świeżym klonie `firebase deploy --only storage` nie
+   zadziała bez ręcznego dopisania. Do przemyślenia czy nie odgitignorować.
