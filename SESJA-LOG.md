@@ -2242,3 +2242,50 @@ myto staje się realne bez zmian w kodzie.
 **Co NIEzweryfikowane end-to-end**: realny call TollGuru (user zakłada konto + wkleja klucz).
 Fallback = ścieżka już działająca. **TODO usera**: konto tollguru.com → klucz API → wklej w Kalkulator
 (sekcja Stawki, pole „Klucz TollGuru"); sprawdzić limit free tier vs ~150–600 zapytań/mc.
+
+## 2026-07-21 (cd.3) — Kalkulator: TollGuru live + myto per klasa auta + flota (PRZERWANE na GPS)
+
+### TollGuru — integracja LIVE (commity 66c8d0f→2a48682)
+- Klucz trial usera `tg_...` (w config/toll, zapisany przez skrypt admin). **Endpoint działający:
+  `origin-destination-waypoints`** (NIE `complete-polyline-from-mapping-service` = 403 „not authorized
+  for TollTally" — osobny produkt). Wysyłamy `from/to/waypoints {lat,lng}`, nie polyline.
+- Odpowiedź: `routes[0].tolls[]` (country ISO3, tagCost/cashCost, waluta kraju startu np. PLN).
+  CF `tollProxy` agreguje per kraj → EUR (ISO3→ISO2 + kursy zgrubne), preferuje tagCost>cashCost.
+- **LIMIT TRIALU = 15 transakcji/DZIEŃ** (rolling 24h, nie kalendarz). Za mało na produkcję,
+  starczy na kalibrację. Dziś wyczerpany (testy). Reset ~24h od pierwszego użycia.
+- **Brak darmowego-na-zawsze API** (Tollsmart=trial 10k/mc+Zach.Europa, OpenTollData=tylko FR WIP,
+  Valhalla=bez cen). Plan: trial→kalibracja→flat-rate free. TODO: klucz regenerować (był w czacie).
+
+### Myto PER KLASA auta (kluczowa poprawka)
+Flota to lekkie auta, nie TIR-y. `vehicle.type`: v1/v3/v5=Solo (Iveco 70C18 solówki ~7,2t),
+**v4 TK 314CL=Bus** (+przyczepa). Flat-rate liczył WSZYSTKIM myto jak zestaw >12t → bus Strawczyn-Paryż
+pokazywał 431€ (user: „tyle nie płacę przez cały miesiąc").
+- **Dwie tabele**: `tollPerKm` (solówka lekka: DE 0.13/FR 0.08/PL 0.05...) + `tollPerKmBus`
+  (bus: DE 0/PL 0, płaci głównie péage FR/IT/ES + winiety AT/CH). Wybór wg `vehicle.type`.
+- TollGuru vehicleType też per klasa: Bus→2AxlesAuto, Solo→2AxlesTruck.
+- Efekt: bus Strawczyn-Paryż myto **~21€** (tylko FR péage) zamiast 431€. Total ~466€ (444 paliwo+21 myto).
+
+### ⚠️ OTWARTE PYTANIE (do dokończenia po GPS)
+User zapytał: „myta w Niemczech nie ma, w Polsce też?" — czyli DE/PL=0 dla busa może być ZŁE.
+Ustawiłem busa jako ZWOLNIONY z Maut towarowego (dobre dla przewozu OSÓB). **ALE jeśli TK 314CL
+wozi TOWAR (bus+przyczepa dla frachtu, ≥3,5t)** → płaci Maut DE + e-TOLL PL w niskiej klasie, NIE zero.
+**Do potwierdzenia z userem:** czy TK 314CL płaci myto w DE/PL realnie?
+- TAK → potraktować jak lekki pojazd towarowy = stawki jak solówka (DE 0.13/PL 0.05), nie zero.
+- NIE → zostaje jak jest (péage tylko FR/IT/ES).
+Najlepiej: NegoMetal faktura myta dla TK 314CL → realne kwoty per kraj. NIE zgadywać dalej
+(już 2× źle: najpierw za wysoko jako TIR, potem może za nisko jako bus-pasażerski).
+
+### Flota — archiwizacja (nie kasowanie!)
+User: „zostaw tylko te 4, nie kasuj na stałe". Zarchiwizowane **TK 130EF (v2) + TK 315CL (v6)**
+przez `archived:true` (transakcja, długość 6→6 bez zmian, historia 111+25 frachtów / 137+79 kosztów
+nietknięta). Aktywne: WGM 0475M, WGM 5367K, TK 314CL, WGM 0507M. Mechanizm: `vehicles.filter(v=>!v.archived)`
+(sekcja Archiwum osobno). Dropdown Pojazd w kalkulatorze też filtruje archived.
+
+### Inne poprawki kalkulatora dziś
+- Selektor „2–9 osi" USUNIĘTY (flota=solówki). Wybór pojazdu OBOWIĄZKOWY (bez auta spalanie=domyślne 30=bzdury).
+- Skrypty read-only w repo (gitignored): diagnose_calibrate_toll.mjs, diagnose_calibrate_overlap.mjs,
+  diagnose_frachty_km.mjs (frachty jako baza km per kraj — działa, ale skad wpisywany tylko sty-mar).
+
+### Bug GPS breadcrumbs (task_fdf05d25) — user odpalił w osobnej sesji, WRACAMY DO GPS TERAZ
+Breadcrumbs v3 zanieczyszczone stale-point 47.914,3.714 → skoki 10000 km/h, zawyża dystans 10×,
+psuje mapę trasy. To był kontekst gdy user przełączył na „problem z GPS".
