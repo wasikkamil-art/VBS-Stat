@@ -267,6 +267,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
 
   const compute = async () => {
     if (waypoints.length < 2) { showToast("Dodaj co najmniej 2 punkty trasy"); return; }
+    if (!vehicleId) { showToast("Wybierz pojazd — bez niego spalanie jest zmyślone"); return; }
     setComputing(true);
     setResult(null);
     setProgress(null);
@@ -412,7 +413,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
             <label className="text-xs text-gray-500">
               Pojazd
               <select value={vehicleId} onChange={(e) => onPickVehicle(e.target.value)} className="mt-1 w-full px-2 py-2 rounded-lg border border-gray-200 text-sm text-gray-700">
-                <option value="">— (ręcznie)</option>
+                <option value="">— wybierz pojazd —</option>
                 {vehicles.filter((v) => !v.archived).map((v) => <option key={v.id} value={v.id}>{v.name || v.plate || v.id}</option>)}
               </select>
             </label>
@@ -422,8 +423,10 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
             </label>
           </div>
 
-          <button onClick={compute} disabled={computing || waypoints.length < 2} className="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium disabled:opacity-50">
-            {computing ? (progress ? `Analizuję kraje… ${progress.done}/${progress.total}` : "Liczę trasę…") : "Oblicz koszt trasy"}
+          <button onClick={compute} disabled={computing || waypoints.length < 2 || !vehicleId} className="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium disabled:opacity-50">
+            {computing ? (progress ? `Analizuję kraje… ${progress.done}/${progress.total}` : "Liczę trasę…")
+              : !vehicleId ? "Wybierz pojazd, żeby policzyć"
+              : "Oblicz koszt trasy"}
           </button>
           {computing && progress && <p className="text-[11px] text-gray-400 mt-2 text-center">Reverse-geocode punktów trasy (Nominatim, ~1/s)</p>}
         </div>
