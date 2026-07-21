@@ -2090,3 +2090,38 @@ Lekcja: skrypt dotykający produkcji ma **najpierw filtrować cele**, potem pisa
 `functions/index.js:1186/1547/1822` mają `["admin","dyspozytor"].includes(callerRole)` —
 to **sprawdzenia uprawnień**, nie rejestr ról. Nie duplikują listy ról, tylko wyrażają politykę
 „kto może wywołać". Ujednolicenie ich to osobny temat (np. helper `canEdit(callerRole)`).
+
+## 2026-07-20 (cd. 8) — Alert budżetu 100% + fix mobile GPS + decyzja o kroku 2
+
+### Alert „100% of budget reached" — zdiagnozowany, NIE jest awarią
+Budżet 25 zł = **próg alertowy, nie limit**. Nic się nie wyłącza. To NIE problem miejsca:
+Storage 0,425 GB / 5 GB. Koszt robią **odczyty Firestore**.
+
+Pomiar dobowy (REST Monitoring): suma 2,39 mln — ale **piki 13:41 (1,7 mln) i 15:41 (474k)
+to MOJE skrypty diagnostyczne** (count() na kolekcji 20k, listUsers, re-sync claimów), nie ruch
+aplikacji. Realny ruch: godziny pracy 07–12 = 21–55k/h (~180k), reszta doby ~400/h.
+**Realny koszt ~7 zł/mies** (250k/dobę − 50k darmowe = 200k płatne × $0.03/100k × 30 × 4 zł/USD).
+Po 16:41 (fix kierowców) spadek do ~400/h, ale to wieczór — realny efekt pokaże jutrzejszy pomiar.
+
+### Decyzja: A + budżet
+- **Krok 2 (okno dla admina/dyspozytora) — osobna sesja.** Wymaga refaktoru
+  `MultiDayActivityView` (własne zapytanie), inaczej ciche obcięcie historii tachografu.
+  Zapisane w memory `project_firestore_cost_krok2.md`. Pomiar: scheduled task 2026-07-21 12:00.
+- **Budżet-alert 25 → 100 zł** — Budget API w projekcie WYŁĄCZONE (`PERMISSION_DENIED`,
+  „has not been used before"). Nie włączam kolejnego API dla jednej liczby na koncie
+  rozliczeniowym → user robi ręcznie w konsoli (Billing → Budżety → edytuj kwotę).
+
+### Fix mobile: GPS w nawigacji + layout (2 commity, PROD)
+- `608c418` — zakładka `gps` **nie była w pasku mobilnym** (sidebar `hidden md:flex`,
+  dolny pasek jej nie zawierał) → z telefonu nie dało się wejść w GPS. Dodane, gate `canSeeTab`.
+- `79e3dfe` — sam widok „wyglądał ochydnie" na telefonie (screen usera): korzeń `flex gap-4`
+  nie składał się w kolumnę, panel `w-56 flex-shrink-0` (224px sztywno), podzakładki `flex-1`
+  łamały „Czas pracy kierowcy" na 3 linie, toolbar DDD łamał napisy pionowo. Wszystko
+  → `flex-col md:flex-row`, `w-full md:w-56`, poziomy scroll podzakładek, `whitespace-nowrap`.
+  Zweryfikowane: klasy responsywne obecne w wygenerowanym CSS (arbitralne wartości bywają
+  wycinane). ⚠️ NIE potwierdzone wizualnie na telefonie — widok za loginem, haseł nie wpisuję.
+
+### Zauważone przy okazji (NIE ruszone)
+- Niebieski FAB czatu **zasłania dolne menu** na telefonie (widać na screenie — przykrywa
+  „Kierowcy"/„Czat"). Dotyczy wszystkich zakładek, nie tylko GPS. Osobna zmiana.
+- Mapa GPS ma sztywne `height: 500px` — na telefonie działa, ale zajmuje dużo.
