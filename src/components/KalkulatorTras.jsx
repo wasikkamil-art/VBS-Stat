@@ -14,7 +14,8 @@
 // Wydzielone jako osobny lazy chunk — NIE puchnie App.jsx (cel code-splitting).
 
 import { useState, useEffect, useRef } from "react";
-import { db } from "../firebase";
+import { httpsCallable } from "firebase/functions";
+import { db, functions } from "../firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { logAction } from "../utils/logAction";
 
@@ -159,6 +160,33 @@ const fmtEUR = (n) => (n == null ? "—" : n.toLocaleString("pl-PL", { minimumFr
 const fmtEUR2 = (n) => (n == null ? "—" : n.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €");
 const fmtDatePL = (iso) => { try { return new Date(iso).toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric" }); } catch { return iso; } };
 
+// Typy pojazdu wg TollGuru (osie ciężarówki).
+const VEHICLE_TYPES = [
+  ["5AxlesTruck", "Ciężarówka 5-osiowa (zestaw ~40t)"],
+  ["4AxlesTruck", "Ciężarówka 4-osiowa"],
+  ["3AxlesTruck", "Ciężarówka 3-osiowa"],
+  ["2AxlesTruck", "Ciężarówka 2-osiowa"],
+  ["6AxlesTruck", "Ciężarówka 6-osiowa"],
+];
+
+// Enkoder Google polyline (precyzja 5) z listy [[lat,lon],...] — dla TollGuru.
+function encodePolyline(coords) {
+  let lastLat = 0, lastLon = 0, out = "";
+  const enc = (val) => {
+    let v = val < 0 ? ~(val << 1) : (val << 1);
+    let s = "";
+    while (v >= 0x20) { s += String.fromCharCode((0x20 | (v & 0x1f)) + 63); v >>= 5; }
+    s += String.fromCharCode(v + 63);
+    return s;
+  };
+  for (const [lat, lon] of coords) {
+    const la = Math.round(lat * 1e5), lo = Math.round(lon * 1e5);
+    out += enc(la - lastLat) + enc(lo - lastLon);
+    lastLat = la; lastLon = lo;
+  }
+  return out;
+}
+
 export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate = null, canEdit = false, showToast = () => {}, currentUser = null }) {
   const [waypoints, setWaypoints] = useState([]); // {id,label,lat,lon}
   const [addInput, setAddInput] = useState("");
@@ -173,6 +201,9 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
   const [ratesOpen, setRatesOpen] = useState(false);
   const [savingRates, setSavingRates] = useState(false);
   const [ratesUpdatedAt, setRatesUpdatedAt] = useState(null); // data ostatniej aktualizacji cen (ISO) lub null = domyślne
+  const [vehicleType, setVehicleType] = useState("5AxlesTruck"); // typ pojazdu dla TollGuru
+  const [tollKeyInput, setTollKeyInput] = useState("");
+  const [savingKey, setSavingKey] = useState(false);
 
   const mapRef = useRef(null);
   const mapObjRef = useRef(null);
@@ -193,6 +224,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
           });
           if (d.defaultConsumption) setConsumption(d.defaultConsumption);
           if (d.updatedAt) setRatesUpdatedAt(d.updatedAt);
+          if (d.vehicleType) setVehicleType(d.vehicleType);
         }
       } catch (e) { console.warn("[kalkulator] config load:", e); }
     })();
@@ -270,6 +302,16 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
       setProgress({ done: 0, total: 14 });
       const { perCountry, unknownKm } = await countrySplit(route.coordinates, distanceKm, (done, total) => setProgress({ done, total }));
 
+      // ── Myto: spróbuj TollGuru (realne dane), fallback na flat-rate €/km ──
+      let tollByCountry = null; // {cc: EUR} gdy TollGuru zadziała
+      let tollSource = "flat";
+      try {
+        const polyline = encodePolyline(route.coordinates);
+        const call = httpsCallable(functions, "tollProxy");
+        const res = (await call({ polyline, vehicleType })).data;
+        if (res?.success && res.perCountry) { tollByCountry = res.perCountry; tollSource = "tollguru"; }
+      } catch (e) { console.warn("[kalkulator] tollProxy:", e?.message || e); }
+
       const cons = parseFloat(consumption) || DEFAULT_RATES.defaultConsumption;
       const avgFuel = Object.values(rates.fuelPrice).reduce((a, b) => a + b, 0) / Object.values(rates.fuelPrice).length;
       const rows = [];
@@ -279,12 +321,21 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
       for (const [cc, km] of entries) {
         const liters = (km * cons) / 100;
         const price = cc === "??" ? avgFuel : (rates.fuelPrice[cc] ?? avgFuel);
-        const toll = cc === "??" ? 0 : (rates.tollPerKm[cc] ?? 0);
         const fuelCost = liters * price;
-        const tollCost = km * toll;
+        // Myto: TollGuru per kraj jeśli dostępne, inaczej flat-rate km × stawka.
+        const tollCost = tollByCountry
+          ? (tollByCountry[cc] || 0)
+          : (cc === "??" ? 0 : km * (rates.tollPerKm[cc] ?? 0));
         fuelTotal += fuelCost;
         tollTotal += tollCost;
         rows.push({ cc, km, liters, price, fuelCost, tollCost });
+      }
+      // TollGuru może zwrócić myto dla kraju, którego nie wykrył podział km — dolicz do sumy.
+      if (tollByCountry) {
+        const seen = new Set(entries.map(([cc]) => cc));
+        for (const [cc, eur] of Object.entries(tollByCountry)) {
+          if (!seen.has(cc) && eur > 0) { tollTotal += eur; rows.push({ cc, km: 0, liters: 0, price: 0, fuelCost: 0, tollCost: eur }); }
+        }
       }
       setResult({
         geometry: route.coordinates,
@@ -296,6 +347,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
         grand: fuelTotal + tollTotal,
         cons,
         consBasis,
+        tollSource,
         hasUnknown: unknownKm > 0.5,
       });
     } catch (e) {
@@ -316,6 +368,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
         tollPerKm: rates.tollPerKm,
         defaultConsumption: rates.defaultConsumption,
         tankL: rates.tankL,
+        vehicleType,
         updatedAt: now,
         updatedBy: currentUser?.email || null,
       }, { merge: true });
@@ -326,6 +379,21 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
       console.error("[kalkulator] saveRates:", e);
       showToast("❌ Nie udało się zapisać stawek");
     } finally { setSavingRates(false); }
+  };
+
+  // ── Admin: zapis klucza TollGuru przez CF (klient nie czyta klucza). ──
+  const saveTollKey = async () => {
+    const k = tollKeyInput.trim();
+    if (!k) { showToast("Wklej klucz API TollGuru"); return; }
+    setSavingKey(true);
+    try {
+      await httpsCallable(functions, "setTollKey")({ apiKey: k });
+      setTollKeyInput("");
+      showToast("✅ Klucz TollGuru zapisany — myto pójdzie z realnych danych");
+    } catch (e) {
+      console.error("[kalkulator] setTollKey:", e);
+      showToast("❌ Nie udało się zapisać klucza (tylko admin)");
+    } finally { setSavingKey(false); }
   };
 
   const grandPLN = result && eurRate ? result.grand * eurRate : null;
@@ -378,6 +446,12 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
               Spalanie L/100
               <input type="number" step="0.1" value={consumption} onChange={(e) => { setConsumption(e.target.value); setConsBasis("wpisane ręcznie"); }} className="mt-1 w-full px-2 py-2 rounded-lg border border-gray-200 text-sm text-gray-700" />
             </label>
+            <label className="text-xs text-gray-500 col-span-2">
+              Typ pojazdu (myto)
+              <select value={vehicleType} onChange={(e) => setVehicleType(e.target.value)} className="mt-1 w-full px-2 py-2 rounded-lg border border-gray-200 text-sm text-gray-700">
+                {VEHICLE_TYPES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+              </select>
+            </label>
           </div>
 
           <button onClick={compute} disabled={computing || waypoints.length < 2} className="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium disabled:opacity-50">
@@ -404,6 +478,9 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
             <div className="text-sm text-gray-500">
               {result.distanceKm.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} km · {result.durationH.toFixed(1)} h · {result.cons} L/100
             </div>
+            {result.tollSource === "tollguru"
+              ? <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-[11px] font-medium">myto: TollGuru realne</span>
+              : <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[11px] font-medium">myto: szacunek flat-rate</span>}
           </div>
 
           <div className="overflow-x-auto">
@@ -457,12 +534,23 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
               </p>
             </div>
             <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
-              <div className="text-xs font-semibold text-gray-700 mb-1">🛣️ Myto — jak liczone</div>
-              <p className="text-[11px] leading-relaxed text-gray-500">
-                <b>km w kraju × stawka €/km tego kraju</b> (tabela stawek poniżej).<br />
-                Stawki to <b>uśredniony koszt dla zestawu ciężarowego &gt;12 t</b> na płatnej sieci (autostrady/drogi objęte opłatą).<br />
-                <b>Nie</b> uwzględniają klasy emisji EURO, liczby osi, ani tego, że część dróg jest bezpłatna — dlatego to szacunek do dostrojenia (Faza 3: kalibracja o realne trasy).
-              </p>
+              <div className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-2">
+                🛣️ Myto — jak liczone
+                {result.tollSource === "tollguru"
+                  ? <span className="px-1.5 py-0.5 rounded bg-green-100 text-green-700 text-[10px] font-medium">TollGuru · realne</span>
+                  : <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-medium">szacunek · flat-rate</span>}
+              </div>
+              {result.tollSource === "tollguru" ? (
+                <p className="text-[11px] leading-relaxed text-gray-500">
+                  <b>Realne dane TollGuru</b> — trasa dopasowana do faktycznych płatnych dróg per kraj/operator, wg typu pojazdu (osie/waga). Uwzględnia płatne odcinki, pomija bezpłatne (péage koncesyjne FR/IT/ES liczone poprawnie).<br />
+                  Kwoty spoza EUR przeliczone zgrubnym kursem.
+                </p>
+              ) : (
+                <p className="text-[11px] leading-relaxed text-gray-500">
+                  <b>km w kraju × stawka €/km tego kraju</b> (tabela stawek poniżej) — <b>fallback</b>, bo TollGuru niedostępne (brak klucza / limit / błąd API).<br />
+                  Stawki to uśredniony koszt zestawu &gt;12 t, <b>nie</b> uwzględniają klasy EURO/osi/darmowych dróg — dlatego to szacunek. Wklej klucz TollGuru niżej, by liczyć z realnych danych.
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -476,13 +564,29 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
         </button>
         {ratesOpen && (
           <div className="mt-4">
+            {canEdit && (
+              <div className="mb-4 rounded-xl bg-blue-50/50 border border-blue-100 p-3">
+                <div className="text-xs font-semibold text-gray-700 mb-1">🔑 Klucz TollGuru (realne myto)</div>
+                <p className="text-[11px] text-gray-500 mb-2">
+                  Załóż konto na <b>tollguru.com</b> → wygeneruj klucz API → wklej tutaj. Wtedy myto liczy się z <b>realnych płatnych dróg</b> zamiast flat-rate. Klucz zapisuje się bezpiecznie (przez serwer, nie w przeglądarce).
+                </p>
+                <div className="flex gap-2">
+                  <input type="password" value={tollKeyInput} onChange={(e) => setTollKeyInput(e.target.value)} placeholder="x-api-key TollGuru" autoComplete="off"
+                    className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100" />
+                  <button onClick={saveTollKey} disabled={savingKey} className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm disabled:opacity-50">
+                    {savingKey ? "…" : "Zapisz klucz"}
+                  </button>
+                </div>
+                <p className="text-[11px] text-gray-400 mt-2">Poniższe stawki €/km działają jako <b>fallback</b>, gdy TollGuru jest niedostępne.</p>
+              </div>
+            )}
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-xs text-gray-400 border-b border-gray-100">
                     <th className="text-left font-medium py-1.5">Kraj</th>
                     <th className="text-right font-medium">Diesel €/L</th>
-                    <th className="text-right font-medium">Myto €/km</th>
+                    <th className="text-right font-medium">Myto €/km (fallback)</th>
                   </tr>
                 </thead>
                 <tbody>

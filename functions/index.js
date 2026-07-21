@@ -1263,6 +1263,104 @@ exports.gpsProxy = onCall(
   }
 );
 
+// ── TOLL PROXY — TollGuru Map-Independent Toll API (realne myto per kraj) ──
+//    Bierze zakodowaną polyline trasy (z OSRM) + typ pojazdu, zwraca realne
+//    myto zagregowane per kraj (w EUR). Klucz API z config/toll.apiKey (admin).
+//    Kalkulator tras używa tego jako główne źródło myta; flat-rate €/km = fallback.
+const TOLLGURU_URL = "https://apis.tollguru.com/toll/v2/route-encoded-polyline";
+// Zgrubne kursy do EUR (myto bywa w walutach krajowych; szacunek, nie księgowość).
+const TO_EUR = { EUR:1, PLN:0.233, CZK:0.040, HUF:0.0026, CHF:1.05, GBP:1.17, DKK:0.134, SEK:0.088, NOK:0.086, RON:0.20, BGN:0.51 };
+
+exports.tollProxy = onCall(
+  { region: "europe-west1", timeoutSeconds: 30 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musisz byc zalogowany.");
+    if (!["admin", "dyspozytor"].includes(request.auth.token.role)) {
+      throw new HttpsError("permission-denied", "Brak dostepu.");
+    }
+    const { polyline, vehicleType, departureTime } = request.data || {};
+    if (!polyline || typeof polyline !== "string") {
+      throw new HttpsError("invalid-argument", "Wymagana zakodowana polyline trasy.");
+    }
+
+    const db = getFirestore();
+    const cfg = (await db.doc("config/toll").get()).data() || {};
+    const apiKey = cfg.apiKey;
+    if (!apiKey) {
+      // Klucz nieustawiony — kalkulator spadnie na flat-rate.
+      return { success: false, reason: "no-key" };
+    }
+
+    const body = {
+      source: "osrm",
+      polyline,
+      vehicleType: vehicleType || "5AxlesTruck",
+      departure_time: departureTime || new Date().toISOString(),
+    };
+
+    let data;
+    try {
+      const resp = await fetch(TOLLGURU_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(20000),
+      });
+      const text = await resp.text();
+      if (!resp.ok) {
+        console.error("tollProxy: TollGuru", resp.status, text.slice(0, 300));
+        return { success: false, reason: "api-error", status: resp.status };
+      }
+      data = JSON.parse(text);
+    } catch (e) {
+      console.error("tollProxy: fetch error", e.message);
+      return { success: false, reason: "fetch-error", error: e.message };
+    }
+
+    // Agreguj tolls[] per kraj → EUR. Preferuj tagCost (OBU) > cashCost.
+    const tolls = data?.route?.tolls || data?.tolls || [];
+    const perCountry = {};
+    let total = 0, converted = false;
+    for (const t of tolls) {
+      const cc = String(t.country || "??").toUpperCase();
+      const cur = String(t.currency || "EUR").toUpperCase();
+      const raw = (typeof t.tagCost === "number" && t.tagCost > 0) ? t.tagCost
+        : (typeof t.cashCost === "number" ? t.cashCost : 0);
+      const rate = TO_EUR[cur] ?? 1;
+      if (cur !== "EUR") converted = true;
+      const eur = raw * rate;
+      perCountry[cc] = (perCountry[cc] || 0) + eur;
+      total += eur;
+    }
+    return {
+      success: true,
+      perCountry,
+      total,
+      tollCount: tolls.length,
+      currencyConverted: converted,
+      vehicleType: body.vehicleType,
+    };
+  }
+);
+
+// ── SET TOLL KEY (admin) — zapis klucza TollGuru bez czytania z klienta ──
+exports.setTollKey = onCall(
+  { region: "europe-west1" },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musisz byc zalogowany.");
+    if (request.auth.token.role !== "admin") throw new HttpsError("permission-denied", "Tylko admin.");
+    const { apiKey } = request.data || {};
+    if (typeof apiKey !== "string") throw new HttpsError("invalid-argument", "Wymagany apiKey.");
+    const db = getFirestore();
+    await db.doc("config/toll").set({
+      apiKey: apiKey.trim(),
+      updatedAt: new Date().toISOString(),
+      updatedBy: request.auth.token.email || null,
+    }, { merge: true });
+    return { success: true, hasKey: !!apiKey.trim() };
+  }
+);
+
 // ── GPS CONFIG SETUP (one-time admin callable) ──
 exports.setGpsConfig = onCall(
   { region: "europe-west1" },
