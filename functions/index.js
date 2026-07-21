@@ -1299,7 +1299,7 @@ exports.tollProxy = onCall(
       from: pts[0],
       to: pts[pts.length - 1],
       ...(pts.length > 2 ? { waypoints: pts.slice(1, -1) } : {}),
-      vehicleType: vehicleType || "5AxlesTruck",
+      vehicleType: vehicleType || "2AxlesTruck", // domyślnie solówka 2-os (flota Iveco 70C18)
       departure_time: departureTime || new Date().toISOString(),
     };
 

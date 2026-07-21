@@ -160,13 +160,12 @@ const fmtEUR = (n) => (n == null ? "—" : n.toLocaleString("pl-PL", { minimumFr
 const fmtEUR2 = (n) => (n == null ? "—" : n.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €");
 const fmtDatePL = (iso) => { try { return new Date(iso).toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric" }); } catch { return iso; } };
 
-// Typy pojazdu wg TollGuru (osie ciężarówki).
+// Typy pojazdu wg TollGuru — pod flotę VBS (solówki 2-osiowe Iveco 70C18 ~7,2t).
+// Bus+przyczepa to inna klasa — dodane na wypadek gdyby liczyć trasę busa.
 const VEHICLE_TYPES = [
-  ["5AxlesTruck", "Ciężarówka 5-osiowa (zestaw ~40t)"],
-  ["4AxlesTruck", "Ciężarówka 4-osiowa"],
-  ["3AxlesTruck", "Ciężarówka 3-osiowa"],
-  ["2AxlesTruck", "Ciężarówka 2-osiowa"],
-  ["6AxlesTruck", "Ciężarówka 6-osiowa"],
+  ["2AxlesTruck", "Solówka 2-osiowa (Iveco 70C18 ~7,2t)"],
+  ["3AxlesTruck", "Solówka 3-osiowa (cięższa)"],
+  ["2AxlesAuto", "Bus / bus + przyczepa"],
 ];
 
 
@@ -184,7 +183,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
   const [ratesOpen, setRatesOpen] = useState(false);
   const [savingRates, setSavingRates] = useState(false);
   const [ratesUpdatedAt, setRatesUpdatedAt] = useState(null); // data ostatniej aktualizacji cen (ISO) lub null = domyślne
-  const [vehicleType, setVehicleType] = useState("5AxlesTruck"); // typ pojazdu dla TollGuru
+  const [vehicleType, setVehicleType] = useState("2AxlesTruck"); // domyślnie solówka 2-os (flota Iveco 70C18)
   const [tollKeyInput, setTollKeyInput] = useState("");
   const [savingKey, setSavingKey] = useState(false);
 
@@ -429,7 +428,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
               <input type="number" step="0.1" value={consumption} onChange={(e) => { setConsumption(e.target.value); setConsBasis("wpisane ręcznie"); }} className="mt-1 w-full px-2 py-2 rounded-lg border border-gray-200 text-sm text-gray-700" />
             </label>
             <label className="text-xs text-gray-500 col-span-2">
-              Typ pojazdu (myto)
+              Klasa pojazdu do myta
               <select value={vehicleType} onChange={(e) => setVehicleType(e.target.value)} className="mt-1 w-full px-2 py-2 rounded-lg border border-gray-200 text-sm text-gray-700">
                 {VEHICLE_TYPES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
               </select>
