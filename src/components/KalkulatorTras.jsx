@@ -288,20 +288,22 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
       setProgress({ done: 0, total: 14 });
       const { perCountry, unknownKm } = await countrySplit(route.coordinates, distanceKm, (done, total) => setProgress({ done, total }));
 
-      // ── Klasa auta: bus vs solówka → inna tabela myta + inna klasa TollGuru ──
+      // ── Klasa auta: bus vs solówka → inna tabela myta + inny profil PTV ──
       const selVeh = vehicles.find((v) => v.id === vehicleId);
       const isBus = selVeh?.type === "Bus";
       const tollTable = isBus ? rates.tollPerKmBus : rates.tollPerKm;
-      const tgVehicleType = isBus ? "2AxlesAuto" : "2AxlesTruck";
 
-      // ── Myto: spróbuj TollGuru (realne dane), fallback na flat-rate €/km ──
-      let tollByCountry = null; // {cc: EUR} gdy TollGuru zadziała
+      // ── Myto: PTV Developer (oficjalne stawki UE, per kraj) — tylko dla solówek.
+      //    Bus = winiety (koszt roczny) → per trasa 0, więc PTV nie wołamy.
+      let tollByCountry = null; // {cc: EUR} gdy PTV zadziała
       let tollSource = "flat";
-      try {
-        const call = httpsCallable(functions, "tollProxy");
-        const res = (await call({ waypoints: waypoints.map((w) => ({ lat: w.lat, lng: w.lon })), vehicleType: tgVehicleType })).data;
-        if (res?.success && res.perCountry) { tollByCountry = res.perCountry; tollSource = "tollguru"; }
-      } catch (e) { console.warn("[kalkulator] tollProxy:", e?.message || e); }
+      if (!isBus) {
+        try {
+          const call = httpsCallable(functions, "tollProxy");
+          const res = (await call({ waypoints: waypoints.map((w) => ({ lat: w.lat, lng: w.lon })), profile: "EUR_TRUCK_7_49T" })).data;
+          if (res?.success && res.perCountry) { tollByCountry = res.perCountry; tollSource = "ptv"; }
+        } catch (e) { console.warn("[kalkulator] tollProxy:", e?.message || e); }
+      }
 
       const cons = parseFloat(consumption) || DEFAULT_RATES.defaultConsumption;
       const avgFuel = Object.values(rates.fuelPrice).reduce((a, b) => a + b, 0) / Object.values(rates.fuelPrice).length;
@@ -377,12 +379,12 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
   // ── Admin: zapis klucza TollGuru przez CF (klient nie czyta klucza). ──
   const saveTollKey = async () => {
     const k = tollKeyInput.trim();
-    if (!k) { showToast("Wklej klucz API TollGuru"); return; }
+    if (!k) { showToast("Wklej klucz API PTV"); return; }
     setSavingKey(true);
     try {
       await httpsCallable(functions, "setTollKey")({ apiKey: k });
       setTollKeyInput("");
-      showToast("✅ Klucz TollGuru zapisany — myto pójdzie z realnych danych");
+      showToast("✅ Klucz PTV zapisany — myto pójdzie z oficjalnych stawek");
     } catch (e) {
       console.error("[kalkulator] setTollKey:", e);
       showToast("❌ Nie udało się zapisać klucza (tylko admin)");
@@ -467,8 +469,8 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
             <div className="text-sm text-gray-500">
               {result.distanceKm.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} km · {result.durationH.toFixed(1)} h · {result.cons} L/100
             </div>
-            {result.tollSource === "tollguru"
-              ? <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-[11px] font-medium">myto: TollGuru realne</span>
+            {result.tollSource === "ptv"
+              ? <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-[11px] font-medium">myto: PTV oficjalne</span>
               : <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[11px] font-medium">myto: szacunek flat-rate</span>}
           </div>
 
@@ -525,21 +527,21 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
             <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
               <div className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-2">
                 🛣️ Myto — jak liczone
-                {result.tollSource === "tollguru"
-                  ? <span className="px-1.5 py-0.5 rounded bg-green-100 text-green-700 text-[10px] font-medium">TollGuru · realne</span>
+                {result.tollSource === "ptv"
+                  ? <span className="px-1.5 py-0.5 rounded bg-green-100 text-green-700 text-[10px] font-medium">PTV · oficjalne</span>
                   : <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-medium">szacunek · flat-rate</span>}
               </div>
-              {result.tollSource === "tollguru" ? (
+              {result.tollSource === "ptv" ? (
                 <p className="text-[11px] leading-relaxed text-gray-500">
-                  <b>Realne dane TollGuru</b> — trasa dopasowana do faktycznych płatnych dróg per kraj/operator, wg typu pojazdu (osie/waga). Uwzględnia płatne odcinki, pomija bezpłatne (péage koncesyjne FR/IT/ES liczone poprawnie).<br />
+                  <b>Oficjalne stawki PTV Developer</b> — myto per kraj wg realnych taryf operatorów (Toll Collect, e-TOLL, ASFA…) i geometrii płatnych dróg, dla klasy solówka 3,5–7,49 t. Liczy też Polskę.<br />
                   Kwoty spoza EUR przeliczone zgrubnym kursem.
                 </p>
               ) : (
                 <p className="text-[11px] leading-relaxed text-gray-500">
-                  <b>km w kraju × stawka €/km tego kraju</b> — <b>fallback</b>, bo TollGuru niedostępne (limit dzienny / brak klucza).<br />
+                  <b>km w kraju × stawka €/km tego kraju</b> — <b>fallback</b>, bo PTV niedostępne (brak klucza / błąd API).<br />
                   Klasa: {result.isBus
                     ? <><b>BUS</b> — tylko winiety (koszt <b>roczny/okresowy</b>, nie per trasa; CZ rocznie, AT/BG rzadko) → myto per trasa <b>= 0</b>.</>
-                    : <><b>solówka lekka ~7,2 t</b> — myto towarowe wg oficjalnych stawek; wartości do potwierdzenia TollGuru + walidacji NegoMetal.</>}
+                    : <><b>solówka lekka ~7,2 t</b> — myto towarowe wg oficjalnych stawek; wartości orientacyjne — realne liczy PTV powyżej.</>}
                 </p>
               )}
             </div>
@@ -557,18 +559,18 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
           <div className="mt-4">
             {canEdit && (
               <div className="mb-4 rounded-xl bg-blue-50/50 border border-blue-100 p-3">
-                <div className="text-xs font-semibold text-gray-700 mb-1">🔑 Klucz TollGuru (realne myto)</div>
+                <div className="text-xs font-semibold text-gray-700 mb-1">🔑 Klucz PTV Developer (realne myto)</div>
                 <p className="text-[11px] text-gray-500 mb-2">
-                  Załóż konto na <b>tollguru.com</b> → wygeneruj klucz API → wklej tutaj. Wtedy myto liczy się z <b>realnych płatnych dróg</b> zamiast flat-rate. Klucz zapisuje się bezpiecznie (przez serwer, nie w przeglądarce).
+                  Załóż konto na <b>developer.myptv.com</b> (Free Plan, bez karty) → wygeneruj klucz → wklej tutaj. Myto liczy się z <b>oficjalnych stawek UE</b> (w tym Polska). Klucz zapisuje się bezpiecznie (przez serwer, nie w przeglądarce).
                 </p>
                 <div className="flex gap-2">
-                  <input type="password" value={tollKeyInput} onChange={(e) => setTollKeyInput(e.target.value)} placeholder="x-api-key TollGuru" autoComplete="off"
+                  <input type="password" value={tollKeyInput} onChange={(e) => setTollKeyInput(e.target.value)} placeholder="klucz PTV Developer" autoComplete="off"
                     className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100" />
                   <button onClick={saveTollKey} disabled={savingKey} className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm disabled:opacity-50">
                     {savingKey ? "…" : "Zapisz klucz"}
                   </button>
                 </div>
-                <p className="text-[11px] text-gray-400 mt-2">Poniższe stawki €/km działają jako <b>fallback</b>, gdy TollGuru jest niedostępne.</p>
+                <p className="text-[11px] text-gray-400 mt-2">Poniższe stawki €/km działają jako <b>fallback</b>, gdy PTV jest niedostępne.</p>
               </div>
             )}
             <div className="overflow-x-auto">
