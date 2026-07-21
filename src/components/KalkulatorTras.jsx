@@ -160,13 +160,8 @@ const fmtEUR = (n) => (n == null ? "—" : n.toLocaleString("pl-PL", { minimumFr
 const fmtEUR2 = (n) => (n == null ? "—" : n.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €");
 const fmtDatePL = (iso) => { try { return new Date(iso).toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric" }); } catch { return iso; } };
 
-// Typy pojazdu wg TollGuru — pod flotę VBS (solówki 2-osiowe Iveco 70C18 ~7,2t).
-// Bus+przyczepa to inna klasa — dodane na wypadek gdyby liczyć trasę busa.
-const VEHICLE_TYPES = [
-  ["2AxlesTruck", "Solówka 2-osiowa (Iveco 70C18 ~7,2t)"],
-  ["3AxlesTruck", "Solówka 3-osiowa (cięższa)"],
-  ["2AxlesAuto", "Bus / bus + przyczepa"],
-];
+// Flota VBS = solówki 2-osiowe (Iveco 70C18 ~7,2t) — myto zawsze w tej klasie.
+const VEHICLE_TYPE = "2AxlesTruck";
 
 
 export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate = null, canEdit = false, showToast = () => {}, currentUser = null }) {
@@ -183,7 +178,6 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
   const [ratesOpen, setRatesOpen] = useState(false);
   const [savingRates, setSavingRates] = useState(false);
   const [ratesUpdatedAt, setRatesUpdatedAt] = useState(null); // data ostatniej aktualizacji cen (ISO) lub null = domyślne
-  const [vehicleType, setVehicleType] = useState("2AxlesTruck"); // domyślnie solówka 2-os (flota Iveco 70C18)
   const [tollKeyInput, setTollKeyInput] = useState("");
   const [savingKey, setSavingKey] = useState(false);
 
@@ -206,7 +200,6 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
           });
           if (d.defaultConsumption) setConsumption(d.defaultConsumption);
           if (d.updatedAt) setRatesUpdatedAt(d.updatedAt);
-          if (d.vehicleType) setVehicleType(d.vehicleType);
         }
       } catch (e) { console.warn("[kalkulator] config load:", e); }
     })();
@@ -289,7 +282,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
       let tollSource = "flat";
       try {
         const call = httpsCallable(functions, "tollProxy");
-        const res = (await call({ waypoints: waypoints.map((w) => ({ lat: w.lat, lng: w.lon })), vehicleType })).data;
+        const res = (await call({ waypoints: waypoints.map((w) => ({ lat: w.lat, lng: w.lon })), vehicleType: VEHICLE_TYPE })).data;
         if (res?.success && res.perCountry) { tollByCountry = res.perCountry; tollSource = "tollguru"; }
       } catch (e) { console.warn("[kalkulator] tollProxy:", e?.message || e); }
 
@@ -349,7 +342,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
         tollPerKm: rates.tollPerKm,
         defaultConsumption: rates.defaultConsumption,
         tankL: rates.tankL,
-        vehicleType,
+        vehicleType: VEHICLE_TYPE,
         updatedAt: now,
         updatedBy: currentUser?.email || null,
       }, { merge: true });
@@ -426,12 +419,6 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
             <label className="text-xs text-gray-500">
               Spalanie L/100
               <input type="number" step="0.1" value={consumption} onChange={(e) => { setConsumption(e.target.value); setConsBasis("wpisane ręcznie"); }} className="mt-1 w-full px-2 py-2 rounded-lg border border-gray-200 text-sm text-gray-700" />
-            </label>
-            <label className="text-xs text-gray-500 col-span-2">
-              Klasa pojazdu do myta
-              <select value={vehicleType} onChange={(e) => setVehicleType(e.target.value)} className="mt-1 w-full px-2 py-2 rounded-lg border border-gray-200 text-sm text-gray-700">
-                {VEHICLE_TYPES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
-              </select>
             </label>
           </div>
 
