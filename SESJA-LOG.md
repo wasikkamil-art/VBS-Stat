@@ -2173,3 +2173,39 @@ Stawki myta zasiane zgrubnie (PL 0,13 €/km zawyża — myto tylko na A/S) → 
 
 **TODO Faza 2:** auto-odświeżanie cen paliwa (CF tygodniowa → config), zapis szacunków, podpięcie
 pod konkretny fracht. **Faza 3:** kalibracja o 6 mc realnych kosztów (user wyciągnie z raportów).
+
+## 2026-07-21 (cd.) — Kalibracja myta kalkulatora: GPS × NegoMetal (częściowa) + bug breadcrumbs
+
+User: „myto wychodzi gigantyczne, tyle nie płacimy" → wrzucił NegoMetal toll export
+(`negometal_toll_transactions_website_export (35).xlsx`, WGM 5367K, 24.06–16.07.2026).
+
+### Realne myto per kraj (NegoMetal, cały plik, netto EUR)
+DE **531,26** · FR **196,76** · PL 12,10 (52 zł) · ES 10,14 · BE 9,47 · CZ 1,06. Razem ~760€/3 tyg./1 auto.
+To KWOTY, nie km — do €/km brakuje km per kraj.
+
+### Pomysł usera: km z GPS (Atlas/widziszwszystko podpięte w Monitoring)
+- Atlas **widzi teraz wiele aut** (v1,v3,v4,v5) — memory `reference_atlas_api` NIEAKTUALNE (było „tylko 0475M").
+- Atlas `/history?year=&month=` zwraca **płytko** (czerwiec=5 pkt, lipiec=0) — brak głębokiej historii.
+- `gpsBreadcrumbs/{vid}/points` (z `scheduledHistorySync`) sięgają tylko **14.07→21.07** (~tydzień).
+- Overlap z mytem = **14–16.07** (3 dni). W tym oknie NegoMetal: FR 69,9€ + DE 29,4€.
+
+### Wynik (okno 14–16.07, po odfiltrowaniu szumu)
+- **FR: 841 km GPS / 69,9€ = 0,083 €/km** (seed 0,25 → **zawyża 3×**). SOLIDNE.
+- **ES: 652 km GPS / ≤10€ = ≤0,016 €/km** (seed 0,12 → **zawyża ~7×**, Hiszpania prawie darmowa). SOLIDNE (górna granica).
+- **DE nie pojawił się w GPS** w oknie (auto było FR+ES), a myto DE 29€ z tych dat → **daty transakcji NegoMetal mają lag** względem jazdy → precyzyjne krótkookienkowe dopasowanie dla reszty krajów zawodne.
+- DE/PL/BE/CZ/AT — brak dopasowanych km, €/km NIEobliczalne (niskie total ≠ niska stawka).
+
+**Wniosek:** intuicja usera trafna — seed myta zawyża (auto jedzie dużo dróg bezpłatnych).
+Twarde dane tylko FR≈0,08 i ES≈0,02. Reszta wymaga **kalibracji do przodu**
+(breadcrumbs uzbierają miesiąc → NegoMetal za dopasowane okno → €/km per kraj/flota).
+
+### 🐛 Bug jakości GPS (zgłoszony jako task chip, task_fdf05d25)
+Breadcrumbs v3 zanieczyszczone: punkt postoju ~47.914,3.714 (v=0) **powtarza się wymieszany**
+z ruchem → skoki 137 km/48s = 10 000 km/h → zawyża dystans **10×** (15 462 zamiast 1 498 km/3 dni).
+**Psuje też mapę trasy w GpsTab** (zygzaki). Źródło: scheduledGpsPoll/scheduledHistorySync,
+podejrzenie stale last-known position albo plate matching `includes()`. Fix osobno.
+
+### Decyzja: STAWKI NIE ruszone
+User dwukrotnie odłożył decyzję (opcje: FR+ES z danych teraz / kalibracja do przodu / haircut).
+`config/kalkulatorTras` bez zmian. Skrypty read-only w repo (gitignored): diagnose_breadcrumbs.mjs,
+diagnose_calibrate_toll.mjs, diagnose_calibrate_overlap.mjs.
