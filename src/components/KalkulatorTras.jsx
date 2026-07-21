@@ -20,22 +20,31 @@ import { doc, getDoc, setDoc } from "firebase/firestore";
 import { logAction } from "../utils/logAction";
 
 // ── Stawki domyślne (EUR). Edytowalne w UI, zapisywane do config/kalkulatorTras.
-// Ceny diesla i myta to wartości orientacyjne (lipiec 2026) — do dostrojenia
-// o realne dane. Myto = uśredniona stawka dla ciężarówki >12t na sieci płatnej;
-// wiele dróg jest darmowych, więc realny koszt zależy od trasy.
+// Ceny diesla orientacyjne (lipiec 2026). Myto = efektywne €/km (blended
+// płatne+bezpłatne odcinki) dla FLOTY VBS: lekka solówka ~7,2t (Iveco 70C18)
+// oraz OSOBNO bus (busy zwolnione z Maut towarowego DE/PL). Wartości szacunkowe
+// do potwierdzenia TollGuru — edytowalne.
 const DEFAULT_RATES = {
   fuelPrice: {
     PL: 1.42, DE: 1.66, FR: 1.69, BE: 1.73, CZ: 1.44, ES: 1.48, LU: 1.40,
     AT: 1.56, IT: 1.74, NL: 1.76, SK: 1.48, HU: 1.55, SI: 1.52, CH: 1.90,
     DK: 1.75, SE: 1.65, LT: 1.42, LV: 1.45, EE: 1.48, RO: 1.40, HR: 1.45, BG: 1.38,
   },
+  // Solówka lekka ~7,2t — niższa klasa niż zestaw >12t; nie wszystkie km płatne.
   tollPerKm: {
-    DE: 0.37, AT: 0.42, FR: 0.25, PL: 0.13, CZ: 0.21, BE: 0.17, IT: 0.26,
-    ES: 0.12, LU: 0.00, NL: 0.00, SK: 0.24, HU: 0.20, SI: 0.30, CH: 0.60,
-    DK: 0.00, SE: 0.00, LT: 0.09, LV: 0.09, EE: 0.09, RO: 0.10, HR: 0.20, BG: 0.15,
+    DE: 0.13, AT: 0.20, FR: 0.08, PL: 0.05, CZ: 0.10, BE: 0.08, IT: 0.14,
+    ES: 0.03, LU: 0.00, NL: 0.00, SK: 0.12, HU: 0.10, SI: 0.15, CH: 0.05,
+    DK: 0.00, SE: 0.00, LT: 0.05, LV: 0.05, EE: 0.05, RO: 0.06, HR: 0.10, BG: 0.08,
+  },
+  // Bus — zwolniony z myta towarowego (Maut DE, e-TOLL PL); płaci głównie
+  // péage pasażerski (FR/IT/ES) i winiety (AT/CH). Dużo taniej niż ciężarówka.
+  tollPerKmBus: {
+    DE: 0.00, AT: 0.10, FR: 0.06, PL: 0.00, CZ: 0.03, BE: 0.00, IT: 0.08,
+    ES: 0.03, LU: 0.00, NL: 0.00, SK: 0.03, HU: 0.03, SI: 0.08, CH: 0.03,
+    DK: 0.00, SE: 0.00, LT: 0.00, LV: 0.00, EE: 0.00, RO: 0.03, HR: 0.05, BG: 0.03,
   },
   defaultConsumption: 30, // L/100 km
-  tankL: 700,
+  tankL: 200, // solówka Iveco 70C18 ~ zbiornik 100–200 L
 };
 
 const COUNTRY_NAMES = {
@@ -195,6 +204,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
           setRates({
             fuelPrice: { ...DEFAULT_RATES.fuelPrice, ...(d.fuelPrice || {}) },
             tollPerKm: { ...DEFAULT_RATES.tollPerKm, ...(d.tollPerKm || {}) },
+            tollPerKmBus: { ...DEFAULT_RATES.tollPerKmBus, ...(d.tollPerKmBus || {}) },
             defaultConsumption: d.defaultConsumption || DEFAULT_RATES.defaultConsumption,
             tankL: d.tankL || DEFAULT_RATES.tankL,
           });
@@ -278,12 +288,18 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
       setProgress({ done: 0, total: 14 });
       const { perCountry, unknownKm } = await countrySplit(route.coordinates, distanceKm, (done, total) => setProgress({ done, total }));
 
+      // ── Klasa auta: bus vs solówka → inna tabela myta + inna klasa TollGuru ──
+      const selVeh = vehicles.find((v) => v.id === vehicleId);
+      const isBus = selVeh?.type === "Bus";
+      const tollTable = isBus ? rates.tollPerKmBus : rates.tollPerKm;
+      const tgVehicleType = isBus ? "2AxlesAuto" : "2AxlesTruck";
+
       // ── Myto: spróbuj TollGuru (realne dane), fallback na flat-rate €/km ──
       let tollByCountry = null; // {cc: EUR} gdy TollGuru zadziała
       let tollSource = "flat";
       try {
         const call = httpsCallable(functions, "tollProxy");
-        const res = (await call({ waypoints: waypoints.map((w) => ({ lat: w.lat, lng: w.lon })), vehicleType: VEHICLE_TYPE })).data;
+        const res = (await call({ waypoints: waypoints.map((w) => ({ lat: w.lat, lng: w.lon })), vehicleType: tgVehicleType })).data;
         if (res?.success && res.perCountry) { tollByCountry = res.perCountry; tollSource = "tollguru"; }
       } catch (e) { console.warn("[kalkulator] tollProxy:", e?.message || e); }
 
@@ -297,10 +313,10 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
         const liters = (km * cons) / 100;
         const price = cc === "??" ? avgFuel : (rates.fuelPrice[cc] ?? avgFuel);
         const fuelCost = liters * price;
-        // Myto: TollGuru per kraj jeśli dostępne, inaczej flat-rate km × stawka.
+        // Myto: TollGuru per kraj jeśli dostępne, inaczej flat-rate km × stawka klasy auta.
         const tollCost = tollByCountry
           ? (tollByCountry[cc] || 0)
-          : (cc === "??" ? 0 : km * (rates.tollPerKm[cc] ?? 0));
+          : (cc === "??" ? 0 : km * (tollTable[cc] ?? 0));
         fuelTotal += fuelCost;
         tollTotal += tollCost;
         rows.push({ cc, km, liters, price, fuelCost, tollCost });
@@ -323,6 +339,8 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
         cons,
         consBasis,
         tollSource,
+        isBus,
+        vehName: selVeh?.name || selVeh?.plate || "",
         hasUnknown: unknownKm > 0.5,
       });
     } catch (e) {
@@ -518,8 +536,11 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
                 </p>
               ) : (
                 <p className="text-[11px] leading-relaxed text-gray-500">
-                  <b>km w kraju × stawka €/km tego kraju</b> (tabela stawek poniżej) — <b>fallback</b>, bo TollGuru niedostępne (brak klucza / limit / błąd API).<br />
-                  Stawki to uśredniony koszt zestawu &gt;12 t, <b>nie</b> uwzględniają klasy EURO/osi/darmowych dróg — dlatego to szacunek. Wklej klucz TollGuru niżej, by liczyć z realnych danych.
+                  <b>km w kraju × stawka €/km tego kraju</b> — <b>fallback</b>, bo TollGuru niedostępne (limit dzienny / brak klucza).<br />
+                  Klasa: {result.isBus
+                    ? <><b>BUS</b> — zwolniony z myta towarowego (Maut DE, e-TOLL PL = 0), płaci głównie péage FR/IT/ES i winiety AT/CH.</>
+                    : <><b>solówka lekka ~7,2 t</b> — niższa klasa niż zestaw &gt;12 t, nie wszystkie km płatne.</>}<br />
+                  Stawki szacunkowe do potwierdzenia TollGuru (dziś limit wyczerpany).
                 </p>
               )}
             </div>
