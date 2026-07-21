@@ -2125,3 +2125,51 @@ Po 16:41 (fix kierowców) spadek do ~400/h, ale to wieczór — realny efekt pok
 - Niebieski FAB czatu **zasłania dolne menu** na telefonie (widać na screenie — przykrywa
   „Kierowcy"/„Czat"). Dotyczy wszystkich zakładek, nie tylko GPS. Osobna zmiana.
 - Mapa GPS ma sztywne `height: 500px` — na telefonie działa, ale zajmuje dużo.
+
+## 2026-07-21 — Pomiar Firestore (post-fix) + NOWY MODUŁ Kalkulator tras (Faza 1, PROD)
+
+### Pomiar odczytów Firestore po fixie kierowców (07-20 krok 1)
+Scheduled task `firestore-reads-check-vbs-stats` (12:00) jeszcze nie odpalił — zmierzyłem ręcznie
+REST Monitoring API (`gcloud auth print-access-token` + curl, bo gcloud CLI wywala się na Py3.9).
+- **Surowa doba (07-20 09:00Z → 07-21 09:00Z) = 2,39 mln** (QUERY 2,388 mln, LOOKUP 4,2k) — MYLĄCE.
+- **Trend godzinowy demaskuje**: pik **1,66 mln w 1h (07-20 14:01Z=16:01 CEST) + 475k w następnej**
+  = **2,14 mln w 2h** = wczorajsza sesja debug na produkcji (masa przeładowań), NIE ruch stały.
+- **Post-fix noc (16Z–06Z, 15h) = ~640/h** (idle + `scheduledGpsPoll`). Fix kierowców działa.
+- **Post-fix rano workday (07–08Z) ramping**; 08:01Z = 24k ≈ jeden pełny load kolekcji admina.
+- `driverActivities` urosło **20 338 → 23 304** dok. (każdy load admina = pełna kolekcja).
+- **Problem pomiaru**: brak jeszcze czystej doby post-fix (minęło ~18h, workday dopiero startuje).
+  Ekstrapolacja ~150–250k/dobę = strefa „pomiędzy/poniżej progu 400k".
+- **DECYZJA: krok 2 NIE teraz.** Preliminary poniżej progu, koszt ~7 zł/mies („nie pali się").
+  Czysty pomiar dobowy DO DOKOŃCZENIA wieczorem 07-21 — dopiero on przesądza zamknięcie tematu.
+  (Uwaga: okno `alignmentPeriod=86400s` z krótszym interwałem ŹLE się wyrównuje i wciąga pik —
+  wiarygodne są kubełki godzinowe `alignmentPeriod=3600s`, sumowane w Pythonie.)
+
+### NOWY MODUŁ: Kalkulator tras (commit `c5bc53d`, PROD via Vercel)
+Pomysł usera: moduł pod Frachtami — dyspozytor dodaje trasę, my na podstawie danych (koszty
+drogowe + paliwo, „nie 1:1, szacunkowo") pokazujemy szacowany koszt + mapa. Nazwa: **polska
+„Kalkulator tras"** (user odrzucił EN warianty i „Wycena/Kosztorys").
+
+**Wizja usera (docelowa):** inteligentny kalkulator per kraj. Przykład Kielce→Berlin: pełny bak
+na start, tankowania po drodze (1× PL, 1× DE) → ceny paliwa z DWÓCH krajów wg km w każdym;
+ceny aktualne z sieci (zmienne); kalibracja o 6 mc realnych tras z raportów.
+
+**Faza 1 zbudowana (`src/components/KalkulatorTras.jsx`, osobny lazy chunk 14,67 kB / gzip 5,52):**
+- Wpis punktów: adres → geokod **Nominatim/OSM** (darmowy), albo bezpośrednio „lat, lon".
+- **OSRM** (własna kopia `osrmRoute`, ten sam publiczny serwer co reszta apki) → dystans + geometria.
+- **Podział na kraje**: próbkowanie ~14 punktów geometrii + reverse-geocode (zoom=3, cache,
+  ~1 req/s), przypisanie odcinków do najbliższego próbkowanego kraju, skalowanie haversine do
+  realnego dystansu OSRM.
+- **Model kosztu**: paliwo = km_kraj × spalanie/100 × cena_diesla_kraju; myto = km_kraj × stawka_kraju.
+  Proporcjonalny per kraj (≈ logika „bak+tankowania", odporniejszy).
+- **Stawki edytowalne** → `config/kalkulatorTras` (zasiane orientacyjnymi cenami diesla €/L +
+  myto €/km per kraj, EUR). Pojazd → auto-spalanie ze średniej `operacyjne`. Mapa Leaflet.
+- Wynik: total €, ≈PLN (eurRate), rozbicie per kraj (km/L/€/L/paliwo/myto). Tab dla admin+dyspozytor.
+
+**Zweryfikowane na żywo** (Node fetch, Kielce→Berlin): geokod OK, OSRM **624 km / 7,1 h**,
+podział **PL 515 km / DE 109 km** (granica ~14,6°E wykryta poprawnie), koszt paliwo 274€ + myto 107€ = 381€.
+**NIEzweryfikowane end-to-end**: (1) kliknięcie w zalogowanym UI — brak hasła lokalnie, widok za
+loginem; (2) **CORS Nominatim z przeglądarki** — test był server-side; do potwierdzenia na prod.
+Stawki myta zasiane zgrubnie (PL 0,13 €/km zawyża — myto tylko na A/S) → Faza 3 kalibracja je dostroi.
+
+**TODO Faza 2:** auto-odświeżanie cen paliwa (CF tygodniowa → config), zapis szacunków, podpięcie
+pod konkretny fracht. **Faza 3:** kalibracja o 6 mc realnych kosztów (user wyciągnie z raportów).
