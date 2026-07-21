@@ -36,12 +36,12 @@ const DEFAULT_RATES = {
     ES: 0.03, LU: 0.00, NL: 0.00, SK: 0.12, HU: 0.10, SI: 0.15, CH: 0.05,
     DK: 0.00, SE: 0.00, LT: 0.05, LV: 0.05, EE: 0.05, RO: 0.06, HR: 0.10, BG: 0.08,
   },
-  // Bus — zwolniony z myta towarowego (Maut DE, e-TOLL PL); płaci głównie
-  // péage pasażerski (FR/IT/ES) i winiety (AT/CH). Dużo taniej niż ciężarówka.
+  // Bus — TYLKO winiety (koszt roczny/okresowy, NIE per przejazd). CZ kupowane
+  // rocznie, AT/BG rzadko. Per trasa myto = 0 (winiety to koszt stały floty).
   tollPerKmBus: {
-    DE: 0.00, AT: 0.10, FR: 0.06, PL: 0.00, CZ: 0.03, BE: 0.00, IT: 0.08,
-    ES: 0.03, LU: 0.00, NL: 0.00, SK: 0.03, HU: 0.03, SI: 0.08, CH: 0.03,
-    DK: 0.00, SE: 0.00, LT: 0.00, LV: 0.00, EE: 0.00, RO: 0.03, HR: 0.05, BG: 0.03,
+    DE: 0.00, AT: 0.00, FR: 0.00, PL: 0.00, CZ: 0.00, BE: 0.00, IT: 0.00,
+    ES: 0.00, LU: 0.00, NL: 0.00, SK: 0.00, HU: 0.00, SI: 0.00, CH: 0.00,
+    DK: 0.00, SE: 0.00, LT: 0.00, LV: 0.00, EE: 0.00, RO: 0.00, HR: 0.00, BG: 0.00,
   },
   defaultConsumption: 30, // L/100 km
   tankL: 200, // solówka Iveco 70C18 ~ zbiornik 100–200 L
@@ -538,9 +538,8 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
                 <p className="text-[11px] leading-relaxed text-gray-500">
                   <b>km w kraju × stawka €/km tego kraju</b> — <b>fallback</b>, bo TollGuru niedostępne (limit dzienny / brak klucza).<br />
                   Klasa: {result.isBus
-                    ? <><b>BUS</b> — zwolniony z myta towarowego (Maut DE, e-TOLL PL = 0), płaci głównie péage FR/IT/ES i winiety AT/CH.</>
-                    : <><b>solówka lekka ~7,2 t</b> — niższa klasa niż zestaw &gt;12 t, nie wszystkie km płatne.</>}<br />
-                  Stawki szacunkowe do potwierdzenia TollGuru (dziś limit wyczerpany).
+                    ? <><b>BUS</b> — tylko winiety (koszt <b>roczny/okresowy</b>, nie per trasa; CZ rocznie, AT/BG rzadko) → myto per trasa <b>= 0</b>.</>
+                    : <><b>solówka lekka ~7,2 t</b> — myto towarowe wg oficjalnych stawek; wartości do potwierdzenia TollGuru + walidacji NegoMetal.</>}
                 </p>
               )}
             </div>
