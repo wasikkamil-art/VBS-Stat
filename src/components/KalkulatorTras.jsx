@@ -157,6 +157,7 @@ async function countrySplit(geometry, totalKm, onProgress) {
 
 const fmtEUR = (n) => (n == null ? "—" : n.toLocaleString("pl-PL", { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + " €");
 const fmtEUR2 = (n) => (n == null ? "—" : n.toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €");
+const fmtDatePL = (iso) => { try { return new Date(iso).toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric" }); } catch { return iso; } };
 
 export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate = null, canEdit = false, showToast = () => {}, currentUser = null }) {
   const [waypoints, setWaypoints] = useState([]); // {id,label,lat,lon}
@@ -164,12 +165,14 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
   const [geocoding, setGeocoding] = useState(false);
   const [vehicleId, setVehicleId] = useState("");
   const [consumption, setConsumption] = useState(DEFAULT_RATES.defaultConsumption);
+  const [consBasis, setConsBasis] = useState("wartość domyślna 30 L/100"); // skąd wzięte spalanie
   const [computing, setComputing] = useState(false);
   const [progress, setProgress] = useState(null); // {done,total}
   const [result, setResult] = useState(null); // {distanceKm,durationH,perCountry,unknownKm,rows,fuelTotal,tollTotal,grand}
   const [rates, setRates] = useState(DEFAULT_RATES);
   const [ratesOpen, setRatesOpen] = useState(false);
   const [savingRates, setSavingRates] = useState(false);
+  const [ratesUpdatedAt, setRatesUpdatedAt] = useState(null); // data ostatniej aktualizacji cen (ISO) lub null = domyślne
 
   const mapRef = useRef(null);
   const mapObjRef = useRef(null);
@@ -189,6 +192,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
             tankL: d.tankL || DEFAULT_RATES.tankL,
           });
           if (d.defaultConsumption) setConsumption(d.defaultConsumption);
+          if (d.updatedAt) setRatesUpdatedAt(d.updatedAt);
         }
       } catch (e) { console.warn("[kalkulator] config load:", e); }
     })();
@@ -197,11 +201,15 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
   // ── Wybór pojazdu → średnie spalanie z danych operacyjnych. ──
   const onPickVehicle = (id) => {
     setVehicleId(id);
-    if (!id) return;
+    if (!id) { setConsBasis("wpisane ręcznie"); return; }
     const ops = operacyjne.filter((o) => o.vehicleId === id && o.spalanie > 0);
+    const vName = vehicles.find((v) => v.id === id)?.name || vehicles.find((v) => v.id === id)?.plate || "pojazd";
     if (ops.length) {
       const avg = ops.reduce((s, o) => s + o.spalanie, 0) / ops.length;
       setConsumption(Math.round(avg * 10) / 10);
+      setConsBasis(`średnia z ${ops.length} mies. danych operacyjnych (${vName})`);
+    } else {
+      setConsBasis(`brak danych operacyjnych dla ${vName} — wartość domyślna`);
     }
   };
 
@@ -287,6 +295,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
         tollTotal,
         grand: fuelTotal + tollTotal,
         cons,
+        consBasis,
         hasUnknown: unknownKm > 0.5,
       });
     } catch (e) {
@@ -301,14 +310,16 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
   const saveRates = async () => {
     setSavingRates(true);
     try {
+      const now = new Date().toISOString();
       await setDoc(doc(db, "config", "kalkulatorTras"), {
         fuelPrice: rates.fuelPrice,
         tollPerKm: rates.tollPerKm,
         defaultConsumption: rates.defaultConsumption,
         tankL: rates.tankL,
-        updatedAt: new Date().toISOString(),
+        updatedAt: now,
         updatedBy: currentUser?.email || null,
       }, { merge: true });
+      setRatesUpdatedAt(now);
       logAction("update", "config", { section: "kalkulatorTras" });
       showToast("✅ Stawki zapisane");
     } catch (e) {
@@ -365,7 +376,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
             </label>
             <label className="text-xs text-gray-500">
               Spalanie L/100
-              <input type="number" step="0.1" value={consumption} onChange={(e) => setConsumption(e.target.value)} className="mt-1 w-full px-2 py-2 rounded-lg border border-gray-200 text-sm text-gray-700" />
+              <input type="number" step="0.1" value={consumption} onChange={(e) => { setConsumption(e.target.value); setConsBasis("wpisane ręcznie"); }} className="mt-1 w-full px-2 py-2 rounded-lg border border-gray-200 text-sm text-gray-700" />
             </label>
           </div>
 
@@ -431,14 +442,36 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
             </table>
           </div>
           {result.hasUnknown && <p className="text-[11px] text-amber-500 mt-2">⚠️ Część trasy bez rozpoznanego kraju — wyceniona średnią ceną paliwa, bez myta.</p>}
-          <p className="text-[11px] text-gray-400 mt-2">Model: litry paliwa proporcjonalnie do km w kraju × krajowa cena diesla. Myto = km × stawka kraju. Stawki edytowalne poniżej.</p>
+
+          {/* ── Podstawa wyliczeń (na czym opiera się szacunek) ── */}
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
+              <div className="text-xs font-semibold text-gray-700 mb-1">⛽ Paliwo — jak liczone</div>
+              <p className="text-[11px] leading-relaxed text-gray-500">
+                Osobno dla każdego kraju: <b>km w kraju × spalanie ({result.cons} L/100) × cena diesla tego kraju</b>.<br />
+                Spalanie: {result.consBasis}.<br />
+                Ceny diesla: {ratesUpdatedAt
+                  ? <>stan na <b>{fmtDatePL(ratesUpdatedAt)}</b> (z tabeli stawek poniżej)</>
+                  : <>wartości <b>domyślne</b> (orientacyjne, stan lipiec 2026)</>}.
+                To jedna cena „bieżąca" na kraj — <b>nie</b> kurs z konkretnego dnia trasy. Aktualizowana ręcznie (Faza 2: auto-odświeżanie).
+              </p>
+            </div>
+            <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
+              <div className="text-xs font-semibold text-gray-700 mb-1">🛣️ Myto — jak liczone</div>
+              <p className="text-[11px] leading-relaxed text-gray-500">
+                <b>km w kraju × stawka €/km tego kraju</b> (tabela stawek poniżej).<br />
+                Stawki to <b>uśredniony koszt dla zestawu ciężarowego &gt;12 t</b> na płatnej sieci (autostrady/drogi objęte opłatą).<br />
+                <b>Nie</b> uwzględniają klasy emisji EURO, liczby osi, ani tego, że część dróg jest bezpłatna — dlatego to szacunek do dostrojenia (Faza 3: kalibracja o realne trasy).
+              </p>
+            </div>
+          </div>
         </div>
       )}
 
       {/* ── Edytor stawek ── */}
       <div className="mt-5 bg-white rounded-2xl border border-gray-100 p-5">
         <button onClick={() => setRatesOpen((o) => !o)} className="w-full flex items-center justify-between text-sm font-semibold text-gray-700">
-          <span>Stawki (ceny diesla €/L · myto €/km per kraj)</span>
+          <span>Stawki (ceny diesla €/L · myto €/km per kraj){ratesUpdatedAt ? <span className="ml-2 font-normal text-gray-400">· stan {fmtDatePL(ratesUpdatedAt)}</span> : <span className="ml-2 font-normal text-gray-400">· wartości domyślne</span>}</span>
           <span className="text-gray-400">{ratesOpen ? "▲" : "▼"}</span>
         </button>
         {ratesOpen && (
