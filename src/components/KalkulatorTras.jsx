@@ -169,23 +169,6 @@ const VEHICLE_TYPES = [
   ["6AxlesTruck", "Ciężarówka 6-osiowa"],
 ];
 
-// Enkoder Google polyline (precyzja 5) z listy [[lat,lon],...] — dla TollGuru.
-function encodePolyline(coords) {
-  let lastLat = 0, lastLon = 0, out = "";
-  const enc = (val) => {
-    let v = val < 0 ? ~(val << 1) : (val << 1);
-    let s = "";
-    while (v >= 0x20) { s += String.fromCharCode((0x20 | (v & 0x1f)) + 63); v >>= 5; }
-    s += String.fromCharCode(v + 63);
-    return s;
-  };
-  for (const [lat, lon] of coords) {
-    const la = Math.round(lat * 1e5), lo = Math.round(lon * 1e5);
-    out += enc(la - lastLat) + enc(lo - lastLon);
-    lastLat = la; lastLon = lo;
-  }
-  return out;
-}
 
 export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate = null, canEdit = false, showToast = () => {}, currentUser = null }) {
   const [waypoints, setWaypoints] = useState([]); // {id,label,lat,lon}
@@ -306,9 +289,8 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
       let tollByCountry = null; // {cc: EUR} gdy TollGuru zadziała
       let tollSource = "flat";
       try {
-        const polyline = encodePolyline(route.coordinates);
         const call = httpsCallable(functions, "tollProxy");
-        const res = (await call({ polyline, vehicleType })).data;
+        const res = (await call({ waypoints: waypoints.map((w) => ({ lat: w.lat, lng: w.lon })), vehicleType })).data;
         if (res?.success && res.perCountry) { tollByCountry = res.perCountry; tollSource = "tollguru"; }
       } catch (e) { console.warn("[kalkulator] tollProxy:", e?.message || e); }
 

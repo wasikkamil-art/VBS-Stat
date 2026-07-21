@@ -1267,9 +1267,12 @@ exports.gpsProxy = onCall(
 //    Bierze zakodowaną polyline trasy (z OSRM) + typ pojazdu, zwraca realne
 //    myto zagregowane per kraj (w EUR). Klucz API z config/toll.apiKey (admin).
 //    Kalkulator tras używa tego jako główne źródło myta; flat-rate €/km = fallback.
-const TOLLGURU_URL = "https://apis.tollguru.com/toll/v2/route-encoded-polyline";
-// Zgrubne kursy do EUR (myto bywa w walutach krajowych; szacunek, nie księgowość).
+// Endpoint origin-destination (klucz trial autoryzowany tu; polyline/TollTally = osobny produkt).
+const TOLLGURU_URL = "https://apis.tollguru.com/toll/v2/origin-destination-waypoints";
+// Zgrubne kursy do EUR (myto bywa w walucie kraju startu; szacunek, nie księgowość).
 const TO_EUR = { EUR:1, PLN:0.233, CZK:0.040, HUF:0.0026, CHF:1.05, GBP:1.17, DKK:0.134, SEK:0.088, NOK:0.086, RON:0.20, BGN:0.51 };
+// TollGuru zwraca kraje jako ISO3 — mapujemy na ISO2 używane w kalkulatorze.
+const ISO3_TO_2 = { POL:"PL", DEU:"DE", FRA:"FR", BEL:"BE", CZE:"CZ", ESP:"ES", LUX:"LU", AUT:"AT", ITA:"IT", NLD:"NL", SVK:"SK", HUN:"HU", SVN:"SI", CHE:"CH", DNK:"DK", SWE:"SE", PRT:"PT", HRV:"HR", GBR:"GB", NOR:"NO", ROU:"RO", BGR:"BG", LTU:"LT", LVA:"LV", EST:"EE", IRL:"IE", SRB:"RS" };
 
 exports.tollProxy = onCall(
   { region: "europe-west1", timeoutSeconds: 30 },
@@ -1278,9 +1281,9 @@ exports.tollProxy = onCall(
     if (!["admin", "dyspozytor"].includes(request.auth.token.role)) {
       throw new HttpsError("permission-denied", "Brak dostepu.");
     }
-    const { polyline, vehicleType, departureTime } = request.data || {};
-    if (!polyline || typeof polyline !== "string") {
-      throw new HttpsError("invalid-argument", "Wymagana zakodowana polyline trasy.");
+    const { waypoints, vehicleType, departureTime } = request.data || {};
+    if (!Array.isArray(waypoints) || waypoints.length < 2) {
+      throw new HttpsError("invalid-argument", "Wymagane min. 2 punkty trasy (lat,lng).");
     }
 
     const db = getFirestore();
@@ -1291,9 +1294,11 @@ exports.tollProxy = onCall(
       return { success: false, reason: "no-key" };
     }
 
+    const pts = waypoints.map((w) => ({ lat: Number(w.lat), lng: Number(w.lng) }));
     const body = {
-      source: "osrm",
-      polyline,
+      from: pts[0],
+      to: pts[pts.length - 1],
+      ...(pts.length > 2 ? { waypoints: pts.slice(1, -1) } : {}),
       vehicleType: vehicleType || "5AxlesTruck",
       departure_time: departureTime || new Date().toISOString(),
     };
@@ -1317,15 +1322,17 @@ exports.tollProxy = onCall(
       return { success: false, reason: "fetch-error", error: e.message };
     }
 
-    // Agreguj tolls[] per kraj → EUR. Preferuj tagCost (OBU) > cashCost.
-    const tolls = data?.route?.tolls || data?.tolls || [];
+    // Agreguj routes[0].tolls[] per kraj → EUR. Preferuj tagCost (OBU) > cashCost.
+    const route = data?.routes?.[0] || {};
+    const tolls = route.tolls || [];
     const perCountry = {};
     let total = 0, converted = false;
     for (const t of tolls) {
-      const cc = String(t.country || "??").toUpperCase();
+      const cc3 = String(t.country || "").toUpperCase();
+      const cc = ISO3_TO_2[cc3] || cc3.slice(0, 2) || "??";
       const cur = String(t.currency || "EUR").toUpperCase();
       const raw = (typeof t.tagCost === "number" && t.tagCost > 0) ? t.tagCost
-        : (typeof t.cashCost === "number" ? t.cashCost : 0);
+        : (typeof t.cashCost === "number" && t.cashCost > 0 ? t.cashCost : 0);
       const rate = TO_EUR[cur] ?? 1;
       if (cur !== "EUR") converted = true;
       const eur = raw * rate;
@@ -1339,6 +1346,7 @@ exports.tollProxy = onCall(
       tollCount: tolls.length,
       currencyConverted: converted,
       vehicleType: body.vehicleType,
+      hasTolls: route.summary?.hasTolls ?? (tolls.length > 0),
     };
   }
 );
