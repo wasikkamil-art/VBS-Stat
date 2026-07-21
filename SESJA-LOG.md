@@ -2209,3 +2209,36 @@ podejrzenie stale last-known position albo plate matching `includes()`. Fix osob
 User dwukrotnie odłożył decyzję (opcje: FR+ES z danych teraz / kalibracja do przodu / haircut).
 `config/kalkulatorTras` bez zmian. Skrypty read-only w repo (gitignored): diagnose_breadcrumbs.mjs,
 diagnose_calibrate_toll.mjs, diagnose_calibrate_overlap.mjs.
+
+## 2026-07-21 (cd.2) — Kalkulator: frachty jako źródło km + integracja TollGuru (realne myto)
+
+### Frachty jako baza km per kraj (pomysł usera)
+Frachty mają `skad`/`dokod` (format „DE85748", „PL38-200 JASŁO" = kraj+kod pocztowy, geokodowalne)
++ gotowe `kmWszystkie`/`kmLadowne`/`kmPodjazd`. Przepuściłem realne trasy v3 (styczeń+luty, 10 frachtów)
+przez OSRM+countrySplit skalując do `kmWszystkie`: **8 988 km → FR 46% / DE 20% / PL 9% / CZ 8% / AT 7%
+/ CH 5% / IT 2% / NL+BE 3%**. Podział geograficznie poprawny (DE→FR przez CH). Pipeline działa.
+**BLOKADA:** `skad` przestał być wpisywany **od kwietnia 2026** (kwi–lip: 0/… pełnych) → kalibrowalne
+tylko sty–lut–mar; okres myta (lipiec) bez tras. Do dokończenia €/km trzeba NegoMetal za sty/lut.
+⚠️ Warto przywrócić wpisywanie `skad` (bez tego brak kalibracji + rentowności tras na świeżych danych).
+
+### DECYZJA usera: TollGuru (opcja A) — omija problem kalibracji
+Zamiast dopasowywać myto do km z historii — wysyłamy trasę, dostajemy realny koszt z faktycznych
+płatnych dróg. Zbadane: OSM `toll=yes` to tylko tagi (trzeba by budować własny silnik = niepraktyczne);
+**TollGuru Map-Independent Toll API** bierze polyline OSRM + typ pojazdu → realne myto per kraj/operator
+(ogarnia péage koncesyjne FR/IT/ES). Darmowy trial, płatne od ~$80/mc.
+
+### WDROŻONE (commit 66c8d0f, CF zdeployowane Node 22 europe-west1)
+- **CF `tollProxy`**: polyline(enc) + vehicleType → TollGuru (`route-encoded-polyline`, `x-api-key`),
+  agreguje `tolls[]` per kraj do EUR (preferuje tagCost>cashCost; kursy zgrubne PLN/CZK/CHF…).
+  Klucz z `config/toll.apiKey`. Bez klucza → `{success:false,reason:"no-key"}`.
+- **CF `setTollKey`** (admin): zapis klucza przez serwer, klient nie czyta.
+- **Kalkulator**: po OSRM enkoduje polyline (Google precision 5), woła tollProxy; sukces → myto realne
+  per kraj (badge „TollGuru realne"), inaczej **fallback flat-rate €/km** (badge „szacunek flat-rate").
+  Wybór typu pojazdu (2–6 osi, zapis w config), pole admina na klucz w sekcji stawek, kafelek
+  „Myto — jak liczone" zależny od źródła. Osobny lazy chunk 20,68 kB.
+
+**Działa od razu**: bez klucza leci flat-rate (dotychczasowe, zweryfikowane). Po wklejeniu klucza
+myto staje się realne bez zmian w kodzie.
+**Co NIEzweryfikowane end-to-end**: realny call TollGuru (user zakłada konto + wkleja klucz).
+Fallback = ścieżka już działająca. **TODO usera**: konto tollguru.com → klucz API → wklej w Kalkulator
+(sekcja Stawki, pole „Klucz TollGuru"); sprawdzić limit free tier vs ~150–600 zapytań/mc.
