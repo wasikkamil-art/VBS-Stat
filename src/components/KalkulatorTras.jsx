@@ -413,7 +413,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
               Pojazd
               <select value={vehicleId} onChange={(e) => onPickVehicle(e.target.value)} className="mt-1 w-full px-2 py-2 rounded-lg border border-gray-200 text-sm text-gray-700">
                 <option value="">— (ręcznie)</option>
-                {vehicles.map((v) => <option key={v.id} value={v.id}>{v.name || v.plate || v.id}</option>)}
+                {vehicles.filter((v) => !v.archived).map((v) => <option key={v.id} value={v.id}>{v.name || v.plate || v.id}</option>)}
               </select>
             </label>
             <label className="text-xs text-gray-500">
