@@ -2289,3 +2289,35 @@ nietknięta). Aktywne: WGM 0475M, WGM 5367K, TK 314CL, WGM 0507M. Mechanizm: `ve
 ### Bug GPS breadcrumbs (task_fdf05d25) — user odpalił w osobnej sesji, WRACAMY DO GPS TERAZ
 Breadcrumbs v3 zanieczyszczone stale-point 47.914,3.714 → skoki 10000 km/h, zawyża dystans 10×,
 psuje mapę trasy. To był kontekst gdy user przełączył na „problem z GPS".
+
+## 2026-07-22 — Kalkulator: myto z PTV Developer (europejskie, oficjalne) + box płatnymi/landem
+
+### PTV Developer wygrał (europejski, liczy Polskę, darmowy 500/dzień)
+Po odrzuceniu TollGuru (15/dzień, USA) i Tollsmart (USA, bez PL) — **PTV Developer** (developer.myptv.com,
+niemiecki standard branżowy): Free Plan **500/dzień bez karty, rejestracja od ręki**, LICZY POLSKĘ,
+oficjalne stawki operatorów. Standard Plan €0 + **50k/mies** gratis (user pokazał — nigdy nie dobijemy,
+realnie **max 5 tras/dzień**). Koszt = martwy temat.
+- CF `tollProxy` przepisany na PTV Routing API (`results=TOLL_COSTS`, `profile=EUR_TRUCK_7_49T`
+  = solówka 3,5–7,49t). Odpowiedź: `toll.costs.countries[]` ISO2 + `convertedPrice` EUR (PTV
+  konwertuje waluty sam). Klucz w `config/toll.ptvKey`. Bus = 0 (PTV nie wołany).
+- Profil MA znaczenie: Kielce→Berlin domyślnie (40t) 152€, jako 7,49T = **77€** (PL 63 + DE 14).
+
+### Walidacja o kotwicę usera €350–600/auto/mies (dowód, nie zgadywanie)
+Realne trasy frachtów v3 przez PTV: styczeń 853€/4443km (powyżej), luty 332€/3018km (poniżej),
+**średnia ~590€ = W ZAKRESIE**. PTV pasuje do rzeczywistości. FR dominuje myto (autostrady/péage).
+
+### KOREKTA założeń (user)
+- **Polska NIE omijana** — PL toll jest w **polskim e-TOLL** (osobny system), NegoMetal go NIE MA
+  (stąd NegoMetal PL 12€ = niepełne; PTV PL 63€ realne). **Odrzucony pomysł „PL=0".**
+- Po Europie jeżdżą **„landem"** (krajówkami) żeby płacić mniej → PTV najszybsza = górna granica.
+
+### Box płatnymi vs landem (commit f915033)
+CF liczy 2 trasy PTV równolegle: płatnymi + landem (`options[avoid]=TOLL`, enum: TOLL/FERRIES/
+RAIL_SHUTTLES/HIGHWAYS). Box w wyniku: oba warianty (€ myto · km · h) + oszczędność/objazd/h +
+ocena opłacalności (€/h objazdu, <8€/h = nieopłacalne). Kielce→Berlin: płatnymi 77€/9,2h vs
+landem 1€/17,5h (+171km, +8h = nieopłacalne). Rozbicie liczone dla wariantu płatnego.
+
+### Stan: myto REALNE i zwalidowane
+Koniec szacunków. PTV = oficjalne stawki UE z Polską, zwalidowane kotwicą usera. Flat-rate =
+tylko fallback gdy PTV padnie. **NIEzweryfikowane**: kliknięcie w zalogowanej apce (brak hasła).
+Skrypty: diagnose_ptv_validate.mjs (gitignored). Klucz PTV był w czacie → user zregeneruje.
