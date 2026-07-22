@@ -31,15 +31,17 @@ const DEFAULT_RATES = {
     DK: 1.75, SE: 1.65, LT: 1.42, LV: 1.45, EE: 1.48, RO: 1.40, HR: 1.45, BG: 1.38,
   },
   // Solówka lekka ~7,2t — niższa klasa niż zestaw >12t; nie wszystkie km płatne.
+  // PL: 0,02 €/km = realny e-TOLL z kosztów FleetStat (~65€/mies ÷ ~6 przejazdów;
+  // kierowcy omijają płatną A2, płacą tylko zjazd/wyjazd). NADPISUJE PTV dla Polski.
   tollPerKm: {
-    DE: 0.13, AT: 0.20, FR: 0.08, PL: 0.05, CZ: 0.10, BE: 0.08, IT: 0.14,
+    DE: 0.13, AT: 0.20, FR: 0.08, PL: 0.02, CZ: 0.10, BE: 0.08, IT: 0.14,
     ES: 0.03, LU: 0.00, NL: 0.00, SK: 0.12, HU: 0.10, SI: 0.15, CH: 0.05,
     DK: 0.00, SE: 0.00, LT: 0.05, LV: 0.05, EE: 0.05, RO: 0.06, HR: 0.10, BG: 0.08,
   },
-  // Bus — TYLKO winiety (koszt roczny/okresowy, NIE per przejazd). CZ kupowane
-  // rocznie, AT/BG rzadko. Per trasa myto = 0 (winiety to koszt stały floty).
+  // Bus — winiety (koszt roczny) → per trasa 0 dla większości. WYJĄTEK PL: v4
+  // płaci ~50€/mies e-TOLL → PL 0,02 €/km jak solówka (zjazd/wyjazd z Polski).
   tollPerKmBus: {
-    DE: 0.00, AT: 0.00, FR: 0.00, PL: 0.00, CZ: 0.00, BE: 0.00, IT: 0.00,
+    DE: 0.00, AT: 0.00, FR: 0.00, PL: 0.02, CZ: 0.00, BE: 0.00, IT: 0.00,
     ES: 0.00, LU: 0.00, NL: 0.00, SK: 0.00, HU: 0.00, SI: 0.00, CH: 0.00,
     DK: 0.00, SE: 0.00, LT: 0.00, LV: 0.00, EE: 0.00, RO: 0.00, HR: 0.00, BG: 0.00,
   },
@@ -310,6 +312,20 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
         } catch (e) { console.warn("[kalkulator] tollProxy:", e?.message || e); }
       }
 
+      // ── Polska: PTV prowadzi przez płatną A2 i zawyża (~63€), a kierowcy A2
+      //    omijają (krajówki, tylko zjazd/wyjazd płatny). Nadpisujemy PL realną
+      //    stawką e-TOLL z kosztów FleetStat (~0,02 €/km). km_PL z podziału trasy.
+      let plOverride = null;
+      if (tollByCountry && (tollByCountry.PL !== undefined || (perCountry.PL || 0) > 0)) {
+        const plKm = perCountry.PL || 0;
+        const plReal = plKm * (tollTable.PL ?? 0);
+        const plPtv = tollByCountry.PL || 0;
+        tollByCountry.PL = plReal;
+        plOverride = { ptv: plPtv, real: plReal };
+        // Skoryguj total wariantu płatnego w boxie o różnicę PL.
+        if (tollVariants?.tolled) tollVariants.tolled.total = Math.max(0, tollVariants.tolled.total - plPtv + plReal);
+      }
+
       const cons = parseFloat(consumption) || DEFAULT_RATES.defaultConsumption;
       const avgFuel = Object.values(rates.fuelPrice).reduce((a, b) => a + b, 0) / Object.values(rates.fuelPrice).length;
       const rows = [];
@@ -348,6 +364,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
         consBasis,
         tollSource,
         tollVariants,
+        plOverride,
         isBus,
         vehName: selVeh?.name || selVeh?.plate || "",
         hasUnknown: unknownKm > 0.5,
@@ -568,7 +585,8 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
               </div>
               {result.tollSource === "ptv" ? (
                 <p className="text-[11px] leading-relaxed text-gray-500">
-                  <b>Oficjalne stawki PTV Developer</b> — myto per kraj wg realnych taryf operatorów (Toll Collect, e-TOLL, ASFA…) i geometrii płatnych dróg, dla klasy solówka 3,5–7,49 t. Liczy też Polskę.<br />
+                  <b>Oficjalne stawki PTV Developer</b> — myto per kraj wg realnych taryf operatorów (Toll Collect, ASFA…) i geometrii płatnych dróg, dla klasy solówka 3,5–7,49 t.<br />
+                  {result.plOverride && <><b>Polska: z Waszego realnego e-TOLL</b> (~0,02 €/km, kierowcy omijają płatną A2). PTV liczył PL {fmtEUR2(result.plOverride.ptv)} przez A2 → nadpisane na {fmtEUR2(result.plOverride.real)}.<br /></>}
                   Kwoty spoza EUR przeliczone zgrubnym kursem.
                 </p>
               ) : (
