@@ -297,11 +297,16 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
       //    Bus = winiety (koszt roczny) → per trasa 0, więc PTV nie wołamy.
       let tollByCountry = null; // {cc: EUR} gdy PTV zadziała
       let tollSource = "flat";
+      let tollVariants = null; // {tolled, economic} — box płatnymi vs landem
       if (!isBus) {
         try {
           const call = httpsCallable(functions, "tollProxy");
           const res = (await call({ waypoints: waypoints.map((w) => ({ lat: w.lat, lng: w.lon })), profile: "EUR_TRUCK_7_49T" })).data;
-          if (res?.success && res.perCountry) { tollByCountry = res.perCountry; tollSource = "ptv"; }
+          if (res?.success && res.perCountry) {
+            tollByCountry = res.perCountry;
+            tollSource = "ptv";
+            tollVariants = { tolled: res.tolled, economic: res.economic };
+          }
         } catch (e) { console.warn("[kalkulator] tollProxy:", e?.message || e); }
       }
 
@@ -341,6 +346,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
         cons,
         consBasis,
         tollSource,
+        tollVariants,
         isBus,
         vehName: selVeh?.name || selVeh?.plate || "",
         hasUnknown: unknownKm > 0.5,
@@ -473,6 +479,34 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
               ? <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-[11px] font-medium">myto: PTV oficjalne</span>
               : <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[11px] font-medium">myto: szacunek flat-rate</span>}
           </div>
+
+          {/* ── Box: myto płatnymi vs landem (oba warianty PTV) ── */}
+          {result.tollVariants?.tolled && result.tollVariants?.economic && (() => {
+            const t = result.tollVariants.tolled, e = result.tollVariants.economic;
+            const save = t.total - e.total, dKm = e.km - t.km, dH = e.durationH - t.durationH;
+            const worth = save > 0 && dH > 0 ? save / dH : 0; // €/godzinę objazdu
+            return (
+              <div className="mb-4 rounded-xl border border-gray-100 overflow-hidden">
+                <div className="grid grid-cols-2 text-sm">
+                  <div className="p-3 bg-blue-50/40 border-r border-gray-100">
+                    <div className="text-[11px] text-gray-500 mb-0.5">🛣️ Płatnymi (najszybciej)</div>
+                    <div className="font-bold text-gray-800">{fmtEUR2(t.total)} <span className="font-normal text-gray-400 text-xs">myto</span></div>
+                    <div className="text-[11px] text-gray-500">{t.km.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} km · {t.durationH.toFixed(1)} h</div>
+                  </div>
+                  <div className="p-3 bg-green-50/40">
+                    <div className="text-[11px] text-gray-500 mb-0.5">🌿 Landem (omijaj płatne)</div>
+                    <div className="font-bold text-gray-800">{fmtEUR2(e.total)} <span className="font-normal text-gray-400 text-xs">myto</span></div>
+                    <div className="text-[11px] text-gray-500">{e.km.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} km · {e.durationH.toFixed(1)} h</div>
+                  </div>
+                </div>
+                <div className="px-3 py-2 bg-gray-50 text-[11px] text-gray-600 border-t border-gray-100">
+                  Landem oszczędza <b>{fmtEUR2(save)}</b> myta, ale <b>+{dKm.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} km</b> i <b>+{dH.toFixed(1)} h</b>
+                  {worth > 0 && <> — to <b>{fmtEUR2(worth)}/h</b> objazdu {worth < 8 ? "(zwykle nieopłacalne)" : "(może się opłacać)"}</>}.
+                  {" "}Kwoty niżej liczone dla wariantu <b>płatnego</b>.
+                </div>
+              </div>
+            );
+          })()}
 
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

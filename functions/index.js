@@ -1286,43 +1286,48 @@ exports.tollProxy = onCall(
     const key = cfg.ptvKey || cfg.apiKey;
     if (!key) return { success: false, reason: "no-key" };
 
-    const params = new URLSearchParams();
-    for (const w of waypoints) params.append("waypoints", `${Number(w.lat)},${Number(w.lng)}`);
-    params.append("results", "TOLL_COSTS");
-    params.append("profile", profile || "EUR_TRUCK_7_49T"); // solówka 3,5-7,49t (Iveco 70C18)
+    const prof = profile || "EUR_TRUCK_7_49T"; // solówka 3,5-7,49t (Iveco 70C18)
 
-    let data;
-    try {
-      const resp = await fetch(`${PTV_URL}?${params.toString()}`, {
-        headers: { apiKey: key },
-        signal: AbortSignal.timeout(20000),
-      });
-      const text = await resp.text();
-      if (!resp.ok) {
-        console.error("tollProxy: PTV", resp.status, text.slice(0, 300));
-        return { success: false, reason: "api-error", status: resp.status };
+    // Jedno wywołanie PTV — z opcjonalnym omijaniem płatnych (options[avoid]=TOLL).
+    async function ptvRoute(avoidToll) {
+      const p = new URLSearchParams();
+      for (const w of waypoints) p.append("waypoints", `${Number(w.lat)},${Number(w.lng)}`);
+      p.append("results", "TOLL_COSTS");
+      p.append("profile", prof);
+      if (avoidToll) p.append("options[avoid]", "TOLL");
+      const resp = await fetch(`${PTV_URL}?${p.toString()}`, { headers: { apiKey: key }, signal: AbortSignal.timeout(20000) });
+      if (!resp.ok) { console.error("tollProxy: PTV", resp.status, (await resp.text()).slice(0, 200)); return null; }
+      const data = await resp.json();
+      const costs = data?.toll?.costs || {};
+      const perCountry = {};
+      for (const c of (costs.countries || [])) {
+        perCountry[String(c.countryCode || "??").toUpperCase()] = c.convertedPrice?.price ?? c.price?.price ?? 0;
       }
-      data = JSON.parse(text);
+      return {
+        perCountry,
+        total: costs.convertedPrice?.price ?? Object.values(perCountry).reduce((a, b) => a + b, 0),
+        km: (data.distance || 0) / 1000,
+        durationH: (data.travelTime || 0) / 3600,
+      };
+    }
+
+    let tolled, economic;
+    try {
+      // Dwa warianty równolegle: płatnymi (najszybciej) i landem (omijaj płatne).
+      [tolled, economic] = await Promise.all([ptvRoute(false), ptvRoute(true)]);
     } catch (e) {
       console.error("tollProxy: fetch error", e.message);
       return { success: false, reason: "fetch-error", error: e.message };
     }
+    if (!tolled) return { success: false, reason: "api-error" };
 
-    // PTV: toll.costs.countries[] → {countryCode(ISO2), convertedPrice{price,currency:EUR}}
-    const costs = data?.toll?.costs || {};
-    const perCountry = {};
-    for (const c of (costs.countries || [])) {
-      const cc = String(c.countryCode || "??").toUpperCase();
-      const eur = c.convertedPrice?.price ?? c.price?.price ?? 0;
-      perCountry[cc] = (perCountry[cc] || 0) + eur;
-    }
     return {
       success: true,
-      perCountry,
-      total: costs.convertedPrice?.price ?? Object.values(perCountry).reduce((a, b) => a + b, 0),
-      tollCount: (costs.countries || []).length,
-      approximated: costs.containsApproximatedSections ?? false,
-      profile: profile || "EUR_TRUCK_7_49T",
+      perCountry: tolled.perCountry, // wariant płatny = główne rozbicie
+      total: tolled.total,
+      tolled,
+      economic: economic || null,
+      profile: prof,
     };
   }
 );
