@@ -338,7 +338,8 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
       setResult({
         geometry: route.coordinates,
         distanceKm,
-        durationH: route.duration / 3600,
+        // Czas: preferuj realny czas ciężarówki z PTV (wariant płatny); OSRM = ~auto (zaniża).
+        durationH: tollVariants?.tolled?.durationH ?? (route.duration / 3600),
         rows,
         fuelTotal,
         tollTotal,
