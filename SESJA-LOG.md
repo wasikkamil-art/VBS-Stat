@@ -2411,3 +2411,27 @@ User podrzucił https://etoll.gov.pl/kalkulator-trasy-w-e-toll/. Odpaliłem w pr
   myta (kalkulacja w widżecie) → nie da się wpiąć, i nie trzeba (PTV daje to samo + myto zagr. w 1 calu).
 - Gotcha: sticky-layout SPA psuje screenshoty (białe) i klik-po-refie; sterowane przez JS-focus + wybór
   opcji react-select przez dispatch mousedown; liczba czytana z DOM.
+
+### PALIWO Faza 2 — realne ceny diesla NETTO z 3 kart (czerwiec 2026)
+User: „A" (ceny z Waszych kart, nie detal) + wrzucił 3 raporty („z 3 korzystamy"): Eurowag
+(EW_Export), E100 (transaction-1594078), Andamur (MOJE ZUŻYCIE). NegoMetal odpadł (to i tak myto).
+- **Najpierw sprawdziłem Firestore `fuelEntries`** — za ubogie (24 rek., 2 tyg., pricePerL w GROSZACH
+  i głównie null; tylko FR sensowny 1,33). Nie nadaje się. Import nie wypełnia ceny/kraju konsekwentnie.
+- **Eurowag = backbone**: ma kolumnę „Kwota netto" (zweryfikowane: DE ratio 1,19=VAT19%, CZ 1,21=VAT21%)
+  + kraj + litry, pokrywa 12 krajów (DE14/FR18/PL15/ES4/BE4/CZ/AT/HU/RO/BG/LU/PT diesle).
+- **E100/Andamur = brutto → netto przez VAT kraju** (zasada ZASADY netto=brutto/(1+VAT)). Cross-check
+  ZGODNY z Eurowag: ES 1,23/1,22/1,31 · FR 1,63/1,64 · AT 1,57/1,54 · RO 1,57/1,60 → konwersja OK.
+- Filtr: tylko flota WGM*/TK314CL (OKAZICIEL/TRUCK/UNIVERSAL/benzyna skip). Kurs NBP 30.06.2026
+  (EUR 4,2963/RON 0,819/CZK 0,1772). Ważone litrami.
+- **Realne netto < domyślne** (potwierdza premisę): PL 1,30 (było 1,42), DE 1,51 (1,66), ES 1,23 (1,48),
+  CZ 1,24 (1,44), FR 1,63 (1,69), BE 1,68, AT 1,57, LU 1,34, HU 1,68, RO 1,57, BG 1,35, PT 1,47.
+- **ZAPISANE do `config/kalkulatorTras.fuelPrice`** (firebase-admin, merge:true, updatedAt ISO).
+  Kraje bez danych czerwca (IT/NL/SK/SI/CH…) zostają z domyślnych przez merge w kodzie (linia 207).
+- Skrypty (gitignored): diagnose_fuel_from_reports.py, diagnose_fuel_prices.mjs.
+
+### Zweryfikowane / NIE
+- ✅ Konwersja brutto→netto potwierdzona cross-checkiem 3 dostawców. Zapis do config odczytany zwrotnie.
+- ⚠️ NIE klikane w UI za loginem (ceny załadują się dyspozytorowi przy otwarciu; merge logic w kodzie
+  potwierdzony). RO/BG/PT/LU/HU = 1–3 tankowania (cienkie, ale realne); core PL/DE/FR/ES/BE = solidne próbki.
+- Paliwo przestało być „szacunkowe" dla 12 krajów. Docelowy automat (CF/import wypełnia pricePerL+country
+  → fuelEntries auto-źródło) = wciąż otwarte, gdy user zechce.
