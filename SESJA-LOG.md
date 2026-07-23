@@ -2321,3 +2321,42 @@ landem 1€/17,5h (+171km, +8h = nieopłacalne). Rozbicie liczone dla wariantu p
 Koniec szacunków. PTV = oficjalne stawki UE z Polską, zwalidowane kotwicą usera. Flat-rate =
 tylko fallback gdy PTV padnie. **NIEzweryfikowane**: kliknięcie w zalogowanej apce (brak hasła).
 Skrypty: diagnose_ptv_validate.mjs (gitignored). Klucz PTV był w czacie → user zregeneruje.
+
+## 2026-07-22 — Kalkulator tras: myto PTV Developer + Polska z realnego e-TOLL
+
+### PTV Developer wpięte (zastąpiło TollGuru) — commity f6f48b7→8877fe0
+Po odrzuceniu TollGuru (15/dzień) i Tollsmart (bez Polski): **PTV Developer** (europejski,
+developer.myptv.com). Free Plan 500/dzień bez karty, self-service, **LICZY POLSKĘ**. Standard Plan
+€0 + 50k/mies free (user gotów wykupić, ale ~5 tras/dzień = nigdy nie dobije limitu).
+- CF `tollProxy`: PTV Routing API, `profile=EUR_TRUCK_7_49T` (solówka 3,5–7,49t = Iveco 70C18).
+  Odpowiedź `toll.costs.countries[]` ISO2 + convertedPrice EUR (PTV konwertuje sam). Klucz `config/toll.ptvKey`.
+- Profil ma znaczenie: Kielce→Berlin 40t=152€, 11.99T=77€, **7.49T=77€** (PL 63+DE 14).
+- Nagłówek czasu z PTV (czas ciężarówki 9,3h) zamiast OSRM (~auto 7,2h).
+
+### Box „płatnymi vs landem"
+PTV `options[avoid]=TOLL` (enum: TOLL,FERRIES,RAIL_SHUTTLES,HIGHWAYS). Dwa warianty:
+płatnymi (najszybciej) vs landem (omijaj płatne) + ocena €/h objazdu. User: „po Europie jeździmy landem".
+
+### Polska — NADPISANA realnym e-TOLL (kluczowa korekta)
+PTV liczył PL **63€/trasa** przez płatną **A2 Konin–Świecko** (koncesja, najdroższa w PL). Ale:
+- User: „w PL zjazd i wyjazd" — schemat 2 przejazdy PL/runda (wyjazd Kielce→załadunek PL→rozładunek
+  DE/FR; powrót załadunek EU→rozładunek PL), reszta krajówki (omijają A2).
+- **Realny e-TOLL z kosztów FleetStat** (import Excel v17-v19, linia „E-Toll", EUR): solówki
+  **54–79€/MIESIĄC** (nie per trasa!). v1 374€/5mc, v3 397€, v5 271€, bus v4 251€.
+- Fix: **PL nadpisane 0,02 €/km** (~10€/przejazd = 65€/mc ÷ ~6 przejazdów), edytowalne. Reszta krajów PTV.
+  Bus PL też 0,02 (v4 płaci ~50€/mc). Kafelek pokazuje „PTV liczył PL X przez A2 → nadpisane na Y".
+
+### Walidacja PTV vs kotwica usera €350–600/auto/mies
+Realne trasy frachtów v3 przez PTV: styczeń 853€ / luty 332€ (śr ~590) = W ZAKRESIE. PTV = górna
+granica (najszybsza=płatna), realnie mniej bo landem. Skrypt `diagnose_ptv_validate.mjs`.
+
+### Dane opłat drogowych (z FleetStat costs, kat. oplaty)
+Import kończy się na MAJU (czerwiec niewgrany). Rozbicie E-Toll+Nego per auto 2026 Jan-maj podane userowi.
+**Czerwiec z NegoMetal (plik 37, 01-29.06, netto EUR):** WGM 0507M 399€, WGM 0475M 253€, WGM 5367K 167€
+(suma 820€, tylko Nego zagr., bez PL e-TOLL, bez busa). User importuje sam przez Excel/Total — NIE wgrywać.
+
+### Otwarte
+1. Paliwo — wciąż ceny domyślne diesla (Faza 2 = realne). 2. Stawka PL 0,02 do potwierdzenia (user
+sprawdza e-TOLL dokładnie). 3. Bus DE/FR myto=0 vs fakt że v4 płaci e-TOLL PL — spójne (PL≠0 teraz).
+4. ⚠️ Klucz PTV był w transkrypcie → user regeneruje. Skrypty diagnostyczne: diagnose_ptv_validate.mjs,
+diagnose_calibrate_*.mjs (gitignored).
