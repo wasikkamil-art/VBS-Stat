@@ -2452,3 +2452,23 @@ User: „Niemcy Austria Czechy Włochy płatne drogi, reszta landem, Polska jak 
   (landem FR/ES/BE = 0). Oszczędność 196 €. To realny model — płacą tylko niemiecki Maut.
 - Commity: 3c296b0 (feature) + ff5f601 (fix timeout PTV wcześniej). Deploy CF + push OK.
 - ⚠️ NIE klikane w UI za loginem — logika policy zweryfikowana na danych PTV (Berlin→Madryt 97 €).
+
+### Frachty: kolumna „nego/e-toll" per zlecenie + zwężenie tabeli (user request)
+User (na zrzucie tabeli WGM 0475M): dodać myto per zlecenie pod nazwą „nego/e-toll" (od lipca),
+zwęzić daty, skrócić status. Potwierdził: myto AUTO z silnika (trasa załadunek→rozładunek → PTV+e-TOLL),
+daty DD.MM, status „✅ rozł".
+- **Kolumna „nego/e-toll"**: `computeFrachtToll(fracht)` — geokod (Nominatim) punktów załadunek+rozładunek
+  → `tollProxy` (PTV per kraj + e-TOLL PL) → zasada floty (DE/AT/CZ/IT/PL płatne, reszta landem=0).
+  Zapis `tollEstimate`+`tollEstimateAt`+`tollEstimatePer` na frachcie (liczone RAZ, nie na żywo — PTV limit).
+  Komórka `FrachtTollCell`: wartość lub „🧮 licz" (tylko od 2026-07). Batch „🧮 Policz myto (N)" w nagłówku
+  (July+ brakujące, sekwencyjnie). Suma myta w wierszu SUMA.
+- **Daty** ZLEC/ZAŁ/ROZŁ → `ddmm()` = „06.07" (pełna w tooltip). **Status** cfg+opcje skrócone („✅ rozł"),
+  select minWidth 130→92.
+- Reuse: `geocode` (App.jsx) + `tollProxy` (wdrożony, wspiera plInRoute). BEZ zmian CF. Commit ca259cf.
+- **Zweryfikowane silnikiem na realnych adresach**: #1 PL Stryków→FR Aoste = 145€ wg zasady (PL 9,74+DE 135,58;
+  CH 50+FR 39 landem); #6 DE Neunkirchen→PL Kostrzyn = 117€ (DE 116+PL 0,23).
+- ⚠️ **CH (Szwajcaria) transit** wychodzi jako landem=0 (nie ma jej na liście płatnych) — LSVA realnie
+  nieuniknione jeśli jadą przez CH. User może dodać CH do config/kalkulatorTras.tollCountries.
+- ⚠️ NIE klikane w UI za loginem (silnik zweryfikowany bezpośrednio). Mobile card BEZ kolumny myta (desktop only).
+- OTWARTE: pełne auto-on-save (liczenie przy zapisie frachtu w modalu) — teraz trigger przyciskiem (per wiersz
+  + batch). Auto-on-render odrzucone (limit PTV/re-fire).
