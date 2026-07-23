@@ -2472,3 +2472,19 @@ daty DD.MM, status „✅ rozł".
 - ⚠️ NIE klikane w UI za loginem (silnik zweryfikowany bezpośrednio). Mobile card BEZ kolumny myta (desktop only).
 - OTWARTE: pełne auto-on-save (liczenie przy zapisie frachtu w modalu) — teraz trigger przyciskiem (per wiersz
   + batch). Auto-on-render odrzucone (limit PTV/re-fire).
+
+### Diagnoza „strona miga / wywala do logowania" (user na komputerze, różne maszyny)
+Trzy przyczyny (nie jedna):
+1. **SW auto-reload** (`controllerchange → location.reload()` w index.html) — flash load→reload→load
+   przy pierwszym wejściu / evikcji SW. Zbędne od SW v6 (shell network-first, deploye i tak propagują
+   się same). **USUNIĘTE** (commit 2c74390). Potwierdzone na żywo: `performance.navigation.type=reload`.
+2. **Banner „nowa wersja"** (checkVersion co 5 min, App.jsx ~1286: fetch `/` → porównanie hash bundla →
+   niebieski pasek „Odśwież teraz" → reload). Sam OK, ale **dziś ~12 deployów w sesji = spam paska** u usera
+   + flash przy każdym reloadzie. Efekt sesji, nie stały bug. Lekcja: mniej deployów gdy user pracuje na żywo.
+3. **Auto-logout 30 min bezczynności** (App.jsx 763) — „wywala do logowania". Liczy ruch na oknie → karta
+   w TLE (brak myszy) → cichy signOut po 30 min; multi-tab: jedna karta wylogowuje wszystkie (Firebase
+   dzieli sesję). **Wydłużone 30min→12h** (commit a0a32f7), `AUTO_LOGOUT_MS=0` wyłącza. Ikona ciężarówki =
+   ekran `user===undefined`/`!roleLoaded` (App.jsx 927/929) — miga gdy App się remountuje (reload).
+- Persystencja auth = browserLocalPersistence (firebase.js 54) — reload NIE wylogowuje; logout był z #3.
+- ⚠️ NIE zweryfikowane w zalogowanym UI (mechanizmy potwierdzone w kodzie + reload na żywo w przeglądarce).
+  User: po deployu Vercela raz wyczyścić dane witryny (zejść ze starego shella z reloadem).
