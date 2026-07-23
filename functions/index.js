@@ -1270,13 +1270,13 @@ exports.gpsProxy = onCall(
 const PTV_URL = "https://api.myptv.com/routing/v1/routes";
 
 exports.tollProxy = onCall(
-  { region: "europe-west1", timeoutSeconds: 30 },
+  { region: "europe-west1", timeoutSeconds: 60 },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Musisz byc zalogowany.");
     if (!["admin", "dyspozytor"].includes(request.auth.token.role)) {
       throw new HttpsError("permission-denied", "Brak dostepu.");
     }
-    const { waypoints, profile } = request.data || {};
+    const { waypoints, profile, plInRoute } = request.data || {};
     if (!Array.isArray(waypoints) || waypoints.length < 2) {
       throw new HttpsError("invalid-argument", "Wymagane min. 2 punkty trasy (lat,lng).");
     }
@@ -1289,15 +1289,16 @@ exports.tollProxy = onCall(
     const prof = profile || "EUR_TRUCK_7_49T"; // solówka 3,5-7,49t (Iveco 70C18)
 
     // Jedno wywołanie PTV — z opcjonalnym omijaniem płatnych (options[avoid]=TOLL).
-    async function ptvRoute(avoidToll) {
+    // withSections: TOLL_SECTIONS/SYSTEMS pobieramy TYLKO gdy trasa dotyka PL (do e-TOLL) —
+    // dla długich tras zagr. (np. Berlin→Madryt, 2300 km) sekcje bardzo obciążają odpowiedź
+    // PTV i przekraczały timeout. Bez PL sekcje są zbędne → lekki, szybki request.
+    async function ptvRoute(avoidToll, withSections) {
       const p = new URLSearchParams();
       for (const w of waypoints) p.append("waypoints", `${Number(w.lat)},${Number(w.lng)}`);
-      // TOLL_SECTIONS/SYSTEMS: rozbicie na operatorów → pozwala oddzielić państwowy
-      // e-TOLL (PL) od koncesji A2 AWSA / A4 Stalexport, które kierowcy omijają.
-      p.append("results", "TOLL_COSTS,TOLL_SECTIONS,TOLL_SYSTEMS");
+      p.append("results", withSections ? "TOLL_COSTS,TOLL_SECTIONS,TOLL_SYSTEMS" : "TOLL_COSTS");
       p.append("profile", prof);
       if (avoidToll) p.append("options[avoid]", "TOLL");
-      const resp = await fetch(`${PTV_URL}?${p.toString()}`, { headers: { apiKey: key }, signal: AbortSignal.timeout(20000) });
+      const resp = await fetch(`${PTV_URL}?${p.toString()}`, { headers: { apiKey: key }, signal: AbortSignal.timeout(50000) });
       if (!resp.ok) { console.error("tollProxy: PTV", resp.status, (await resp.text()).slice(0, 200)); return null; }
       const data = await resp.json();
       const costs = data?.toll?.costs || {};
@@ -1335,7 +1336,8 @@ exports.tollProxy = onCall(
     let tolled, economic;
     try {
       // Dwa warianty równolegle: płatnymi (najszybciej) i landem (omijaj płatne).
-      [tolled, economic] = await Promise.all([ptvRoute(false), ptvRoute(true)]);
+      // Sekcje (do e-TOLL) tylko na wariancie płatnym i tylko gdy trasa dotyka PL.
+      [tolled, economic] = await Promise.all([ptvRoute(false, !!plInRoute), ptvRoute(true, false)]);
     } catch (e) {
       console.error("tollProxy: fetch error", e.message);
       return { success: false, reason: "fetch-error", error: e.message };

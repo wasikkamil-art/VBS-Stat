@@ -305,7 +305,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
       let plEtollKm = 0;
       try {
         const call = httpsCallable(functions, "tollProxy");
-        const res = (await call({ waypoints: waypoints.map((w) => ({ lat: w.lat, lng: w.lon })), profile: "EUR_TRUCK_7_49T" })).data;
+        const res = (await call({ waypoints: waypoints.map((w) => ({ lat: w.lat, lng: w.lon })), profile: "EUR_TRUCK_7_49T", plInRoute: (perCountry.PL || 0) > 0 })).data;
         if (res?.success) {
           if (res.plHasEtoll) { plEtoll = res.plEtoll; plEtollKm = res.plEtollKm || 0; }
           if (!isBus && res.perCountry) {
