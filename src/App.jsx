@@ -17062,6 +17062,69 @@ function TrackerPill({ fracht, onUpdate, compact = false }) {
   );
 }
 
+// Data "2026-07-06" → "06.07" (węższa kolumna). Puste → "-".
+function ddmm(iso) {
+  const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}.${m[2]}` : (iso || "-");
+}
+
+// Kraje z płatnym mytem (zasada floty) — mirror config/kalkulatorTras.tollCountries.
+const FRACHT_TOLL_PAY = new Set(["DE", "AT", "CZ", "IT", "PL"]);
+
+// Szacunek myta per fracht: trasa załadunek→rozładunek → PTV (per kraj) + e-TOLL + zasada floty
+// (płatne tylko DE/AT/CZ/IT/PL, reszta landem=0). Zwraca {toll, perCountry} albo {error}.
+// Liczone raz i zapisywane na frachcie (tollEstimate) — PTV ma limit 500/dzień, nie liczymy na żywo.
+async function computeFrachtToll(fracht) {
+  const loads = [fracht.zaladunekKod, fracht.zaladunekKod2, fracht.zaladunekKod3].filter((s) => s && s.trim());
+  if (!loads.length && fracht.skad) loads.push(fracht.skad);
+  const unloads = allDokody(fracht);
+  const pts = [...loads, ...unloads].filter(Boolean);
+  if (pts.length < 2) return { error: "za mało punktów trasy" };
+  const coords = await Promise.all(pts.map((p) => geocode(p)));
+  const valid = coords.filter(Boolean);
+  if (valid.length < 2) return { error: "nie zgeokodowano trasy" };
+  const plIn = pts.some((p) => /^\s*(pl|polska|poland)\b/i.test(String(p)));
+  try {
+    const call = httpsCallable(functions, "tollProxy");
+    const res = (await call({ waypoints: valid.map((c) => ({ lat: c[0], lng: c[1] })), profile: "EUR_TRUCK_7_49T", plInRoute: plIn })).data;
+    if (!res?.success) return { error: res?.reason || "PTV niedostępne" };
+    const per = { ...(res.perCountry || {}) };
+    if (res.plHasEtoll) per.PL = res.plEtoll; // PL = realny e-TOLL (bez koncesji)
+    let toll = 0;
+    for (const [cc, eur] of Object.entries(per)) if (FRACHT_TOLL_PAY.has(cc)) toll += (eur || 0);
+    return { toll: Math.round(toll * 100) / 100, perCountry: per };
+  } catch (e) { return { error: e?.message || "błąd PTV" }; }
+}
+
+// Komórka myta w tabeli Frachtów: wartość zapisana lub przycisk „licz" (od lipca 2026).
+function FrachtTollCell({ fracht, onUpdate }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const val = fracht.tollEstimate;
+  const d = fracht.dataZaladunku || fracht.dataZlecenia || "";
+  const fromJuly = String(d) >= "2026-07";
+  const run = async (ev) => {
+    ev.stopPropagation();
+    setBusy(true); setErr(null);
+    const r = await computeFrachtToll(fracht);
+    setBusy(false);
+    if (r?.error) { setErr(r.error); return; }
+    onUpdate(fracht.id, { tollEstimate: r.toll, tollEstimateAt: new Date().toISOString(), tollEstimatePer: r.perCountry });
+  };
+  if (busy) return <span className="text-gray-400">…</span>;
+  if (val != null) return (
+    <button onClick={run} title={`Przelicz myto${fracht.tollEstimateAt ? " · " + ddmm(fracht.tollEstimateAt.slice(0,10)) : ""}`} className="text-gray-700 hover:text-blue-600 font-medium">
+      {Number(val).toLocaleString("pl-PL", { maximumFractionDigits: 0 })} €
+    </button>
+  );
+  if (!fromJuly) return <span className="text-gray-300">—</span>;
+  return (
+    <button onClick={run} title={err || "Policz myto (nego/e-toll) z trasy"} className={"text-xs px-1.5 py-0.5 rounded " + (err ? "bg-red-50 text-red-500" : "bg-blue-50 text-blue-600 hover:bg-blue-100")}>
+      {err ? "błąd" : "🧮 licz"}
+    </button>
+  );
+}
+
 function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = [], onAdd, onDelete, onUpdate, onBulkAdd, canEdit = false, currentUser = null, appUsers = [], showToast = () => {} }) {
   // Index driverEvents by frachtId for quick lookup
   const eventsByFracht = useMemo(() => {
@@ -17078,6 +17141,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
   const [editId, setEditId] = useState(null);
   const [prefillRecord, setPrefillRecord] = useState(null); // round-trip "fracht powrotny" prefill
   const [driverStatusId, setDriverStatusId] = useState(null); // rozwinięty panel statusów kierowcy
+  const [tollBatch, setTollBatch] = useState(null); // {done,total} podczas liczenia myta wsadowo
   // Inline editor dla recznego ustawienia czasu dotarcia (admin/dyspozytor)
   // { frachtId, type: "dotarcie_zaladunek"|"dotarcie_rozladunek", localDt: "YYYY-MM-DDTHH:MM", eventId?: string }
   const [manualEv, setManualEv] = useState(null);
@@ -17292,6 +17356,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
   const totalKmPodj = rows.reduce((s,r) => s + (parseInt(r.kmPodjazd)||0), 0);
   const totalKmLad = rows.reduce((s,r) => s + (parseInt(r.kmLadowne)||0), 0);
   const totalKmWsz = rows.reduce((s,r) => s + (parseInt(r.kmWszystkie)||0), 0);
+  const totalToll = rows.reduce((s,r) => s + (Number(r.tollEstimate)||0), 0);
   const avgEurKm = totalKmWszAll > 0 ? (totalCena/totalKmWszAll).toFixed(2) : (totalKmLad > 0 ? (totalCena/totalKmLad).toFixed(2) : "-");
   const avgEurKmLad = totalKmLad > 0 ? (totalCena/totalKmLad).toFixed(2) : "-";
   const avgEurKmWsz = totalKmWsz > 0 ? (totalCena/totalKmWsz).toFixed(2) : "-";
@@ -17301,6 +17366,30 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <button onClick={() => setSelectedVehicle(null)} className="px-3 py-1.5 rounded-lg text-sm text-gray-500 hover:bg-gray-100 border border-gray-200">← Powrot</button>
         <div className="flex-1"><h2 className="text-xl font-bold text-gray-900">{v?.plate} · Frachty</h2><p className="text-sm text-gray-400">{vehicleSubtitle(v)}</p></div>
+        {(() => {
+          const need = rows.filter(r => r.tollEstimate == null && String(r.dataZaladunku || r.dataZlecenia || "") >= "2026-07");
+          if (!need.length && !tollBatch) return null;
+          return (
+            <button
+              disabled={!!tollBatch}
+              title="Policz myto (nego/e-toll) z trasy dla zleceń od lipca bez wyliczenia"
+              onClick={async () => {
+                setTollBatch({ done: 0, total: need.length });
+                let ok = 0, fail = 0;
+                for (let i = 0; i < need.length; i++) {
+                  const res = await computeFrachtToll(need[i]);
+                  if (res?.error) fail++;
+                  else { ok++; onUpdate(need[i].id, { tollEstimate: res.toll, tollEstimateAt: new Date().toISOString(), tollEstimatePer: res.perCountry }); }
+                  setTollBatch({ done: i + 1, total: need.length });
+                }
+                setTollBatch(null);
+                showToast(`Myto policzone: ${ok} OK${fail ? `, ${fail} błąd` : ""}`);
+              }}
+              className="px-3 py-2 rounded-lg text-sm font-semibold border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-60">
+              {tollBatch ? `🧮 ${tollBatch.done}/${tollBatch.total}…` : `🧮 Policz myto (${need.length})`}
+            </button>
+          );
+        })()}
         <button onClick={() => { setEditId(null); setShowForm(true); }} className="px-4 py-2 rounded-lg text-sm font-semibold text-white" style={{background:"#111827"}}>+ Dodaj fracht</button>
       </div>
       <div className="flex flex-wrap gap-2 mb-4">
@@ -17382,11 +17471,11 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-gray-100 text-gray-400 uppercase bg-gray-50">
-              {["#","Zlec.","Zał.","Rozł.","Załadunek","Rozładunek","Status","Klient","EUR","KM p.","KM ł.","KM w.","€/km ł.","€/km w.","Waga","Dysp.","FV","Uwagi",""].map(h => <th key={h} className="px-1.5 py-2 text-left whitespace-nowrap" style={{fontSize:11}}>{h}</th>)}
+              {["#","Zlec.","Zał.","Rozł.","Załadunek","Rozładunek","Status","Klient","EUR","KM p.","KM ł.","KM w.","€/km ł.","€/km w.","nego/e-toll","Waga","Dysp.","FV","Uwagi",""].map(h => <th key={h} className="px-1.5 py-2 text-left whitespace-nowrap" style={{fontSize:11}}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && <tr><td colSpan={19} className="text-center py-10 text-gray-400">Brak frachtow w {miesiaceL[filterMonth]} {filterYear}</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={20} className="text-center py-10 text-gray-400">Brak frachtow w {miesiaceL[filterMonth]} {filterYear}</td></tr>}
             {rows.map((r,idx) => {
               const eurKmLad = r.kmLadowne && r.cenaEur ? (parseFloat(r.cenaEur)/parseInt(r.kmLadowne)).toFixed(2) : "-";
               const eurKmWsz = r.kmWszystkie && r.cenaEur ? (parseFloat(r.cenaEur)/parseInt(r.kmWszystkie)).toFixed(2) : "-";
@@ -17399,9 +17488,9 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
               return [
                 <tr key={r.id} className="border-b border-gray-50 hover:bg-blue-50 transition-colors" style={{fontSize: 12}}>
                   <td className="px-1.5 py-1.5 text-gray-400">{idx+1}</td>
-                  <td className="px-1.5 py-1.5 whitespace-nowrap">{r.dataZlecenia||"-"}</td>
-                  <td className="px-1.5 py-1.5 whitespace-nowrap text-gray-500">{r.dataZaladunku||"-"}</td>
-                  <td className="px-1.5 py-1.5 whitespace-nowrap text-gray-500">{r.dataRozladunku||"-"}</td>
+                  <td className="px-1.5 py-1.5 whitespace-nowrap" title={r.dataZlecenia||""}>{ddmm(r.dataZlecenia)}</td>
+                  <td className="px-1.5 py-1.5 whitespace-nowrap text-gray-500" title={r.dataZaladunku||""}>{ddmm(r.dataZaladunku)}</td>
+                  <td className="px-1.5 py-1.5 whitespace-nowrap text-gray-500" title={r.dataRozladunku||""}>{ddmm(r.dataRozladunku)}</td>
                   <td className="px-1.5 py-1.5 whitespace-nowrap" style={{maxWidth:120,overflow:"hidden",textOverflow:"ellipsis"}}>{[r.zaladunekKod,r.zaladunekKod2,r.zaladunekKod3].filter(s=>s&&s.trim()).join(" / ")||[r.skad].filter(Boolean).join("")||"-"}</td>
                   <td className="px-1.5 py-1.5 whitespace-nowrap" style={{maxWidth:120,overflow:"hidden",textOverflow:"ellipsis"}}>{allDokody(r).join(" / ")||"-"}</td>
                   <td className="px-2 py-2 whitespace-nowrap">
@@ -17410,9 +17499,9 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                       // Computed status (events > legacy field > manual override)
                       const s = computeFrachtStatus(r, evts);
                       const cfg = {
-                        rozladowano: { emoji:"✅", label:"Rozładowano", bg:"#f0fdf4", color:"#166534" },
-                        w_trasie:    { emoji:"→", label:"W trasie",    bg:"#f0f9ff", color:"#0369a1" },
-                        problem:     { emoji:"⚠️", label:"Problem",     bg:"#fef2f2", color:"#991b1b" },
+                        rozladowano: { emoji:"✅", label:"rozł", bg:"#f0fdf4", color:"#166534" },
+                        w_trasie:    { emoji:"→", label:"w trasie", bg:"#f0f9ff", color:"#0369a1" },
+                        problem:     { emoji:"⚠️", label:"problem", bg:"#fef2f2", color:"#991b1b" },
                       };
                       const c = cfg[s] || cfg.w_trasie;
                       // hasZal: po refactorze 2026-04-28 driver nie emit'uje `zaladowano` —
@@ -17436,16 +17525,16 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                             style={{
                               background: c.bg,
                               color: c.color,
-                              minWidth: 130,
+                              minWidth: 92,
                               border: isManualOverride ? "2px solid #f59e0b" : "0",
                               fontWeight: isManualOverride ? 800 : 600,
                             }}
                             title={isManualOverride ? "Status nadpisany ręcznie — wybierz 'Auto' żeby wrócić do automatyki" : "Status z eventów kierowcy"}
                           >
-                            <option value="auto">↻ Auto ({c.label})</option>
-                            <option value="w_trasie">→ W trasie (manual)</option>
-                            <option value="rozladowano">✅ Rozładowano (manual)</option>
-                            <option value="problem">⚠️ Problem (manual)</option>
+                            <option value="auto">↻ auto ({c.label})</option>
+                            <option value="w_trasie">→ w trasie</option>
+                            <option value="rozladowano">✅ rozł</option>
+                            <option value="problem">⚠️ problem</option>
                           </select>
                           {evts.length > 0 && (
                             <button onClick={(ev) => { ev.stopPropagation(); setDriverStatusId(driverStatusId === r.id ? null : r.id); }}
@@ -17488,6 +17577,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                   <td className="px-1.5 py-1.5 text-right text-gray-600">{r.kmWszystkie||"-"}</td>
                   <td className="px-1.5 py-1.5 text-right text-amber-600 font-medium">{eurKmLad}</td>
                   <td className="px-1.5 py-1.5 text-right text-blue-600 font-medium">{eurKmWsz}</td>
+                  <td className="px-1.5 py-1.5 text-right whitespace-nowrap"><FrachtTollCell fracht={r} onUpdate={onUpdate} /></td>
                   <td className="px-1.5 py-1.5 text-gray-500">{r.wagaLadunku||"-"}</td>
                   <td className="px-1.5 py-1.5 whitespace-nowrap text-gray-500">{r.dyspozytor||"-"}</td>
                   <td className="px-1.5 py-1.5 whitespace-nowrap text-gray-500">{r.nrFV||"-"}</td>
@@ -17799,6 +17889,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                 <td className="px-2 py-2.5 text-right text-blue-700">{totalKmWsz.toLocaleString("pl-PL")}</td>
                 <td className="px-2 py-2.5 text-right text-amber-600">{avgEurKmLad}</td>
                 <td className="px-2 py-2.5 text-right text-blue-600">{avgEurKmWsz}</td>
+                <td className="px-2 py-2.5 text-right text-gray-700">{totalToll > 0 ? `${totalToll.toLocaleString("pl-PL",{maximumFractionDigits:0})} €` : ""}</td>
                 <td colSpan={5}></td>
               </tr>
             )}
