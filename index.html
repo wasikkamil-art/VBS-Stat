@@ -41,15 +41,10 @@
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('/sw.js').catch(() => {});
         });
-        // Gdy nowy SW przejmie kontrolę (skipWaiting + clients.claim po deployu) —
-        // przeładuj raz, żeby otwarte karty dostały nowy kod bez ręcznego czyszczenia.
-        // Guard `refreshing` chroni przed pętlą reloadów.
-        let refreshing = false;
-        navigator.serviceWorker.addEventListener('controllerchange', () => {
-          if (refreshing) return;
-          refreshing = true;
-          window.location.reload();
-        });
+        // NIE przeładowujemy strony na `controllerchange`. Od SW v6 shell jest network-first,
+        // więc każdy świeży load i tak pobiera najnowszy index.html + hashe assetów (deploye
+        // propagują się same). Auto-reload powodował widoczny „flash" (load → reload → load)
+        // przy pierwszym wejściu / po evikcji SW (mobile) — usunięty 2026-07-23.
       }
     </script>
   </body>
