@@ -1292,19 +1292,40 @@ exports.tollProxy = onCall(
     async function ptvRoute(avoidToll) {
       const p = new URLSearchParams();
       for (const w of waypoints) p.append("waypoints", `${Number(w.lat)},${Number(w.lng)}`);
-      p.append("results", "TOLL_COSTS");
+      // TOLL_SECTIONS/SYSTEMS: rozbicie na operatorów → pozwala oddzielić państwowy
+      // e-TOLL (PL) od koncesji A2 AWSA / A4 Stalexport, które kierowcy omijają.
+      p.append("results", "TOLL_COSTS,TOLL_SECTIONS,TOLL_SYSTEMS");
       p.append("profile", prof);
       if (avoidToll) p.append("options[avoid]", "TOLL");
       const resp = await fetch(`${PTV_URL}?${p.toString()}`, { headers: { apiKey: key }, signal: AbortSignal.timeout(20000) });
       if (!resp.ok) { console.error("tollProxy: PTV", resp.status, (await resp.text()).slice(0, 200)); return null; }
       const data = await resp.json();
       const costs = data?.toll?.costs || {};
+      const systems = data?.toll?.systems || [];
+      const sections = data?.toll?.sections || [];
       const perCountry = {};
       for (const c of (costs.countries || [])) {
         perCountry[String(c.countryCode || "??").toUpperCase()] = c.convertedPrice?.price ?? c.price?.price ?? 0;
       }
+      // PL: policz koszt TYLKO systemu e-TOLL (państwowego). Pomija koncesje (A2
+      // AWSA, A4 Stalexport) — kierowcy jeżdżą krajówkami, płacą tylko e-TOLL.
+      // Sekcje niosą realną taryfę (~0,41 PLN/km = 0,095 €/km, zweryfikowane 2026-07-23).
+      let plEtoll = 0, plEtollKm = 0, plHasEtoll = false;
+      for (const s of sections) {
+        if (String(s.countryCode || "").toUpperCase() !== "PL") continue;
+        const sys = systems[s.tollSystemIndex] || {};
+        const label = String(sys.operatorName || sys.name || "").toLowerCase();
+        if (!label.includes("e-toll") && !label.includes("etoll")) continue; // koncesje pomijamy
+        plHasEtoll = true;
+        const cost = (s.costs && s.costs[0]) || {};
+        plEtoll += cost.convertedPrice?.price ?? 0;
+        plEtollKm += (s.officialDistance || 0) / 1000;
+      }
       return {
         perCountry,
+        plEtoll: Math.round(plEtoll * 100) / 100,
+        plEtollKm: Math.round(plEtollKm * 10) / 10,
+        plHasEtoll,
         total: costs.convertedPrice?.price ?? Object.values(perCountry).reduce((a, b) => a + b, 0),
         km: (data.distance || 0) / 1000,
         durationH: (data.travelTime || 0) / 3600,
@@ -1324,6 +1345,9 @@ exports.tollProxy = onCall(
     return {
       success: true,
       perCountry: tolled.perCountry, // wariant płatny = główne rozbicie
+      plEtoll: tolled.plEtoll,       // PL: realny e-TOLL bez koncesji (nadpisuje PL)
+      plEtollKm: tolled.plEtollKm,
+      plHasEtoll: tolled.plHasEtoll,
       total: tolled.total,
       tolled,
       economic: economic || null,
