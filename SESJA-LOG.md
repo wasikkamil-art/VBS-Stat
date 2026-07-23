@@ -2398,3 +2398,16 @@ PTV `results=TOLL_COSTS,TOLL_SECTIONS,TOLL_SYSTEMS` zwraca:
 ### Otwarte (kalkulator)
 1. **PALIWO** — jedyna część wciąż na wartościach domyślnych (Faza 2). To następny naturalny krok.
 2. Stawka fallback PL 0,02 — nieistotna teraz (używana tylko gdy PTV padnie).
+
+### Cross-check z oficjalnym kalkulatorem rządowym e-TOLL (etoll.gov.pl)
+User podrzucił https://etoll.gov.pl/kalkulator-trasy-w-e-toll/. Odpaliłem w przeglądarce
+(Kielce→Zgorzelec, Euro 6, ciężarówka 3,5–12t, „Najszybsza"):
+- **Oficjalny gov: 183,17 PLN** vs **nasze PTV (sekcje e-TOLL): 178,51 PLN** (41,21€).
+- Różnica **4,66 PLN = 2,5%** (porównanie PLN-do-PLN, bez FX). Zgoda 97,5%.
+- Reszta różnicy = drobny wybór odcinków S/A przez „najszybszą", nie błąd stawki. Oba wykluczają
+  koncesje A2/A4 (gov ich nie liczy, my pomijamy) → jabłko-do-jabłka.
+- **Model PTV POTWIERDZONY rządowym źródłem.** Stary 0,02×535km≈46 PLN = ~4× za mało (gov to potwierdza).
+- Technicznie: etoll.gov.pl = Next.js SPA za Incapsulą + zamknięty widżet Leaflet, BEZ publicznego API
+  myta (kalkulacja w widżecie) → nie da się wpiąć, i nie trzeba (PTV daje to samo + myto zagr. w 1 calu).
+- Gotcha: sticky-layout SPA psuje screenshoty (białe) i klik-po-refie; sterowane przez JS-focus + wybór
+  opcji react-select przez dispatch mousedown; liczba czytana z DOM.
