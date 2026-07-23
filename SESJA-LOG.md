@@ -2488,3 +2488,13 @@ Trzy przyczyny (nie jedna):
 - Persystencja auth = browserLocalPersistence (firebase.js 54) — reload NIE wylogowuje; logout był z #3.
 - ⚠️ NIE zweryfikowane w zalogowanym UI (mechanizmy potwierdzone w kodzie + reload na żywo w przeglądarce).
   User: po deployu Vercela raz wyczyścić dane witryny (zejść ze starego shella z reloadem).
+
+### NASTĘPNA SESJA (plan usera, koniec dnia 2026-07-23)
+1. **Import kosztów za czerwiec** — user chce zrobić razem. Materiały już są: 3 raporty paliwowe czerwca
+   sparsowane dziś (Eurowag EW_Export + E100 transaction-1594078 + Andamur MOJE ZUŻYCIE) — patrz sekcja
+   "PALIWO Faza 2". NegoMetal czerwca (myto zagr.) policzony wcześniej: WGM 0507M 399€ / 0475M 253€ / 5367K 167€.
+   Workflow: feedback_import_kosztow_workflow (Total_26, miesiąc=czerwiec=kol.H?, top-up brakujących, note=nr pliku).
+2. **Nowy pomysł: monitorowanie/zarządzanie paliwem** — user ma koncepcję, do omówienia. Kontekst: dane
+   tankowań są w `fuelEntries` (litry, pricePerL w groszach, country, station, isAdblue) — ale niekonsekwentnie
+   wypełniane (patrz PALIWO Faza 2: import nie zawsze zapisuje cenę/kraj). Możliwy kierunek: €/L per kraj auto,
+   €/km, alerty, spalanie. Poczekać na pomysł usera, nie zakładać z góry.
