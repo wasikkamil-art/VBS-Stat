@@ -2360,3 +2360,41 @@ Import kończy się na MAJU (czerwiec niewgrany). Rozbicie E-Toll+Nego per auto 
 sprawdza e-TOLL dokładnie). 3. Bus DE/FR myto=0 vs fakt że v4 płaci e-TOLL PL — spójne (PL≠0 teraz).
 4. ⚠️ Klucz PTV był w transkrypcie → user regeneruje. Skrypty diagnostyczne: diagnose_ptv_validate.mjs,
 diagnose_calibrate_*.mjs (gitignored).
+
+---
+
+## 2026-07-23 — Kalkulator: Polska z REALNYCH sekcji e-TOLL PTV (koniec zgadywanki 0,02)
+
+Komit **3dc29ec** (CF `tollProxy` + `src/components/KalkulatorTras.jsx`).
+
+### Problem ze starym modelem (0,02 €/km × total km PL)
+User wrzucił 3 realne eksporty e-TOLL (WGM 5367K, TK 314CL bus, WGM 0475M; ~1520 płatnych km).
+Taryfa e-TOLL jak w zegarku: **0,410 PLN/km ≈ 0,095 €/km**, identyczna dla solówki i busa (klasa
+3,5–12t, euro_6). Stare 0,02 na CAŁY dystans PL zakładało po cichu, że tylko ~21% km jest płatne —
+a realne trasy floty są mocno ekspresowe (A4/S8/S7), więc **0,02 zaniżało ~4×**.
+
+### Odkrycie w PTV (live test Kielce→Zgorzelec, klucz z config/toll przez gcloud REST)
+PTV `results=TOLL_COSTS,TOLL_SECTIONS,TOLL_SYSTEMS` zwraca:
+- `toll.systems[]`: **[0] e-TOLL (państwowy), [1] A4 Stalexport (koncesja)**.
+- `toll.sections[]`: per sekcja `countryCode`, `tollSystemIndex`, `costs[].convertedPrice` (EUR),
+  `officialDistance`. **Sekcje e-TOLL wycenione po realnej taryfie 0,410 PLN/km** (2,39 PLN / 5,84 km).
+- Kielce→Zgorzelec PL: total PTV **53,23€** = e-TOLL **41,21€** (435,8 km) + koncesja A4 **12,02€**.
+  Kontrola: 435,8 × 0,095 = 41,40€ ✓. Stary model: 535 km × 0,02 = **10,71€** (4× za mało).
+
+### Fix (wariant A wybrany przez usera)
+- **CF `tollProxy`**: dolicza `plEtoll`/`plEtollKm`/`plHasEtoll` = suma sekcji PL systemu e-TOLL
+  (operator/name zawiera „e-toll"), z pominięciem koncesji A2 AWSA / A4 Stalexport.
+- **Frontend**: PL nadpisywane realnym `plEtoll` z PTV (nie 0,02×km). Fallback km×0,02 tylko gdy PTV
+  nie zwróci sekcji (brak klucza/api-error). **Bus też woła PTV** i bierze TYLKO plEtoll (winiety
+  zagranicą bez zmian). Infobox rozróżnia źródło: „realny e-TOLL (X km × 0,41 PLN/km)" vs fallback.
+- Komentarze przy stałych zaktualizowane: `tollPerKm.PL=0,02` / `tollPerKmBus.PL=0,02` = TYLKO fallback.
+
+### Zweryfikowane / NIE
+- ✅ Logika parsowania sekcji na realnym JSON PTV (plEtoll=41,21€ policzone offline).
+- ✅ Build zielony, CF deployed, push na main (Vercel auto-deploy). Klucz PTV WAŻNY (użyty w sesji).
+- ⚠️ NIE klikałem UI kalkulatora za loginem (nie loguję się na konto). API PTV sprawdzone bezpośrednio,
+  kliknięcia dyspozytora nie. Do potwierdzenia przez usera: policzenie realnej trasy w panelu.
+
+### Otwarte (kalkulator)
+1. **PALIWO** — jedyna część wciąż na wartościach domyślnych (Faza 2). To następny naturalny krok.
+2. Stawka fallback PL 0,02 — nieistotna teraz (używana tylko gdy PTV padnie).
