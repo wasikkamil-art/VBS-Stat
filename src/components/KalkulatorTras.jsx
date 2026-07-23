@@ -49,6 +49,11 @@ const DEFAULT_RATES = {
   tankL: 200, // solówka Iveco 70C18 ~ zbiornik 100–200 L
 };
 
+// Polityka myta per kraj (zasada floty): płatne drogi TYLKO w tych krajach; reszta = landem
+// (krajówki, myto per trasa 0). DE/AT/CZ/IT = płatne konieczne, PL = e-TOLL. FR/ES/BE/NL/LU…
+// = krajówki (péage FR i autopisty ES za drogie). Edytowalne przez config/kalkulatorTras.tollCountries.
+const DEFAULT_TOLL_COUNTRIES = ["DE", "AT", "CZ", "IT", "PL"];
+
 const COUNTRY_NAMES = {
   PL: "Polska", DE: "Niemcy", FR: "Francja", BE: "Belgia", CZ: "Czechy",
   ES: "Hiszpania", LU: "Luksemburg", AT: "Austria", IT: "Włochy", NL: "Holandia",
@@ -186,6 +191,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
   const [progress, setProgress] = useState(null); // {done,total}
   const [result, setResult] = useState(null); // {distanceKm,durationH,perCountry,unknownKm,rows,fuelTotal,tollTotal,grand}
   const [rates, setRates] = useState(DEFAULT_RATES);
+  const [tollCountries, setTollCountries] = useState(DEFAULT_TOLL_COUNTRIES); // kraje z płatnym mytem (reszta = landem)
   const [ratesOpen, setRatesOpen] = useState(false);
   const [savingRates, setSavingRates] = useState(false);
   const [ratesUpdatedAt, setRatesUpdatedAt] = useState(null); // data ostatniej aktualizacji cen (ISO) lub null = domyślne
@@ -211,6 +217,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
             tankL: d.tankL || DEFAULT_RATES.tankL,
           });
           if (d.defaultConsumption) setConsumption(d.defaultConsumption);
+          if (Array.isArray(d.tollCountries) && d.tollCountries.length) setTollCountries(d.tollCountries.map((c) => String(c).toUpperCase()));
           if (d.updatedAt) setRatesUpdatedAt(d.updatedAt);
         }
       } catch (e) { console.warn("[kalkulator] config load:", e); }
@@ -311,7 +318,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
           if (!isBus && res.perCountry) {
             tollByCountry = res.perCountry;
             tollSource = "ptv";
-            tollVariants = { tolled: res.tolled, economic: res.economic };
+            tollVariants = { tolled: res.tolled }; // do czasu/km; wariant landem liczony politycznie per kraj
           }
         }
       } catch (e) { console.warn("[kalkulator] tollProxy:", e?.message || e); }
@@ -334,28 +341,37 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
 
       const cons = parseFloat(consumption) || DEFAULT_RATES.defaultConsumption;
       const avgFuel = Object.values(rates.fuelPrice).reduce((a, b) => a + b, 0) / Object.values(rates.fuelPrice).length;
+      const tollPay = new Set(tollCountries); // kraje z płatnym mytem; reszta = landem (0)
       const rows = [];
-      let fuelTotal = 0, tollTotal = 0;
+      let fuelTotal = 0, tollTotal = 0, allTollTotal = 0; // tollTotal = wg zasady floty; allTollTotal = gdyby wszędzie płatnymi
       const entries = Object.entries(perCountry).sort((a, b) => b[1] - a[1]);
       if (unknownKm > 0.5) entries.push(["??", unknownKm]);
       for (const [cc, km] of entries) {
         const liters = (km * cons) / 100;
         const price = cc === "??" ? avgFuel : (rates.fuelPrice[cc] ?? avgFuel);
         const fuelCost = liters * price;
-        // Myto: PTV per kraj jeśli dostępne, inaczej flat-rate km × stawka klasy auta.
-        // Wyjątek PL na ścieżce flat (bus): realny e-TOLL z PTV, nie km × 0,02.
-        const tollCost = tollByCountry
+        // Myto pełne (płatnymi) per kraj — PTV jeśli dostępne, inaczej flat-rate; PL = e-TOLL na ścieżce flat.
+        const tollFull = tollByCountry
           ? (tollByCountry[cc] || 0)
           : (cc === "??" ? 0 : (cc === "PL" && plEtoll != null ? plEtoll : km * (tollTable[cc] ?? 0)));
+        // Polityka floty: myto liczymy TYLKO w krajach płatnych (DE/AT/CZ/IT/PL); reszta = landem (0).
+        const pay = cc !== "??" && tollPay.has(cc);
+        const tollCost = pay ? tollFull : 0;
         fuelTotal += fuelCost;
         tollTotal += tollCost;
-        rows.push({ cc, km, liters, price, fuelCost, tollCost });
+        allTollTotal += tollFull;
+        rows.push({ cc, km, liters, price, fuelCost, tollCost, tollFull, land: !pay && cc !== "??" && tollFull > 0 });
       }
-      // TollGuru może zwrócić myto dla kraju, którego nie wykrył podział km — dolicz do sumy.
+      // PTV może zwrócić myto dla kraju, którego nie wykrył podział km — dolicz (z polityką).
       if (tollByCountry) {
         const seen = new Set(entries.map(([cc]) => cc));
         for (const [cc, eur] of Object.entries(tollByCountry)) {
-          if (!seen.has(cc) && eur > 0) { tollTotal += eur; rows.push({ cc, km: 0, liters: 0, price: 0, fuelCost: 0, tollCost: eur }); }
+          if (!seen.has(cc) && eur > 0) {
+            const pay = tollPay.has(cc);
+            allTollTotal += eur;
+            if (pay) tollTotal += eur;
+            rows.push({ cc, km: 0, liters: 0, price: 0, fuelCost: 0, tollCost: pay ? eur : 0, tollFull: eur, land: !pay });
+          }
         }
       }
       setResult({
@@ -366,6 +382,8 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
         rows,
         fuelTotal,
         tollTotal,
+        allTollTotal,
+        tollCountriesUsed: [...tollPay],
         grand: fuelTotal + tollTotal,
         cons,
         consBasis,
@@ -505,29 +523,28 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
               : <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[11px] font-medium">myto: szacunek flat-rate</span>}
           </div>
 
-          {/* ── Box: myto płatnymi vs landem (oba warianty PTV) ── */}
-          {result.tollVariants?.tolled && result.tollVariants?.economic && (() => {
-            const t = result.tollVariants.tolled, e = result.tollVariants.economic;
-            const save = t.total - e.total, dKm = e.km - t.km, dH = e.durationH - t.durationH;
-            const worth = save > 0 && dH > 0 ? save / dH : 0; // €/godzinę objazdu
+          {/* ── Box: myto wg zasady floty (płatne w wybranych krajach) vs gdyby wszędzie płatnymi ── */}
+          {result.tollSource === "ptv" && result.allTollTotal > result.tollTotal + 0.01 && (() => {
+            const save = result.allTollTotal - result.tollTotal;
+            const payCC = result.tollCountriesUsed;
+            const landCC = result.rows.filter((r) => r.land).map((r) => r.cc);
             return (
               <div className="mb-4 rounded-xl border border-gray-100 overflow-hidden">
                 <div className="grid grid-cols-2 text-sm">
-                  <div className="p-3 bg-blue-50/40 border-r border-gray-100">
-                    <div className="text-[11px] text-gray-500 mb-0.5">🛣️ Płatnymi (najszybciej)</div>
-                    <div className="font-bold text-gray-800">{fmtEUR2(t.total)} <span className="font-normal text-gray-400 text-xs">myto</span></div>
-                    <div className="text-[11px] text-gray-500">{t.km.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} km · {t.durationH.toFixed(1)} h</div>
+                  <div className="p-3 bg-green-50/40 border-r border-gray-100">
+                    <div className="text-[11px] text-gray-500 mb-0.5">🌿 Wg Waszej zasady</div>
+                    <div className="font-bold text-gray-800">{fmtEUR2(result.tollTotal)} <span className="font-normal text-gray-400 text-xs">myto</span></div>
+                    <div className="text-[11px] text-gray-500">płatne: {payCC.join(" · ") || "—"}</div>
                   </div>
-                  <div className="p-3 bg-green-50/40">
-                    <div className="text-[11px] text-gray-500 mb-0.5">🌿 Landem (omijaj płatne)</div>
-                    <div className="font-bold text-gray-800">{fmtEUR2(e.total)} <span className="font-normal text-gray-400 text-xs">myto</span></div>
-                    <div className="text-[11px] text-gray-500">{e.km.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} km · {e.durationH.toFixed(1)} h</div>
+                  <div className="p-3 bg-gray-50/60">
+                    <div className="text-[11px] text-gray-500 mb-0.5">🛣️ Gdyby wszędzie płatnymi</div>
+                    <div className="font-bold text-gray-500">{fmtEUR2(result.allTollTotal)} <span className="font-normal text-gray-400 text-xs">myto</span></div>
+                    <div className="text-[11px] text-gray-500">landem w: {landCC.length ? landCC.join(" · ") : "—"}</div>
                   </div>
                 </div>
                 <div className="px-3 py-2 bg-gray-50 text-[11px] text-gray-600 border-t border-gray-100">
-                  Landem oszczędza <b>{fmtEUR2(save)}</b> myta, ale <b>+{dKm.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} km</b> i <b>+{dH.toFixed(1)} h</b>
-                  {worth > 0 && <> — to <b>{fmtEUR2(worth)}/h</b> objazdu {worth < 8 ? "(zwykle nieopłacalne)" : "(może się opłacać)"}</>}.
-                  {" "}Kwoty niżej liczone dla wariantu <b>płatnego</b>.
+                  Zasada floty: płatne drogi w <b>{payCC.join(", ")}</b> (PL = e-TOLL), reszta <b>landem</b> (krajówki, myto 0).
+                  {" "}Omijanie płatnych oszczędza <b>{fmtEUR2(save)}</b> myta na tej trasie.
                 </div>
               </div>
             );
@@ -553,7 +570,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
                     <td className="text-right text-gray-600">{r.liters.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}</td>
                     <td className="text-right text-gray-400">{r.price.toFixed(2)}</td>
                     <td className="text-right text-gray-700">{fmtEUR2(r.fuelCost)}</td>
-                    <td className="text-right text-gray-700">{r.tollCost > 0 ? fmtEUR2(r.tollCost) : "—"}</td>
+                    <td className="text-right text-gray-700">{r.tollCost > 0 ? fmtEUR2(r.tollCost) : (r.land ? <span className="text-green-600 text-xs">landem</span> : "—")}</td>
                   </tr>
                 ))}
               </tbody>
@@ -593,6 +610,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
               {result.tollSource === "ptv" ? (
                 <p className="text-[11px] leading-relaxed text-gray-500">
                   <b>Oficjalne stawki PTV Developer</b> — myto per kraj wg realnych taryf operatorów (Toll Collect, ASFA…) i geometrii płatnych dróg, dla klasy solówka 3,5–7,49 t.<br />
+                  <b>Zasada floty:</b> myto naliczane tylko w krajach płatnych ({(result.tollCountriesUsed || []).join(", ")}); w pozostałych jedziecie <b>landem</b> (krajówki) → myto 0.<br />
                   {result.plOverride && result.plOverride.source === "etoll"
                     ? <><b>Polska: realny e-TOLL</b> — suma sekcji systemu państwowego ({result.plOverride.km} km × 0,41 PLN/km), z pominięciem koncesji A2 AWSA / A4 Stalexport, które kierowcy omijają. PTV z koncesją liczył PL {fmtEUR2(result.plOverride.ptv)} → skorygowane na {fmtEUR2(result.plOverride.real)}.<br /></>
                     : result.plOverride && <><b>Polska: fallback</b> — km_PL × 0,02 €/km (PTV nie zwrócił sekcji e-TOLL). PTV liczył PL {fmtEUR2(result.plOverride.ptv)} → nadpisane na {fmtEUR2(result.plOverride.real)}.<br /></>}

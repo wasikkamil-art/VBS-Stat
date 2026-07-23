@@ -1333,11 +1333,13 @@ exports.tollProxy = onCall(
       };
     }
 
-    let tolled, economic;
+    let tolled;
     try {
-      // Dwa warianty równolegle: płatnymi (najszybciej) i landem (omijaj płatne).
-      // Sekcje (do e-TOLL) tylko na wariancie płatnym i tylko gdy trasa dotyka PL.
-      [tolled, economic] = await Promise.all([ptvRoute(false, !!plInRoute), ptvRoute(true, false)]);
+      // Jedno wywołanie: wariant płatny (per-kraj rozbicie). Sekcje e-TOLL tylko gdy trasa dotyka PL.
+      // Wariant „landem" liczymy politycznie per kraj po stronie frontu (zerujemy myto w krajach
+      // spoza listy) — NIE wołamy avoid=TOLL, bo globalny avoid dawał bezsensowne objazdy
+      // (np. Berlin→Madryt przez Austrię, +1100 km). Dzięki temu też szybciej (1 wywołanie zamiast 2).
+      tolled = await ptvRoute(false, !!plInRoute);
     } catch (e) {
       console.error("tollProxy: fetch error", e.message);
       return { success: false, reason: "fetch-error", error: e.message };
@@ -1352,7 +1354,6 @@ exports.tollProxy = onCall(
       plHasEtoll: tolled.plHasEtoll,
       total: tolled.total,
       tolled,
-      economic: economic || null,
       profile: prof,
     };
   }
