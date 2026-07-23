@@ -17069,7 +17069,8 @@ function ddmm(iso) {
 }
 
 // Kraje z płatnym mytem (zasada floty) — mirror config/kalkulatorTras.tollCountries.
-const FRACHT_TOLL_PAY = new Set(["DE", "AT", "CZ", "IT", "PL"]);
+// CH = LSVA (opłata dystansowa dla ciężarówek, liczy PTV). Reszta = landem (0).
+const FRACHT_TOLL_PAY = new Set(["DE", "AT", "CZ", "IT", "PL", "CH"]);
 
 // Szacunek myta per fracht: trasa załadunek→rozładunek → PTV (per kraj) + e-TOLL + zasada floty
 // (płatne tylko DE/AT/CZ/IT/PL, reszta landem=0). Zwraca {toll, perCountry} albo {error}.

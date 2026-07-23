@@ -52,7 +52,7 @@ const DEFAULT_RATES = {
 // Polityka myta per kraj (zasada floty): płatne drogi TYLKO w tych krajach; reszta = landem
 // (krajówki, myto per trasa 0). DE/AT/CZ/IT = płatne konieczne, PL = e-TOLL. FR/ES/BE/NL/LU…
 // = krajówki (péage FR i autopisty ES za drogie). Edytowalne przez config/kalkulatorTras.tollCountries.
-const DEFAULT_TOLL_COUNTRIES = ["DE", "AT", "CZ", "IT", "PL"];
+const DEFAULT_TOLL_COUNTRIES = ["DE", "AT", "CZ", "IT", "PL", "CH"];
 
 const COUNTRY_NAMES = {
   PL: "Polska", DE: "Niemcy", FR: "Francja", BE: "Belgia", CZ: "Czechy",
