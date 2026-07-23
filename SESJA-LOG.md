@@ -2435,3 +2435,20 @@ User: „A" (ceny z Waszych kart, nie detal) + wrzucił 3 raporty („z 3 korzys
   potwierdzony). RO/BG/PT/LU/HU = 1–3 tankowania (cienkie, ale realne); core PL/DE/FR/ES/BE = solidne próbki.
 - Paliwo przestało być „szacunkowe" dla 12 krajów. Docelowy automat (CF/import wypełnia pricePerL+country
   → fuelEntries auto-źródło) = wciąż otwarte, gdy user zechce.
+
+### Myto wg ZASADY FLOTY (polityka per kraj) — user doprecyzował schemat jazdy
+User: „Niemcy Austria Czechy Włochy płatne drogi, reszta landem, Polska jak wiemy płatne również".
+- PTV nie umie omijać toll per kraj (globalny avoid=TOLL daje objazd Berlin→Madryt przez Austrię +1100km).
+- **Nie trzeba PTV do przetrasowania** — mam myto per kraj z PTV, więc ZERUJĘ myto w krajach „landem".
+- Polityka `DEFAULT_TOLL_COUNTRIES=[DE,AT,CZ,IT,PL]` (edytowalna: config/kalkulatorTras.tollCountries).
+  Kraje spoza listy (FR/ES/BE/NL/LU…) = landem, myto 0. PL = e-TOLL (jak wcześniej).
+- Compute: `tollFull` (płatnymi per kraj) + `pay=tollPay.has(cc)` → tollCost=pay?tollFull:0. Śledzę
+  `tollTotal` (wg zasady) i `allTollTotal` (gdyby wszędzie płatnymi). Row.land flag.
+- UI: box „Wg Waszej zasady vs Gdyby wszędzie płatnymi" (+oszczędność), tabela pokazuje „landem",
+  tekst „Myto — jak liczone" wymienia kraje płatne. Zastąpił binarny płatnymi-vs-landem.
+- **CF: usunięte wywołanie economic (avoid=TOLL)** — polityka liczona per kraj po froncie → 1 wywołanie
+  PTV zamiast 2 (szybciej, bez bezsensownych objazdów). Config: zapisane tollCountries (fuelPrice zachowane).
+- **Przykład Berlin→Madryt**: gdyby wszędzie płatnymi 293 € → wg zasady (płatne tylko DE) **97 €**
+  (landem FR/ES/BE = 0). Oszczędność 196 €. To realny model — płacą tylko niemiecki Maut.
+- Commity: 3c296b0 (feature) + ff5f601 (fix timeout PTV wcześniej). Deploy CF + push OK.
+- ⚠️ NIE klikane w UI za loginem — logika policy zweryfikowana na danych PTV (Berlin→Madryt 97 €).
