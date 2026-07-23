@@ -756,12 +756,17 @@ export default function Root() {
   const [allowedTabs, setAllowedTabs] = useState(null); // null = fallback do roli
   const autoLogoutTimer = useRef(null);
   const lastActivity = useRef(Date.now());
+  // Auto-wylogowanie po bezczynności. Było 30 min → wylogowywało dyspozytora gdy karta
+  // była w tle (brak ruchu myszy) i w multi-tab jedna karta wywalała wszystkie. 2026-07-23:
+  // wydłużone do 12 h ("wyloguj na koniec dnia"). Chcesz brak auto-logout → ustaw na 0 (wyłącza).
+  const AUTO_LOGOUT_MS = 12 * 60 * 60 * 1000;
   const resetAutoLogout = useRef(() => {
     lastActivity.current = Date.now();
     if (autoLogoutTimer.current) clearTimeout(autoLogoutTimer.current);
+    if (!AUTO_LOGOUT_MS) return; // 0 = auto-logout wyłączony
     autoLogoutTimer.current = setTimeout(() => {
-      if (Date.now() - lastActivity.current >= 30 * 60 * 1000) { logAction("logout", "auth", { reason: "inactivity" }); signOut(auth); }
-    }, 30 * 60 * 1000);
+      if (Date.now() - lastActivity.current >= AUTO_LOGOUT_MS) { logAction("logout", "auth", { reason: "inactivity" }); signOut(auth); }
+    }, AUTO_LOGOUT_MS);
   });
   useEffect(() => {
     const events = ["mousemove","mousedown","keydown","keyup","click","scroll","touchstart","touchmove","input","change","focus"];
