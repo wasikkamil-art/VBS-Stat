@@ -2634,3 +2634,31 @@ maj v1 9388 km; **czerwiec: v1 8728 · v3 2834 · v4 6872 · v5 7920,14 (report)
 - ⚠️ km za czerwiec dla v1/v3/v4 nadal ±1% — user dosyła dokładne z raportu panelu.
 - ⚠️ Piąte urządzenie Atlas **WE 2CG94** wciąż niezidentyfikowane (nie ma go we flocie → vehicleId null,
   snapshot je zapisuje ale km nie są liczone).
+
+## 2026-07-24 (cd.3) — dokładne km z raportu + ROZWIĄZANY rozjazd litrów arkusz vs karty
+
+User podał km z raportu panelu za czerwiec (01–30, kalendarzowo): **WGM 0475M 8853,83 · WGM 5367K 2922,07 ·
+TK 314CL 7139,73 · WGM 0507M 7920,14**. Zapisane do `vehicleKmMonthly/2026-06` jako `source: "report"`
+(źródło nadrzędne, CF nigdy tego nie nadpisze). Auto **WE 2CG94 — user potwierdził: NIE jest we flocie**
+(snapshot je zapisuje, ale `vehicleId=null` → km nie liczone; nic do zrobienia).
+
+**Delta z Atlas API systematycznie ZANIŻA**: 0475M −126 (−1,4%) · 5367K −88 (−3,0%) · 314CL −268 (−3,8%) ·
+0507M −58 (−0,7%). Kierunek zawsze ten sam (okno kończy się na ostatnim punkcie miesiąca) — to argument za
+snapshotem o 00:05, który to eliminuje od 1.08.
+
+**Spalanie za czerwiec (litry z kart / km z raportu)**: 5367K 15,0 · 0475M 16,0 · 314CL 16,2 · **0507M 17,7**.
+0507M vs średnia pozostałych 15,7 → **nadwyżka 159 L ≈ 224 €/mies**. (5367K z małej próby — 2922 km, auto stało.)
+
+### 🔎 ROZWIĄZANE: dlaczego litry w arkuszu ≠ litry z kart
+- **WGM 0507M: arkusz 1240,81 L = DOKŁADNIE suma Eurowag.** Brakuje E100 (103,5 L) + Andamur (59,91 L)
+  = **163,41 L**. Czyli karty mają rację, arkusz nie — a spalanie w arkuszu (15,7) było zaniżone; realne 17,7.
+- **Koszty w arkuszu są kompletne**: kolumna „Paliwo" ≈ ON+AdBlue wszystkie karty (2167 vs 2172 · 666 vs 667 ·
+  2030 vs 2034 = ±0,3% na kursach) → **import kosztów czerwca stoi, poprawka niepotrzebna**. Błąd był tylko w litrach.
+- v1 1412,54 = ON wszystkie karty ✓ · v3 439,27 ✓ (jeździ tylko na Eurowagu).
+- **TK 314CL: arkusz +29,62 L i +43 € vs karty — NIEWYJAŚNIONE.** Sprawdziłem pominięte rejestracje
+  (UNIVERSAL5562 diesel = 51,79 L — nie pasuje). Zgodnie z zasadą „arkusz to żywy dokument" NIE ścigam.
+
+### Widok zaktualizowany
+Kolumna „km (raport)" + „vs Atlas", nowe wnioski: spalanie-outlier (liczony vs **średnia pozostałych**,
+nie vs minimum — pierwsza wersja porównywała do auta z 2922 km i zawyżała wymowę do 300 €) oraz diagnoza
+litrów. Sprawdzone odczytem DOM na żywo.
