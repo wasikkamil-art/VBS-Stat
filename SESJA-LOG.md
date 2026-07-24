@@ -2738,3 +2738,19 @@ w zakładce Paliwo → oczekiwane „0 nowych, 91 duplikatów pominiętych".
 **Otwarte z modułu**: miesiące wstecz (maj i wcześniej — pliki są, wystarczy wrzucić), trendy cen między
 miesiącami, sprzężenie realnych €/l z Kalkulatorem tras, detekcja ubytków z samych kart (tankowanie > bak,
 dwa tankowania w odległych miejscach w krótkim czasie).
+
+### Sekcja „Auto i kierowca — ile zatankował, po jakiej cenie" (user request)
+User: brakowało **sumy zatankowanej kwoty i średniej ceny per kierowca**, „tak jak mamy w totalu".
+Tabela auta przebudowana z 5 kolumn na **2 linie per pojazd** (w panelu 400 px sześć kolumn liczbowych
+byłoby nieczytelne):
+- linia 1: rejestracja + **kierowca** (z `driverHistory`, aktywny wpis; nazwy zapisane z maila typu
+  „volodymyr.lukashuchuk" prettyfikowane do „Volodymyr Lukashuchuk") → po prawej **suma netto €** + litry + liczba tankowań
+- linia 2: **średnia €/L** · L/100 · €/km · km (ze źródłem w tooltipie, `*` gdy delta Atlas)
+- **wiersz RAZEM** (jak total w arkuszu): suma €, litry, tankowania, średnia €/L floty, L/100, €/km, km.
+  Gdy nie wszystkie auta mają km → ostrzeżenie, z ilu aut liczona jest flotowa średnia (nie udajemy pełnej).
+
+**Zweryfikowane danymi z produkcji** (`diagnose_paliwo_drivers.mjs`, te same wzory co komponent):
+Iwansky 2124,99 € / 1,504 €/L / 16,0 · Lukashuchuk 1978,86 € / 1,409 / **17,7** · Teper 1743,02 € / 1,510 / 16,2 ·
+Kolabu 656,49 € / 1,495 / 15,0 · **RAZEM 6503,36 € / 4410 L / 76 tank. / 1,475 €/L / 16,4 L/100 / 26 836 km**.
+Suma zgadza się z kafelkiem KPI „koszt netto". Render SSR OK, build OK (chunk 36,9 kB).
+⚠️ Wygląd sekcji nie klikany w UI (brak logowania) — liczby i nazwiska sprawdzone na realnych danych.

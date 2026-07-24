@@ -134,6 +134,20 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
   const activeVehicles = useMemo(() => vehicles.filter(v => !v.archived), [vehicles]);
   const plateOf = id => activeVehicles.find(v => v.id === id)?.plate || vehicles.find(v => v.id === id)?.plate || id;
 
+  // Kierowca przypisany do auta = aktywny wpis w driverHistory (bez `to`), w razie braku
+  // ostatni historyczny. Część nazw jest wpisana z maila ("volodymyr.lukashuchuk") — pokazujemy
+  // je po ludzku, bo ta tabela jest o kierowcach, nie o loginach.
+  const prettyName = s => String(s || "").trim().replace(/@.*$/, "")
+    .split(/[.\s_-]+/).filter(Boolean)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+  const driverOf = id => {
+    const v = vehicles.find(x => x.id === id);
+    const hist = v?.driverHistory || [];
+    const d = hist.find(h => !h.to) || hist[hist.length - 1];
+    return prettyName(d?.name || d?.email) || "—";
+  };
+
   // ── Lista miesięcy ──
   useEffect(() => {
     (async () => {
@@ -762,42 +776,87 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
           {/* Auta: litry / km / spalanie */}
           {byVehicle.length > 0 && (
             <div className="bg-white rounded-2xl border border-gray-100 p-4">
-              <div className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold mb-2">Auta — litry, km, spalanie</div>
-              <table className="w-full text-[12.5px]">
-                <thead className="text-[10.5px] uppercase tracking-wide text-gray-400">
-                  <tr><th className="text-left pb-1.5">Auto</th><th className="text-right pb-1.5">Litry</th>
-                    <th className="text-right pb-1.5">km</th><th className="text-right pb-1.5">L/100</th>
-                    <th className="text-right pb-1.5">€/km</th></tr>
-                </thead>
-                <tbody>
-                  {byVehicle.map(v => (
-                    <tr key={v.vid} className="border-t border-gray-100">
-                      <td className="py-1">{plateOf(v.vid)}</td>
-                      <td className="py-1 text-right tabular-nums">{Math.round(v.l)}</td>
-                      <td className="py-1 text-right tabular-nums">
+              <div className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold mb-2">
+                Auto i kierowca — ile zatankował, po jakiej cenie
+              </div>
+              {/* Dwie linie na pojazd: kto i za ile (górna) + jak jeździ (dolna). W panelu ~400 px
+                  sześć kolumn liczbowych było nieczytelne, a suma i średnia €/L to najważniejsze liczby. */}
+              <div className="divide-y divide-gray-100">
+                {byVehicle.map(v => (
+                  <div key={v.vid} className="py-2">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-[13px] font-medium text-gray-900">{plateOf(v.vid)}</div>
+                        <div className="text-[11px] text-gray-400 truncate">{driverOf(v.vid)}</div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="text-[13px] font-semibold text-gray-900 tabular-nums">{eur(v.e)}</div>
+                        <div className="text-[11px] text-gray-400 tabular-nums">{litr(v.l)} · {v.n} tank.</div>
+                      </div>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11.5px] text-gray-500 tabular-nums">
+                      <span><b className="text-gray-900 font-semibold">{p3(v.l ? v.e / v.l : 0)} €/L</b> średnia</span>
+                      <span>{v.l100 ? <><b className="text-gray-900 font-semibold">{v.l100.toFixed(1)}</b> L/100</> : "L/100 —"}</span>
+                      <span>{v.eurKm ? `${v.eurKm.toFixed(3)} €/km` : "€/km —"}</span>
+                      <span>
                         {v.km
                           ? <span title={v.kmSource === "report" ? "z raportu panelu (dokładne)"
                               : v.kmSource === "snapshot" ? "snapshot licznika (dokładne)" : "delta Atlas (±1%)"}>
-                              {Math.round(v.km).toLocaleString("pl-PL")}
+                              {Math.round(v.km).toLocaleString("pl-PL")} km
                               {v.kmSource !== "report" && v.kmSource !== "snapshot" && <span className="text-gray-400">*</span>}
                             </span>
                           : canEdit
-                            ? <span className="inline-flex gap-1">
+                            ? <span className="inline-flex gap-1 items-center">
                                 <input value={kmEdit[v.vid] ?? ""} onChange={e => setKmEdit(p => ({ ...p, [v.vid]: e.target.value }))}
-                                  placeholder="km" className="w-16 px-1.5 py-0.5 border border-gray-200 rounded text-right text-[11px]" />
+                                  placeholder="km z raportu"
+                                  className="w-24 px-1.5 py-0.5 border border-gray-200 rounded text-right text-[11px]" />
                                 <button onClick={() => saveKm(v.vid)} className="text-[11px] text-blue-600">✔</button>
                               </span>
-                            : "—"}
-                      </td>
-                      <td className="py-1 text-right tabular-nums font-semibold">{v.l100 ? v.l100.toFixed(1) : "—"}</td>
-                      <td className="py-1 text-right tabular-nums text-gray-500">{v.eurKm ? v.eurKm.toFixed(3) : "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                            : "brak km"}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+
+                {/* RAZEM — jak wiersz totalu w arkuszu */}
+                {byVehicle.length > 1 && (() => {
+                  const l = byVehicle.reduce((s, v) => s + v.l, 0);
+                  const e = byVehicle.reduce((s, v) => s + v.e, 0);
+                  const n = byVehicle.reduce((s, v) => s + v.n, 0);
+                  const withKm = byVehicle.filter(v => v.km);
+                  const km = withKm.reduce((s, v) => s + v.km, 0);
+                  const lKm = withKm.reduce((s, v) => s + v.l, 0);      // litry TYLKO aut z km
+                  const eKm = withKm.reduce((s, v) => s + v.e, 0);
+                  return (
+                    <div className="py-2 bg-gray-50 -mx-4 px-4 mt-1">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <div>
+                          <div className="text-[13px] font-semibold text-gray-900">RAZEM</div>
+                          <div className="text-[11px] text-gray-400">{byVehicle.length} kierowców</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-[13px] font-semibold text-gray-900 tabular-nums">{eur(e)}</div>
+                          <div className="text-[11px] text-gray-400 tabular-nums">{litr(l)} · {n} tank.</div>
+                        </div>
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11.5px] text-gray-500 tabular-nums">
+                        <span><b className="text-gray-900 font-semibold">{p3(l ? e / l : 0)} €/L</b> średnia floty</span>
+                        <span>{km ? <><b className="text-gray-900 font-semibold">{(lKm / km * 100).toFixed(1)}</b> L/100</> : "L/100 —"}</span>
+                        <span>{km ? `${(eKm / km).toFixed(3)} €/km` : "€/km —"}</span>
+                        <span>{km ? `${Math.round(km).toLocaleString("pl-PL")} km` : "brak km"}</span>
+                      </div>
+                      {withKm.length !== byVehicle.length && (
+                        <div className="text-[10.5px] text-amber-700 mt-1">
+                          L/100 i €/km floty liczone tylko z {withKm.length} z {byVehicle.length} aut — reszta bez km.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
               <div className="text-[11px] text-gray-400 mt-2 leading-relaxed">
-                km z raportu panelu albo ze snapshotu licznika (CF, 1. dnia miesiąca o 00:05).
-                <b>*</b> = delta z Atlas API, zaniża ~1–4%. Puste pole = wpisz km z raportu.
+                Koszt i średnia €/L = <b>netto</b>, z kursu NBP z dnia tankowania. km z raportu panelu albo ze
+                snapshotu licznika (CF, 1. dnia miesiąca o 00:05). <b>*</b> = delta z Atlas API, zaniża ~1–4%.
               </div>
             </div>
           )}
