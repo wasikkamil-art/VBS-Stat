@@ -2674,3 +2674,50 @@ bak raportowany w **%** u ciężarówek i w **litrach** u WE 2CG94, bez kalibrac
   (o 12:03 jeszcze miały pola paliwowe). ~30 min zebranych danych wyparuje samo z retencją 7 dni — nie kasuję ręcznie.
 - Pamięć zaktualizowana (`project_monitoring_paliwa`, `reference_atlas_api`) + skorygowane zdanie z maja
   „vbs/vbs widzi tylko 81372", które było już nieprawdą.
+
+## 2026-07-24 (cd.4) — ZAKŁADKA „⛽ Paliwo" + importer raportów kart (PROD)
+
+Nowy moduł: `src/components/PaliwoTab.jsx` (lazy chunk, 34 kB / 12 kB gzip — główny bundle bez zmian)
++ `src/utils/fuelParsers.js` (czysta logika parserów, ZERO importów Firebase/React → testowalna w node).
+Wpięte: `DEFAULT_TABS_BY_ROLE` (admin + dyspozytor), NavBtn w sidebarze po „Koszty", **pasek mobilny**
+(inaczej z telefonu nie dałoby się wejść — ten sam błąd co kiedyś z GPS), render z `Suspense`.
+
+### Importer (UI, admin/dyspozytor)
+- Wrzucasz 1–3 pliki naraz; **format rozpoznawany po nagłówkach** (nie po nazwie pliku):
+  „Tablica rejestracyjna" → Eurowag, „Numer samochodu" → E100, „MOJE ZUŻYCIE"/Stacja+Litry → Andamur.
+- Netto: Eurowag ma kolumnę netto; E100/Andamur brutto/(1+VAT kraju). **FX = NBP z DNIA TRANSAKCJI**
+  (dzień wolny → wstecz max 5 dni), nie jeden kurs na miesiąc.
+- Odrzucane: benzyna, opłaty (`Usługa=OTHER`), rejestracje poza flotą (OKAZICIEL/TRUCK/UNIVERSAL/przyczepa)
+  — pokazywane w podsumowaniu jako „pominięte", żeby nie znikały po cichu.
+- **Dedup**: docId = `karta_rejestracja_ts_litry_kwota` → ten sam plik wgrany 2× = 0 nowych.
+  Podgląd przed zapisem pokazuje ile nowych / ile duplikatów.
+- **Geokod**: raporty nie mają współrzędnych → Nominatim po adresie/nazwie stacji z `countrycodes`,
+  trwały cache `fuelStations` (każda stacja pytana RAZ w życiu, 1 req/s, progress w UI).
+- ⚠️ **Andamur: kolumna „Godzina" to czas EKSPORTU, nie transakcji** — celowo jej NIE używam, bo przy
+  ponownym eksporcie zmieniłaby się i rozsypała klucz dedup (byłyby duplikaty). ts = data dzienna.
+
+### Widok
+Panel: filtry (auto/karta/Diesel-AdBlue/kraj) · KPI · **auto-wnioski** · ceny per kraj · auta
+(litry, km, L/100, €/km + **pole do wpisania km z raportu**, zapis jako `source:"report"`) · lista tankowań
+(klik → skok na pin). Mapa Leaflet: pin = transakcja, kolor = karta, wielkość = litry, etykieta €/L
+od zoomu 6, popup z pełnym detalem + ile realnie zapłacono w walucie lokalnej.
+Wnioski: dźwignia cenowa per kraj, karta droższa od alternatywy w tym kraju, najgorsze tankowanie vs
+średnia kraju, **spalanie-outlier liczony vs średnia POZOSTAŁYCH** (nie vs minimum), brak km, AdBlue.
+
+### Zweryfikowane (uczciwie: bez klikania w UI za loginem)
+- ✅ **TEST PARSERÓW na prawdziwych 3 raportach czerwca** (`diagnose_paliwo_parsers.mjs`): wszystkie
+  oczekiwania z NIEZALEŻNEGO przeliczenia w Pythonie trafione **co do jednostki** — 76 tank. ON, 15 AdBlue,
+  4410 L, 6494 €, per auto 1413/439/1154/1404 L i 24/6/24/22 tankowań. Klucze dedup unikalne i stabilne,
+  0 pozycji netto>brutto, ratio VAT = stawka kraju.
+- ✅ **Smoke test renderu (SSR w node, `diagnose_ssr_paliwo.mjs` + shim)**: komponent renderuje się bez
+  wyjątku dla `canEdit=true` i `false`, przycisk importu poprawnie gated rolą.
+- ✅ **Baza zasilona czerwcem tą samą ścieżką co UI** (`diagnose_paliwo_seed.mjs`: te same parsery, ten sam
+  txId, ten sam stationKey, realne kursy NBP per dzień): `fuelTransactions/2026-06/tx` = **91 dokumentów,
+  91/91 ze współrzędnymi**, ON 4410 L / 6503 € netto (6503 a nie 6494, bo kursy per dzień transakcji zamiast
+  jednego z 30.06 — dokładniej). `fuelStations` = 71 stacji, więc pierwszy import z UI nie będzie geokodował.
+- ✅ Build zielony, reguły `fuelTransactions` + `fuelStations` zadeployowane, lint 0 errorów.
+- ⚠️ **NIE klikane w zalogowanym UI** — nie loguję się na konto usera. Niesprawdzone klikaniem: wybór plików
+  w input, przebieg geokodowania z przeglądarki (CORS Nominatim — z serwera działa, z apki używa tego samego
+  wzorca co Kalkulator tras), zapis batchem z uprawnieniami dyspozytora, mapa w realnym layoucie.
+- ⚠️ **DOWÓD DEDUPU DO ZROBIENIA PRZEZ USERA**: wrzuć te same 3 pliki czerwca w UI — powinno pokazać
+  „0 nowych, 91 duplikatów pominiętych". To jednocześnie test importera end-to-end.

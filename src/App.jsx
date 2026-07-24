@@ -39,6 +39,7 @@ const TachografComplianceSection = lazy(() => import("./components/TachografComp
 const FrachtyModal = lazy(() => import("./components/FrachtyModal"));
 // Kalkulator tras — szacunkowy koszt trasy (paliwo per kraj + myto). Lazy chunk.
 const KalkulatorTras = lazy(() => import("./components/KalkulatorTras"));
+const PaliwoTab = lazy(() => import("./components/PaliwoTab"));
 
 // ─── FIREBASE ───────────────────────────────────────────────────────────────
 // Init wydzielony do src/firebase.js (2026-04-28 TODO #5c) — pozwala lazy-loaded
@@ -1189,8 +1190,8 @@ function exportCostsToExcel(costs, vehicles, categories, filterYear, filterMonth
 
 // ── Per-role default tab access (fallback kiedy user nie ma jeszcze allowedTabs) ──
 const DEFAULT_TABS_BY_ROLE = {
-  admin:      ["dashboard","frachty","kalkulator","fv","costs","vehicles","serwis","rent","docs","imi","payments","users","email","logi","sprawy","kierowcy","chat","gps"],
-  dyspozytor: ["dashboard","frachty","kalkulator","fv","costs","vehicles","serwis","rent","docs","imi","sprawy","chat","gps"],
+  admin:      ["dashboard","frachty","kalkulator","fv","costs","paliwo","vehicles","serwis","rent","docs","imi","payments","users","email","logi","sprawy","kierowcy","chat","gps"],
+  dyspozytor: ["dashboard","frachty","kalkulator","fv","costs","paliwo","vehicles","serwis","rent","docs","imi","sprawy","chat","gps"],
   podglad:    ["dashboard","frachty","vehicles","serwis","docs","imi","chat"],
   kierowca:   ["driver"],  // kierowca widzi TYLKO swój panel
 };
@@ -2835,6 +2836,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 <NavBtn id="kalkulator" label="Kalkulator tras" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="10" r="3"/><path d="M12 2a8 8 0 0 0-8 8c0 5.4 8 12 8 12s8-6.6 8-12a8 8 0 0 0-8-8z"/></svg>} />
                 <NavBtn id="fv" label="Faktury sprzedaży" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 8h6"/><path d="M14 12c0-1.5-3-1.5-3 0s3 1.5 3 0"/><path d="M9 17h3"/></svg>} />
                 <NavBtn id="costs" label="Koszty" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="13" rx="2.5"/><path d="M2 10h20"/><path d="M6 15h4"/></svg>} />
+                <NavBtn id="paliwo" label="Paliwo" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/><path d="M4 8h12"/><path d="M18 8v9a2 2 0 0 0 2 2 2 2 0 0 0 2-2V9l-3-4"/></svg>} />
 
                 {/* ── POJAZDY (grupa rozwijana) ── */}
                 <button onClick={() => setSidebarOpen(p => ({...p, pojazdy: !pojazdyOpen}))}
@@ -4134,6 +4136,16 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               />
             </Suspense>
           )}
+          {tab === "paliwo" && canSeeTab("paliwo") && (
+            <Suspense fallback={<div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-sm text-gray-500">⛽ Ładowanie modułu paliwa…</div>}>
+              <PaliwoTab
+                vehicles={vehicles}
+                canEdit={canEdit}
+                showToast={showToast}
+                currentUser={user}
+              />
+            </Suspense>
+          )}
           {tab === "fv" && canSeeTab("fv") && (
             <FVTab
               frachtyList={frachtyList}
@@ -4518,6 +4530,9 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             { id: "vehicles", label: "Pojazdy", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="6" width="11" height="10" rx="2"/><path d="M14 10h3.5l3 3v3a1 1 0 0 1-1 1h-1"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M9 17h6"/><path d="M3 16h1.5"/></svg> },
             ...(canFinance ? [
               { id: "rent", label: "Rentow.", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg> },
+            ] : []),
+            ...(canSeeTab("paliwo") ? [
+              { id: "paliwo", label: "Paliwo", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/><path d="M4 8h12"/><path d="M18 8v9a2 2 0 0 0 2 2 2 2 0 0 0 2-2V9l-3-4"/></svg> },
             ] : []),
             { id: "docs", label: "Dok.", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> },
             { id: "imi", label: "IMI", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> },

@@ -297,6 +297,25 @@ service cloud.firestore {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // PALIWO — transakcje z kart paliwowych (import raportów miesięcznych)
+    // fuelTransactions/{YYYY-MM}/tx/{id} — id = klucz dedup, więc ponowny
+    // import tego samego raportu nadpisuje sam siebie zamiast duplikować.
+    // fuelStations — cache geokodu stacji (każda pytana raz w życiu).
+    // ═══════════════════════════════════════════════════════════════
+    match /fuelTransactions/{month} {
+      allow read: if isAuth();
+      allow write: if canEdit();
+      match /tx/{txId} {
+        allow read: if isAuth();
+        allow write: if canEdit();
+      }
+    }
+    match /fuelStations/{stationId} {
+      allow read: if isAuth();
+      allow write: if canEdit();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // DOMYŚLNA REGUŁA — blokuj wszystko inne
     // ═══════════════════════════════════════════════════════════════
     match /{document=**} {
