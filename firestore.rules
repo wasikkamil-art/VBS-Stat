@@ -282,6 +282,21 @@ service cloud.firestore {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // ODOMETER SNAPSHOTS + KM MIESIĘCZNE — stan liczników na granicy
+    // miesiąca (CF monthlyOdometerSnapshot) i policzone km/litry CAN.
+    // Zapis tylko z Cloud Function (admin SDK omija reguły); z frontu
+    // admin może nadpisać km ręcznie z raportu panelu (source="report").
+    // ═══════════════════════════════════════════════════════════════
+    match /odometerSnapshots/{boundary} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+    match /vehicleKmMonthly/{month} {
+      allow read: if isAuth();
+      allow write: if canEdit();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // DOMYŚLNA REGUŁA — blokuj wszystko inne
     // ═══════════════════════════════════════════════════════════════
     match /{document=**} {

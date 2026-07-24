@@ -713,12 +713,17 @@ exports.scheduledGpsPoll = onSchedule(
 
       const speed = Number(pos?.speed) || 0;
       const mileage = pos?.can?.mileage?.value ?? null;
+      // CAN paliwowy: fuelUsage = kumulacyjne litry spalone przez auto, fuelLevelCan = stan baku
+      // (% u ciężarówek, litry u WE 2CG94). Zbierane pod monitoring paliwa: skok = tankowanie,
+      // spadek na postoju = sygnał do sprawdzenia. Retencja jak breadcrumbs (7 dni).
+      const fuelUsedL = numOrNull(pos?.can?.fuelUsage?.value);
+      const fuelLevel = numOrNull(pos?.can?.fuelLevelCan?.value);
       const atlasTs = atlasDateTimeToMsBackend(pos?.dateTime) || startMs;
 
       // 4a. Breadcrumb (docId = ts, dedup idempotentnie)
       try {
         await db.collection("gpsBreadcrumbs").doc(vehicle.id).collection("points").doc(String(atlasTs))
-          .set({ lat, lng, ts: atlasTs, speed, mileage });
+          .set({ lat, lng, ts: atlasTs, speed, mileage, fuelUsedL, fuelLevel });
         breadcrumbsWritten++;
       } catch (e) {
         console.warn(`scheduledGpsPoll: breadcrumb write ${vehicle.id}:`, e.message);
@@ -1024,6 +1029,158 @@ exports.dailyBackup = onSchedule(
         });
       } catch {}
     }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════
+// MONTHLY ODOMETER + FUEL SNAPSHOT — 1. dnia miesiąca o 00:05 CET
+//
+// PO CO: Atlas API nie umie policzyć km za zakres dat (`history?from=&to=` → 422,
+// `&device=`/`&day=` ignorowane). Zwraca tylko licznik BIEŻĄCY (`distance`) oraz
+// jeden rekord na miesiąc w `/history` (ostatnia pozycja, np. 30.06 21:50) — delta
+// z tego zaniża km o ~0,7% (WGM 0507M: 7862 vs raport panelu 7920,14 za 01–30.06).
+// Snapshot licznika na granicy miesiąca daje km kalendarzowe z dokładnością do 5 min.
+//
+// BONUS: przy okazji zapisujemy CAN `fuelUsage` (kumulacyjne litry spalone przez auto)
+// → różnica miesięczna = litry wg pojazdu, do porównania z litrami z kart paliwowych
+// (detektor ubytków). I `fuelLevelCan` (stan baku) dla kontekstu.
+//
+// Kolekcje:
+//   odometerSnapshots/{YYYY-MM-DD}  — surowy stan liczników na granicy miesiąca
+//   vehicleKmMonthly/{YYYY-MM}      — policzone km + litry CAN za miesiąc, per vehicleId
+//     source: "snapshot" (dokładne) | "atlas_history" (±1%, seed wstecz) | "report"
+//     (ręcznie z raportu panelu — NIGDY nie nadpisujemy, to źródło wygrywa)
+// ═══════════════════════════════════════════════════════════════
+
+// WGM5367K raportuje licznik w METRACH (202603000), pozostałe w km — normalizuj.
+function atlasDistanceToKm(v) {
+  const n = Number(v);
+  if (!isFinite(n) || n <= 0) return null;
+  return n > 1e6 ? Math.round(n / 1000) : Math.round(n);
+}
+
+// Liczba albo null — 0 zachowane (pusty bak to informacja, nie brak danych).
+function numOrNull(v) {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return isFinite(n) ? n : null;
+}
+
+// Pobiera bieżący stan liczników/paliwa z Atlas dla wszystkich urządzeń.
+async function fetchAtlasOdometers(db) {
+  const cfg = (await db.doc("config/gps").get()).data() || {};
+  if (!cfg.username || !cfg.password) throw new Error("brak credentials Atlas w config/gps");
+  const base = `${ATLAS_BASE}/${cfg.group}/${cfg.username}`;
+  const headers = {
+    Accept: "application/json",
+    Authorization: "Basic " + Buffer.from(`${cfg.username}:${cfg.password}`).toString("base64"),
+  };
+  const devResp = await fetch(`${base}/devices`, { headers, signal: AbortSignal.timeout(15000) });
+  const devBody = devResp.ok ? await devResp.json() : {};
+  const devMap = {};
+  for (const d of (devBody?.deviceList || devBody?.data?.deviceList || [])) {
+    if (d?.deviceId) devMap[String(d.deviceId)] = String(d.deviceName || d.plate || "");
+  }
+  const posResp = await fetch(`${base}/positionsWithCanDetails`, { headers, signal: AbortSignal.timeout(20000) });
+  if (!posResp.ok) throw new Error(`Atlas positionsWithCanDetails ${posResp.status}`);
+  const posBody = await posResp.json();
+  const payload = posBody?.data || posBody || {};
+  const positions = Array.isArray(payload) ? payload : (payload.positionList || []);
+
+  return positions.map(p => ({
+    deviceId: String(p.deviceId ?? ""),
+    deviceName: devMap[String(p.deviceId)] || "",
+    distanceKm: atlasDistanceToKm(p?.can?.mileage?.value ?? p?.distance),
+    fuelUsedL: numOrNull(p?.can?.fuelUsage?.value),
+    fuelLevel: numOrNull(p?.can?.fuelLevelCan?.value),
+    atlasTs: atlasDateTimeToMsBackend(p?.dateTime) || Date.now(),
+  })).filter(d => d.deviceId);
+}
+
+// Dopasowanie urządzenia Atlas → pojazd floty (ta sama logika co w scheduledGpsPoll)
+function matchVehicleByPlate(vehicles, deviceName) {
+  const dev = String(deviceName || "").replace(/\s+/g, "").toUpperCase();
+  if (!dev) return null;
+  return vehicles.find(v => {
+    const fp = String(v.plate || "").replace(/\s+/g, "").toUpperCase();
+    return fp && (fp === dev || dev.includes(fp) || fp.includes(dev));
+  }) || null;
+}
+
+// Wspólna logika: zapis snapshotu + policzenie miesiąca który się właśnie zamknął.
+async function runOdometerSnapshot(db, nowMs) {
+  const now = new Date(nowMs);
+  const boundary = now.toISOString().slice(0, 10);                       // np. "2026-08-01"
+  const devices = await fetchAtlasOdometers(db);
+  const vehicles = ((await db.doc("fleet/data").get()).data() || {}).fleetv2_vehicles || [];
+
+  const devMap = {};
+  for (const d of devices) {
+    const v = matchVehicleByPlate(vehicles, d.deviceName);
+    devMap[d.deviceId] = {
+      plate: d.deviceName, vehicleId: v?.id || null,
+      distanceKm: d.distanceKm, fuelUsedL: d.fuelUsedL, fuelLevel: d.fuelLevel, atlasTs: d.atlasTs,
+    };
+  }
+  await db.doc(`odometerSnapshots/${boundary}`).set({
+    boundary, takenAt: now.toISOString(), source: "atlas_positions", devices: devMap,
+  }, { merge: true });
+
+  // Miesiąc który się zamknął = miesiąc poprzedzający granicę
+  const prev = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+  const prevMonth = prev.toISOString().slice(0, 7);                      // "2026-07"
+  const prevBoundary = prev.toISOString().slice(0, 10);                  // "2026-07-01"
+  const prevSnap = await db.doc(`odometerSnapshots/${prevBoundary}`).get();
+  if (!prevSnap.exists) {
+    console.log(`odometerSnapshot: zapisany ${boundary}; brak ${prevBoundary} → km za ${prevMonth} nieliczone (pierwszy miesiąc)`);
+    return { boundary, month: prevMonth, computed: 0 };
+  }
+
+  const before = prevSnap.data().devices || {};
+  const existing = (await db.doc(`vehicleKmMonthly/${prevMonth}`).get()).data() || {};
+  const out = { ...(existing.vehicles || {}) };
+  let computed = 0;
+  for (const [devId, after] of Object.entries(devMap)) {
+    const vid = after.vehicleId; if (!vid) continue;
+    if (out[vid]?.source === "report") continue;                          // raport usera wygrywa
+    const b = before[devId]; if (!b) continue;
+    const km = (after.distanceKm != null && b.distanceKm != null) ? after.distanceKm - b.distanceKm : null;
+    const litersCan = (after.fuelUsedL != null && b.fuelUsedL != null)
+      ? Math.round((after.fuelUsedL - b.fuelUsedL) * 10) / 10 : null;
+    if (km == null || km < 0) continue;                                   // licznik cofnięty = wymiana urządzenia
+    // Jeśli punkt startowy był zasiany z /history (ostatnia pozycja miesiąca, nie 00:05),
+    // to wynik jest przybliżony (~1%) — nie udawaj że jest dokładny.
+    const source = prevSnap.data().approx ? "snapshot_approx_start" : "snapshot";
+    out[vid] = { km, litersCan, plate: after.plate, source, from: prevBoundary, to: boundary };
+    computed++;
+  }
+  await db.doc(`vehicleKmMonthly/${prevMonth}`).set({
+    month: prevMonth, vehicles: out, updatedAt: now.toISOString(),
+  }, { merge: true });
+  console.log(`odometerSnapshot: ${boundary} OK, km policzone dla ${computed} pojazdów za ${prevMonth}`);
+  return { boundary, month: prevMonth, computed };
+}
+
+exports.monthlyOdometerSnapshot = onSchedule(
+  { schedule: "5 0 1 * *", timeZone: "Europe/Warsaw", region: "europe-west1", timeoutSeconds: 120 },
+  async () => {
+    const db = getFirestore();
+    try {
+      await runOdometerSnapshot(db, Date.now());
+    } catch (e) {
+      console.error("monthlyOdometerSnapshot error:", e.message);
+    }
+  }
+);
+
+// CALLABLE: ręczny snapshot (admin) — do testu i do zasiania pierwszej granicy
+exports.snapshotOdometerNow = onCall(
+  { region: "europe-west1", timeoutSeconds: 120 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musisz być zalogowany.");
+    if (request.auth.token.role !== "admin") throw new HttpsError("permission-denied", "Tylko admin.");
+    const db = getFirestore();
+    return await runOdometerSnapshot(db, Date.now());
   }
 );
 

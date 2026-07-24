@@ -2592,3 +2592,45 @@ w `scheduledGpsPoll`. Nie zrobione — do decyzji usera.
 - ✅ Atlas: devices, CAN, /history i km/miesiąc sprawdzone bezpośrednio na API.
 - ⚠️ Nic nie jest w App.jsx ani na produkcji. Import danych = skrypt, nie UI. Historia = tylko czerwiec.
 - ⚠️ Piąte urządzenie WE 2CG94 niewyjaśnione. Rozjazd litrów arkusz vs karty niewyjaśniony.
+
+## 2026-07-24 (cd.2) — km kalendarzowe z Atlasa: snapshot licznika na granicy miesiąca (PROD)
+
+User pokazał raport panelu widziszwszystko: **WGM 0507M, 01–30.06.2026 = 7920,14 km**. Sprawdziłem,
+czy API to udostępnia — **NIE**: `history?from=&to=` → HTTP 422 („wrong parameters"), `&device=`/`&day=`
+**ignorowane** (zawsze 1 rekord/pojazd), `positionsWithDistance`/`positionsWithCanDistance` → tylko pozycja
+bieżąca. Raport jest funkcją panelu, nie API. Moja delta z `/history` (31.05 21:25 → 30.06 21:50) dała
+7862 km = **−0,7%** (okno gubi ~2,5 h z 31.05 i ~2 h z 30.06). Arkusz „KM licznik" 7617 = −303 km,
+czyli **najsłabsze z trzech źródeł**.
+
+### Wybór usera: A — snapshot licznika na granicy miesiąca
+**Nowa CF `monthlyOdometerSnapshot`** (`5 0 1 * *`, Europe/Warsaw): 1. dnia miesiąca o 00:05 czyta
+`positionsWithCanDetails` i zapisuje stan liczników do `odometerSnapshots/{YYYY-MM-DD}`, potem liczy
+miesiąc, który się zamknął → `vehicleKmMonthly/{YYYY-MM}`. Od 1.08 km są kalendarzowe z dokładnością 5 min.
+- **`snapshotOdometerNow`** (callable, admin) — ręczny trigger do testu/seedu.
+- **Hierarchia źródeł** w `vehicleKmMonthly`: `report` (ręcznie z raportu panelu) **wygrywa i nigdy nie jest
+  nadpisywany** > `snapshot` (dokładny) > `snapshot_approx_start` (gdy punkt startowy zasiany z /history)
+  > `atlas_history` (±1%, seed wstecz).
+- **Normalizacja metrów**: `atlasDistanceToKm()` dzieli /1000 gdy wartość > 1e6 (WGM5367K raportuje w metrach).
+- **BONUS w tym samym snapshotcie**: CAN `fuelUsage` (kumulacyjne litry spalone przez auto) → różnica
+  miesięczna = `litersCan`, do porównania z litrami z kart = **detektor ubytków**. Plus `fuelLevelCan` (bak).
+- **`scheduledGpsPoll` rozszerzony**: breadcrumby zapisują teraz `fuelUsedL` + `fuelLevel` (helper `numOrNull`,
+  0 zachowane — pusty bak to informacja). Retencja 7 dni jak reszta breadcrumbów.
+- **firestore.rules**: `odometerSnapshots` read isAuth/write isAdmin, `vehicleKmMonthly` read isAuth/write canEdit.
+
+### Seed wstecz (`diagnose_seed_km.mjs`, gitignored, ma `--dry`)
+Granice 2026-05-01 / 06-01 / 07-01 zasiane z `/history` z flagą `approx: true`. Policzone:
+maj v1 9388 km; **czerwiec: v1 8728 · v3 2834 · v4 6872 · v5 7920,14 (report)**. Litry CAN = null
+(z `/history` nie ma `can`) — od sierpnia będą.
+
+### Zweryfikowane NA ŻYWO
+- ✅ Deploy: rules + `monthlyOdometerSnapshot` + `snapshotOdometerNow` + `scheduledGpsPoll`.
+- ✅ **Funkcja odpalona na produkcji** (force-run przez Cloud Scheduler REST): log
+  `odometerSnapshot: 2026-07-24 OK, km policzone dla 3 pojazdów za 2026-06` — **3, nie 4, bo v5 ma
+  source="report" → guard „raport wygrywa" potwierdzony na żywo**.
+- ✅ Test nadpisał czerwiec deltą 54-dniową (v1 16868 km) — **przywrócone seedem**, artefakt
+  `odometerSnapshots/2026-07-24` (nie-granica) skasowany. Stan końcowy odczytany zwrotnie: 8728/2834/6872/7920,14.
+- ✅ Breadcrumby zapisują nowe pola: v1 `fuelUsedL 19652, fuelLevel 26`; v5 `25422.5, 98`.
+- ⚠️ Prawdziwy przebieg schedulera 1.08 00:05 niesprawdzony (dopiero wtedy pierwszy dokładny snapshot).
+- ⚠️ km za czerwiec dla v1/v3/v4 nadal ±1% — user dosyła dokładne z raportu panelu.
+- ⚠️ Piąte urządzenie Atlas **WE 2CG94** wciąż niezidentyfikowane (nie ma go we flocie → vehicleId null,
+  snapshot je zapisuje ale km nie są liczone).
