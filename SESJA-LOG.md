@@ -2721,3 +2721,20 @@ Wnioski: dźwignia cenowa per kraj, karta droższa od alternatywy w tym kraju, n
   wzorca co Kalkulator tras), zapis batchem z uprawnieniami dyspozytora, mapa w realnym layoucie.
 - ⚠️ **DOWÓD DEDUPU DO ZROBIENIA PRZEZ USERA**: wrzuć te same 3 pliki czerwca w UI — powinno pokazać
   „0 nowych, 91 duplikatów pominiętych". To jednocześnie test importera end-to-end.
+
+### Poprawka UX po uwadze usera (commit `7767491`)
+„Auta to jedno, karty drugie, kraje trzecie" — filtry rozbite na **4 osobne wiersze z podpisem i separatorem**
+(Auto / Karta paliwowa / Produkt / Kraj) zamiast wszystkich chipów w jednym rzędzie. Dodane skróty
+„wszystkie"/„wyczyść" (flota jednym kliknięciem) — link „wszystkie" przy Karcie i Kraju pokazuje się TYLKO
+gdy filtr jest zawężony, więc widać że dane są odfiltrowane, a nie że ich nie ma. Select kraju na pełną
+szerokość wiersza. Smoke test SSR rozszerzony o kontrolę obecności 4 podpisów.
+
+### STAN NA KONIEC DNIA 2026-07-24
+Na produkcji: import kosztów czerwca (50 wpisów, 0 dubli) · CF `monthlyOdometerSnapshot` (km kalendarzowe
+od 1.08) · km czerwca z raportu dla 4 aut · **moduł ⛽ Paliwo z importerem** (czerwiec w bazie: 91 transakcji,
+91/91 z coords, 71 stacji w cache).
+**DO ZROBIENIA PRZEZ USERA (test end-to-end, którego nie mogłem zrobić)**: wrzucić te same 3 pliki czerwca
+w zakładce Paliwo → oczekiwane „0 nowych, 91 duplikatów pominiętych".
+**Otwarte z modułu**: miesiące wstecz (maj i wcześniej — pliki są, wystarczy wrzucić), trendy cen między
+miesiącami, sprzężenie realnych €/l z Kalkulatorem tras, detekcja ubytków z samych kart (tankowanie > bak,
+dwa tankowania w odległych miejscach w krótkim czasie).
