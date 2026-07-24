@@ -2498,3 +2498,46 @@ Trzy przyczyny (nie jedna):
    tankowań są w `fuelEntries` (litry, pricePerL w groszach, country, station, isAdblue) — ale niekonsekwentnie
    wypełniane (patrz PALIWO Faza 2: import nie zawsze zapisuje cenę/kraj). Możliwy kierunek: €/L per kraj auto,
    €/km, alerty, spalanie. Poczekać na pomysł usera, nie zakładać z góry.
+
+## 2026-07-24 — Import kosztów CZERWCA 2026 (top-up v20) + audyt dubli
+
+Plik źródłowy: `Auta VBS 2025 (20).xlsx`, zakładka `Total_26`, **czerwiec = kolumna H**.
+Note importu = **„Import Excel v20"** (numer PLIKU, nie auta).
+
+### Audyt dubli PRZED importem (odpowiedź na pytanie usera)
+Skan całego 2026 dwoma kluczami: appkowym (`vehicleId|date|amount|note`) i ostrzejszym
+(ta sama kategoria >1× w miesiącu). **Prawdziwych dubli: 0.**
+- „Powtórzenia" w sty–maju to `oplaty` ×2 = **Nego + E-Toll** (różne kwoty + suffiks w note) → legit.
+- Styczeń v4/v2 `inne` ×2 = pozycja własna + „(Przyczepa)" → też legit.
+
+### ⚠️ Realne ryzyko dubla (dlatego TOP-UP, nie pełny import)
+Czerwiec NIE był pusty: **19 wpisów z projekcji „Import Excel v17"** (koszty stałe wepchnięte
+naprzód na 2026-06…12). Kwoty zgadzały się z arkuszem co do grosza → pełne 50 pozycji dałoby
+**19 dubli** (note v20 ≠ v17, dedup appki by ich nie złapał).
+Dziury w projekcji v17, domknięte przez top-up: **v5 bez ZUS 400** (v1/v3 mają) oraz
+**żaden pojazd nie miał `imi` 13 ani `ocpd` 104**.
+
+### Import (wariant A — user wgrał sam przez UI „📥 Importuj z Excel")
+Wygenerowany `~/Downloads/koszty_2026-06_flat.xlsx` — **31 pozycji** (v1 9, v3 7, v4 7, v5 8, v2 0).
+
+### Weryfikacja PO imporcie (`diagnose_dedup_june.mjs`, read-only)
+- Baza 1048 → **1079** wpisów (+31, dokładnie tyle ile w pliku).
+- **2026-06 = 50 wpisów / 23 893,02 EUR** vs arkusz `suma kosztów` **23 893,01** (1 grosz zaokrągleń).
+- Per auto (baza vs arkusz): v1 8910,14/8910,15 · v3 3838,79/3838,78 · v4 4623,29/4623,29 ·
+  v5 6510,80/6510,79 · v2 10/10. ✅
+- **DUBLE A: 0.** DUBLE B: 3 × `oplaty` (Nego+E-Toll) = oczekiwane.
+- Cross-check Nego czerwca zgodny z NegoMetal policzonym 07-23: 0507M 399 / 0475M 253 / 5367K 167 ✅
+
+### Flagi danych (do wiedzy usera, NIE zmieniane)
+1. **v1 „inne" 1 243 €** — komentarz w H58: „naprawa klocków w FR". W arkuszu to wiersz *inne*,
+   faktycznie serwis. Wgrane jako `inne` (1:1 z arkuszem, zasada snapshotu); user może przemapować.
+2. **v1 E-Toll czerwiec = 2,59 €** przy Nego 253 € (inne auta 68–87 €) → wygląda na niekompletny
+   e-TOLL dla WGM 0475M w arkuszu. Wgrane jak jest.
+3. **v3 (WGM 5367K) czerwiec = 2 frachty / 8 dni** — auto stało, stąd paliwo 667 € (nie błąd).
+4. Znany bug arkusza wrócił: wiersze podsumowań kategorii w bloku Total zaniżone
+   (Nego 485 vs realne 819; E-Toll 95,65 vs 233,06). Bottom-line `suma kosztów` OK.
+
+### Zweryfikowane / NIE
+- ✅ Suma i skład czerwca odczytane zwrotnie z Firestore po imporcie usera. 0 dubli.
+- ⚠️ Lipiec–grudzień 2026 wciąż mają projekcje v17 (po 19 wpisów) → co miesiąc znowu top-up.
+  Kiedyś warto wyczyścić projekcje przyszłych miesięcy.
