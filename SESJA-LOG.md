@@ -2662,3 +2662,15 @@ snapshotem o 00:05, który to eliminuje od 1.08.
 Kolumna „km (raport)" + „vs Atlas", nowe wnioski: spalanie-outlier (liczony vs **średnia pozostałych**,
 nie vs minimum — pierwsza wersja porównywała do auta z 2922 km i zawyżała wymowę do 300 €) oraz diagnoza
 litrów. Sprawdzone odczytem DOM na żywo.
+
+### Decyzja usera: paliwo TYLKO z kart, CAN paliwowy WYCOFANY (ten sam dzień)
+User: „paliwo będziemy zbierać z raportów z kart, z CAN będą błędy". Zgoda — CAN to czujnik, nie dokument:
+bak raportowany w **%** u ciężarówek i w **litrach** u WE 2CG94, bez kalibracji, tankowania do pełna.
+- **Usunięte z `scheduledGpsPoll`**: zapis `fuelUsedL`/`fuelLevel` do breadcrumbów (+ martwy helper `numOrNull`).
+- **Usunięte ze snapshotu**: pobieranie `fuelUsage`/`fuelLevelCan` i liczenie `litersCan` w `vehicleKmMonthly`.
+  Z Atlasa zostaje **wyłącznie licznik (km)**.
+- Komentarze w kodzie mówią WPROST, że to decyzja, nie przeoczenie — żeby nikt nie „naprawił" tego z powrotem.
+- Deploy 3 funkcji OK. **Zweryfikowane na żywo**: breadcrumby od 12:04 mają tylko `lat,lng,mileage,speed,ts`
+  (o 12:03 jeszcze miały pola paliwowe). ~30 min zebranych danych wyparuje samo z retencją 7 dni — nie kasuję ręcznie.
+- Pamięć zaktualizowana (`project_monitoring_paliwa`, `reference_atlas_api`) + skorygowane zdanie z maja
+  „vbs/vbs widzi tylko 81372", które było już nieprawdą.

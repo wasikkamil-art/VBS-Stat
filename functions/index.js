@@ -713,17 +713,15 @@ exports.scheduledGpsPoll = onSchedule(
 
       const speed = Number(pos?.speed) || 0;
       const mileage = pos?.can?.mileage?.value ?? null;
-      // CAN paliwowy: fuelUsage = kumulacyjne litry spalone przez auto, fuelLevelCan = stan baku
-      // (% u ciężarówek, litry u WE 2CG94). Zbierane pod monitoring paliwa: skok = tankowanie,
-      // spadek na postoju = sygnał do sprawdzenia. Retencja jak breadcrumbs (7 dni).
-      const fuelUsedL = numOrNull(pos?.can?.fuelUsage?.value);
-      const fuelLevel = numOrNull(pos?.can?.fuelLevelCan?.value);
+      // CAN paliwowy (fuelUsage / fuelLevelCan) CELOWO NIE zapisywany — decyzja usera 2026-07-24:
+      // paliwo liczymy z raportów kart (dokument księgowy), CAN to szacunek z czujnika i myliłby się
+      // (bak raportowany w % u ciężarówek, w litrach u WE 2CG94; brak kalibracji, tankowania do pełna).
       const atlasTs = atlasDateTimeToMsBackend(pos?.dateTime) || startMs;
 
       // 4a. Breadcrumb (docId = ts, dedup idempotentnie)
       try {
         await db.collection("gpsBreadcrumbs").doc(vehicle.id).collection("points").doc(String(atlasTs))
-          .set({ lat, lng, ts: atlasTs, speed, mileage, fuelUsedL, fuelLevel });
+          .set({ lat, lng, ts: atlasTs, speed, mileage });
         breadcrumbsWritten++;
       } catch (e) {
         console.warn(`scheduledGpsPoll: breadcrumb write ${vehicle.id}:`, e.message);
@@ -1041,13 +1039,13 @@ exports.dailyBackup = onSchedule(
 // z tego zaniża km o ~0,7% (WGM 0507M: 7862 vs raport panelu 7920,14 za 01–30.06).
 // Snapshot licznika na granicy miesiąca daje km kalendarzowe z dokładnością do 5 min.
 //
-// BONUS: przy okazji zapisujemy CAN `fuelUsage` (kumulacyjne litry spalone przez auto)
-// → różnica miesięczna = litry wg pojazdu, do porównania z litrami z kart paliwowych
-// (detektor ubytków). I `fuelLevelCan` (stan baku) dla kontekstu.
+// TYLKO LICZNIK. Litrów z CAN (`fuelUsage`) świadomie nie bierzemy — decyzja usera 2026-07-24:
+// paliwo pochodzi z raportów kart paliwowych, CAN dawałby błędy (czujnik, brak kalibracji,
+// niespójne jednostki między urządzeniami).
 //
 // Kolekcje:
 //   odometerSnapshots/{YYYY-MM-DD}  — surowy stan liczników na granicy miesiąca
-//   vehicleKmMonthly/{YYYY-MM}      — policzone km + litry CAN za miesiąc, per vehicleId
+//   vehicleKmMonthly/{YYYY-MM}      — policzone km za miesiąc, per vehicleId
 //     source: "snapshot" (dokładne) | "atlas_history" (±1%, seed wstecz) | "report"
 //     (ręcznie z raportu panelu — NIGDY nie nadpisujemy, to źródło wygrywa)
 // ═══════════════════════════════════════════════════════════════
@@ -1059,14 +1057,7 @@ function atlasDistanceToKm(v) {
   return n > 1e6 ? Math.round(n / 1000) : Math.round(n);
 }
 
-// Liczba albo null — 0 zachowane (pusty bak to informacja, nie brak danych).
-function numOrNull(v) {
-  if (v === null || v === undefined || v === "") return null;
-  const n = Number(v);
-  return isFinite(n) ? n : null;
-}
-
-// Pobiera bieżący stan liczników/paliwa z Atlas dla wszystkich urządzeń.
+// Pobiera bieżący stan liczników (km) z Atlas dla wszystkich urządzeń.
 async function fetchAtlasOdometers(db) {
   const cfg = (await db.doc("config/gps").get()).data() || {};
   if (!cfg.username || !cfg.password) throw new Error("brak credentials Atlas w config/gps");
@@ -1091,8 +1082,6 @@ async function fetchAtlasOdometers(db) {
     deviceId: String(p.deviceId ?? ""),
     deviceName: devMap[String(p.deviceId)] || "",
     distanceKm: atlasDistanceToKm(p?.can?.mileage?.value ?? p?.distance),
-    fuelUsedL: numOrNull(p?.can?.fuelUsage?.value),
-    fuelLevel: numOrNull(p?.can?.fuelLevelCan?.value),
     atlasTs: atlasDateTimeToMsBackend(p?.dateTime) || Date.now(),
   })).filter(d => d.deviceId);
 }
@@ -1119,7 +1108,7 @@ async function runOdometerSnapshot(db, nowMs) {
     const v = matchVehicleByPlate(vehicles, d.deviceName);
     devMap[d.deviceId] = {
       plate: d.deviceName, vehicleId: v?.id || null,
-      distanceKm: d.distanceKm, fuelUsedL: d.fuelUsedL, fuelLevel: d.fuelLevel, atlasTs: d.atlasTs,
+      distanceKm: d.distanceKm, atlasTs: d.atlasTs,
     };
   }
   await db.doc(`odometerSnapshots/${boundary}`).set({
@@ -1145,13 +1134,11 @@ async function runOdometerSnapshot(db, nowMs) {
     if (out[vid]?.source === "report") continue;                          // raport usera wygrywa
     const b = before[devId]; if (!b) continue;
     const km = (after.distanceKm != null && b.distanceKm != null) ? after.distanceKm - b.distanceKm : null;
-    const litersCan = (after.fuelUsedL != null && b.fuelUsedL != null)
-      ? Math.round((after.fuelUsedL - b.fuelUsedL) * 10) / 10 : null;
     if (km == null || km < 0) continue;                                   // licznik cofnięty = wymiana urządzenia
     // Jeśli punkt startowy był zasiany z /history (ostatnia pozycja miesiąca, nie 00:05),
     // to wynik jest przybliżony (~1%) — nie udawaj że jest dokładny.
     const source = prevSnap.data().approx ? "snapshot_approx_start" : "snapshot";
-    out[vid] = { km, litersCan, plate: after.plate, source, from: prevBoundary, to: boundary };
+    out[vid] = { km, plate: after.plate, source, from: prevBoundary, to: boundary };
     computed++;
   }
   await db.doc(`vehicleKmMonthly/${prevMonth}`).set({
