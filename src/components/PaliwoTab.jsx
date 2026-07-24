@@ -96,6 +96,20 @@ async function geocodeStations(txs, onProgress) {
 // ══════════════════════════════════════════════════════════════════
 // KOMPONENT
 // ══════════════════════════════════════════════════════════════════
+// Jeden wiersz filtra: podpis wymiaru po lewej, kontrolki po prawej. Osobne wiersze
+// (z separatorem) zamiast wszystkiego w jednym rzędzie — auto ≠ karta ≠ produkt ≠ kraj.
+function FilterRow({ label, action, children }) {
+  return (
+    <div className="px-4 py-2.5">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[10.5px] uppercase tracking-wide text-gray-400 font-semibold">{label}</span>
+        {action || null}
+      </div>
+      <div className="flex flex-wrap gap-1.5">{children}</div>
+    </div>
+  );
+}
+
 export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = () => {}, currentUser }) {
   const [months, setMonths] = useState([]);
   const [month, setMonth] = useState("");
@@ -639,26 +653,48 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(340px,400px)_1fr] gap-4">
         {/* PANEL */}
         <div className="space-y-4">
-          {/* Filtry */}
-          <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-2">
-            <div className="flex flex-wrap gap-1.5">
-              {[...new Set(txs.map(t => t.vehicleId))].filter(Boolean).map(vid =>
-                chip(fCars.has(vid), () => toggle(setFCars, fCars, vid), plateOf(vid)))}
-            </div>
-            <div className="flex flex-wrap gap-1.5">
+          {/* Filtry — KAŻDY WYMIAR OSOBNO (auta / karty / produkt / kraj), bo to są
+              cztery różne pytania i chipy obok siebie zlewały się w jedną kaszę. */}
+          <div className="bg-white rounded-2xl border border-gray-100 divide-y divide-gray-100">
+            {(() => {
+              const allCars = [...new Set(txs.map(t => t.vehicleId))].filter(Boolean);
+              const allOn = fCars.size === allCars.length;
+              return (
+                <FilterRow label="Auto" action={allCars.length > 1 && (
+                  <button onClick={() => setFCars(new Set(allOn ? [] : allCars))}
+                    className="text-[11px] text-blue-600 hover:underline">
+                    {allOn ? "wyczyść" : "wszystkie"}
+                  </button>
+                )}>
+                  {allCars.map(vid => chip(fCars.has(vid), () => toggle(setFCars, fCars, vid), plateOf(vid)))}
+                </FilterRow>
+              );
+            })()}
+
+            <FilterRow label="Karta paliwowa" action={fCards.size < Object.keys(CARDS).length && (
+              <button onClick={() => setFCards(new Set(Object.keys(CARDS)))}
+                className="text-[11px] text-blue-600 hover:underline">wszystkie</button>
+            )}>
               {Object.entries(CARDS).map(([k, v]) =>
                 chip(fCards.has(k), () => toggle(setFCards, fCards, k), v.name, v.color))}
-            </div>
-            <div className="flex flex-wrap gap-1.5 items-center">
+            </FilterRow>
+
+            <FilterRow label="Produkt">
               {chip(product === "on", () => setProduct("on"), "Diesel")}
               {chip(product === "adblue", () => setProduct("adblue"), "AdBlue")}
+            </FilterRow>
+
+            <FilterRow label="Kraj" action={country !== "all" && (
+              <button onClick={() => setCountry("all")}
+                className="text-[11px] text-blue-600 hover:underline">wszystkie</button>
+            )}>
               <select value={country} onChange={e => setCountry(e.target.value)}
-                className="ml-auto px-2.5 py-1.5 rounded-xl border border-gray-200 bg-gray-50 text-xs">
+                className="w-full px-2.5 py-1.5 rounded-xl border border-gray-200 bg-gray-50 text-xs">
                 <option value="all">Wszystkie kraje</option>
                 {[...new Set(txs.filter(t => t.product === product).map(t => t.country))].filter(Boolean).sort()
                   .map(cc => <option key={cc} value={cc}>{FLAG[cc] || ""} {cc}</option>)}
               </select>
-            </div>
+            </FilterRow>
           </div>
 
           {/* KPI */}
