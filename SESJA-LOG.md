@@ -2541,3 +2541,54 @@ Wygenerowany `~/Downloads/koszty_2026-06_flat.xlsx` — **31 pozycji** (v1 9, v3
 - ✅ Suma i skład czerwca odczytane zwrotnie z Firestore po imporcie usera. 0 dubli.
 - ⚠️ Lipiec–grudzień 2026 wciąż mają projekcje v17 (po 19 wpisów) → co miesiąc znowu top-up.
   Kiedyś warto wyczyścić projekcje przyszłych miesięcy.
+
+## 2026-07-24 (cd.) — NOWY MODUŁ „Paliwo": poglądowy widok na realnych danych czerwca + korekta Atlasa
+
+Pomysł usera: mapa tankowań (co, gdzie, jaką kartą, kiedy, ile litrów, za ile) + wnioski + km z Atlasa.
+Wariant **A** — najpierw poglądowy widok, potem kodowanie w App.jsx. Nic jeszcze nie poszło na produkcję.
+
+### Dane — 3 karty, czerwiec 2026
+91 transakcji (76 diesla, 15 AdBlue) z `EW_Export_TR_2607203`, `transaction-1594078` (E100),
+`MOJE ZUŻYCIE (3)` (Andamur). **4 410 L ON / 6 494 € netto / 1,473 €/L** — litry i liczba tankowań
+zgadzają się co do jednostki z zestawieniem, które user zrobił wcześniej (1413/439/1154/1404 L).
+Netto: Eurowag ma kolumnę netto; E100/Andamur brutto/(1+VAT kraju); FX = NBP 30.06.2026.
+**Geokod stacji** (raporty NIE mają coords): Nominatim po nazwie/adresie + countrycodes, cache 71 stacji,
+7 skrótów ręcznie („Katy Wrocl." → Kąty Wrocławskie itd.). Docelowo kolekcja `fuelStations`.
+
+### Widok (`mockup_paliwo.html`, gitignored; podgląd: launch.json wpis `mockup` → port 5190)
+Panel lewy: filtry (auto/karta/Diesel-AdBlue/kraj) · KPI · auto-wnioski · ceny per kraj · auta
+(litry, km, L/100, €/km) · lista tankowań (klik → skok na mapę). Mapa Leaflet: pin = transakcja,
+kolor = karta, wielkość = litry, etykieta €/L od zoomu 6 (niżej się zlepiały), popup z pełnym detalem
++ ile realnie zapłacono w walucie lokalnej.
+
+### Co dane pokazały (realne, nie przykładowe)
+- **FR 1205 L @ 1,630 €/L = 27% litrów floty w najdroższym kraju → nadpłata 468 € vs CZ (1,242)**.
+  Dalej DE 1,510 · PL 1,302 · ES 1,267.
+- **W ES Andamur 1,311 vs E100 1,217 €/L → 33 € straty na 350 L.** Trzy karty w jednym kraju, jedna słabsza.
+- Najgorsze tankowanie: 05.06 WGM 0475M, Andamur La Junquera, 1,371 €/L (+0,104 nad średnią ES).
+- AdBlue: 165 L / 151 € / 0,916 €/L = 3,7% litrów diesla.
+- **Arkusz vs karty: WGM 0507M +163 L, TK 314CL −30 L** — rozjazd do wyjaśnienia (wchodzi w spalanie).
+
+### ⚠️ KOREKTA: Atlas widzi CAŁĄ flotę (user zgłosił, zweryfikowane na żywo)
+Zapis w pamięci „konto vbs/vbs widzi tylko WGM 0475M, reszta to Webfleet" był **NIEAKTUALNY**.
+`/devices` zwraca **5 urządzeń**: 81372 WGM 0475M · 81469 WGM 0507M · 81472 WGM5367K ·
+81837 „TK 314CL " (trailing space!) · **83545 WE 2CG94 — user nie potwierdził co to za auto**.
+- **`/history?year&month` = 1 rekord/pojazd z kumulacyjnym `distance`** → różnica miesięcy = km/miesiąc.
+  Czerwiec: 0475M **8728** · 0507M **7862** · 5367K **2834** · 314CL **6872** km (arkusz: 8594 / 7617 /
+  BRAK / 7039 → zgoda 1,6–3,2%; delta liczy ostatni punkt maja → ostatni czerwca). Historia od kwietnia.
+- **WGM5367K raportuje licznik w METRACH** (202603000) — pozostałe w km. Normalizować per urządzenie.
+- Spalanie (litry z kart / km z Atlasa): 0475M 16,2 · 5367K 15,5 · 314CL 16,8 · **0507M 17,9 L/100**.
+- `gpsBreadcrumbs` w Firestore ma tylko ~7 dni (okno retencji) → backfill wstecz tylko z `/history`.
+
+### 🔎 Odkrycie przy okazji — CAN daje paliwo
+Pola `can[]`: `fuelUsage` = **kumulacyjne litry spalone przez auto** (Spalania) i `fuelLevelCan` = **% baku**
+(u WE 2CG94 w litrach). To otwiera **detektor ubytków: litry z auta vs litry z kart**, oraz skoki poziomu
+baku = tankowanie/spuszczanie. Retro nie policzymy (7 dni breadcrumbs); od teraz wymaga zapisu tych pól
+w `scheduledGpsPoll`. Nie zrobione — do decyzji usera.
+
+### Zweryfikowane / NIE
+- ✅ Parsowanie 3 raportów (sumy = zestawienie usera), geokod 91/91 transakcji, widok działa w przeglądarce
+  (KPI, filtry, mapa, popupy, tabele — sprawdzone przez DOM/JS na żywo).
+- ✅ Atlas: devices, CAN, /history i km/miesiąc sprawdzone bezpośrednio na API.
+- ⚠️ Nic nie jest w App.jsx ani na produkcji. Import danych = skrypt, nie UI. Historia = tylko czerwiec.
+- ⚠️ Piąte urządzenie WE 2CG94 niewyjaśnione. Rozjazd litrów arkusz vs karty niewyjaśniony.
