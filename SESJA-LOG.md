@@ -2791,3 +2791,17 @@ usuwania danych, bo skoro admin czyta okno, wielkość kolekcji przestaje mieć 
   (grosze), ale odczyty już nie.
 - **DDD „nadpisywać przy re-uploadzie, żeby został najświeższy"** — user: „osobno potem". Dotyka parsera DDD,
   nie kosztu; zrobić w oddzielnej sesji (dług: „re-upload starych DDD — fix 07-16 tylko na nowe parsowania").
+
+## 2026-07-24 (cd.6) — Fix: Paliwo + Kalkulator w siatce uprawnień (commit d0d38bb)
+User (na zrzucie panelu Osoby, agnieszka.vbs@gmail.com): „nie ma paliwa na liście, agnieszka widzi paliwo?".
+- **Agnieszka WIDZI** — `allowedTabs: undefined` → domyślne dla roli dyspozytor (zawierają paliwo od 037a50c).
+- Bug: `ASSIGNABLE_TABS` (siatka checkboxów) nie miało **paliwo ANI kalkulator** → brak checkboxów, więc
+  dyspozytora z custom `allowedTabs` nie dało się do nich dopuścić. Dodane oba (App.jsx).
+- **Nikt nic nie stracił**: `toggleTab` seeduje z `DEFAULTS` (mają paliwo) → edycja Agnieszki i tak by je zachowała.
+- Skan 11 userów: jedna luka — **arek@vbstransport.com** (dyspozytor, custom 11 zakładek sprzed paliwa/kalkulatora)
+  NIE widzi obu. User: **„nic nie robimy, sam nadaje role"** → NIE zmieniamy Arkowi uprawnień. Teraz checkboxy są,
+  user przyzna ręcznie jeśli zechce.
+
+## 2026-07-24 — ZADANIE ZAPLANOWANE: pomiar odczytów Firestore
+Scheduled task `check-firestore-reads-drop` na 2026-07-28 12:00 — sprawdzi w GCP Monitoring czy QUERY reads
+spadły po oknie 45d (baseline 360–680k/dobę → oczek. ~100–150k). Wynik dopisze do SESJA-LOG sam.
