@@ -9269,10 +9269,12 @@ function MultiDayActivityView({ vehicle, driverActivities = [], currentUser = nu
 // Definicja wszystkich zakładek które admin może przyznawać userom
 // Kolejność odpowiada sidebar nav. "users" i "email" są ukryte — zawsze admin-only.
 const ASSIGNABLE_TABS = [
-  { id: "dashboard", label: "Przegląd",      icon: "📊" },
-  { id: "frachty",   label: "Frachty",       icon: "🚛" },
-  { id: "fv",        label: "Faktury sprzedaży", icon: "💰" },
-  { id: "costs",     label: "Koszty",        icon: "💳" },
+  { id: "dashboard",  label: "Przegląd",      icon: "📊" },
+  { id: "frachty",    label: "Frachty",       icon: "🚛" },
+  { id: "kalkulator", label: "Kalkulator tras", icon: "🗺️" },
+  { id: "fv",         label: "Faktury sprzedaży", icon: "💰" },
+  { id: "costs",      label: "Koszty",        icon: "💳" },
+  { id: "paliwo",     label: "Paliwo",        icon: "⛽" },
   { id: "vehicles",  label: "Pojazdy",       icon: "🚚" },
   { id: "serwis",    label: "Serwis",        icon: "🔧" },
   { id: "rent",      label: "Rentowność",    icon: "📈" },
