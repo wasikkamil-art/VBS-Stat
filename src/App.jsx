@@ -671,6 +671,9 @@ function LoginScreen() {
   const [password, setPassword] = useState("");
   const [error, setError]       = useState(null);
   const [loading, setLoading]   = useState(false);
+  // Chooser-first: null = ekran wyboru aplikacji, "fleetstat" = formularz logowania FleetStat.
+  // Faktury/FOX to osobne domeny z własnym logowaniem → przekierowanie, nie formularz tutaj.
+  const [selectedApp, setSelectedApp] = useState(null);
 
   async function handleLogin(e) {
     e.preventDefault();
@@ -687,6 +690,24 @@ function LoginScreen() {
     }
   }
 
+  const APPS = [
+    { key:"fleetstat", desc:"Flota i monitoring", url:null },
+    { key:"invoices",  desc:"Dokumenty i płatności", url:"https://faktury.fleetstat.pl" },
+    { key:"fox",       desc:"CRM prospektów", url:"https://fox.fleetstat.pl" },
+  ];
+
+  // Logo aplikacji (te same pliki co na ekranach logowania każdej apki, skopiowane do public/).
+  const appLogo = (key, h) => {
+    if (key === "invoices") return <img src="/app-invoices.png" alt="FleetStat Faktury" style={{ height:h, width:"auto", objectFit:"contain", mixBlendMode:"multiply" }} />;
+    if (key === "fox") return (
+      <span style={{ display:"flex", alignItems:"center", gap:5 }}>
+        <img src="/fox-mark.png" alt="" style={{ height:h, width:"auto" }} />
+        <img src="/fox-wordmark.png" alt="FOX" style={{ height:Math.round(h*0.52), width:"auto" }} />
+      </span>
+    );
+    return <img src="/app-fleetstat.png" alt="FleetStat" style={{ height:h, width:"auto", objectFit:"contain" }} />;
+  };
+
   return (
     <div style={{ minHeight:"100vh", background:"#f8f9fb", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
       <div style={{ background:"#fff", borderRadius:20, padding:"32px", width:360, maxWidth:"100%", boxShadow:"0 8px 32px rgba(0,0,0,0.08)" }}>
@@ -694,38 +715,50 @@ function LoginScreen() {
           <img src="/logodologowania.png" alt="FleetStat" style={{ width:220 }} />
         </div>
 
-        {/* Przełącznik aplikacji VBS — FleetStat aktywny (formularz niżej), Faktury/FOX
-            przenoszą na swoje domeny (każda apka ma własne logowanie). */}
-        <div style={{ fontSize:11, fontWeight:600, color:"#9ca3af", textTransform:"uppercase", letterSpacing:"0.5px", marginBottom:8 }}>Aplikacja</div>
-        <div style={{ display:"flex", gap:8, marginBottom:22 }}>
-          {[
-            { name:"FleetStat", desc:"Flota", icon:"🚚", url:null },
-            { name:"Faktury", desc:"Dokumenty", icon:"🧾", url:"https://faktury.fleetstat.pl" },
-            { name:"FOX", desc:"Prospekty", icon:"🦊", url:"https://fox.fleetstat.pl" },
-          ].map(a => {
-            const active = !a.url;
-            return (
-              <a key={a.name}
-                href={a.url || undefined}
-                onClick={active ? (e => e.preventDefault()) : undefined}
-                style={{
-                  flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:3,
-                  padding:"11px 4px", borderRadius:12, textDecoration:"none", textAlign:"center",
-                  border: active ? "1.5px solid #111827" : "1.5px solid #e5e7eb",
-                  background: active ? "#111827" : "#f9fafb",
-                  color: active ? "#fff" : "#6b7280",
-                  cursor: active ? "default" : "pointer", transition:"all 0.15s",
-                }}
-                onMouseOver={active ? undefined : (e => { const el=e.currentTarget; el.style.borderColor="#1d4ed8"; el.style.color="#1d4ed8"; })}
-                onMouseOut={active ? undefined : (e => { const el=e.currentTarget; el.style.borderColor="#e5e7eb"; el.style.color="#6b7280"; })}>
-                <span style={{ fontSize:19, lineHeight:1 }}>{a.icon}</span>
-                <span style={{ fontSize:12.5, fontWeight:700 }}>{a.name}</span>
-                <span style={{ fontSize:10, opacity:0.75 }}>{a.desc}</span>
-              </a>
-            );
-          })}
-        </div>
+        {/* ── EKRAN WYBORU APLIKACJI ── */}
+        {!selectedApp && (
+          <>
+            <div style={{ fontSize:11, fontWeight:600, color:"#9ca3af", textTransform:"uppercase", letterSpacing:"0.5px", marginBottom:10 }}>Wybierz aplikację</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+              {APPS.map(a => {
+                const inner = (
+                  <>
+                    <div style={{ flex:1, minWidth:0, display:"flex", flexDirection:"column", alignItems:"flex-start", gap:6 }}>
+                      {appLogo(a.key, 22)}
+                      <div style={{ fontSize:12, color:"#9ca3af" }}>{a.desc}</div>
+                    </div>
+                    <span style={{ fontSize:18, color:"#d1d5db" }}>›</span>
+                  </>
+                );
+                const box = {
+                  display:"flex", alignItems:"center", gap:12, width:"100%",
+                  padding:"14px 16px", borderRadius:14, border:"1.5px solid #e5e7eb",
+                  background:"#f9fafb", textDecoration:"none", cursor:"pointer",
+                  textAlign:"left", boxSizing:"border-box", transition:"all 0.15s",
+                };
+                const hoverIn  = e => { const el=e.currentTarget; el.style.borderColor="#1d4ed8"; el.style.background="#f5f8ff"; };
+                const hoverOut = e => { const el=e.currentTarget; el.style.borderColor="#e5e7eb"; el.style.background="#f9fafb"; };
+                return a.url ? (
+                  <a key={a.key} href={a.url} style={box} onMouseOver={hoverIn} onMouseOut={hoverOut}>{inner}</a>
+                ) : (
+                  <button key={a.key} type="button" onClick={() => setSelectedApp("fleetstat")}
+                    style={box} onMouseOver={hoverIn} onMouseOut={hoverOut}>{inner}</button>
+                );
+              })}
+            </div>
+          </>
+        )}
 
+        {/* ── FORMULARZ LOGOWANIA FLEETSTAT ── */}
+        {selectedApp === "fleetstat" && (
+        <>
+        <button type="button" onClick={() => { setSelectedApp(null); setError(null); }}
+          style={{ display:"flex", alignItems:"center", gap:6, background:"none", border:"none", padding:0, marginBottom:16, cursor:"pointer", color:"#6b7280", fontSize:13, fontWeight:600 }}>
+          <span style={{ fontSize:16 }}>‹</span> Inne aplikacje
+        </button>
+        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:18 }}>
+          <span style={{ fontSize:13, fontWeight:600, color:"#6b7280" }}>Flota i monitoring</span>
+        </div>
         <form onSubmit={handleLogin}>
           <div style={{ marginBottom:14 }}>
             <label style={{ display:"block", fontSize:12, fontWeight:600, color:"#6b7280", marginBottom:5, textTransform:"uppercase", letterSpacing:"0.5px" }}>Email</label>
@@ -757,6 +790,8 @@ function LoginScreen() {
             {loading ? "Logowanie..." : "Zaloguj się"}
           </button>
         </form>
+        </>
+        )}
       </div>
     </div>
   );
