@@ -710,6 +710,12 @@ function LoginScreen() {
 
   return (
     <div style={{ minHeight:"100vh", background:"#f8f9fb", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
+      <style>{`
+        .vbs-app-card { display:flex; align-items:center; gap:12px; width:100%; padding:14px 16px;
+          border-radius:14px; border:1.5px solid #e5e7eb; background:#f9fafb; text-decoration:none;
+          cursor:pointer; text-align:left; box-sizing:border-box; transition:border-color .15s, background .15s; }
+        @media (hover:hover) { .vbs-app-card:hover { border-color:#1d4ed8; background:#f5f8ff; } }
+      `}</style>
       <div style={{ background:"#fff", borderRadius:20, padding:"32px", width:360, maxWidth:"100%", boxShadow:"0 8px 32px rgba(0,0,0,0.08)" }}>
         <div style={{ display:"flex", justifyContent:"center", marginBottom:22 }}>
           <img src="/logodologowania.png" alt="FleetStat" style={{ width:220 }} />
@@ -730,19 +736,12 @@ function LoginScreen() {
                     <span style={{ fontSize:18, color:"#d1d5db" }}>›</span>
                   </>
                 );
-                const box = {
-                  display:"flex", alignItems:"center", gap:12, width:"100%",
-                  padding:"14px 16px", borderRadius:14, border:"1.5px solid #e5e7eb",
-                  background:"#f9fafb", textDecoration:"none", cursor:"pointer",
-                  textAlign:"left", boxSizing:"border-box", transition:"all 0.15s",
-                };
-                const hoverIn  = e => { const el=e.currentTarget; el.style.borderColor="#1d4ed8"; el.style.background="#f5f8ff"; };
-                const hoverOut = e => { const el=e.currentTarget; el.style.borderColor="#e5e7eb"; el.style.background="#f9fafb"; };
+                // Hover przez CSS (@media hover:hover) — NIE JS onMouseOver, bo na iOS/dotyku
+                // pierwszy tap tylko „hoveruje", a klik dopiero drugi (bug dwóch kliknięć).
                 return a.url ? (
-                  <a key={a.key} href={a.url} style={box} onMouseOver={hoverIn} onMouseOut={hoverOut}>{inner}</a>
+                  <a key={a.key} href={a.url} className="vbs-app-card">{inner}</a>
                 ) : (
-                  <button key={a.key} type="button" onClick={() => setSelectedApp("fleetstat")}
-                    style={box} onMouseOver={hoverIn} onMouseOut={hoverOut}>{inner}</button>
+                  <button key={a.key} type="button" onClick={() => setSelectedApp("fleetstat")} className="vbs-app-card">{inner}</button>
                 );
               })}
             </div>
