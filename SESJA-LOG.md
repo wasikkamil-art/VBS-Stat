@@ -2826,3 +2826,18 @@ User dostarczył pliki **maja** (Eurowag 97 tx / E100 27 / Andamur 12). Zbudowan
 Czerwiec **tańszy o ~10%** na całej flocie (1,643 → ~1,477 €/L), spadek w KAŻDYM kraju: FR 1,782→1,630 (−0,151), PL 1,459→1,302 (−0,158), DE 1,623→1,510, CZ 1,469→1,242 (−0,227), LU 1,548→1,344 (−0,204), BE 1,773→1,675, ES 1,359→1,267. Zastrzeżenie: LU/CZ/ES maj = cienkie próbki.
 
 **DO ZROBIENIA PRZEZ USERA:** wrzucić 3 pliki maja w zakładkę Paliwo (import → dedup+geokod jak czerwiec) → trend pokaże się w UI dla 2 miesięcy. Kwiecień i starsze tą samą metodą.
+
+## 2026-07-27 (cd.) — Przełącznik aplikacji na ekranach logowania 3 apek (portal)
+User chciał przy logowaniu wybór między FleetStat / FleetStat Faktury / FOX. Zrobione jako **portal**
+(nie SSO — 3 osobne projekty Firebase/domeny, sesja powstaje na swojej domenie, cross-domain login niemożliwy).
+- **Chooser-first**: ekran „Wybierz aplikację" → 3 karty. Karta bieżącej apki = formularz logowania w miejscu
+  (`selectedApp` state), dwie pozostałe = `<a href>` na swoją domenę. Link powrotu „‹ Inne aplikacje".
+- **Zasięg: ekrany logowania WSZYSTKICH 3 apek** (user najpierw chciał tylko FleetStat, po uwadze „nie ma
+  powrotu z Faktur/FOX" rozszerzone). 3 repa: VBS-Stat `54d9f54`, vbs-invoices `668a4bc`, fox `53c5019`.
+- **Logo, nie emoji** (poprawka usera „logówki takie jakie są przy logowaniu, nie randomowe"): karty pokazują
+  prawdziwe logo każdej apki. Pliki skopiowane do `public/` każdego repo pod wspólnymi nazwami:
+  `app-fleetstat.png` (=logodologowania), `app-invoices.png` (=logo-fleetstat-invoices), `fox-mark.png`+`fox-wordmark.png`.
+  Helper `AppLogo`/`appLogo` renderuje po kluczu (FOX = mark+wordmark side-by-side jak `FoxLogo`; invoices ma `mix-blend-multiply`).
+- Weryfikacja: **FleetStat i Faktury sfotografowane na żywo** (chooser + logo renderują się, linki OK desktop+mobile).
+  FOX: build zielony + kod identyczny; ekranu logowania NIE sfotografowałem (preview trzymał zalogowaną sesję).
+  Wszystkie 3 build zielone, git author email OK (brak ryzyka blokady Vercela).
