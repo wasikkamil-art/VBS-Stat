@@ -2805,3 +2805,24 @@ User (na zrzucie panelu Osoby, agnieszka.vbs@gmail.com): „nie ma paliwa na li�
 ## 2026-07-24 — ZADANIE ZAPLANOWANE: pomiar odczytów Firestore
 Scheduled task `check-firestore-reads-drop` na 2026-07-28 12:00 — sprawdzi w GCP Monitoring czy QUERY reads
 spadły po oknie 45d (baseline 360–680k/dobę → oczek. ~100–150k). Wynik dopisze do SESJA-LOG sam.
+
+## 2026-07-27 — Paliwo: pomiar Firestore (baseline) + trend cen miesiąc-do-miesiąca
+
+**⚠️ Korekta daty:** commit `dbf78e9` (okno 45d) ma author=committer = **2026-07-27 12:50** (reflog potwierdza, bez rebase). Sekcje wyżej nagłówkowane „2026-07-24 (cd.5/cd.6)" faktycznie działy się **dziś (27.07)** — poprzednia sesja miała złą datę. Okno 45d jest na produkcji od ~2h, nie od 3 dni.
+
+### Pomiar odczytów Firestore (ręczny, GCP Monitoring REST przez gcloud token)
+Zaplanowany task `check-firestore-reads-drop` odpala się dopiero **28.07 12:00** — dziś zmierzyłem ręcznie. Metryka `firestore.googleapis.com/document/read_count`, agregacja ALIGN_SUM/86400s, groupBy `metric.label.type`. QUERY/dobę:
+- 07-14: 195k · 07-17: 383k · 07-18: 30k · 07-19: 984k · **07-20: 3 967k · 07-21: 2 670k · 07-22: 1 260k · 07-23: 3 970k** · 07-24: 660k · 07-25: 384k · 07-26: 666k.
+- **Wszystko to BASELINE** (deploy okna dziś ~13:00). Realny baseline jest DUŻO gorszy niż zakładane w logu „361–679k" — piki 2,7–4,0 mln/dobę (4–6×). Optymalizacja tym bardziej uzasadniona. Pierwsza pełna doba po deployu = 28.07 → task dopisze wynik sam.
+
+### Nowy widok: Trend cen netto €/L miesiąc-do-miesiąca (PaliwoTab.jsx)
+User dostarczył pliki **maja** (Eurowag 97 tx / E100 27 / Andamur 12). Zbudowany widok trendu w module Paliwo:
+- Przycisk **„📊 Trend cen"** w nagłówku (widoczny dla wszystkich, nie tylko admin).
+- **Opt-in, świadomie NIE `onSnapshot`**: jednorazowy dociąg wszystkich miesięcy przy pierwszym otwarciu, cache w stanie (`trendData`). Kilkaset tx/miesiąc = groszowy jednorazowy odczyt, nieporównywalny z problemem driverActivities. Cache unieważniany po imporcie (`setTrendData(null)` w `confirmImport`).
+- Tabela **kraj × miesiąc** (€/L netto, średnia ważona litrami) + wiersz **🚚 Flota** + kolumna **Δ ost.** (zmiana dwóch ostatnich miesięcy, spadek=zielony). Zielony/czerwony = najtańszy/najdroższy miesiąc w wierszu. Litry pod ceną = wielkość próbki. Respektuje filtr produktu+kart, celowo fleet-wide po autach.
+- Weryfikacja: build zielony, lint 0 błędów. **Logika memo sprawdzona headless** na danych maj+czerwiec (grupowanie, Flota, Δ, braki AT/BG/HU/PT/RO=„—"). ⚠️ NIE klikane w UI za loginem.
+
+### Trend cen maj→czerwiec 2026 (z surowych plików, czerwiec potwierdza zalogowaną średnią 1,475)
+Czerwiec **tańszy o ~10%** na całej flocie (1,643 → ~1,477 €/L), spadek w KAŻDYM kraju: FR 1,782→1,630 (−0,151), PL 1,459→1,302 (−0,158), DE 1,623→1,510, CZ 1,469→1,242 (−0,227), LU 1,548→1,344 (−0,204), BE 1,773→1,675, ES 1,359→1,267. Zastrzeżenie: LU/CZ/ES maj = cienkie próbki.
+
+**DO ZROBIENIA PRZEZ USERA:** wrzucić 3 pliki maja w zakładkę Paliwo (import → dedup+geokod jak czerwiec) → trend pokaże się w UI dla 2 miesięcy. Kwiecień i starsze tą samą metodą.

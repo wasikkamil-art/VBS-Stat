@@ -127,6 +127,12 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
   const [labelMode, setLabelMode] = useState("price");
   const [kmEdit, setKmEdit] = useState({});
 
+  // Trend cen miesiąc-do-miesiąca — opt-in. Świadomie NIE listener onSnapshot: jednorazowy
+  // dociąg wszystkich miesięcy przy pierwszym otwarciu, cache w stanie (dyscyplina kosztów).
+  const [showTrend, setShowTrend] = useState(false);
+  const [trendData, setTrendData] = useState(null);   // { [month]: tx[] } | null
+  const [trendLoading, setTrendLoading] = useState(false);
+
   const mapRef = useRef(null);
   const mapObj = useRef(null);
   const layerRef = useRef(null);
@@ -184,6 +190,28 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
     return () => { alive = false; };
   }, [month]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Trend: dociągnij WSZYSTKIE miesiące raz, gdy user otworzy panel trendu ──
+  useEffect(() => {
+    if (!showTrend || trendData || trendLoading || !months.length) return;
+    let alive = true;
+    (async () => {
+      setTrendLoading(true);
+      try {
+        const byMonth = {};
+        for (const m of months) {
+          const snap = await getDocs(collection(db, "fuelTransactions", m, "tx"));
+          byMonth[m] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        }
+        if (alive) setTrendData(byMonth);
+      } catch (e) {
+        console.warn("[Paliwo] trend:", e);
+        showToast("❌ Nie udało się wczytać trendu miesięcy");
+      }
+      if (alive) setTrendLoading(false);
+    })();
+    return () => { alive = false; };
+  }, [showTrend, months]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Filtrowanie ──
   const filtered = useMemo(() => txs.filter(t =>
     (fCars.size === 0 || fCars.has(t.vehicleId)) &&
@@ -220,6 +248,27 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
         l100: km ? o.l / km * 100 : null, eurKm: km ? o.e / km : null };
     }).sort((a, b) => b.l - a.l);
   }, [filtered, kmMonthly]);
+
+  // ── Trend cen: per miesiąc → per kraj (średnia ważona litrami) + średnia flotowa ──
+  // Respektuje filtr PRODUKTU i KART; po autach jest fleet-wide (ceny to kwestia kraju/karty,
+  // nie konkretnego auta — a filtr aut i tak dotyczy tylko bieżącego miesiąca).
+  const trend = useMemo(() => {
+    if (!trendData) return null;
+    const monthsAsc = Object.keys(trendData).sort();
+    const perMonth = {};
+    for (const m of monthsAsc) {
+      const byCC = {}; let fl = 0, fe = 0;
+      for (const t of trendData[m]) {
+        if (!fCards.has(t.card) || t.product !== product || t.netEUR == null) continue;
+        const o = byCC[t.country] = byCC[t.country] || { l: 0, e: 0, n: 0 };
+        o.l += t.liters || 0; o.e += t.netEUR || 0; o.n++;
+        fl += t.liters || 0; fe += t.netEUR || 0;
+      }
+      perMonth[m] = { byCC, fleet: { l: fl, e: fe } };
+    }
+    const countries = [...new Set(monthsAsc.flatMap(m => Object.keys(perMonth[m].byCC)))].sort();
+    return { monthsAsc, perMonth, countries };
+  }, [trendData, fCards, product]);
 
   // ── Wnioski (te same reguły co w makiecie, liczone z danych) ──
   const insights = useMemo(() => {
@@ -499,6 +548,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
       }
       logAction("import", "fuelTransactions", { count: st.fresh.length, months: [...monthsTouched] });
       showToast(`✅ Zaimportowano ${st.fresh.length} tankowań${st.dupes ? ` (pominięto ${st.dupes} duplikatów)` : ""}`);
+      setTrendData(null);   // świeży miesiąc → unieważnij cache trendu, doliczy się przy otwarciu
       setImportState(null);
       setShowImport(false);
       const ms = [...new Set([...months, ...monthsTouched])].sort().reverse();
@@ -574,6 +624,15 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
           {months.length === 0 && <option value="">brak danych</option>}
           {months.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
         </select>
+        {months.length > 0 && (
+          <button onClick={() => setShowTrend(s => !s)}
+            className="px-4 py-2 rounded-xl text-sm font-medium border transition-all"
+            style={showTrend
+              ? { background: "#0071e3", borderColor: "#0071e3", color: "#fff" }
+              : { background: "#fff", borderColor: "#e5e5ea", color: "#1d1d1f" }}>
+            📊 Trend cen
+          </button>
+        )}
         {canEdit && (
           <button onClick={() => { setShowImport(true); setImportState(null); }}
             className="px-4 py-2 rounded-xl text-sm font-medium text-white"
@@ -660,6 +719,101 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── TREND CEN miesiąc-do-miesiąca ── */}
+      {showTrend && (
+        <div className="bg-white rounded-2xl border border-gray-100 p-4">
+          <div className="flex items-start justify-between mb-3 gap-2">
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">📊 Trend cen netto €/L — miesiąc do miesiąca</div>
+              <div className="text-[11px] text-gray-400">
+                {product === "on" ? "Diesel" : "AdBlue"} · średnia ważona litrami · karty:{" "}
+                {fCards.size === Object.keys(CARDS).length ? "wszystkie" : [...fCards].map(k => CARDS[k]?.name || k).join(", ")}
+              </div>
+            </div>
+            <button onClick={() => setShowTrend(false)} className="text-sm text-gray-400 hover:text-gray-600 shrink-0">Zwiń ✕</button>
+          </div>
+
+          {trendLoading && <div className="text-sm text-gray-400 py-3">⏳ Wczytuję wszystkie miesiące…</div>}
+          {!trendLoading && trend && trend.monthsAsc.length < 2 && (
+            <div className="text-sm text-gray-400 py-2">
+              Potrzeba co najmniej 2 miesięcy w bazie, żeby pokazać trend. Zaimportuj kolejny miesiąc raportami kart.
+            </div>
+          )}
+          {!trendLoading && trend && trend.monthsAsc.length >= 2 && (() => {
+            const { monthsAsc, perMonth, countries } = trend;
+            const NMS = ["sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru"];
+            const shortM = m => `${NMS[+m.slice(5, 7) - 1]} '${m.slice(2, 4)}`;
+            const cell = (m, cc) => { const o = perMonth[m].byCC[cc]; return o && o.l ? o.e / o.l : null; };
+            const fleet = m => { const f = perMonth[m].fleet; return f.l ? f.e / f.l : null; };
+            const lastDelta = arr => {
+              const i = arr.length - 1;
+              return (arr[i] != null && arr[i - 1] != null) ? arr[i] - arr[i - 1] : null;
+            };
+            const dcol = d => d == null ? "#c7c7cc" : d < 0 ? "#16a34a" : d > 0 ? "#dc2626" : "#6e6e73";
+            return (
+              <div className="overflow-x-auto">
+                <table className="w-full text-[12.5px] min-w-[440px]">
+                  <thead className="text-[10.5px] uppercase tracking-wide text-gray-400">
+                    <tr>
+                      <th className="text-left pb-1.5">Kraj</th>
+                      {monthsAsc.map(m => <th key={m} className="text-right pb-1.5 px-2">{shortM(m)}</th>)}
+                      <th className="text-right pb-1.5 pl-2">Δ ost.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {countries.map(cc => {
+                      const vals = monthsAsc.map(m => cell(m, cc));
+                      const nums = vals.filter(v => v != null);
+                      const mn = Math.min(...nums), mx = Math.max(...nums);
+                      const d = lastDelta(vals);
+                      return (
+                        <tr key={cc} className="border-t border-gray-100">
+                          <td className="py-1 whitespace-nowrap">{FLAG[cc] || ""} {cc}</td>
+                          {vals.map((v, i) => {
+                            const o = perMonth[monthsAsc[i]].byCC[cc];
+                            return (
+                              <td key={i} className="py-1 px-2 text-right tabular-nums font-semibold align-bottom"
+                                style={{ color: v == null ? "#c7c7cc" : (nums.length > 1 && v === mn) ? "#16a34a" : (nums.length > 1 && v === mx) ? "#dc2626" : "#1d1d1f" }}>
+                                {v == null ? "—" : p3(v)}
+                                <span className="block text-[9.5px] text-gray-300 font-normal">{o ? Math.round(o.l) + " L" : ""}</span>
+                              </td>
+                            );
+                          })}
+                          <td className="py-1 pl-2 text-right tabular-nums align-bottom" style={{ color: dcol(d) }}>
+                            {d == null ? "—" : (d > 0 ? "+" : "") + p3(d)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {(() => {
+                      const fv = monthsAsc.map(m => fleet(m));
+                      const d = lastDelta(fv);
+                      return (
+                        <tr className="border-t-2 border-gray-200 bg-gray-50">
+                          <td className="py-1.5 font-semibold whitespace-nowrap">🚚 Flota</td>
+                          {fv.map((v, i) => (
+                            <td key={i} className="py-1.5 px-2 text-right tabular-nums font-semibold">{v == null ? "—" : p3(v)}</td>
+                          ))}
+                          <td className="py-1.5 pl-2 text-right tabular-nums font-semibold" style={{ color: dcol(d) }}>
+                            {d == null ? "—" : (d > 0 ? "+" : "") + p3(d)}
+                          </td>
+                        </tr>
+                      );
+                    })()}
+                  </tbody>
+                </table>
+                <div className="text-[11px] text-gray-400 mt-2 leading-relaxed">
+                  €/L <b>netto</b>, średnia ważona litrami. <b className="text-green-600">Zielony</b> = najtańszy miesiąc w wierszu,
+                  {" "}<b className="text-red-600">czerwony</b> = najdroższy. <b>Δ ost.</b> = zmiana między dwoma ostatnimi miesiącami z danymi
+                  (spadek = zielony). Litry pod ceną = wielkość próbki — mała próbka (np. 1 tankowanie) to cena mniej wiarygodna.
+                  Trend obejmuje <b>całą flotę</b> (filtr aut nie zawęża tej tabeli celowo).
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
