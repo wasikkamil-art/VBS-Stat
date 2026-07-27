@@ -690,9 +690,42 @@ function LoginScreen() {
   return (
     <div style={{ minHeight:"100vh", background:"#f8f9fb", display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
       <div style={{ background:"#fff", borderRadius:20, padding:"32px", width:360, maxWidth:"100%", boxShadow:"0 8px 32px rgba(0,0,0,0.08)" }}>
-        <div style={{ display:"flex", justifyContent:"center", marginBottom:28 }}>
+        <div style={{ display:"flex", justifyContent:"center", marginBottom:22 }}>
           <img src="/logodologowania.png" alt="FleetStat" style={{ width:220 }} />
         </div>
+
+        {/* Przełącznik aplikacji VBS — FleetStat aktywny (formularz niżej), Faktury/FOX
+            przenoszą na swoje domeny (każda apka ma własne logowanie). */}
+        <div style={{ fontSize:11, fontWeight:600, color:"#9ca3af", textTransform:"uppercase", letterSpacing:"0.5px", marginBottom:8 }}>Aplikacja</div>
+        <div style={{ display:"flex", gap:8, marginBottom:22 }}>
+          {[
+            { name:"FleetStat", desc:"Flota", icon:"🚚", url:null },
+            { name:"Faktury", desc:"Dokumenty", icon:"🧾", url:"https://faktury.fleetstat.pl" },
+            { name:"FOX", desc:"Prospekty", icon:"🦊", url:"https://fox.fleetstat.pl" },
+          ].map(a => {
+            const active = !a.url;
+            return (
+              <a key={a.name}
+                href={a.url || undefined}
+                onClick={active ? (e => e.preventDefault()) : undefined}
+                style={{
+                  flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:3,
+                  padding:"11px 4px", borderRadius:12, textDecoration:"none", textAlign:"center",
+                  border: active ? "1.5px solid #111827" : "1.5px solid #e5e7eb",
+                  background: active ? "#111827" : "#f9fafb",
+                  color: active ? "#fff" : "#6b7280",
+                  cursor: active ? "default" : "pointer", transition:"all 0.15s",
+                }}
+                onMouseOver={active ? undefined : (e => { const el=e.currentTarget; el.style.borderColor="#1d4ed8"; el.style.color="#1d4ed8"; })}
+                onMouseOut={active ? undefined : (e => { const el=e.currentTarget; el.style.borderColor="#e5e7eb"; el.style.color="#6b7280"; })}>
+                <span style={{ fontSize:19, lineHeight:1 }}>{a.icon}</span>
+                <span style={{ fontSize:12.5, fontWeight:700 }}>{a.name}</span>
+                <span style={{ fontSize:10, opacity:0.75 }}>{a.desc}</span>
+              </a>
+            );
+          })}
+        </div>
+
         <form onSubmit={handleLogin}>
           <div style={{ marginBottom:14 }}>
             <label style={{ display:"block", fontSize:12, fontWeight:600, color:"#6b7280", marginBottom:5, textTransform:"uppercase", letterSpacing:"0.5px" }}>Email</label>
