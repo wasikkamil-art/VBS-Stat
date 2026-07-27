@@ -2754,3 +2754,40 @@ Iwansky 2124,99 € / 1,504 €/L / 16,0 · Lukashuchuk 1978,86 € / 1,409 / **
 Kolabu 656,49 € / 1,495 / 15,0 · **RAZEM 6503,36 € / 4410 L / 76 tank. / 1,475 €/L / 16,4 L/100 / 26 836 km**.
 Suma zgadza się z kafelkiem KPI „koszt netto". Render SSR OK, build OK (chunk 36,9 kB).
 ⚠️ Wygląd sekcji nie klikany w UI (brak logowania) — liczby i nazwiska sprawdzone na realnych danych.
+
+## 2026-07-24 (cd.5) — Koszt Firestore: okno dla admina na driverActivities (krok 2, PROD)
+
+User zauważył rosnący rachunek Firebase (wykres do ~100 zł/mies, słupki rosną cze→lip). Diagnoza na
+GCP Monitoring (nie zgadywanie): odczyty `type: QUERY` = **361–679 tys./dobę i rosną**, reszta w tysiącach.
+Źródło: **admin/dyspozytor subskrybował CAŁĄ kolekcję `driverActivities`** (`onSnapshot` bez okna) — 21 717
+dok. i rośnie bez końca (poll co minutę + backfill DDD/CSV z datą wstecz). Każdy resync/reconnect/deploy =
+ponowny odczyt wszystkich 21 tys. → ~31 resync-ów/dobę = ~679 tys. Kolekcja rośnie → wykres rośnie.
+
+**Decyzja usera: „B bez kasowania".** A (kasowanie starych auto_gps) ODRZUCONE — B samo tnie koszt bez
+usuwania danych, bo skoro admin czyta okno, wielkość kolekcji przestaje mieć znaczenie. Nic nie skasowano.
+
+### Zmiana (frontend only, commit poniżej)
+1. **Górny listener admina → okno przesuwne 45 dni** (`ADMIN_ACTIVITIES_WINDOW_DAYS`, App.jsx). Pokrywa live
+   dashboard + compliance (28-dniowy „powrót do bazy" + margines na kotwicę odpoczynku). Kierowca bez zmian (60d).
+   Zapytanie `where(startTs >= cutoff)` = jedno pole, bez indeksu złożonego.
+2. **`MultiDayActivityView` dociąga PEŁNĄ historię pojazdu sam** — `where(vehicleId == id)` (jedno pole, bez
+   indeksu), raz przy otwarciu, scalane z propsem (okno=live) po id. `refetchTick` odświeża po zapisie/usunięciu
+   korekty (może być poza oknem 45d). Dzięki temu okno NIE obcina już historii PO CICHU — komentarz-ostrzeżenie
+   z kodu spełniony. Głęboka historia (miesiące/rok wstecz) w pełni dostępna.
+
+### Zweryfikowane na produkcji (skryptem, bez klikania w UI za loginem)
+- Okno admina 45d: **21 717 → 4 332 dok./resync = −80%**, przesuwne → koszt przestaje rosnąć z kolekcją.
+- Dociąg per-pojazd (dokładnie jak apka, BEZ orderBy): pełna historia — v4 od 2025-07-09, v3 od 2025-10-02,
+  v5 od 2025-11-07, v1 od 2026-01-17. Nic nie ginie.
+- 5 189 dok. bez `vehicleId`/inne auta — stary widok też ich nie renderował (ten sam filtr), zero regresji.
+- Brak nowych indeksów Firestore. Build zielony, lint 0 errorów.
+- ⚠️ NIE klikane w zalogowanym UI (nie loguję się na konto). Kształty zapytań sprawdzone bezpośrednio na
+  bazie; render lokalnie tylko przez build (komponent za loginem). Efekt na rachunku widoczny po ~dobie w GCP.
+- ⚠️ Drobny efekt: przy otwarciu pojazdu głęboka historia pojawia się po dociągu (ułamek sek.); domyślny
+  widok 7 dni mieści się w oknie, więc zwykle bez różnicy.
+
+### Odrzucone / odłożone
+- A (kasowanie starych auto_gps) — świadomie NIE robimy (decyzja usera „nie kasować"). Storage rośnie dalej
+  (grosze), ale odczyty już nie.
+- **DDD „nadpisywać przy re-uploadzie, żeby został najświeższy"** — user: „osobno potem". Dotyka parsera DDD,
+  nie kosztu; zrobić w oddzielnej sesji (dług: „re-upload starych DDD — fix 07-16 tylko na nowe parsowania").

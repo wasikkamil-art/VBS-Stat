@@ -1203,6 +1203,16 @@ const ADMIN_ONLY_TABS = ["users", "email", "kierowcy"];
 // a `weeklyRestCompensation` liczy 4 tygodnie wstecz od poniedziałku.
 const ACTIVITIES_WINDOW_DAYS = 60;
 
+// Okno subskrypcji dla ADMINA/DYSPOZYTORA (dni wstecz). Wcześniej admin czytał CAŁĄ
+// kolekcję `driverActivities` przy każdym resyncu listenera — a że rośnie bez końca
+// (poll co minutę + backfill DDD/CSV z datą wstecz), to był główny koszt Firestore
+// (QUERY ~360–680 tys. odczytów/dobę, rosnące). Okno przesuwne 45 dni pokrywa live
+// dashboard + compliance (28-dniowy „powrót do bazy" + margines na znalezienie kotwicy
+// odpoczynku), a koszt przestaje rosnąć z wielkością kolekcji.
+// Głęboka historia (przeglądanie miesięcy wstecz) NIE ginie — `MultiDayActivityView`
+// dociąga własnym zapytaniem po vehicleId na żądanie (patrz tam). NIC nie kasujemy.
+const ADMIN_ACTIVITIES_WINDOW_DAYS = 45;
+
 function App({ user, role, appUsers = [], allowedTabs = null }) {
   const isAdmin      = role === "admin";
   const [showExportModal, setShowExportModal] = useState(false);
@@ -1485,20 +1495,25 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   // `weeklyRestCompensation` potrzebuje ~31 dni. 60 dni daje zapas na segmenty przecinające
   // granicę okna. Filtrujemy po `startTs` (indeks driverEmail+startTs już istnieje).
   //
-  // ADMIN/DYSPOZYTOR czyta na razie całość — `MultiDayActivityView` pozwala wybrać DOWOLNĄ
-  // datę wstecz, a granice pickera biorą się z załadowanej tablicy, więc okno obcięłoby
-  // historię PO CICHU (bez błędu). Docelowo ten widok ma dostać własne zapytanie
-  // (vehicleId + wybrany zakres) — do tego czasu nie ruszamy admina.
+  // Subskrypcja `driverActivities` z OKNEM CZASOWYM dla obu ról (koszt Firestore):
+  //  • KIEROWCA — własne segmenty, 60 dni wstecz.
+  //  • ADMIN/DYSPOZYTOR — cała flota, 45 dni wstecz (ADMIN_ACTIVITIES_WINDOW_DAYS).
+  // Wcześniej admin subskrybował CAŁĄ kolekcję → przy każdym resyncu czytał ~21 tys.
+  // dokumentów i rosło. Okno tnie to do ~4 tys. i stabilizuje koszt.
+  // Głęboką historię (miesiące wstecz) `MultiDayActivityView` dociąga sam po vehicleId,
+  // więc okno NIE obcina już nic PO CICHU — picker dostaje pełen zakres z dofetchu.
   useEffect(() => {
     if (isKierowca && !user?.email) return;
     const base = collection(db, "driverActivities");
+    const windowDays = isKierowca ? ACTIVITIES_WINDOW_DAYS : ADMIN_ACTIVITIES_WINDOW_DAYS;
+    const cutoffIso = new Date(Date.now() - windowDays * 86400000).toISOString();
     const q = isKierowca
       ? query(
           base,
           where("driverEmail", "==", user.email),
-          where("startTs", ">=", new Date(Date.now() - ACTIVITIES_WINDOW_DAYS * 86400000).toISOString())
+          where("startTs", ">=", cutoffIso)
         )
-      : base;
+      : query(base, where("startTs", ">=", cutoffIso));
     const unsub = onSnapshot(q, (snap) => {
       setDriverActivities(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }, (err) => console.error("driverActivities onSnapshot error", err));
@@ -8740,10 +8755,38 @@ function DddSummaryCard({ label, value, color, bg }) {
 function MultiDayActivityView({ vehicle, driverActivities = [], currentUser = null, isAdmin = false, showToast = () => {} }) {
   const vehicleId = vehicle?.id || "__none__";
 
-  const vehicleActivities = useMemo(
-    () => driverActivities.filter(a => a.vehicleId === vehicleId),
-    [driverActivities, vehicleId]
-  );
+  // Górna subskrypcja daje tylko ostatnie 45 dni (koszt Firestore). Ten widok pozwala
+  // cofnąć się o miesiące, więc dociąga PEŁNĄ historię TEGO pojazdu własnym zapytaniem
+  // (where vehicleId == — pojedyncza równość, bez indeksu złożonego), raz przy otwarciu.
+  // Scalamy z propsem (świeże live z okna) po id → recent jest na żywo, stare z dofetchu.
+  // `refetchTick` wymusza ponowny dociąg po zapisie/usunięciu korekty (może być poza oknem).
+  const [fetchedActs, setFetchedActs] = useState(null);
+  const [fetchingHist, setFetchingHist] = useState(false);
+  const [refetchTick, setRefetchTick] = useState(0);
+  useEffect(() => {
+    if (vehicleId === "__none__") { setFetchedActs(null); return; }
+    let alive = true;
+    setFetchingHist(true);
+    (async () => {
+      try {
+        const snap = await getDocs(query(collection(db, "driverActivities"), where("vehicleId", "==", vehicleId)));
+        if (alive) setFetchedActs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (e) {
+        console.error("MultiDayActivityView history fetch error", e);
+        if (alive) setFetchedActs([]);   // fallback: zdamy się na okno z propsu
+      }
+      if (alive) setFetchingHist(false);
+    })();
+    return () => { alive = false; };
+  }, [vehicleId, refetchTick]);
+
+  const vehicleActivities = useMemo(() => {
+    const recent = driverActivities.filter(a => a.vehicleId === vehicleId);
+    if (!fetchedActs) return recent;                       // dofetch jeszcze leci — pokaż okno
+    const byId = new Map(fetchedActs.map(a => [a.id, a]));
+    for (const a of recent) byId.set(a.id, a);             // props (live) wygrywa nad snapshotem
+    return [...byId.values()];
+  }, [driverActivities, fetchedActs, vehicleId]);
 
   // ── Korekty tachografu (source="correction") — adnotacja avail→rest ──
   const corrections = useMemo(
@@ -8990,6 +9033,7 @@ function MultiDayActivityView({ vehicle, driverActivities = [], currentUser = nu
       logAction("ddd_correction_add", "driverActivities", { vehicleId: vehicle.id, driverEmail, startTs, endTs, reason: corrReason.trim() });
       showToast("✅ Korekta zapisana (dyspozycyjność → odpoczynek)");
       setShowCorrModal(false);
+      setRefetchTick(t => t + 1);   // korekta może być poza oknem 45d → odśwież dociąg historii
     } catch (e) {
       console.error("saveCorrection error", e);
       showToast("❌ Błąd zapisu korekty");
@@ -9004,6 +9048,7 @@ function MultiDayActivityView({ vehicle, driverActivities = [], currentUser = nu
       await deleteDoc(doc(db, "driverActivities", id));
       logAction("ddd_correction_delete", "driverActivities", { id, vehicleId: vehicle.id });
       showToast("✅ Korekta cofnięta");
+      setRefetchTick(t => t + 1);   // usunięcie może być poza oknem 45d → odśwież dociąg historii
     } catch (e) {
       console.error("deleteCorrection error", e);
       showToast("❌ Błąd cofania korekty");
