@@ -671,9 +671,6 @@ function LoginScreen() {
   const [password, setPassword] = useState("");
   const [error, setError]       = useState(null);
   const [loading, setLoading]   = useState(false);
-  // Chooser-first: null = ekran wyboru aplikacji, "fleetstat" = formularz logowania FleetStat.
-  // Faktury/FOX to osobne domeny z własnym logowaniem → przekierowanie, nie formularz tutaj.
-  const [selectedApp, setSelectedApp] = useState(null);
 
   async function handleLogin(e) {
     e.preventDefault();
@@ -721,43 +718,8 @@ function LoginScreen() {
           <img src="/logodologowania.png" alt="FleetStat" style={{ width:220 }} />
         </div>
 
-        {/* ── EKRAN WYBORU APLIKACJI ── */}
-        {!selectedApp && (
-          <>
-            <div style={{ fontSize:11, fontWeight:600, color:"#9ca3af", textTransform:"uppercase", letterSpacing:"0.5px", marginBottom:10 }}>Wybierz aplikację</div>
-            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-              {APPS.map(a => {
-                const inner = (
-                  <>
-                    <div style={{ flex:1, minWidth:0, display:"flex", flexDirection:"column", alignItems:"flex-start", gap:6 }}>
-                      {appLogo(a.key, 22)}
-                      <div style={{ fontSize:12, color:"#9ca3af" }}>{a.desc}</div>
-                    </div>
-                    <span style={{ fontSize:18, color:"#d1d5db" }}>›</span>
-                  </>
-                );
-                // Hover przez CSS (@media hover:hover) — NIE JS onMouseOver, bo na iOS/dotyku
-                // pierwszy tap tylko „hoveruje", a klik dopiero drugi (bug dwóch kliknięć).
-                return a.url ? (
-                  <a key={a.key} href={a.url} className="vbs-app-card">{inner}</a>
-                ) : (
-                  <button key={a.key} type="button" onClick={() => setSelectedApp("fleetstat")} className="vbs-app-card">{inner}</button>
-                );
-              })}
-            </div>
-          </>
-        )}
-
-        {/* ── FORMULARZ LOGOWANIA FLEETSTAT ── */}
-        {selectedApp === "fleetstat" && (
-        <>
-        <button type="button" onClick={() => { setSelectedApp(null); setError(null); }}
-          style={{ display:"flex", alignItems:"center", gap:6, background:"none", border:"none", padding:0, marginBottom:16, cursor:"pointer", color:"#6b7280", fontSize:13, fontWeight:600 }}>
-          <span style={{ fontSize:16 }}>‹</span> Inne aplikacje
-        </button>
-        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:18 }}>
-          <span style={{ fontSize:13, fontWeight:600, color:"#6b7280" }}>Flota i monitoring</span>
-        </div>
+        {/* ── FORMULARZ LOGOWANIA — od razu widoczny (bez kroku „wybierz apkę"),
+             żeby na telefonie logowanie było jednym tapem, nie dwoma. ── */}
         <form onSubmit={handleLogin}>
           <div style={{ marginBottom:14 }}>
             <label style={{ display:"block", fontSize:12, fontWeight:600, color:"#6b7280", marginBottom:5, textTransform:"uppercase", letterSpacing:"0.5px" }}>Email</label>
@@ -783,14 +745,26 @@ function LoginScreen() {
           </div>
           {error && <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:10, padding:"10px 14px", color:"#dc2626", fontSize:13, marginBottom:14 }}>{error}</div>}
           <button type="submit" disabled={loading}
-            style={{ width:"100%", padding:"12px", background:"#111827", border:"none", borderRadius:10, fontWeight:700, fontSize:15, color:"#fff", cursor:"pointer", transition:"opacity 0.2s" }}
-            onMouseOver={e => e.target.style.opacity="0.9"}
-            onMouseOut={e => e.target.style.opacity="1"}>
+            style={{ width:"100%", padding:"12px", background:"#111827", border:"none", borderRadius:10, fontWeight:700, fontSize:15, color:"#fff", cursor:"pointer" }}>
             {loading ? "Logowanie..." : "Zaloguj się"}
           </button>
         </form>
-        </>
-        )}
+
+        {/* ── Przełącznik do pozostałych aplikacji VBS (linki — nawigują pierwszym tapem) ── */}
+        <div style={{ borderTop:"1px solid #f0f0f2", marginTop:22, paddingTop:16 }}>
+          <div style={{ fontSize:11, fontWeight:600, color:"#9ca3af", textTransform:"uppercase", letterSpacing:"0.5px", marginBottom:10 }}>Inne aplikacje VBS</div>
+          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+            {APPS.filter(a => a.url).map(a => (
+              <a key={a.key} href={a.url} className="vbs-app-card">
+                <div style={{ flex:1, minWidth:0, display:"flex", flexDirection:"column", alignItems:"flex-start", gap:5 }}>
+                  {appLogo(a.key, 20)}
+                  <div style={{ fontSize:11.5, color:"#9ca3af" }}>{a.desc}</div>
+                </div>
+                <span style={{ fontSize:18, color:"#d1d5db" }}>›</span>
+              </a>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
