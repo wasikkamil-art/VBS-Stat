@@ -188,7 +188,9 @@ service cloud.firestore {
     // ═══════════════════════════════════════════════════════════════
     match /payments/{docId} {
       allow read: if isAuth();
-      allow create, update, delete: if isAuth();
+      // 2026-07-27 audyt: było `if isAuth()` → każdy zalogowany (też kierowca/podgląd)
+      // mógł kasować rekordy płatności. Zawężone do admin/dyspozytor (canEdit).
+      allow create, update, delete: if canEdit();
     }
 
     // ═══════════════════════════════════════════════════════════════

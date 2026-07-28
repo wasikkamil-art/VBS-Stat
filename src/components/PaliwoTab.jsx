@@ -26,6 +26,9 @@ import {
 const eur = n => (Number(n) || 0).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
 const p3 = n => (Number(n) || 0).toLocaleString("pl-PL", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 const litr = n => Math.round(Number(n) || 0).toLocaleString("pl-PL") + " L";
+// Escape danych z importu (nazwa stacji, rejestracja) przed wstawieniem do HTML
+// „Wniosków" (render przez dangerouslySetInnerHTML) — obrona przed stored-XSS.
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 // ══════════════════════════════════════════════════════════════════
 // NBP — kurs z dnia transakcji (dzień wolny → cofnij max 5 dni wstecz).
@@ -311,7 +314,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
     const dev = filtered.map(t => ({ t, d: (t.pricePerLNet || 0) - (ccAvg[t.country] || 0) }))
       .sort((a, b) => b.d - a.d)[0];
     if (dev && dev.d > 0.05) out.push(["⚠️", `Najgorsze tankowanie: <b>${dev.t.ts.slice(8, 10)}.${dev.t.ts.slice(5, 7)}</b> `
-      + `${dev.t.plate}, ${dev.t.station} (${dev.t.country}) — ${p3(dev.t.pricePerLNet)} €/L, o <b>+${p3(dev.d)}</b> `
+      + `${esc(dev.t.plate)}, ${esc(dev.t.station)} (${esc(dev.t.country)}) — ${p3(dev.t.pricePerLNet)} €/L, o <b>+${p3(dev.d)}</b> `
       + `powyżej średniej kraju. Koszt odchyłki: ${eur(dev.d * dev.t.liters)}.`]);
     // spalanie — kto odstaje (vs ŚREDNIA POZOSTAŁYCH, nie vs minimum)
     if (product === "on" && country === "all") {
@@ -321,14 +324,14 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
         const avg = rest.reduce((a, x) => a + x.l100, 0) / rest.length;
         if (w.l100 > avg) {
           const over = (w.l100 - avg) / 100 * w.km;
-          out.push(["⛽", `Spalanie: <b>${plateOf(w.vid)} ${w.l100.toFixed(1)} L/100</b> vs średnia pozostałych `
-            + `${avg.toFixed(1)} (${rest.map(x => `${plateOf(x.vid)} ${x.l100.toFixed(1)}`).join(" · ")}). `
+          out.push(["⛽", `Spalanie: <b>${esc(plateOf(w.vid))} ${w.l100.toFixed(1)} L/100</b> vs średnia pozostałych `
+            + `${avg.toFixed(1)} (${rest.map(x => `${esc(plateOf(x.vid))} ${x.l100.toFixed(1)}`).join(" · ")}). `
             + `Nadwyżka na jego ${Math.round(w.km).toLocaleString("pl-PL")} km: `
             + `<b>${Math.round(over)} L ≈ ${eur(over * (w.e / w.l))}</b>.`]);
         }
       }
       const noKm = byVehicle.filter(v => !v.km);
-      if (noKm.length) out.push(["📐", `Brak km za ten miesiąc: ${noKm.map(v => plateOf(v.vid)).join(", ")} — `
+      if (noKm.length) out.push(["📐", `Brak km za ten miesiąc: ${noKm.map(v => esc(plateOf(v.vid))).join(", ")} — `
         + `spalanie nieliczone. Wpisz km z raportu w tabeli poniżej.`]);
       const ad = txs.filter(t => t.product === "adblue" && (fCars.size === 0 || fCars.has(t.vehicleId)));
       if (ad.length) {
