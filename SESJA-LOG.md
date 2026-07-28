@@ -2841,3 +2841,24 @@ User chciał przy logowaniu wybór między FleetStat / FleetStat Faktury / FOX. 
 - Weryfikacja: **FleetStat i Faktury sfotografowane na żywo** (chooser + logo renderują się, linki OK desktop+mobile).
   FOX: build zielony + kod identyczny; ekranu logowania NIE sfotografowałem (preview trzymał zalogowaną sesję).
   Wszystkie 3 build zielone, git author email OK (brak ryzyka blokady Vercela).
+
+## 2026-07-27 (cd.) — Audyt bezpieczeństwa 3 apek + quick-winy wdrożone
+User: „jakie mamy zabezpieczenia, czy ktoś skasuje bazę?". Realny audyt (czytane faktyczne reguły/funkcje, nie z pamięci).
+
+**Wynik: postawa MOCNA** — wszędzie default-deny (Firestore+Storage), wymóg logowania, role, delete=admin-only na kluczowych, sekrety server-side, backup+PITR. Brak dziury „każdy wejdzie/skasuje".
+- **FleetStat**: reguły solidne + anti-wipe guard `fleet/data` + audit log immutable + Storage backupy zablokowane + `/api/claude` token+CORS + tracker token=crypto.randomUUID(32). Sekrety nie w bundlu (ANTHROPIC nie VITE_-prefixed). Firebase apiKey publiczny z założenia (nie luka).
+- **Faktury**: reguły CIAŚNIEJSZE (invoices create/delete=false dla klientów, tylko CF; update admin-only+whitelist pól; brak samo-promocji). Wszystkie CF admin-gated (`assertAdmin`, w tym destrukcyjny `clearAndReset`). 🟡 Storage `leasings/{id}` — każdy zalogowany może nadpisać PDF (reguły nie czytają roli; brama=metadane admin-only).
+- **FOX**: reguły solidne (prospects zawężone, handlowiec nie przejmie cudzego), nie używa Storage, `translateTemplate` admin-gated, monitoring logowań live.
+
+**Główne ryzyko = przejęte konto ADMINA** (może `delete fleet/data` — anti-wipe jest na update, nie delete). Mitygacja = MFA (zaprojektowane, makieta, ODŁOŻONE — patrz project_auth_hardening).
+
+**QUICK-WINY WDROŻONE (commity 1d66ee4 / 4ad071f / c48ca46):**
+1. ✅ FleetStat `payments` delete: `isAuth()`→`canEdit()` (reguły deployed na prod) — kierowca/podgląd nie kasuje płatności.
+2. ✅ FleetStat PaliwoTab: `esc()` na station/plate/plateOf w HTML „Wniosków" (obrona stored-XSS z nazwy stacji z importu).
+3. ✅ `npm audit fix` na 3 repach: **Faktury critical `websocket-driver` USUNIĘTY** + moderate. Wszystkie build zielone.
+
+**OTWARTE (świadomie odłożone):**
+- 🟠 **react-router open-redirect (high, CVE-2025-68470)** w Faktury+FOX — fix wymaga majora 6→7 (breaking), niska realna eksploatowalność (nawigacja po stałych trasach). Osobna sesja z testami.
+- 🟡 FleetStat **śledzi `node_modules`** mimo `.gitignore` (pre-existing, puchnie repo) — cleanup osobno.
+- 🟡 FleetStat 2 high z `npm audit` = dev-tooling (eslint/esbuild), zero prod-ekspozycji, `--force` bumpnąłby majora — zostawione.
+- Faktury `leasings` Storage upload-by-any-auth — do rozważenia walidacja ścieżki.
