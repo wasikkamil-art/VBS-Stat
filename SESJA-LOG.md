@@ -2862,3 +2862,11 @@ User: „jakie mamy zabezpieczenia, czy ktoś skasuje bazę?". Realny audyt (czy
 - 🟡 FleetStat **śledzi `node_modules`** mimo `.gitignore` (pre-existing, puchnie repo) — cleanup osobno.
 - 🟡 FleetStat 2 high z `npm audit` = dev-tooling (eslint/esbuild), zero prod-ekspozycji, `--force` bumpnąłby majora — zostawione.
 - Faktury `leasings` Storage upload-by-any-auth — do rozważenia walidacja ścieżki.
+
+## 2026-07-27 (cd.) — Odłożone punkty audytu: rozstrzygnięte
+1. ✅ **node_modules untrack (FleetStat, commit 9e3fcf2)** — 19 248 plików było śledzonych mimo `.gitignore` (dodane przed regułą). `git rm -r --cached node_modules` (zostają na dysku). git status odchudzony, Vercel robi npm install bez zmian. Pre-push build zielony.
+2. ✅ **react-router — ZBADANE, decyzja: ZOSTAJEMY na 6.30.4** (Faktury+FOX). Odkrycie: **fix iluzoryczny** — ≤7.17.0 ma open-redirect (CVE-2025-68470), a 7.12.0–8.2.0 ma „RSC Mode CSRF" (GHSA-qwww-vcr4-c8h2). **Nie ma wersji wolnej od obu.** ALE: open-redirect **nieeksploatowalny** (zweryfikowane: `navigate()` nigdzie z inputu, cele `<Link>/<Navigate>` tylko literały + `item.path` z zaszytej `navItems`), RSC CSRF **nieaplikowalny** (SPA z BrowserRouter, brak trybu RSC). Upgrade do 7.18.1 zbudował się OK, ale **nie czyści nawet audytu** (7.x = RSC high) → breaking major za zero zysku. Cofnięty. **Zaakceptowane jako non-exploitable.**
+3. 🟡 **Faktury `leasings` Storage** (upload PDF przez każdego zalogowanego, też podgląd) — brak czystego fixu w regułach Storage (nie czytają roli Firestore). Realny fix = App Check (osobny projekt) i tak nie chroni przed insiderem-podglądem. Niska waga (podgląd to zaufana rola wewnętrzna, brama metadanych admin-only). **Zaakceptowane**, ewentualnie App Check w przyszłości.
+4. FleetStat 2 high npm = dev-tooling (eslint/esbuild), zero prod → zostawione.
+
+**Wniosek audytu: wszystkie realne quick-winy zamknięte; pozostałe „high" z npm to albo nieeksploatowalne w tych apkach, albo dev-only. Największe ryzyko (przejęty admin) adresuje MFA — gotowe, odłożone.**
