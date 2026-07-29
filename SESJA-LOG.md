@@ -2870,3 +2870,34 @@ User: „jakie mamy zabezpieczenia, czy ktoś skasuje bazę?". Realny audyt (czy
 4. FleetStat 2 high npm = dev-tooling (eslint/esbuild), zero prod → zostawione.
 
 **Wniosek audytu: wszystkie realne quick-winy zamknięte; pozostałe „high" z npm to albo nieeksploatowalne w tych apkach, albo dev-only. Największe ryzyko (przejęty admin) adresuje MFA — gotowe, odłożone.**
+
+## 2026-07-29 — Wzmocnienie zabezpieczeń: monitoring logowań (FleetStat+Faktury) + delete-guard fleet/data + diff reguł dysk↔prod
+
+Sesja security (kontynuacja audytu 27.07). Wybór usera z 4 celów: **#2 monitoring, #3 diff reguł, #4 delete-guard** (MFA/#1 odłożone — wymaga jego kroku w konsoli Identity Platform). Wykonane w tej kolejności, wszystko LIVE.
+
+### ✅ #3 — Diff reguł NA DYSKU vs WDROŻONE na produkcji (czy się nie rozjechały)
+- Narzędzie: **Firebase Rules REST API** (`firebaserules.googleapis.com`) z gcloud tokenem + **nagłówek `x-goog-user-project: <proj>`** (bez niego 403 „quota project not set"). Pobranie release'ów → rulesetName → źródło pliku, diff z repo.
+- **WYNIK: ZERO rozjazdu.** firestore.rules + storage.rules na dysku == prod dla **vbs-stats** i **vbs-invoices**; **fox-fleetstat** firestore == prod, storage bez release (FOX nie używa Storage — zgodne). Jedyna „różnica" = końcowy newline dodawany przez API (kosmetyka).
+- Wielokrotnie reużywalne — skrypt w scratchpad. **Metoda audytu reguł na przyszłość.**
+
+### ✅ #4 — Delete-guard `fleet/data` (domknięcie dziury z audytu 27.07)
+- Problem: anti-wipe (`fleetNoMassWipe`) chronił tylko **UPDATE**; przejęte konto admina mogło skasować cały dokument `fleet/data` jednym **DELETE** (flota+koszty+frachty), omijając guard.
+- Weryfikacja przed zmianą: klient **nigdy** nie kasuje `fleet/*` (grep `deleteDoc` — tylko inne kolekcje; jedyne odwołanie to `doc(db,"fleet","data")` do read/transaction). Pod `fleet/` żyją 2 doki (`data`, `fleetv2_rent`) — żaden nie kasowany z klienta.
+- Fix: [firestore.rules] `match /fleet/{docId}` → `allow delete: if false;` (legit bulk-delete i tak przez CF/admin SDK). Commit **`1923858`**, `firebase deploy --only firestore:rules` na vbs-stats. Potwierdzone live (`allow delete: if false` w prod rulesecie).
+
+### ✅ #2 — Monitoring logowań na FleetStat + Faktury (wzorzec 1:1 z FOX, Filar 2)
+Do tej pory tylko FOX miał (`api/loginctx`+`loginLog`+`LoginHistory`+reguła). FleetStat miał wyłącznie `logAction("login")` w auditLog (client-side, bez IP/geo). Odtworzone na obu:
+- **`api/loginctx.js`** (Vercel serverless, identyczny jak FOX) — IP z `x-forwarded-for` + geo z `x-vercel-ip-city/country/country-region` (serwerowo, bez klucza/third-party). **Zweryfikowane live: oba zwracają `{ip, city:Kielce, country:PL, region:26}`.**
+- **`src/utils/loginLog.js`** — `logLoginEvent(user)` fire-and-forget po `signInWithEmailAndPassword` (nie await, nie blokuje UI). Bez DEMO-gate (te apki nie mają trybu demo). Zapis do `loginEvents` {uid,email,at:serverTimestamp,ip,city,country,region,device(parseDevice UA),userAgent}.
+- **Widok admina „🔐 Historia logowań"** — Faktury: `src/views/LoginHistory.jsx` (Apple-light, nav+route admin-only). FleetStat: `LoginHistoryTab` inline w App.jsx (paleta gray-* jak AuditLogTab), zakładka „logowania" w `DEFAULT_TABS_BY_ROLE.admin` + `ADMIN_ONLY_TABS` + NavBtn po „Logi aktywności" + render `{tab==="logowania" && isAdmin}`. onSnapshot orderBy at desc limit 300.
+- **Reguła `loginEvents`** (obie apki): `create if uid==auth.uid` / `read if isAdmin()` / `update,delete: false` (immutable audyt). Wdrożone i **zweryfikowane live przez REST** (dysk==prod, loginEvents w prod rulesecie).
+- Integracja: FleetStat App.jsx handleLogin (obok istniejącego logAction), Faktury App.jsx handleLogin. Commity: FleetStat **`bbc2a9b`**, Faktury **`77ce788`**. Oba pushnięte na main (za zgodą usera) → Vercel deploy. **Bundle prod == lokalny build** (FleetStat `index-Xeikrb4j.js`, Faktury `index-DJCWW75x.js`) = nowy front live.
+
+### Zweryfikowane vs NIE (uczciwie)
+- ✅ Reguły live (REST), ✅ `/api/loginctx` zwraca realne geo na prod (oba), ✅ bundle JS live (hash match), ✅ build+lint zielone (FleetStat 0 errors/170 warn backlog).
+- ⚠️ **NIE zweryfikowane end-to-end z CLI**: realny wpis do `loginEvents` + render zakładki za loginem — wymaga świeżego logowania w przeglądarce (geo tylko na prod, wpis wymaga zalogowanego usera; bieżące sesje nie tworzą wpisu). Do sprawdzenia: user loguje się od nowa → query `loginEvents` przez REST potwierdzi wpisy. **To samo ograniczenie było przy FOX (03.07).**
+
+### Stan Filarów auth-hardening po sesji
+- **Filar 2 (monitoring)**: ✅ na WSZYSTKICH 3 apkach (FOX 03.07, FleetStat+Faktury 29.07).
+- **Filar 1 (MFA TOTP)**: zaprojektowany + makieta, **ODŁOŻONY** — bloker = krok konsolowy usera (upgrade Identity Platform dla vbs-stats, nieodwracalny). Siatka ratunkowa (4 adminów) potwierdzona 27.07. Wracamy gdy user zrobi upgrade.
+- Reszta dziur z audytu 27.07: delete-guard fleet/data ✅ domknięty; react-router/leasings-Storage/npm-dev-high = świadomie zaakceptowane.
