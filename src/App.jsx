@@ -10,6 +10,7 @@ import { computeFrachtStatus, isFrachtRozladowany, isStaleUnfinished, hasZaladun
 import { ALL_ROLES, ROLES_BIURO } from "./utils/roles";
 // Audit log helper (wydzielone 2026-04-28 #5c krok 2 — używane w 53+ miejscach)
 import { logAction, logFleetWrite } from "./utils/logAction";
+import { logLoginEvent } from "./utils/loginLog";
 // safeHref — sanityzacja URL (wydzielone 2026-04-29 #5c krok 6, 10 użyć)
 import { safeHref } from "./utils/safeHref";
 // ZlecenieUploadBtn — przycisk uploadu PDF zlecenia (wydzielone 2026-04-29 #5c krok 6)
@@ -678,8 +679,9 @@ function LoginScreen() {
     setLoading(true);
     try {
       _justLoggedIn = true;
-      await signInWithEmailAndPassword(auth, email, password);
+      const cred = await signInWithEmailAndPassword(auth, email, password);
       logAction("login", "auth", { email });
+      logLoginEvent(cred.user); // monitoring logowań (IP+geo serwerowe) — fire-and-forget
     } catch (err) {
       setError("Nieprawidłowy email lub hasło");
     } finally {
@@ -1231,13 +1233,13 @@ function exportCostsToExcel(costs, vehicles, categories, filterYear, filterMonth
 
 // ── Per-role default tab access (fallback kiedy user nie ma jeszcze allowedTabs) ──
 const DEFAULT_TABS_BY_ROLE = {
-  admin:      ["dashboard","frachty","kalkulator","fv","costs","paliwo","vehicles","serwis","rent","docs","imi","payments","users","email","logi","sprawy","kierowcy","chat","gps"],
+  admin:      ["dashboard","frachty","kalkulator","fv","costs","paliwo","vehicles","serwis","rent","docs","imi","payments","users","email","logi","logowania","sprawy","kierowcy","chat","gps"],
   dyspozytor: ["dashboard","frachty","kalkulator","fv","costs","paliwo","vehicles","serwis","rent","docs","imi","sprawy","chat","gps"],
   podglad:    ["dashboard","frachty","vehicles","serwis","docs","imi","chat"],
   kierowca:   ["driver"],  // kierowca widzi TYLKO swój panel
 };
 // Zakładki zawsze admin-only (nie da się ich przyznać przez checkboxy)
-const ADMIN_ONLY_TABS = ["users", "email", "kierowcy"];
+const ADMIN_ONLY_TABS = ["users", "email", "kierowcy", "logowania"];
 
 // Okno czasowe subskrypcji `driverActivities` dla roli KIEROWCA (dni wstecz).
 // Nie schodzić poniżej ~40 — `suggestBaseReturnFromRest` ma lookback 35 dni,
@@ -2925,6 +2927,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 <NavBtn id="users" label="Użytkownicy" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>} />
                 <NavBtn id="email" label="Email statusy" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>} />
                 <NavBtn id="logi" label="Logi aktywności" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>} />
+                <NavBtn id="logowania" label="Historia logowań" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>} />
                 <NavBtn id="chat" label="Czat" badge={chatUnreadCount || null} icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>} />
               </>);
             })()}
@@ -4240,6 +4243,10 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
           {tab === "logi" && isAdmin && (
             <AuditLogTab />
+          )}
+
+          {tab === "logowania" && isAdmin && (
+            <LoginHistoryTab />
           )}
 
           {tab === "chat" && canSeeTab("chat") && (() => {
@@ -9503,6 +9510,80 @@ function AuditLogTab() {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  HISTORIA LOGOWAŃ — monitoring kto/kiedy/skąd/urządzenie (admin-only)
+//  Kolekcja `loginEvents` (zapisywana przez src/utils/loginLog.js po logowaniu).
+//  IP + geo serwerowe (krawędź Vercela). Uzupełnia AuditLogTab (client-side).
+// ═══════════════════════════════════════════════════════════════════
+function LoginHistoryTab() {
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const q = query(collection(db, "loginEvents"), orderBy("at", "desc"), firestoreLimit(300));
+    const unsub = onSnapshot(q, (snap) => {
+      setEvents(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLoading(false);
+    }, (err) => { console.error("loginEvents onSnapshot", err); setLoading(false); });
+    return () => unsub();
+  }, []);
+
+  const fmt = (ts) => {
+    try {
+      const d = ts?.toDate ? ts.toDate() : null;
+      if (!d) return "—";
+      return d.toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    } catch { return "—"; }
+  };
+  const place = (e) => {
+    const geo = [e.city, e.country].filter(Boolean).join(", ");
+    return geo || (e.ip ? "—" : "brak geo");
+  };
+
+  return (
+    <div className="p-4 md:p-6">
+      <div className="mb-5">
+        <h2 className="text-xl font-bold text-gray-800">🔐 Historia logowań</h2>
+        <p className="text-sm text-gray-500 mt-1">
+          Kto, kiedy, skąd i z jakiego urządzenia logował się do systemu. IP i lokalizacja z serwera (krawędź Vercela). Ostatnie {events.length}.
+        </p>
+      </div>
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-400 bg-gray-50">
+                <th className="px-4 py-3 font-medium">Kiedy</th>
+                <th className="px-4 py-3 font-medium">Kto</th>
+                <th className="px-4 py-3 font-medium">Skąd</th>
+                <th className="px-4 py-3 font-medium">Urządzenie</th>
+                <th className="px-4 py-3 font-medium">IP</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && (
+                <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">Ładowanie…</td></tr>
+              )}
+              {!loading && events.length === 0 && (
+                <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">Brak zapisanych logowań (pojawią się po następnym logowaniu przez produkcję).</td></tr>
+              )}
+              {events.map((e) => (
+                <tr key={e.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
+                  <td className="px-4 py-3 whitespace-nowrap text-gray-700">{fmt(e.at)}</td>
+                  <td className="px-4 py-3 text-gray-800 font-medium">{e.email || e.uid || "—"}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-gray-700">{place(e)}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-gray-700">{e.device || "—"}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-400 font-mono">{e.ip || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }

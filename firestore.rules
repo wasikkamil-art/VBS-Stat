@@ -210,6 +210,15 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // loginEvents — monitoring logowań (kto/kiedy/skąd/urządzenie).
+    // Każdy zalogowany zapisuje TYLKO wpis o SOBIE (uid == auth.uid).
+    // Czyta wyłącznie admin. Immutable — bez edycji/kasowania (audyt). Wzorzec z FOX.
+    match /loginEvents/{docId} {
+      allow read: if isAdmin();
+      allow create: if isAuth() && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // DRIVER DOCS — paragony, faktury, mandaty od kierowców
     // Kierowca tworzy i usuwa swoje. Admin/dyspozytor pełny dostęp.
