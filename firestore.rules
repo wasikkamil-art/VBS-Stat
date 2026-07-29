@@ -101,7 +101,12 @@ service cloud.firestore {
       // runTransaction. Plus anti-wipe guard chroni przed mass-delete (max 3 elementy
       // shrink per write). Bulk operations: przez Cloud Function (admin SDK bypass).
       allow update: if (isAdmin() || (canEdit() && fleetDataSafe())) && fleetNoMassWipe();
-      allow delete: if isAdmin();
+      // 🛡️ DELETE-GUARD (2026-07-29): kasowanie całego dokumentu fleet/* z klienta ZABLOKOWANE.
+      // Anti-wipe (fleetNoMassWipe) chroni tylko UPDATE — delete dokumentu ominąłby go i wymazał
+      // fleet/data (cała flota/koszty/frachty). Klient nigdy nie kasuje fleet/* (tylko update przez
+      // runTransaction). Domyka dziurę „przejęte konto admina kasuje bazę jednym delete".
+      // Legit bulk-delete (gdyby kiedyś) = Cloud Function (admin SDK omija reguły).
+      allow delete: if false;
     }
 
     // ═══════════════════════════════════════════════════════════════
