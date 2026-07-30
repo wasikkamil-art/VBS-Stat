@@ -8256,7 +8256,9 @@ function GpsDddSection({ device, showToast }) {
   };
 
   if (selectedDddFile) {
-    return <DddReportView dddFile={selectedDddFile} onClose={() => setSelectedDddFileId(null)} />;
+    return selectedDddFile.fileType === "vu"
+      ? <VuReportView dddFile={selectedDddFile} onClose={() => setSelectedDddFileId(null)} />
+      : <DddReportView dddFile={selectedDddFile} onClose={() => setSelectedDddFileId(null)} />;
   }
 
   return (
@@ -8404,6 +8406,149 @@ function dddDayOfWeek(dateStr) {
   try {
     return new Date(dateStr + "T12:00:00").toLocaleDateString("pl-PL", { weekday: "long" });
   } catch { return ""; }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  RAPORT VU (pamięć pojazdu) — Gen2 V2, parsowany własnym vuParser (CF).
+//  Pokazuje: identyfikacja + kierowcy (karty) + zdarzenia + aktywności dobowe.
+// ═══════════════════════════════════════════════════════════════════
+function VuReportView({ dddFile, onClose }) {
+  const f = dddFile || {};
+  const days = Array.isArray(f.vuDays) ? f.vuDays : [];
+  const drivers = Array.isArray(f.vuDrivers) ? f.vuDrivers : [];
+  const ev = f.vuEventCounts || { events: 0, faults: 0, overspeed: 0 };
+  const sum = f.vuSummary || {};
+  const [showAll, setShowAll] = useState(false);
+
+  const hm = (m) => {
+    if (m == null) return "—";
+    const h = Math.floor(m / 60), mm = m % 60;
+    return h > 0 ? `${h}h ${String(mm).padStart(2, "0")}m` : `${mm}m`;
+  };
+  const fmtDT = (iso) => { try { return iso ? new Date(iso).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"; } catch { return "—"; } };
+  const fmtD = (d) => { try { return new Date(d).toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit" }); } catch { return d; } };
+
+  const visibleDays = showAll ? days : days.filter((d) => (d.driveMin || 0) > 0);
+  const hasContent = days.length > 0;
+
+  return (
+    <div className="p-4 md:p-6">
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <button onClick={onClose} className="text-xs text-gray-400 hover:text-gray-600 mb-1">‹ Wróć do listy plików</button>
+          <h2 className="text-xl font-bold text-gray-800">🚚 Pamięć pojazdu (VU) — {f.vehicleVrn || "?"}</h2>
+          <p className="text-sm text-gray-500 mt-0.5">
+            VIN {f.vin || "—"} · pobrano {fmtDT(f.downloadTime || f.downloadDate)}
+            {f.periodStart && ` · dane ${fmtD(f.periodStart)}–${fmtD(f.periodEnd)}`}
+          </p>
+        </div>
+      </div>
+
+      {!hasContent ? (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
+          Metadane odczytane, ale nie udało się sparsować aktywności tego pliku. Surowy plik jest zarchiwizowany.
+        </div>
+      ) : (
+        <>
+          {/* Kafelki podsumowania */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+            <div className="bg-white rounded-xl border border-gray-200 p-3">
+              <div className="text-[11px] uppercase tracking-wide text-gray-400">Dni z danymi</div>
+              <div className="text-lg font-bold text-gray-800">{sum.daysWithData ?? days.length}</div>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-200 p-3">
+              <div className="text-[11px] uppercase tracking-wide text-gray-400">Suma jazdy</div>
+              <div className="text-lg font-bold text-gray-800">{hm(sum.totalDriveMin)}</div>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-200 p-3">
+              <div className="text-[11px] uppercase tracking-wide text-gray-400">Przebieg</div>
+              <div className="text-lg font-bold text-gray-800">{sum.totalKm != null ? `${sum.totalKm} km` : "—"}</div>
+              {sum.odoStart != null && <div className="text-[10px] text-gray-400">{sum.odoStart}→{sum.odoEnd}</div>}
+            </div>
+            <div className="bg-white rounded-xl border border-gray-200 p-3">
+              <div className="text-[11px] uppercase tracking-wide text-gray-400">Zdarzenia / usterki</div>
+              <div className="text-lg font-bold text-gray-800">{ev.events + ev.faults}</div>
+              <div className="text-[10px] text-gray-400">{ev.overspeed} przekr. prędkości</div>
+            </div>
+          </div>
+
+          {/* Kierowcy */}
+          <div className="bg-white rounded-xl border border-gray-200 p-4 mb-5">
+            <h3 className="font-semibold text-gray-800 mb-2 text-sm">🧑‍✈️ Kierowcy używający pojazdu</h3>
+            <div className="flex flex-wrap gap-2">
+              {drivers.length === 0 && <span className="text-sm text-gray-400">brak danych o kartach</span>}
+              {drivers.map((d, i) => (
+                <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gray-50 border border-gray-200 text-sm">
+                  <span className="font-medium text-gray-800">{d.name || "(nieznany)"}</span>
+                  <span className="text-[11px] text-gray-400 font-mono">{d.cardNumber}</span>
+                  <span className="text-[11px] text-violet-600">{d.insertions}×</span>
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Zdarzenia — czerwone flagi */}
+          {(ev.events > 0 || ev.faults > 0 || ev.overspeed > 0) && (
+            <div className="grid grid-cols-3 gap-3 mb-5">
+              <div className="bg-white rounded-xl border border-gray-200 p-3 text-center">
+                <div className="text-lg font-bold text-amber-600">{ev.events}</div>
+                <div className="text-[11px] text-gray-500">zdarzeń</div>
+              </div>
+              <div className="bg-white rounded-xl border border-gray-200 p-3 text-center">
+                <div className="text-lg font-bold text-red-600">{ev.faults}</div>
+                <div className="text-[11px] text-gray-500">usterek</div>
+              </div>
+              <div className="bg-white rounded-xl border border-gray-200 p-3 text-center">
+                <div className="text-lg font-bold text-orange-600">{ev.overspeed}</div>
+                <div className="text-[11px] text-gray-500">przekroczeń prędkości</div>
+              </div>
+            </div>
+          )}
+
+          {/* Tabela dobowa */}
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="font-semibold text-gray-800 text-sm">📅 Aktywność dobowa (slot kierowcy)</h3>
+              <button onClick={() => setShowAll((s) => !s)} className="text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">
+                {showAll ? "Tylko dni z jazdą" : `Wszystkie dni (${days.length})`}
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-400 bg-gray-50">
+                    <th className="px-4 py-2.5 font-medium">Dzień</th>
+                    <th className="px-4 py-2.5 font-medium">Licznik</th>
+                    <th className="px-4 py-2.5 font-medium">Jazda</th>
+                    <th className="px-4 py-2.5 font-medium">Praca</th>
+                    <th className="px-4 py-2.5 font-medium">Odpoczynek</th>
+                    <th className="px-4 py-2.5 font-medium">Dysp.</th>
+                    <th className="px-4 py-2.5 font-medium">Karty</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleDays.map((d, i) => (
+                    <tr key={i} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
+                      <td className="px-4 py-2.5 whitespace-nowrap font-medium text-gray-800">{fmtD(d.date)}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{d.odometer != null ? `${d.odometer} km` : "—"}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap font-medium" style={{ color: d.driveMin > 0 ? "#7c3aed" : "#9ca3af" }}>{hm(d.driveMin)}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{hm(d.workMin)}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap text-gray-500">{hm(d.restMin)}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap text-gray-500">{hm(d.availMin)}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap text-gray-400 text-xs">{d.cards || 0}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <p className="text-[11px] text-gray-400 mt-3">
+            Aktywność liczona dla slotu kierowcy. Zdarzenia/usterki/przekroczenia = liczniki z pliku (szczegóły w surowym pliku dla ITD).
+          </p>
+        </>
+      )}
+    </div>
+  );
 }
 
 function DddReportView({ dddFile, onClose }) {

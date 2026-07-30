@@ -1839,30 +1839,38 @@ exports.parseDddFile = onCall(
     const fleetSnap = await db.doc("fleet/data").get();
     const vehicles = fleetSnap.data()?.fleetv2_vehicles || [];
 
-    // ═══ VU (pamięć pojazdu / plik M_) — osobna ścieżka (Faza 1: compliance + archiwum) ═══
-    // readesm-js@1.0.12 parsuje tylko VU Gen1 (TREP 0x01-0x06). Nowoczesne tachografy = Gen2
-    // Version 2 (TREP 0x31) → wnętrze NIEobsługiwane. Metadane bierzemy z NAZWY PLIKU
-    // (M_YYYYMMDD_HHMM_VRN_VIN.DDD — ustandaryzowana wg UE). Surowy plik archiwizowany
-    // (delete-guard + backup); ITD i tak czyta go własnym oprogramowaniem. Pełny raport
-    // aktywności VU (Faza 2) wymaga parsera Gen2 V2 — osobny temat.
+    // ═══ VU (pamięć pojazdu / plik M_) — osobna ścieżka ═══
+    // readesm-js NIE obsługuje Gen2 V2 (nowoczesne tachografy). Własny parser
+    // `lib/vuParser.js` (zdekodowany format record-array wg Annex 1C) czyta pełną treść:
+    // identyfikacja + aktywności dobowe (slot kierowcy) + karty + liczniki zdarzeń.
+    // Fallback metadanych = nazwa pliku (M_YYYYMMDD_HHMM_VRN_VIN.DDD). Surowy plik archiwizowany.
     const vuBaseName = (originalFileName || storagePath.split("/").pop() || "");
     const isVuFile = (buffer.length > 0 && buffer[0] === 0x76) || /^M_/i.test(vuBaseName);
     if (isVuFile) {
-      let vuVrn = null, vin = null, downloadDate = null;
-      // Starsze pliki Gen1 może odczytać readesm — spróbuj VuOverview jako bonus
-      const ov = parsed && parsed.VuOverview;
-      if (ov) {
-        vin = ov.vehicleIdentificationNumber || null;
-        const vr = ov.vehicleRegistrationIdentification;
-        vuVrn = (vr && (vr.vehicleRegistrationNumber || (typeof vr === "string" ? vr : null))) || null;
-      }
-      // Główne źródło: nazwa pliku (niezawodne dla Gen2 V2)
+      let vu = null;
+      try { const { parseVuFile } = require("./lib/vuParser"); vu = parseVuFile(buffer); }
+      catch (e) { console.warn(`[DDD parse] VU parser error: ${e.message}`); }
+
+      // Nazwa pliku jako fallback (i preferowana dla VRN/VIN — czysta, bez znaków sterujących)
       const vm = vuBaseName.match(/^M_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})_(.+)_([A-HJ-NPR-Z0-9]{17})\.ddd$/i);
-      if (vm) {
-        downloadDate = `${vm[1]}-${vm[2]}-${vm[3]}`;
-        if (!vuVrn) vuVrn = vm[6].replace(/_/g, " ").trim();
-        if (!vin) vin = vm[7];
-      }
+      const fnDate = vm ? `${vm[1]}-${vm[2]}-${vm[3]}` : null;
+      const vuVrn = (vm && vm[6].replace(/_/g, " ").trim()) || vu?.vrn || null;
+      const vin = (vm && vm[7]) || vu?.vin || null;
+      const downloadDate = fnDate || (vu?.downloadTime ? vu.downloadTime.slice(0, 10) : null);
+      const periodEnd = (vu?.periodEnd ? vu.periodEnd.slice(0, 10) : null) || downloadDate;
+
+      // Mapuj karty kierowców → nazwiska (z driverHistory floty)
+      const drivers = (vu?.drivers || []).map((d) => {
+        let name = null;
+        outer: for (const v of vehicles) {
+          for (const h of (v.driverHistory || [])) {
+            if (h?.cardNumber && String(h.cardNumber).trim() === d.cardNumber) { name = h.name || null; break outer; }
+          }
+        }
+        return { cardNumber: d.cardNumber, insertions: d.insertions, name };
+      });
+
+      const hasContent = !!(vu && vu.days && vu.days.length);
       const vuDoc = {
         storagePath,
         originalFileName: vuBaseName,
@@ -1874,16 +1882,21 @@ exports.parseDddFile = onCall(
         vin: vin || null,
         driverName: null,
         cardNumber: null,
-        periodStart: null,
-        periodEnd: downloadDate,   // kotwica 90 dni = data pobrania z nazwy
+        periodStart: (vu?.periodStart ? vu.periodStart.slice(0, 10) : null),
+        periodEnd,                 // kotwica 90 dni
         downloadDate,
-        activitiesCount: 0,
-        parseStatus: ov ? "success" : "vu_metadata_only",
-        vuNote: ov ? null : "Gen2 V2 — pełne parsowanie wnętrza niedostępne (readesm-js). Metadane z nazwy pliku; surowy plik zarchiwizowany.",
+        downloadTime: vu?.downloadTime || null,
+        activitiesCount: hasContent ? vu.days.length : 0,
+        vuDays: hasContent ? vu.days : [],
+        vuDrivers: drivers,
+        vuEventCounts: vu?.eventCounts || { events: 0, faults: 0, overspeed: 0 },
+        vuSummary: vu?.summary || null,
+        parseStatus: hasContent ? "success" : "vu_metadata_only",
+        vuNote: hasContent ? null : "Nie udało się odczytać aktywności VU — zapisano metadane z nazwy pliku; surowy plik zarchiwizowany.",
       };
       const vuRef = await db.collection("dddFiles").add(vuDoc);
-      console.log(`[DDD parse] OK VU fileId=${vuRef.id} vrn=${vuVrn} vin=${vin} download=${downloadDate} level=${vuDoc.parseStatus}`);
-      return { ok: true, fileId: vuRef.id, fileType: "vu", vehicleVrn: vuVrn, downloadDate, parseStatus: vuDoc.parseStatus };
+      console.log(`[DDD parse] OK VU fileId=${vuRef.id} vrn=${vuVrn} days=${vuDoc.activitiesCount} drivers=${drivers.length} events=${JSON.stringify(vuDoc.vuEventCounts)} level=${vuDoc.parseStatus}`);
+      return { ok: true, fileId: vuRef.id, fileType: "vu", vehicleVrn: vuVrn, downloadDate, days: vuDoc.activitiesCount, parseStatus: vuDoc.parseStatus };
     }
 
     const metadata = extractDddMetadata(parsed);
