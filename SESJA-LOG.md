@@ -2907,3 +2907,31 @@ Do tej pory tylko FOX miał (`api/loginctx`+`loginLog`+`LoginHistory`+reguła). 
 - **Faktury**: pierwsze 2 próby PUSTE → diagnoza. Sprawdzone: kod w bundlu ✓, reguła live ✓, `/api/loginctx` z origin strony 200+geo ✓, baza `(default)` ✓, brak SW/stale-cache ✓. Konsola usera pokazała **rwącą sieć** (`ERR_INTERNET_DISCONNECTED` securetoken + `QUIC_TOO_MANY_RTOS`/`QUIC_PUBLIC_RESET`/400 na firestore.googleapis.com). Fire-and-forget `addDoc` nie dochodził przy zerwanym kanale (błąd cicho w `console.warn`). **Instrumentacja `[LOGINLOG]`** (tymczasowy commit `c2c58d0`, cofnięty `9276a90` — bundle wrócił do identycznego `DJCWW75x`): logowanie na stabilnym łączu → `start→loginctx 200→przed addDoc→✅ ZAPISANO id=EbcexNwKJxZ65uGouNL9`. REST potwierdził wpis (kamil@vbstransport.com, Kielce/PL). **Działa — puste próby to była WYŁĄCZNIE sieć, nie bug.**
 - **LEKCJA**: monitoring fire-and-forget nie zapisze wpisu przy zerwanym łączu w momencie logowania (błąd cichy). To akceptowalne (best-effort, nie blokuje UI), ale przy weryfikacji „brak wpisu" ZAWSZE najpierw sprawdź stan sieci klienta zanim szukasz buga. Filtr konsoli po tagu (`LOGINLOG`) odsiewa szum sieciowy błyskawicznie.
 - **Monitoring logowań (Filar 2) = ✅ zweryfikowany end-to-end na WSZYSTKICH 3 apkach.**
+
+## 2026-07-30 — VU/tachograf + archiwum DDD zgodne z ustawą (delete-guard + panel terminów + backup)
+
+Sesja przeszła w temat DDD/tachografów. Ustalenia prawne + budowa. **VU-parser świadomie ODŁOŻONY do momentu spłynięcia realnego pliku `M_`** (mapowanie pól `VuOverview` musi trafić w dokładny kształt JSON z readesm-js — bez pliku = zgadywanie).
+
+### Kontekst prawny (ustalony z userem)
+- **Karta kierowcy = plik `C_`** (dane kierowcy, ~28 dni pamięci) — pobierać **max co 28 dni**.
+- **VU / pamięć pojazdu = plik `M_`** (dane auta, wszyscy kierowcy, ~1 rok pamięci) — pobierać **max co 90 dni**. To OSOBNY plik `.DDD`, nie „w środku" karty.
+- Przechowywanie **≥12 mies.**, udostępnianie ITD. Zdarzenia awaryjne: odejście kierowcy/wygaśnięcie karty (karta), sprzedaż auta/naprawa tacho (VU).
+- **Zasady = całe UE** (rozp. 581/2010 + 165/2014 stosowane wprost); **kary krajowe** (PL: 500 zł/plik; taryfikator 2026: brak DDD ~8000, brak G2V2 ~12000; na zachodzie zwykle drożej).
+- Podstawa: [gum-serwis.pl/ustawa-o-systemie-tachografow-cyfrowych], [gpswialon.pl/blog/kary-tachograf-2026].
+
+### widziszwszystko — VU dostępne, lokalizacja znaleziona
+- Panel: **Harmonogramy DDD → „Pliki .ddd" → klik pojazd → Lista plików** = pliki `M_` (VU). Zakładka **„Harmonogramy"** dodaje cykliczne pobieranie.
+- User ustawił harmonogram **VU na 4 pojazdy** (0475M/0507M/5367K/TK 314CL), co 28 dni, checkboxy: Dane tachografu + Zdarzenia i przekroczenia + Aktywacja (Prędkość szczegółowo odznaczone = mniejsze pliki). **Auto musi być włączone** (tacho zasilony + GSM); jak stoi — system kolejkuje i pobierze przy jeździe.
+- **Pliki idą do panelu, NIE mailem** (premium, ale user pobiera ręcznie i wgra). Ostatni realny VU dla 0475M był z **13.05** (nazwa `M_20260513_1124_WGM 0475M_ZCFC672C1R5615130.DDD`). Świeży `M_` spłynie gdy auta pojadą → user wgra → dokończę parser VU.
+
+### ✅ ZBUDOWANE I LIVE (części niezależne od pliku VU)
+1. **Delete-guard archiwum DDD** (commit `4fbc009`, deployed vbs-stats firestore+storage): `dddFiles` `update,delete: if false` (pisze tylko CF admin SDK); Storage `driverDdd` → `create` OK, `update,delete: false` (archiwum immutable). Chroni ustawowe archiwum przed przypadkowym skasowaniem. Brak UI kasowania DDD = nic nie zepsute.
+2. **Panel „📅 Terminy pobrań DDD"** (commit `3a9860b`, LIVE `index-DM4BsDiz.js`, admin-only): karty (28d, grupa po nr karty) + pojazdy VU (90d, krzyż z flotą, auta bez VU = „Nigdy nie pobrano"), kolor statusu zielony/amber/czerwony. Liczy z `dddFiles` w FleetStat (label uczciwy: jeśli zgrywasz gdzie indziej i nie wgrywasz tu, pokaże przekroczony). Logika zweryfikowana headless (4 kierowcy OK ~22-26.08; VU pusto = wszystkie „nigdy").
+3. **Backup archiwum DDD** (commit `bec4592`, workflow, PRZETESTOWANY LIVE): nocny backup dodaje dump `dddFiles` + **przyrostowe kopiowanie surowych `.ddd` ze Storage → repo `vbs-stat-backups/ddd-archive/`** (append-only, tylko nowe). Trigger testowy: **`DDD archive: 49 docs, +48 nowych plików`** — SA MA dostęp do Storage, mirror działa. Niezależna własna kopia ustawowa (nie zależy od widziszwszystko).
+
+### ⏳ ZOSTAJE (gdy spłynie plik `M_`)
+- **Parser VU**: gałąź w `extractDddMetadata` (functions/index.js ~1580) — mapować `VuOverview` → vehicleVrn (`vehicleRegistrationIdentification`), VIN (`vehicleIdentificationNumber`), periodStart/End (`vuDownloadablePeriod`), data pobrania (`downloadingTime`), firma. Obecny kod ma ZŁE ścieżki (np. `VuOverview.vehicleRegistrationNumber`) — nigdy nie testowane. **Zwaliduję na realnym pliku przez lokalny sandbox readesm-js** (mam w functions/node_modules). Po tym panel terminów sam pokaże VU (używa fileType=vu+vehicleVrn+periodEnd).
+- **Rozróżnienie VU vs karta w liście „Pliki wgrane"** (GpsDddSection) — żeby VU nie pokazywał się jako „0 aktywności". Robione razem z parserem.
+- (Faza 2 opcjonalnie) pełny raport VU: aktywności, zdarzenia/usterki, przekroczenia prędkości.
+
+**Do wznowienia:** user wgrywa pierwszy `M_` do FleetStat → mówi „jest plik" → pobieram ze Storage, sandbox readesm-js, finalizuję extractDddMetadata VU + lista, deploy CF, walidacja na żywo.
