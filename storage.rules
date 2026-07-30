@@ -77,9 +77,14 @@ service firebase.storage {
     // Pliki DDD z tachografu: `driverDdd/{ts}_{nazwa}` (płaskie).
     // Wgrywa kierowca (mobile) albo admin (GpsDddSection). Czyta tylko biuro —
     // to dane z karty kierowcy, inni kierowcy nie mają po co ich widzieć.
+    // 🛡️ DELETE-GUARD (2026-07-30): surowe pliki .DDD to archiwum ustawowe (≥12 mies.).
+    // Ścieżka ma timestamp → każdy upload = unikalna nazwa (brak legit nadpisania).
+    // Pozwalamy WGRAĆ nowy plik, ale NIE kasować/nadpisać już zarchiwizowanego.
+    // Legit usunięcie (rzadkie) = przez Cloud Function / konsolę admina.
     match /driverDdd/{fileName} {
-      allow read:  if canEdit();
-      allow write: if (isKierowca() || canEdit()) && maxMB(50);
+      allow read:   if canEdit();
+      allow create: if (isKierowca() || canEdit()) && maxMB(50);
+      allow update, delete: if false;
     }
 
     // Dokumenty kierowcy: `driverDocs/{email}/{typ}_{ts}_{nazwa}` — ścieżka

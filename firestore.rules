@@ -279,10 +279,15 @@ service cloud.firestore {
     // ═══════════════════════════════════════════════════════════════
     // DDD FILES — pliki tachografu uploadowane przez admin/kierowcę
     // ═══════════════════════════════════════════════════════════════
+    // 🛡️ DELETE-GUARD (2026-07-30): archiwum DDD/tachografu = wymóg ustawowy
+    // (przechowywanie ≥12 mies., UE 165/2014). dddFiles pisze wyłącznie CF parseDddFile
+    // (admin SDK omija reguły) — klient nigdy. Blokujemy update+delete z klienta, żeby
+    // nikt (nawet admin/dyspo przez pomyłkę) nie skasował dokumentu wymaganego prawem.
+    // Legit usunięcie błędnego wgrania (rzadkie) = przez Cloud Function (admin SDK).
     match /dddFiles/{docId} {
       allow read: if isAuth();
       allow create: if isAuth();
-      allow update, delete: if canEdit();
+      allow update, delete: if false;
     }
 
     // ═══════════════════════════════════════════════════════════════
