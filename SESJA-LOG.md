@@ -2961,3 +2961,24 @@ Wymaga parsera Gen2 V2: (a) inna biblioteka JS (ekosystem cienki), (b) ręczny p
 ### Stan zakresu VU (z tej sesji)
 - ✅ Delete-guard archiwum DDD (`4fbc009`) · ✅ Panel terminów 28/90 (`3a9860b`) · ✅ Backup archiwum DDD (`bec4592`, test „49 docs +48 plików") · ✅ VU Faza 1 metadane+lista (`e36b4cf`).
 - ⏳ VU Faza 2 (pełny raport) — zablokowane brakiem parsera Gen2 V2, do decyzji.
+
+## 2026-07-30 (cd.2) — VU FAZA 2: własny parser Gen2 V2 + raport pojazdu (LIVE)
+
+User: „tak chcę to widzieć" → zbudowany parser wnętrza VU od zera (readesm-js nie umie Gen2 V2). Commit `60d1c91`, LIVE `index-M_FGL0mf.js`.
+
+### Rozgryzienie formatu (na realnym pliku 5367K)
+- VU Gen2 V2 = sekwencja bloków `76 <TREP>` + **record-arrays** `{recordType(1) recordSize(2BE) noOfRecords(2BE) records[]}` (Annex 1C, Appendix 7).
+- Zdekodowane recordType: VIN(0x0a), VRN(0x24), okres(0x13), dzień(0x06), licznik(0x05), **aktywność(0x01)**, karta IW(0x1c), event(0x15)/fault(0x18)/overspeed(0x1b), podpis(0x08).
+- **KLUCZOWY bug rozwiązany**: ActivityChangeInfo (2B) skleja slot kierowcy I zmiennika; bit15=slot. Bez rozdzielenia sortowanie miesza minuty (160 zamiast 577 jazdy). Fix: grupuj po slocie, licz slot kierowcy.
+
+### Wynik — zwalidowane realne dane
+- `lib/vuParser.js` (parser) + CF gałąź VU (zapis vuDays/vuDrivers/vuEventCounts/vuSummary, mapowanie kart→nazwiska z floty) + `VuReportView` (klik pliku VU→raport: kafelki, kierowcy, zdarzenia, tabela dobowa jazda/praca/odpoczynek/licznik).
+- 4 pliki VU zreprocessowane: **5367K 29dni/9182km/Kolabau+Wrona · 314CL 7691km/Teper · 0507M 6768km/Wrona**. Każdy dzień sumuje do 1440 min, liczniki rosną logicznie.
+
+### Gotcha (zapisane w memory)
+- Backfill admin SDK `where fileType==vu .docs[0]` trafił w ZŁY doc (user wgrał więcej plików w międzyczasie) → dane 5367K w docu 0507M. Fix: `/tmp/vu_reprocess.js` parsuje KAŻDY plik M_ osobno (filtr `_M_\d{8}_\d{4}_`, strip prefixu ts). **Reprocess ZAWSZE per-plik.**
+- Zdarzenia: liczby OK (46/11/12), dokładne daty per zdarzenie = offset niedopracowany (v1 pokazuje liczniki).
+- Wrona karta 1850… bez nazwiska (brak w driverHistory floty). Dup 314CL (2× upload) = 2 docs, nieszkodliwe.
+
+### Stan zakresu DDD/VU (kompletny)
+✅ delete-guard · ✅ panel terminów 28/90 (podzakładka GPS/Monitoring) · ✅ backup archiwum · ✅ VU Faza 1 (metadane+archiwum+terminy) · ✅ **VU Faza 2 (parser Gen2 V2 + raport pojazdu)**. Kolejne pliki VU obsłuży CF automatycznie.
