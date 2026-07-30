@@ -2935,3 +2935,29 @@ Sesja przeszła w temat DDD/tachografów. Ustalenia prawne + budowa. **VU-parser
 - (Faza 2 opcjonalnie) pełny raport VU: aktywności, zdarzenia/usterki, przekroczenia prędkości.
 
 **Do wznowienia:** user wgrywa pierwszy `M_` do FleetStat → mówi „jest plik" → pobieram ze Storage, sandbox readesm-js, finalizuję extractDddMetadata VU + lista, deploy CF, walidacja na żywo.
+
+## 2026-07-30 (cd.) — VU Faza 1 WDROŻONA + odkrycie: readesm-js nie parsuje Gen2 V2
+
+User wgrał pierwszy realny plik VU (`M_20260730_1051_WGM_5367K_ZCFC672C2R5593610.DDD`, WGM 5367K). Finalizacja parsera VU napotkała fundamentalne ograniczenie biblioteki.
+
+### 🔴 Odkrycie: readesm-js@1.0.12 NIE parsuje VU Gen2 Version 2
+- Plik zaczyna się `76 31` = odpowiedź UDS TransferData + TREP `0x31` = **VU Generacji 2, Wersja 2** (nowoczesny tachograf, obowiązkowy dla nowych instalacji). readesm-js zna tylko **Gen1** (TREP `0x01-0x06`) → „Unknown vu block type: 0x0031".
+- Dodatkowy bug: `blockFactory` routuje do VU po `data[pos]==0x76`, ale `DataReader` używa `new DataView(data.slice())` (wymaga ArrayBuffer, nieindeksowalny) → z ArrayBuffer routing VU nigdy nie działa. Obejście Proxy-wrapper (indeksowalny + slice→ArrayBuffer) naprawia routing bez regresji kart, ale Gen2 V2 i tak nieznany.
+- **1.0.12 = najnowsza wersja na npm.** Brak upgrade'u który to naprawia. **Pełne parsowanie wnętrza VU Gen2 V2 = niemożliwe z readesm-js.**
+
+### ✅ Rozwiązanie Faza 1 (compliance + archiwum) — WDROŻONE
+- **Metadane VU z NAZWY PLIKU** (`M_YYYYMMDD_HHMM_VRN_VIN.DDD`, standard UE — niezawodny): VRN, VIN, data pobrania. Testowane na 2 realnych nazwach (5367K, 0475M) — 100% trafień.
+- Gałąź VU w CF `parseDddFile` (wykrycie `buffer[0]===0x76 || prefix M_`) → dokument `fileType=vu`, `parseStatus:"vu_metadata_only"`, return early (bez przetwarzania kartowego). Commit `e36b4cf`, CF deployed, front `B84wEYqX`.
+- Pierwszy plik 5367K: stary doc `fileType=unknown` (stary parser) skasowany + poprawny VU utworzony przez **admin REST** (omija delete-guard). Panel „Terminy pobrań" pokazuje **WGM 5367K → termin 2026-10-28 (za 90 dni, zielony)**; pozostałe pojazdy „Nigdy nie pobrano".
+- Lista GpsDddSection: kosmetyk „pobrano <data> · archiwum" zamiast „0 aktywności" dla VU.
+- **Kolejne wgrania VU obsłuży już wdrożona CF automatycznie** (harmonogram widziszwszystko produkuje M_ gdy auta jeżdżą).
+
+### Argumentacja: dlaczego Faza 1 wystarcza prawnie
+Obowiązek ustawowy = **pobierać VU co 90 dni + archiwizować ≥12 mies. + okazać ITD**. FleetStat: archiwizuje surowy podpisany plik (delete-guard+backup) + pilnuje terminu 90 dni. **ITD czyta plik własnym oprogramowaniem** — FleetStat nie musi parsować wnętrza VU dla zgodności. Pełny raport aktywności VU w apce (Faza 2) = wygoda, nie wymóg.
+
+### ⏳ Faza 2 (raport aktywności VU) — OSOBNY TEMAT, nie robione
+Wymaga parsera Gen2 V2: (a) inna biblioteka JS (ekosystem cienki), (b) ręczny parser wg Annex 1C (złożone: certyfikaty variable-length, TimeReal, layout Gen2), (c) usługa zewn. Do decyzji usera czy w ogóle potrzebne (compliance już pokryty).
+
+### Stan zakresu VU (z tej sesji)
+- ✅ Delete-guard archiwum DDD (`4fbc009`) · ✅ Panel terminów 28/90 (`3a9860b`) · ✅ Backup archiwum DDD (`bec4592`, test „49 docs +48 plików") · ✅ VU Faza 1 metadane+lista (`e36b4cf`).
+- ⏳ VU Faza 2 (pełny raport) — zablokowane brakiem parsera Gen2 V2, do decyzji.
