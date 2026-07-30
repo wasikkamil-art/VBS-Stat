@@ -50,6 +50,7 @@ jobs:
           cat > run_backup.js << 'JS'
           const { initializeApp, cert } = require('firebase-admin/app');
           const { getFirestore } = require('firebase-admin/firestore');
+          const { getStorage } = require('firebase-admin/storage');
           const fs = require('fs');
           const sa = JSON.parse(fs.readFileSync('sa.json', 'utf8'));
           initializeApp({ credential: cert(sa) });
@@ -76,6 +77,29 @@ jobs:
             const sprawyData = sprawySnap.docs.map(d => ({ id: d.id, ...d.data() }));
             fs.writeFileSync('backup-repo/backups/sprawy_' + date + '.json', JSON.stringify(sprawyData, null, 2));
 
+            // === Backup archiwum DDD/tachografu (wymog ustawowy przechowywania >=12 mies., UE 165/2014) ===
+            // 1) Metadane + dane sparsowane (kolekcja dddFiles)
+            const dddSnap = await db.collection('dddFiles').get();
+            const dddData = dddSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+            fs.writeFileSync('backup-repo/backups/dddFiles_' + date + '.json', JSON.stringify(dddData, null, 2));
+            // 2) Surowe, podpisane pliki .ddd ze Storage -> ddd-archive/ (przyrostowo, append-only)
+            //    Nazwy maja timestamp = unikalne; kopiujemy tylko nowe (niezalezne archiwum wlasne).
+            let dddCopied = 0, dddSkipped = 0;
+            try {
+              const bucket = getStorage().bucket('vbs-stats.firebasestorage.app');
+              const [rawFiles] = await bucket.getFiles({ prefix: 'driverDdd/' });
+              fs.mkdirSync('backup-repo/ddd-archive', { recursive: true });
+              for (const file of rawFiles) {
+                const base = file.name.split('/').pop();
+                if (!base || !base.toLowerCase().endsWith('.ddd')) continue;
+                const dest = 'backup-repo/ddd-archive/' + base;
+                if (fs.existsSync(dest)) { dddSkipped++; continue; }
+                await file.download({ destination: dest });
+                dddCopied++;
+              }
+            } catch (e) { console.error('DDD Storage mirror error:', e.message); }
+            console.log('DDD archive: ' + dddData.length + ' docs, +' + dddCopied + ' nowych plikow (skip ' + dddSkipped + ')');
+
             const stats = {
               date,
               vehicles: (data.fleetv2_vehicles||[]).length,
@@ -84,7 +108,9 @@ jobs:
               frachty: (data.fleetv2_frachty||[]).length,
               rent: (data.fleetv2_rent||[]).length,
               imi: (data.fleetv2_imi||[]).length,
-              sprawy: sprawyData.length
+              sprawy: sprawyData.length,
+              dddFiles: dddData.length,
+              dddArchivedNew: dddCopied
             };
             console.log('Backup OK:', JSON.stringify(stats));
 
