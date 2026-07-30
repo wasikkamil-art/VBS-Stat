@@ -1233,13 +1233,13 @@ function exportCostsToExcel(costs, vehicles, categories, filterYear, filterMonth
 
 // ── Per-role default tab access (fallback kiedy user nie ma jeszcze allowedTabs) ──
 const DEFAULT_TABS_BY_ROLE = {
-  admin:      ["dashboard","frachty","kalkulator","fv","costs","paliwo","vehicles","serwis","rent","docs","imi","payments","users","email","logi","logowania","sprawy","kierowcy","chat","gps"],
+  admin:      ["dashboard","frachty","kalkulator","fv","costs","paliwo","vehicles","serwis","rent","docs","imi","payments","users","email","logi","logowania","terminy","sprawy","kierowcy","chat","gps"],
   dyspozytor: ["dashboard","frachty","kalkulator","fv","costs","paliwo","vehicles","serwis","rent","docs","imi","sprawy","chat","gps"],
   podglad:    ["dashboard","frachty","vehicles","serwis","docs","imi","chat"],
   kierowca:   ["driver"],  // kierowca widzi TYLKO swój panel
 };
 // Zakładki zawsze admin-only (nie da się ich przyznać przez checkboxy)
-const ADMIN_ONLY_TABS = ["users", "email", "kierowcy", "logowania"];
+const ADMIN_ONLY_TABS = ["users", "email", "kierowcy", "logowania", "terminy"];
 
 // Okno czasowe subskrypcji `driverActivities` dla roli KIEROWCA (dni wstecz).
 // Nie schodzić poniżej ~40 — `suggestBaseReturnFromRest` ma lookback 35 dni,
@@ -2928,6 +2928,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 <NavBtn id="email" label="Email statusy" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>} />
                 <NavBtn id="logi" label="Logi aktywności" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>} />
                 <NavBtn id="logowania" label="Historia logowań" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>} />
+                <NavBtn id="terminy" label="Terminy pobrań DDD" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg>} />
                 <NavBtn id="chat" label="Czat" badge={chatUnreadCount || null} icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>} />
               </>);
             })()}
@@ -4247,6 +4248,10 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
           {tab === "logowania" && isAdmin && (
             <LoginHistoryTab />
+          )}
+
+          {tab === "terminy" && isAdmin && (
+            <TerminyPobranTab vehicles={vehicles} />
           )}
 
           {tab === "chat" && canSeeTab("chat") && (() => {
@@ -9584,6 +9589,133 @@ function LoginHistoryTab() {
           </table>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  TERMINY POBRAŃ DDD — pilnowanie ustawowych odstępów (admin-only)
+//  Karta kierowcy: max co 28 dni · Pamięć pojazdu (VU): max co 90 dni
+//  (UE 581/2010). Liczy z plików dddFiles obecnych w FleetStat.
+// ═══════════════════════════════════════════════════════════════════
+function TerminyPobranTab({ vehicles }) {
+  const [files, setFiles] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const q = query(collection(db, "dddFiles"), orderBy("uploadedAt", "desc"));
+    const unsub = onSnapshot(q, (snap) => {
+      setFiles(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLoading(false);
+    }, (err) => { console.error("dddFiles onSnapshot (terminy)", err); setLoading(false); });
+    return () => unsub();
+  }, []);
+
+  const DAY = 86400000;
+  const now = Date.now();
+  const anchorMs = (f) => {
+    if (f.periodEnd) { const t = Date.parse(f.periodEnd); if (!isNaN(t)) return t; }
+    if (f.uploadedAt?.toDate) return f.uploadedAt.toDate().getTime();
+    if (typeof f.uploadedAt === "string") { const t = Date.parse(f.uploadedAt); if (!isNaN(t)) return t; }
+    return null;
+  };
+  const normPlate = (p) => (p || "").toUpperCase().replace(/\s+/g, "");
+  const fmtD = (ms) => ms ? new Date(ms).toLocaleDateString("pl-PL") : "—";
+
+  // KARTY (28 dni) — grupuj po numerze karty, weź najświeższy plik
+  const byCard = {};
+  for (const f of files) {
+    if (f.fileType !== "card" || !f.cardNumber) continue;
+    const a = anchorMs(f);
+    if (!byCard[f.cardNumber] || (a && a > (byCard[f.cardNumber]._a || 0))) byCard[f.cardNumber] = { ...f, _a: a };
+  }
+  const cardRows = Object.values(byCard).map(f => {
+    const deadline = f._a ? f._a + 28 * DAY : null;
+    return { name: f.driverName || "—", sub: f.cardNumber, through: f.periodEnd, deadline, daysLeft: deadline ? Math.floor((deadline - now) / DAY) : null, has: true, limit: 28 };
+  }).sort((a, b) => (a.daysLeft ?? 1e9) - (b.daysLeft ?? 1e9));
+
+  // VU (90 dni) — grupuj po rejestracji, krzyżuj z całą flotą (auta bez VU = „nigdy")
+  const byVu = {};
+  for (const f of files) {
+    if (f.fileType !== "vu" || !f.vehicleVrn) continue;
+    const k = normPlate(f.vehicleVrn);
+    const a = anchorMs(f);
+    if (!byVu[k] || (a && a > (byVu[k]._a || 0))) byVu[k] = { ...f, _a: a };
+  }
+  const fleet = (vehicles || []).filter(v => !v.archived && v.plate);
+  const vuRows = fleet.map(v => {
+    const f = byVu[normPlate(v.plate)];
+    if (!f) return { name: v.plate, sub: v.brand || "", through: null, deadline: null, daysLeft: null, has: false, limit: 90 };
+    const deadline = f._a ? f._a + 90 * DAY : null;
+    return { name: v.plate, sub: v.brand || "", through: f.periodEnd, deadline, daysLeft: deadline ? Math.floor((deadline - now) / DAY) : null, has: true, limit: 90 };
+  }).sort((a, b) => (a.has === b.has) ? ((a.daysLeft ?? 1e9) - (b.daysLeft ?? 1e9)) : (a.has ? 1 : -1));
+
+  const statusOf = (r) => {
+    if (!r.has) return { label: "Nigdy nie pobrano", cls: "bg-red-100 text-red-700" };
+    if (r.daysLeft == null) return { label: "—", cls: "bg-gray-100 text-gray-500" };
+    if (r.daysLeft < 0) return { label: `Po terminie (${-r.daysLeft} dni)`, cls: "bg-red-100 text-red-700" };
+    if (r.daysLeft <= 7) return { label: `Za ${r.daysLeft} dni`, cls: "bg-amber-100 text-amber-700" };
+    return { label: `Za ${r.daysLeft} dni`, cls: "bg-green-100 text-green-700" };
+  };
+
+  const Table = ({ title, subtitle, rows, colName }) => (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
+      <div className="px-4 py-3 border-b border-gray-100">
+        <h3 className="font-semibold text-gray-800">{title}</h3>
+        <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-400 bg-gray-50">
+              <th className="px-4 py-2.5 font-medium">{colName}</th>
+              <th className="px-4 py-2.5 font-medium">Dane do</th>
+              <th className="px-4 py-2.5 font-medium">Termin</th>
+              <th className="px-4 py-2.5 font-medium">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && (
+              <tr><td colSpan={4} className="px-4 py-6 text-center text-gray-400">Brak danych.</td></tr>
+            )}
+            {rows.map((r, i) => {
+              const s = statusOf(r);
+              return (
+                <tr key={i} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-gray-800">{r.name}</div>
+                    {r.sub && <div className="text-xs text-gray-400 font-mono">{r.sub}</div>}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-gray-600">{r.through ? new Date(r.through).toLocaleDateString("pl-PL") : "—"}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-gray-600">{fmtD(r.deadline)}</td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-medium ${s.cls}`}>{s.label}</span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="p-4 md:p-6">
+      <div className="mb-5">
+        <h2 className="text-xl font-bold text-gray-800">📅 Terminy pobrań DDD</h2>
+        <p className="text-sm text-gray-500 mt-1">
+          Ustawowe odstępy (UE 581/2010): <b>karta kierowcy co 28 dni</b>, <b>pamięć pojazdu (VU) co 90 dni</b>. Liczone z plików obecnych w FleetStat — jeśli zgrywasz gdzie indziej i nie wgrywasz tutaj, termin może wyglądać na przekroczony.
+        </p>
+      </div>
+      {loading ? (
+        <div className="text-gray-400 py-8 text-center">Ładowanie…</div>
+      ) : (
+        <>
+          <Table title="🧑‍✈️ Karty kierowców" subtitle="Pobranie co max 28 dni. Termin = ostatnie dane + 28 dni." rows={cardRows} colName="Kierowca" />
+          <Table title="🚚 Pamięć pojazdu (VU)" subtitle={'Pobranie co max 90 dni. „Nigdy nie pobrano" = brak pliku VU w FleetStat dla tego pojazdu.'} rows={vuRows} colName="Pojazd" />
+        </>
+      )}
     </div>
   );
 }
