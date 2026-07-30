@@ -1839,6 +1839,53 @@ exports.parseDddFile = onCall(
     const fleetSnap = await db.doc("fleet/data").get();
     const vehicles = fleetSnap.data()?.fleetv2_vehicles || [];
 
+    // ═══ VU (pamięć pojazdu / plik M_) — osobna ścieżka (Faza 1: compliance + archiwum) ═══
+    // readesm-js@1.0.12 parsuje tylko VU Gen1 (TREP 0x01-0x06). Nowoczesne tachografy = Gen2
+    // Version 2 (TREP 0x31) → wnętrze NIEobsługiwane. Metadane bierzemy z NAZWY PLIKU
+    // (M_YYYYMMDD_HHMM_VRN_VIN.DDD — ustandaryzowana wg UE). Surowy plik archiwizowany
+    // (delete-guard + backup); ITD i tak czyta go własnym oprogramowaniem. Pełny raport
+    // aktywności VU (Faza 2) wymaga parsera Gen2 V2 — osobny temat.
+    const vuBaseName = (originalFileName || storagePath.split("/").pop() || "");
+    const isVuFile = (buffer.length > 0 && buffer[0] === 0x76) || /^M_/i.test(vuBaseName);
+    if (isVuFile) {
+      let vuVrn = null, vin = null, downloadDate = null;
+      // Starsze pliki Gen1 może odczytać readesm — spróbuj VuOverview jako bonus
+      const ov = parsed && parsed.VuOverview;
+      if (ov) {
+        vin = ov.vehicleIdentificationNumber || null;
+        const vr = ov.vehicleRegistrationIdentification;
+        vuVrn = (vr && (vr.vehicleRegistrationNumber || (typeof vr === "string" ? vr : null))) || null;
+      }
+      // Główne źródło: nazwa pliku (niezawodne dla Gen2 V2)
+      const vm = vuBaseName.match(/^M_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})_(.+)_([A-HJ-NPR-Z0-9]{17})\.ddd$/i);
+      if (vm) {
+        downloadDate = `${vm[1]}-${vm[2]}-${vm[3]}`;
+        if (!vuVrn) vuVrn = vm[6].replace(/_/g, " ").trim();
+        if (!vin) vin = vm[7];
+      }
+      const vuDoc = {
+        storagePath,
+        originalFileName: vuBaseName,
+        uploadedBy: request.auth.token.email || request.auth.uid,
+        uploadedAt: new Date().toISOString(),
+        fileSize: buffer.length,
+        fileType: "vu",
+        vehicleVrn: vuVrn,
+        vin: vin || null,
+        driverName: null,
+        cardNumber: null,
+        periodStart: null,
+        periodEnd: downloadDate,   // kotwica 90 dni = data pobrania z nazwy
+        downloadDate,
+        activitiesCount: 0,
+        parseStatus: ov ? "success" : "vu_metadata_only",
+        vuNote: ov ? null : "Gen2 V2 — pełne parsowanie wnętrza niedostępne (readesm-js). Metadane z nazwy pliku; surowy plik zarchiwizowany.",
+      };
+      const vuRef = await db.collection("dddFiles").add(vuDoc);
+      console.log(`[DDD parse] OK VU fileId=${vuRef.id} vrn=${vuVrn} vin=${vin} download=${downloadDate} level=${vuDoc.parseStatus}`);
+      return { ok: true, fileId: vuRef.id, fileType: "vu", vehicleVrn: vuVrn, downloadDate, parseStatus: vuDoc.parseStatus };
+    }
+
     const metadata = extractDddMetadata(parsed);
     // Czas pobrania karty z nazwy pliku (C_YYYYMMDD_HHMM_...) — do urwania ostatniej
     // czynności dnia pobrania (readesm rozciąga ją do północy → fałszywa jazda).

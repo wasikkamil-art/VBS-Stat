@@ -8332,7 +8332,11 @@ function GpsDddSection({ device, showToast }) {
                         {f.parseStatus === "success" ? "✓ Sparsowany" :
                          f.parseStatus === "error" ? "✕ Błąd" : "⏳ Przetwarzanie"}
                       </span>
-                      {f.activitiesCount != null && (
+                      {f.fileType === "vu" ? (
+                        <span className="text-[10px] text-gray-500" title={f.vuNote || ""}>
+                          {f.downloadDate ? `pobrano ${f.downloadDate}` : "pamięć pojazdu"}{f.parseStatus === "vu_metadata_only" ? " · archiwum" : ""}
+                        </span>
+                      ) : f.activitiesCount != null && (
                         <span className="text-[10px] text-gray-500">{f.activitiesCount} aktywności</span>
                       )}
                     </div>
