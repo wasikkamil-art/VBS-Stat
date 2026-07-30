@@ -1233,13 +1233,13 @@ function exportCostsToExcel(costs, vehicles, categories, filterYear, filterMonth
 
 // ── Per-role default tab access (fallback kiedy user nie ma jeszcze allowedTabs) ──
 const DEFAULT_TABS_BY_ROLE = {
-  admin:      ["dashboard","frachty","kalkulator","fv","costs","paliwo","vehicles","serwis","rent","docs","imi","payments","users","email","logi","logowania","terminy","sprawy","kierowcy","chat","gps"],
+  admin:      ["dashboard","frachty","kalkulator","fv","costs","paliwo","vehicles","serwis","rent","docs","imi","payments","users","email","logi","logowania","sprawy","kierowcy","chat","gps"],
   dyspozytor: ["dashboard","frachty","kalkulator","fv","costs","paliwo","vehicles","serwis","rent","docs","imi","sprawy","chat","gps"],
   podglad:    ["dashboard","frachty","vehicles","serwis","docs","imi","chat"],
   kierowca:   ["driver"],  // kierowca widzi TYLKO swój panel
 };
 // Zakładki zawsze admin-only (nie da się ich przyznać przez checkboxy)
-const ADMIN_ONLY_TABS = ["users", "email", "kierowcy", "logowania", "terminy"];
+const ADMIN_ONLY_TABS = ["users", "email", "kierowcy", "logowania"];
 
 // Okno czasowe subskrypcji `driverActivities` dla roli KIEROWCA (dni wstecz).
 // Nie schodzić poniżej ~40 — `suggestBaseReturnFromRest` ma lookback 35 dni,
@@ -2928,7 +2928,6 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 <NavBtn id="email" label="Email statusy" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>} />
                 <NavBtn id="logi" label="Logi aktywności" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>} />
                 <NavBtn id="logowania" label="Historia logowań" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>} />
-                <NavBtn id="terminy" label="Terminy pobrań DDD" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg>} />
                 <NavBtn id="chat" label="Czat" badge={chatUnreadCount || null} icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>} />
               </>);
             })()}
@@ -4248,10 +4247,6 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
           {tab === "logowania" && isAdmin && (
             <LoginHistoryTab />
-          )}
-
-          {tab === "terminy" && isAdmin && (
-            <TerminyPobranTab vehicles={vehicles} />
           )}
 
           {tab === "chat" && canSeeTab("chat") && (() => {
@@ -6948,6 +6943,7 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
   const SUB_TABS = [
     { id: "mapa", label: "Mapa online", icon: "🗺️" },
     { id: "ddd", label: "Tachograf", icon: "💾" },
+    { id: "terminy", label: "Terminy pobrań", icon: "📅" },
     { id: "tachograf", label: "Czas pracy kierowcy", icon: "⏱️" },
   ];
 
@@ -7118,6 +7114,7 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
               );
             })()}
             {subTab === "ddd" && <GpsDddSection device={selectedDev} showToast={showToast} />}
+            {subTab === "terminy" && <TerminyPobranTab vehicles={vehicles} />}
             {/* 2026-05-07: subTab === "czas-pracy" / "aktywnosc" — usunięte (scalone w "Czas pracy kierowcy"). */}
             {subTab === "tachograf" && (
               <Suspense fallback={<div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-sm text-gray-500">📋 Ładowanie compliance tachografu…</div>}>
