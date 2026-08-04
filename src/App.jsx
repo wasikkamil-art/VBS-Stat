@@ -14858,7 +14858,22 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
         const isGoodTrend = (v26, v25, lib) => lib ? v26 <= v25 : v26 >= v25;
         const [yoyMode, setYoyMode] = useState("flota");
         const [yoyMet, setYoyMet] = useState("frachty");
+        const [yoyCumul, setYoyCumul] = useState(false);   // narastająco (suma running total)
         const met = METRICS.find(m=>m.id===yoyMet);
+        const isRateMet = ["spalanie","eurkm"].includes(yoyMet);
+        // Narastająco: suma od stycznia do danego miesiąca (średnia narastająca dla metryk stawkowych).
+        // upto != null → licz tylko do tego indeksu (2026 = zamknięte miesiące), dalej null (linia się urywa).
+        const cumulate = (vals, upto) => {
+          const out = Array(12).fill(null);
+          let sum = 0, cnt = 0;
+          for (let mi = 0; mi < 12; mi++) {
+            if (upto != null && mi >= upto) break;
+            sum += (vals[mi] || 0);
+            if (vals[mi]) cnt++;
+            out[mi] = isRateMet ? (cnt ? parseFloat((sum / cnt).toFixed(2)) : 0) : sum;
+          }
+          return out;
+        };
         const MS = ["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paź","Lis","Gru"];
         const activeVehs = vehicles;
         const getFlotaVal = (y, mi) => activeVehs.reduce((s,v)=>s+met.fn(v.id,y,mi),0);
@@ -14895,6 +14910,11 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                     className={"px-3 py-1 rounded-lg text-xs font-medium transition-all "+(yoyMode===m?"bg-blue-500 text-white":"bg-gray-100 text-gray-500 hover:bg-gray-200")}>{l}</button>
                 ))}
               </div>
+              <button onClick={()=>setYoyCumul(c=>!c)}
+                title="Narastająco — suma od stycznia do wybranego miesiąca (porównanie z 2025 w tym samym zakresie)"
+                className={"px-3 py-1 rounded-lg text-xs font-medium transition-all "+(yoyCumul?"bg-emerald-500 text-white":"bg-gray-100 text-gray-500 hover:bg-gray-200")}>
+                {yoyCumul?"📈 Narastająco":"Σ Narastająco"}
+              </button>
               <div className="flex gap-1 flex-wrap">
                 {METRICS.map(m=>(
                   <button key={m.id} onClick={()=>setYoyMet(m.id)}
@@ -14913,7 +14933,9 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
               const full25 = row.vals25.reduce((a,b)=>a+b,0);
               const pctYtd = ytd25 ? ((ytd26-ytd25)/Math.abs(ytd25)*100) : 0;
               const projection = closedMonths>0 ? Math.round(ytd26/closedMonths*12) : 0;
-              const rowMax = Math.max(...row.vals25,...row.vals26);
+              const disp26 = yoyCumul ? cumulate(row.vals26, compareMaxMi) : row.vals26;
+              const disp25 = yoyCumul ? cumulate(row.vals25, null) : row.vals25;
+              const rowMax = Math.max(...disp25.map(v=>v||0), ...disp26.map(v=>v||0));
 
               return (
                 <div key={ri} style={{marginBottom: rows.length>1?24:0}}>
@@ -14937,14 +14959,14 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
 
                   {/* Table header */}
                   <div style={{display:"grid",gridTemplateColumns:"44px 1fr 68px 68px 52px",gap:8,padding:"7px 12px",borderBottom:"1px solid #e5e7eb",background:"#f8fafc",borderRadius:"8px 8px 0 0"}}>
-                    {["","PORÓWNANIE","2026","2025","YoY"].map((h,i)=>(
+                    {["",yoyCumul?"NARASTAJĄCO":"PORÓWNANIE","2026","2025","YoY"].map((h,i)=>(
                       <div key={i} style={{fontSize:9,fontWeight:600,color:i===2?"#1d4ed8":"#94a3b8",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:i>=2?"right":"left"}}>{h}</div>
                     ))}
                   </div>
 
                   {/* Monthly rows */}
                   {MS.map((m,mi)=>{
-                    const v25=row.vals25[mi], v26=row.vals26[mi];
+                    const v25=disp25[mi], v26=disp26[mi];
                     const isFut=!v26;
                     const isOpen = mi >= compareMaxMi; // bieżący lub przyszły miesiąc 2026 = NIE porównywalny
                     // YoY tylko gdy miesiąc zamknięty w 2026 (apples-to-apples)
@@ -14973,7 +14995,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                             {pct!==null?<span style={{fontSize:10,fontWeight:700,color:isGoodChange(pct,met.lowerIsBetter)?"#15803d":"#dc2626"}}>{pct>=0?"▲":"▼"}{Math.abs(pct).toFixed(0)}%</span>:<span style={{color:"#d1d5db",fontSize:10}}>—</span>}
                           </div>
                         </div>
-                        {isQEnd&&(()=>{
+                        {!yoyCumul&&isQEnd&&(()=>{
                           const q=Math.floor(mi/3);
                           // Apples-to-apples: sum tylko zamkniętych miesięcy w Q (oba lata te same indices)
                           const q26 = sumClosed(row.vals26, q*3, q*3+3);
@@ -14998,7 +15020,8 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                     );
                   })}
 
-                  {/* Half-year cards — apples-to-apples (tylko zamknięte miesiące) */}
+                  {/* Half-year cards — apples-to-apples (tylko zamknięte miesiące); ukryte w trybie narastająco */}
+                  {!yoyCumul && (
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:10}}>
                     {[0,1].map(h=>{
                       const h25 = sumClosed(row.vals25, h*6, h*6+6);
@@ -15021,6 +15044,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                       );
                     })}
                   </div>
+                  )}
 
                   {/* Year total — apples-to-apples: sum closed months in both years (ytd26 vs ytd25) */}
                   <div style={{marginTop:8,background:"#f8fafc",borderRadius:10,padding:"10px 14px",border:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
