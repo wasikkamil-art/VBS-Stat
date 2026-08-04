@@ -3005,3 +3005,7 @@ Długa sesja operacyjna (zamknięcie miesiąca). Nowa trwała zdolność: **Shee
 
 ### ✅ FEATURE: tryb „Narastająco" w Trendach Rentowności (LIVE, commit `74705bf`)
 - Przełącznik „Σ Narastająco" w YoY Scorecard → wiersze miesięczne = suma narastająca od stycznia (2026 do zamkniętego mc vs 2025 w tym zakresie), YoY% na narastająco. Kwartały/półrocza ukryte w tym trybie. Stawki (spalanie/€km) = średnia narastająca. Logika przetestowana w izolacji, build+lint zielone, bundle `index-DemgpyfO.js` live na prod. **NIE klikane w UI za loginem.**
+
+### ✅ FIX: tryb „Porównaj metryki" w Trendach agreguje flotę (LIVE, commit `f28da92`, bundle `index-C_gVllup.js`)
+- User: v1 sty-mar 2025 pokazuje kreski w Koszty/Zysk mimo zaznaczonych wszystkich aut. Diagnoza: tryb metryki brał TYLKO `tVehicles[0]` (=v1), a v1 nie jeździł sty-mar 2025 → kreski. Fix: **agregacja po wszystkich zaznaczonych pojazdach** (suma; średnia dla stawkowych), label „(flota)".
+- **Przy okazji rozstrzygnięte (v1 2025 sty-mar):** danych realnie NIE MA nigdzie (Total25 blok=0, zakładka „V Iwanski 25"=„-", dynData=0). Ivan zaczął jeździć w KWIETNIU 2025 (potwierdzone przez usera). Skorumpowane rekordy v1 „2025-01" (Maju/LUK-TRANS/JIT) = frachty ze STYCZNIA 2026 z błędnym rokiem w dacie + korekta −7100 (poprawna, zeruje). **NIE zmyślać danych — chart „—" dla v1 sty-mar 2025 był poprawny.** ⚠️ Otwarte do sprawdzenia: czy te styczniowe-2026 ładunki nie brakują w styczniu 2026 (v1 może zaniżony).
