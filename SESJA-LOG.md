@@ -2982,3 +2982,26 @@ User: „tak chcę to widzieć" → zbudowany parser wnętrza VU od zera (reades
 
 ### Stan zakresu DDD/VU (kompletny)
 ✅ delete-guard · ✅ panel terminów 28/90 (podzakładka GPS/Monitoring) · ✅ backup archiwum · ✅ VU Faza 1 (metadane+archiwum+terminy) · ✅ **VU Faza 2 (parser Gen2 V2 + raport pojazdu)**. Kolejne pliki VU obsłuży CF automatycznie.
+
+## 2026-08-03/04 — Miesięczne zamknięcie lipca: dashboardy, paliwo→FS, koszty→FS, rentowność, integracja Google Sheets
+
+Długa sesja operacyjna (zamknięcie miesiąca). Nowa trwała zdolność: **Sheets API** (uzupełnianie arkusza Google wprost).
+
+### Dashboardy dyspozytorów lipiec
+- `Dashboard_dyspozytorzy_LIPIEC_2026.pdf` (skrypt `make_dashboard_lipiec.js`, liczy na żywo z `fleetv2_frachty`). ARO zdominowało lipiec (62,7% obrotu vs czerwiec 34,6%), flota +64% (27 311→44 870 €). Poprawka kubełkowania: czerwcowy „Aga-Arek" → ARO-AGA.
+
+### Integracja Google Sheets — Total_26 uzupełniany przez API (patrz [[feedback_google_sheet_total26_fill]])
+- SA `firebase-adminsdk-fbsvc@vbs-stats` udostępniony arkuszowi „Auta VBS 2025", Sheets API on. Wpisuję miesięcznie paliwo/adblue/nego/e-toll/km/spalanie + ilość frachtów per auto (bloki pionowe, mc=kolumna, lipiec=I).
+- Lipiec + czerwiec domknięte. AdBlue ZAWSZE osobno (wiersz „inne" + notatka). KM z **raportu dystansu ww** (Atlas kontem vbs/vbs nie daje km — /history=4 pkt). Ilość frachtów = FS (nadpisuje ręczne zakładki kierowców).
+- **Naprawiony BUG rollupu floty** (99 formuł, cały rok): wiersze 226-236 miały `=-(A-B-C-D-E)` (odejmowały auta 2-5) → koszty zaniżane, zysk zawyżany KAŻDY mc. Naprawione na `=A+B+C+D+E`. + poprawka znaku v1 inne (+104,52→−104,52).
+
+### Import paliwa lipiec → moduł Paliwo FS (patrz [[project_monitoring_paliwa]])
+- `paliwo_import_fs.mjs` (odtwarza flow PaliwoTab 1:1): **117 tankowań** (99 diesel+18 AdBlue) do `fuelTransactions/2026-07`, geokod Nominatim, 117/117 z coords (7 stacji dogeokodowane ręcznymi podpowiedziami). Ponowny upload w UI = 0 dup.
+
+### Import kosztów lipca → `fleetv2_costs` + rentowność
+- Top-up 38 pozycji (paliwo/leasing/wypłata/nego/etoll/inne/serwis/imi/ocpd) bezpiecznym **arrayUnion** (nie może skrócić tablicy). v3 paliwo poprawione (literówka 2262→2662), v4 bez leasingu (spłacony).
+- **Serwis = standard 150/mc** dla v1/v3/v4/v5 — backfill sty-lip (25 wpisów; realne niestandardowe serwisy zachowane, 150 na wierzch). `fleetv2_costs` 1079→1142.
+- Rentowność lipca: flota +16 764 € (marża 37%). Rozjazd arkusz(17 153)-vs-FS = 209 (błąd znaku v1 inne, naprawiony) + 180 (przychód v3: zakładka kierowcy vs rekordy FS — znany, user zna różnicę).
+
+### ✅ FEATURE: tryb „Narastająco" w Trendach Rentowności (LIVE, commit `74705bf`)
+- Przełącznik „Σ Narastająco" w YoY Scorecard → wiersze miesięczne = suma narastająca od stycznia (2026 do zamkniętego mc vs 2025 w tym zakresie), YoY% na narastająco. Kwartały/półrocza ukryte w tym trybie. Stawki (spalanie/€km) = średnia narastająca. Logika przetestowana w izolacji, build+lint zielone, bundle `index-DemgpyfO.js` live na prod. **NIE klikane w UI za loginem.**
