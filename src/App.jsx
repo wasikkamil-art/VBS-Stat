@@ -14627,12 +14627,23 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
       });
     });
   } else {
-    const vid = tVehicles[0] || vehicles[0]?.id;
+    // Agreguj po WSZYSTKICH zaznaczonych pojazdach (flota): suma, a dla metryk stawkowych średnia.
+    // Wcześniej brało tylko tVehicles[0] → gdy pierwsze auto nie miało danych w miesiącu (np. v1 sty-mar 2025),
+    // wychodziły kreski mimo że reszta floty miała dane.
+    const vids = (tVehicles.length ? tVehicles : [vehicles[0]?.id]).filter(Boolean);
+    const RATE = ["spalanie","eurKm"];
+    const isFleet = vids.length > 1;
     tYears.forEach((year, j) => {
       tMetryki.forEach((met, i) => {
         const metDef = METRYKI.find(m=>m.id===met);
-        const pts = Array.from({length:12}, (_,mi) => getVal(vid, year, mi, met));
-        series.push({ label: `${metDef?.label} ${year}`, color: COLORS[(i*tYears.length+j)%COLORS.length], pts });
+        const isRate = RATE.includes(met);
+        const pts = Array.from({length:12}, (_,mi) => {
+          const vals = vids.map(vid => getVal(vid, year, mi, met)).filter(v => v !== null);
+          if (!vals.length) return null;
+          const sum = vals.reduce((s,v)=>s+v,0);
+          return isRate ? parseFloat((sum/vals.length).toFixed(2)) : sum;
+        });
+        series.push({ label: `${metDef?.label} ${year}${isFleet?" (flota)":""}`, color: COLORS[(i*tYears.length+j)%COLORS.length], pts });
       });
     });
   }
