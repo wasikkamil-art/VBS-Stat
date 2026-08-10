@@ -1112,6 +1112,22 @@ async function uploadPaymentFile(file) {
   };
 }
 
+// Rachunek kosztu (np. hotelowy) do Storage — AI czyta z URL-a (nie base64, limit 413),
+// a sam plik zostaje podpięty do pozycji kosztu do wglądu. Kalka uploadPaymentFile.
+async function uploadCostFile(file) {
+  const safeName = file.name.replace(/[^\w.-]/g, "_");
+  const name = `costs/${Date.now()}_${Math.random().toString(36).slice(2,8)}_${safeName}`;
+  const ref = storageRef(storage, name);
+  await uploadBytes(ref, file);
+  return {
+    fileUrl:  await getDownloadURL(ref),
+    filePath: name,
+    fileName: file.name,
+    fileType: file.type,
+    fileSize: file.size,
+  };
+}
+
 // Oryginał zaświadczenia IMI (delegowanie kierowcy) do Storage.
 // Dwa powody: AI czyta plik z URL-a zamiast base64 (limit 413 na /api/claude),
 // a sam dokument zostaje dostępny do wglądu — wcześniej po parsowaniu przepadał.
@@ -3791,7 +3807,10 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                           {catLabel(c.category)}
                         </span>
                       </div>
-                      <span className="col-span-3 text-gray-400 text-xs truncate">{c.note || "—"}{c.liters ? ` · ${c.liters} L` : ""}</span>
+                      <div className="col-span-3 text-gray-400 text-xs flex items-center gap-1 min-w-0">
+                        <span className="truncate">{c.note || "—"}{c.liters ? ` · ${c.liters} L` : ""}</span>
+                        {c.fileUrl && <a href={safeHref(c.fileUrl)} target="_blank" rel="noopener noreferrer" title="Podgląd rachunku" className="shrink-0 hover:text-blue-500">📎</a>}
+                      </div>
                       <div className="col-span-2 text-right">
                         <div className="font-semibold text-gray-900 text-sm">{fmtEUR(getEUR(c))}</div>
                         {amtEUR != null && <div className="text-xs text-gray-400">{fmtPLN(amtPLN)}</div>}
@@ -11539,6 +11558,92 @@ async function parseOneInvoice(file, fileUrl = null) {
   catch(e) { throw new Error(`${file.name}: niepoprawny JSON z AI`); }
 }
 
+// ── AI: rachunek hotelowy (Booking / hotel PDF / zdjęcie) → JSON ──
+const HOTEL_AI_PROMPT = `Jesteś asystentem księgowym floty transportowej. Przeczytaj załączony rachunek/potwierdzenie hotelowe (np. z Booking.com) i zwróć WYŁĄCZNIE obiekt JSON (bez komentarza, bez markdown):
+
+{
+  "hotelName": "nazwa obiektu (string)",
+  "city": "miasto obiektu (string)",
+  "country": "kraj obiektu jako kod ISO2 wielkimi literami, np. FR, DE, PL, ES (string)",
+  "checkIn": "data zameldowania YYYY-MM-DD",
+  "checkOut": "data wymeldowania YYYY-MM-DD",
+  "nights": liczba nocy (liczba całkowita),
+  "paymentDate": "data zapłaty YYYY-MM-DD (jeśli jest)",
+  "amount": liczba (kwota zapłacona, BRUTTO jak na rachunku; kropka jako separator dziesiętny, bez waluty i separatorów tysięcy),
+  "currency": "kod waluty: EUR | PLN | inny ISO",
+  "guestName": "imię i nazwisko gościa (kierowcy) — string",
+  "bookingRef": "numer rezerwacji (string)",
+  "note": "opcjonalna uwaga lub pusty string"
+}
+
+Reguły:
+- Kwota = to co realnie zapłacono (brutto). NIE licz VAT, NIE zmieniaj kwoty.
+- Kraj podaj jako ISO2 na podstawie adresu obiektu (Francja=FR, Niemcy=DE, Polska=PL, Hiszpania=ES, Włochy=IT, Belgia=BE, Czechy=CZ, Austria=AT, Luksemburg=LU).
+- Jeśli liczba nocy nie jest podana, policz z dat (wymeldowanie − zameldowanie).
+- Jeśli pole nieobecne: pusty string "" lub 0 dla liczb.
+- Zwróć POPRAWNY JSON bez dodatkowego tekstu.`;
+
+// Parsuj rachunek hotelowy przez AI (URL-first ze Storage + fallback base64, jak parseOneInvoice).
+async function parseHotelReceipt(file, fileUrl = null) {
+  if (file.size > 10 * 1024 * 1024) throw new Error(`${file.name}: plik za duży (max 10 MB)`);
+  const isPdf = file.type === "application/pdf";
+  const isImg = /^image\/(png|jpe?g|webp)$/.test(file.type);
+  if (!isPdf && !isImg) throw new Error(`${file.name}: nieobsługiwany format (PDF/JPG/PNG)`);
+  if (!fileUrl && file.size > 3 * 1024 * 1024)
+    throw new Error(`${file.name}: nie udało się wysłać pliku do magazynu, a jest za duży na odczyt bezpośredni. Spróbuj ponownie.`);
+  const source = fileUrl
+    ? { type: "url", url: fileUrl }
+    : { type: "base64", media_type: isPdf ? "application/pdf" : file.type,
+        data: await new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(String(r.result).split(",")[1]);
+          r.onerror = reject; r.readAsDataURL(file);
+        }) };
+  const res = await callClaude({
+    model: "claude-haiku-4-5-20251001", max_tokens: 1200,
+    messages: [{ role: "user", content: [
+      { type: isPdf ? "document" : "image", source },
+      { type: "text", text: HOTEL_AI_PROMPT },
+    ] }],
+  });
+  if (!res.ok) throw new Error(`API ${res.status}: ${(await res.text()).slice(0,150)}`);
+  const resp = await res.json();
+  if (resp.error) throw new Error(resp.error.message || "Błąd API");
+  const txt = resp.content?.map(c => c.text || "").join("").trim().replace(/```json|```/g, "").trim();
+  if (!txt) throw new Error("Pusta odpowiedź AI");
+  try { return JSON.parse(txt); }
+  catch { throw new Error(`${file.name}: niepoprawny JSON z AI`); }
+}
+
+// Odległość Levenshtein (mała, do fuzzy-matchu nazwisk kierowców z transliteracji).
+function levDist(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n; if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, i) => i);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++)
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[n];
+}
+const normName = s => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z\s]/g, " ").trim();
+// Sugeruj pojazd po nazwisku gościa (kierowcy) z driverHistory. Tolerancyjny na transliterację
+// (Kolabu/Kolabau). Zwraca { vehicleId, driverName } albo null — NIGDY nie zgaduje na siłę.
+function guessVehicleByGuest(guestName, vehicles) {
+  const gTokens = normName(guestName).split(/\s+/).filter(t => t.length >= 4);
+  if (!gTokens.length) return null;
+  for (const v of vehicles || []) {
+    for (const d of v.driverHistory || []) {
+      const dTokens = normName(d.name).split(/\s+/).filter(t => t.length >= 4);
+      for (const gt of gTokens) for (const dt of dTokens)
+        if (gt === dt || levDist(gt, dt) <= 2) return { vehicleId: v.id, driverName: d.name };
+    }
+  }
+  return null;
+}
+
 function PaymentForm({ initial, isEdit, onSave, onClose, onSkipNext, onQueueAppend, queueInfo }) {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
@@ -13690,6 +13795,13 @@ function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, 
   });
   const [showNewCat, setShowNewCat] = useState(false);
   const [newCat, setNewCat]         = useState({ label: "", icon: "📋", color: PALETTE[0] });
+  // Rachunek (np. hotelowy) + zaczytywanie AI
+  const [file, setFile] = useState(editRecord?.fileUrl
+    ? { fileUrl: editRecord.fileUrl, filePath: editRecord.filePath, fileName: editRecord.fileName, fileType: editRecord.fileType, fileSize: editRecord.fileSize }
+    : null);
+  const [hotel, setHotel]   = useState(editRecord?.hotel || null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState("");
 
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -13703,6 +13815,38 @@ function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, 
       if (eurRate && val !== "") set("amountPLN", (parseFloat(val || 0) * eurRate).toFixed(2));
       else set("amountPLN", "");
     }
+  };
+
+  // Wgraj rachunek → upload do Storage → AI zaczytuje → autofill formularza (BRUTTO, data płatności).
+  const handleReceipt = async (e) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    setAiBusy(true); setAiError("");
+    try {
+      const meta = await uploadCostFile(f);
+      setFile(meta);
+      const h = await parseHotelReceipt(f, meta.fileUrl);
+      set("category", "hotele");
+      const isPLN = h.currency === "PLN", isEUR = h.currency === "EUR" || !h.currency;
+      const cur = isPLN ? "PLN" : "EUR";
+      set("currency", cur);
+      const amt = Number(h.amount) || 0;
+      if (amt) handleAmountChange(cur === "PLN" ? "amountPLN" : "amountEUR", String(amt));
+      const d = h.paymentDate || h.checkIn || form.date;
+      if (d) set("date", d);
+      const stay = (h.checkIn && h.checkOut) ? `${h.checkIn}→${h.checkOut}${h.nights ? ` (${h.nights} nocy)` : ""}` : "";
+      const foreignCur = (!isPLN && !isEUR) ? `${h.currency} ${amt}` : "";
+      set("note", [
+        [h.hotelName, [h.city, h.country].filter(Boolean).join(", ")].filter(Boolean).join(" · "),
+        stay, h.guestName, h.bookingRef ? `rez. ${h.bookingRef}` : "", foreignCur ? `⚠️ oryg. ${foreignCur}` : "",
+      ].filter(Boolean).join(" · "));
+      const g = guessVehicleByGuest(h.guestName, vehicles);
+      if (g) set("vehicleId", g.vehicleId);
+      setHotel({ name: h.hotelName || "", city: h.city || "", country: (h.country || "").toUpperCase(),
+        checkIn: h.checkIn || "", checkOut: h.checkOut || "", nights: Number(h.nights) || null,
+        bookingRef: h.bookingRef || "", guest: h.guestName || "", _match: g });
+    } catch (err) {
+      setAiError(err?.message || "Nie udało się odczytać rachunku");
+    } finally { setAiBusy(false); e.target.value = ""; }
   };
 
   const handleSaveNewCat = () => {
@@ -13732,6 +13876,8 @@ function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, 
       liters:    form.liters ? parseFloat(form.liters) : undefined,
     };
     if (isSerwis && !hasAmount) entry.pendingSerwis = true;
+    if (file) Object.assign(entry, { fileUrl: file.fileUrl, filePath: file.filePath, fileName: file.fileName, fileType: file.fileType, fileSize: file.fileSize });
+    if (hotel) { const { _match, ...h } = hotel; entry.hotel = h; }
     onSave(entry);
   };
 
@@ -13747,6 +13893,28 @@ function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, 
         </div>
 
         <div className="px-6 py-5 space-y-4">
+
+          {/* WGRAJ RACHUNEK — AI autofill (hotele) */}
+          <div className="rounded-xl p-3" style={{ background: "#f0f9ff", border: "1px solid #bae6fd" }}>
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs font-semibold" style={{ color: "#0369a1" }}>📎 Wgraj rachunek hotelowy — AI wypełni koszt</div>
+              <label className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white cursor-pointer whitespace-nowrap transition-all"
+                style={{ background: aiBusy ? "#93c5fd" : "#0284c7" }}>
+                {aiBusy ? "⏳ Czytam…" : (file ? "Zmień plik" : "Wybierz plik")}
+                <input type="file" accept="application/pdf,image/png,image/jpeg,image/webp" className="hidden" disabled={aiBusy} onChange={handleReceipt} />
+              </label>
+            </div>
+            {aiError && <div className="text-xs mt-2" style={{ color: "#b91c1c" }}>⚠️ {aiError}</div>}
+            {file && !aiBusy && (
+              <div className="text-xs mt-2 text-gray-600 break-words">
+                ✓ {file.fileName}{hotel?.name ? ` — ${hotel.name}` : ""}
+                {hotel?._match
+                  ? <span style={{ color: "#059669" }}> · pojazd z gościa: {vehicles.find(v => v.id === hotel._match.vehicleId)?.plate} ({hotel._match.driverName})</span>
+                  : hotel?.guest ? <span style={{ color: "#b45309" }}> · gość „{hotel.guest}" — wybierz pojazd ręcznie</span> : null}
+                {file.fileUrl && <> · <a href={safeHref(file.fileUrl)} target="_blank" rel="noreferrer" style={{ color: "#0284c7" }}>podgląd</a></>}
+              </div>
+            )}
+          </div>
 
           {/* POJAZD */}
           <MF label="Pojazd">

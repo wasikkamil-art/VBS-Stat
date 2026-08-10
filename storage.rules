@@ -45,6 +45,11 @@ service firebase.storage {
       allow read:  if canEdit();
       allow write: if canEdit() && maxMB(25);
     }
+    // Rachunki kosztów (np. hotelowe) — dane firmowe, tylko admin/dyspozytor.
+    match /costs/{allPaths=**} {
+      allow read:  if canEdit();
+      allow write: if canEdit() && maxMB(25);
+    }
     match /documents/{allPaths=**} {
       allow read:  if canEdit();
       allow write: if canEdit() && maxMB(25);

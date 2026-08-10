@@ -3058,3 +3058,26 @@ Realia danych: FR/DE faktury = tylko **sumy krajowe** (DC/PDF, bez itemizacji) �
 - Fix kodu Bug A: **tylko lint+build**, brak in-browser E2E. Do smoke-testu przy najbliższym imporcie.
 - **Zestawienie dostawców Eurowag/E100** (weryfikacja rabatów analogicznie) — user NIE dosłał w tej sesji, do zrobienia.
 - Deploy src (PaliwoTab/fuelParsers) — do decyzji usera (branch backup vs push main), bo to ścieżka importu (2 realne bugi tej ery stąd).
+
+## 2026-08-10 (cd.2) — Rachunki hotelowe z AI-autofill w module Kosztów (v1)
+
+Nowy temat: user chce wgrywać rachunki hotelowe (Booking) i zaczytywać dane AI do kosztów.
+
+### Decyzje usera (AskUserQuestion)
+- **Brutto** (kwota jak zapłacona; Booking = potwierdzenie płatności, nie faktura VAT, VAT hotelowy zagr. bezzwrotny).
+- **Data płatności** = miesiąc kosztu (metadata: check-in/out/noce zapisane osobno).
+- **Zakres v1 = pojedynczy rachunek + autofill w `AddCostModal`** (batch do iteracji 2).
+
+### Zbudowane (App.jsx, na bazie istniejących wzorców)
+- **`uploadCostFile`** (kalka `uploadPaymentFile`, Storage `costs/...`) + **reguła Storage `/costs/` admin+dyspozytor ≤25 MB, DEPLOYED** (`firebase deploy --only storage`, domyślka była `if false` → bez tego upload padał).
+- **`HOTEL_AI_PROMPT` + `parseHotelReceipt`** (URL-first ze Storage + fallback base64, model Haiku, `/api/claude`): zwraca hotelName/city/country(ISO2)/checkIn/checkOut/nights/paymentDate/amount(brutto)/currency/guestName/bookingRef.
+- **`guessVehicleByGuest`** — sugestia pojazdu po nazwisku gościa z `driverHistory`, tolerancyjna na transliterację (Levenshtein ≤2: Kolabu/Kolabau). **Nie zgaduje na siłę** — brak matchu → user wybiera ręcznie.
+- **`AddCostModal` rozszerzony**: sekcja „📎 Wgraj rachunek hotelowy — AI wypełni koszt" → upload + autofill (kategoria=hotele, kwota brutto, data płatności, notatka z detalami, sugerowany pojazd). Metadata `hotel:{name,city,country,checkIn,checkOut,nights,bookingRef,guest}` + pola pliku `{fileUrl,filePath,...}` na obiekcie kosztu (schemat luźny, `safeDbSet` zniesie bez migracji). Podgląd rachunku klikalny w liście kosztów (📎) i w edycji.
+
+### Zweryfikowane vs NIE
+- ✅ lint 0 błędów / build zielony / reguły Storage compiled+released (REST-owalne).
+- ⚠️ **NIE zweryfikowane E2E**: ścieżka AI wymaga `/api/claude` (serverless Vercel, brak w Vite dev) + login + Storage → testowalne **tylko na prodzie**. Do smoke-testu usera: wgrać `Booking.com_ Potwierdzenie123.pdf` (HôtelF1 Angoulême, Kolabu→v3, 77,70 €, 18–20.07) → sprawdzić autofill + match pojazdu.
+- Model danych hoteli: brutto EUR/PLN wprost; waluta inna niż PLN/EUR → kwota w EUR + oryginał w notatce (rzadkie, do iteracji).
+
+### TODO iteracja 2 (opcje)
+- Batch (wiele rachunków naraz, jak BulkUploadModal). Kolumna/filtr „hotele" z detalami noclegu w widoku. Ewentualnie netto per kraj gdyby user zmienił zdanie o VAT.
