@@ -71,3 +71,11 @@ test-results/
 playwright-report/
 playwright/.cache/
 mockup_*.html
+
+# Andamur reconcile — narzędzia i backupy jednorazowe (2026-08-10)
+correction_apply.js
+sheet_correction.py
+reconcile_andamur.mjs
+andamur_faktury/
+backup_andamur_*.json
+backup_sheet_andamur_*.json

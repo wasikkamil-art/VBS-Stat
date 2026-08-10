@@ -20,7 +20,7 @@ import { db } from "../firebase";
 import { collection, doc, getDoc, getDocs, setDoc, writeBatch } from "firebase/firestore";
 import { logAction } from "../utils/logAction";
 import {
-  CARDS, FLAG, SKIP_PLATE, norm, detectAndParse, txId, stationQueries, stationKey,
+  CARDS, FLAG, SKIP_PLATE, VAT, norm, detectAndParse, txId, stationQueries, stationKey,
 } from "../utils/fuelParsers";
 
 const eur = n => (Number(n) || 0).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
@@ -75,18 +75,22 @@ async function geocodeStations(txs, onProgress) {
       let found = null;
       for (const q of stationQueries(t)) {
         try {
+          // Hint krajem tylko gdy pochodzi z raportu (E100/Eurowag). Andamur ma country=null →
+          // szukamy globalnie i kraj bierzemy z wyniku (addressdetails), zamiast zgadywać "ES".
           const cc = t.country ? `&countrycodes=${t.country.toLowerCase()}` : "";
-          const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}${cc}`);
+          const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=1&q=${encodeURIComponent(q)}${cc}`);
           const j = await r.json();
           if (j?.[0]) {
-            found = { lat: +j[0].lat, lng: +j[0].lon, query: q, match: String(j[0].display_name || "").slice(0, 120) };
+            const geoCC = String(j[0].address?.country_code || "").toUpperCase() || null;
+            found = { lat: +j[0].lat, lng: +j[0].lon, country: geoCC, query: q, match: String(j[0].display_name || "").slice(0, 120) };
             break;
           }
         } catch { /* następny kandydat */ }
         await new Promise(res => setTimeout(res, 1100));               // limit Nominatim: 1 req/s
       }
       const payload = found || { lat: null, lng: null, failed: true, station: t.station || t.address || "" };
-      await setDoc(ref, { ...payload, country: t.country || null, updatedAt: new Date().toISOString() }, { merge: true });
+      // country = z geokodu (autorytatywny), fallback do kraju z raportu, na końcu null.
+      await setDoc(ref, { ...payload, country: found?.country || t.country || null, updatedAt: new Date().toISOString() }, { merge: true });
       result.set(key, payload);
       if (found) await new Promise(res => setTimeout(res, 1100));
     }
@@ -535,12 +539,21 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
         for (const t of st.fresh.slice(i, i + 400)) {
           const g = geo.get(stationKey(t)) || {};
           monthsTouched.add(t.month);
+          // Andamur nie ma kraju w raporcie → bierzemy kraj z geokodu (autorytatywny) i przeliczamy
+          // netto właściwym VAT. Waluta Andamura = EUR, więc netEUR = netLocal.
+          let country = t.country, netLocal = t.netLocal, netEUR = t.netEUR, pricePerLNet = t.pricePerLNet;
+          if (t.card === "andamur" && g.country) {
+            country = g.country;
+            netLocal = t.grossLocal / (1 + (VAT[country] ?? 0.21));
+            netEUR = netLocal;
+            pricePerLNet = t.liters ? netLocal / t.liters : t.pricePerLNet;
+          }
           batch.set(doc(db, "fuelTransactions", t.month, "tx", t.id), {
             card: t.card, vehicleId: t.vehicleId, plate: t.plate, ts: t.ts, month: t.month,
-            country: t.country || null, station: t.station || "", address: t.address || "",
+            country: country || null, station: t.station || "", address: t.address || "",
             product: t.product, liters: t.liters, currency: t.currency,
-            netLocal: t.netLocal, grossLocal: t.grossLocal, netEUR: t.netEUR,
-            pricePerLNet: t.pricePerLNet, lat: g.lat ?? null, lng: g.lng ?? null,
+            netLocal, grossLocal: t.grossLocal, netEUR,
+            pricePerLNet, lat: g.lat ?? null, lng: g.lng ?? null,
             importedAt: new Date().toISOString(), importedBy: currentUser?.email || null,
           });
         }

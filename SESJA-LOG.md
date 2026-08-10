@@ -3009,3 +3009,52 @@ Długa sesja operacyjna (zamknięcie miesiąca). Nowa trwała zdolność: **Shee
 ### ✅ FIX: tryb „Porównaj metryki" w Trendach agreguje flotę (LIVE, commit `f28da92`, bundle `index-C_gVllup.js`)
 - User: v1 sty-mar 2025 pokazuje kreski w Koszty/Zysk mimo zaznaczonych wszystkich aut. Diagnoza: tryb metryki brał TYLKO `tVehicles[0]` (=v1), a v1 nie jeździł sty-mar 2025 → kreski. Fix: **agregacja po wszystkich zaznaczonych pojazdach** (suma; średnia dla stawkowych), label „(flota)".
 - **Przy okazji rozstrzygnięte (v1 2025 sty-mar):** danych realnie NIE MA nigdzie (Total25 blok=0, zakładka „V Iwanski 25"=„-", dynData=0). Ivan zaczął jeździć w KWIETNIU 2025 (potwierdzone przez usera). Skorumpowane rekordy v1 „2025-01" (Maju/LUK-TRANS/JIT) = frachty ze STYCZNIA 2026 z błędnym rokiem w dacie + korekta −7100 (poprawna, zeruje). **NIE zmyślać danych — chart „—" dla v1 sty-mar 2025 był poprawny.** ⚠️ Otwarte do sprawdzenia: czy te styczniowe-2026 ładunki nie brakują w styczniu 2026 (v1 może zaniżony).
+
+## 2026-08-10 — Dashboard porównawczy miesięcy (cze→lip) + WYKRYCIE bug importu Andamur (rabat ~23% + kraj)
+
+### Dashboard porównawczy miesięcy — nowy typ (PDF, poza produkcją)
+- Nowy skrypt **`make_dashboard_porownanie_v2.js`** (gitignored, jak inne `make_dashboard*`): flota zbiorczo, headline **czerwiec→lipiec** + tło całego 2026. Playwright→PDF A4 landscape, styl spójny z dashboardami dyspozytorów.
+- Iteracje wg feedbacku usera: v1 (combo bars+waterfall) → v2 (bullet-bary + „Wyniki miesięczne" heatmapa liczb + słupki parami cze/lip) → trend **€/km** cały rok osobnym wykresem → **YoY narastająco** (zysk+frachty 2026 vs 2025) → **logo FleetStat** (`public/app-fleetstat.png` base64). Finalny: **`Dashboard_porownanie_cze_lip_2026_v2.pdf`** (w repo root + `~/Downloads`).
+- Metoda weryfikacji 1 strony: render HTML w Browser pane + `document.body.scrollHeight` vs 741px (A4 landscape @6mm margin) ORAZ liczba stron z bajtów PDF (`/Type /Page`). pdftoppm niedostępny w CLI — PDF oglądany przez identyczny render HTML.
+- Kluczowy wniosek biznesowy w dashboardzie: **zysk narastająco 2026 (52 605 €) > 2025 (48 343 €) mimo −36% frachtów** (200 vs 311) → zysk/fracht 155 €→263 €. Lipiec = rekord roku (zysk 16 764 €, marża 37,4%), czerwiec = dołek 5/7.
+
+### 🚨 BUG IMPORTU ANDAMUR — koszt paliwa zawyżony ~23% (patrz [[project_monitoring_paliwa]])
+User zauważył rozjazd kwot w popupie modułu Paliwo (Saint Rambert). Diagnoza (twardy dowód = faktury):
+- **Błąd 1 — zły plik źródłowy:** importujemy raport **„MOJE ZUŻYCIE"** (ceny z PYLONU **przed rabatem** flotowym Andamur). Faktury (`C26xxxxxx.zip`→XLSX, kolumna **Importe** po rabacie) pokazują rabat **~22–28% na dieslu ES**, ~17% AdBlue. Na FR stacjach rabat mały (~2%, Saint Rambert). Raport = orientacyjny, gwiazdki `(**)`.
+- **Błąd 2 — kraj sztywny ES:** `fuelParsers.js:159` `country = stationCountry[station] || "ES"` — geokod zapisuje tylko coords, nie kraj → **wszystkie Andamur = ES/VAT 21%**, także FR (Gexa/Avermes/Saint Rambert/Onet) i **DE (Neuss)**. Powinno FR 20% / DE 19%.
+- **Skala (dry-run z faktur):** Andamur netto maj–lip **2 731,50 € → 2 274,54 € = −456,96 €** (maj −79, cze −84, lip −295). Koryguje v1/v3/v5. **Zysk w dashboardach był zaniżony o tę kwotę** (koszt zawyżony).
+- **Wpływ:** `fuelTransactions` (kwoty/kraj/€l), `fleetv2_costs` (paliwo), arkusz **Total_26** — wszystkie zawyżone maj–lip. Bug w KODZIE PRODUKCYJNYM `src/utils/fuelParsers.js` → dotyczy każdego importu Andamur i sprzedaży FleetStat.
+- **Pokrycie fakturami: 38/43 tx.** Brak 5 (osobne serie FR/DE): **Neuss DE 25.05 ×2**, **Onet Le Château FR 30.06 ×2**, **Avermes I FR 01.07 ×1**.
+- **Stan: NIC nie zapisane** (decyzja usera „najpierw diagnoza"). Dry-run gotowy (`diagnose_correction_dryrun.js`), zakłada Importe=brutto (potwierdzone EFR PDF Saint Rambert: Importe=Total z IVA). Faktury w scratchpadzie sesji: `andamur_fv/unz/C2600{20329,23658,25336,30284,33584}.xlsx`.
+- **TODO następny chat:** (1) wgrać 5 brakujących faktur FR/DE, (2) zapisać korektę: baza+`fleetv2_costs`+Total_26 (backup starych wartości = audyt, odwracalne), (3) naprawić `fuelParsers.js` (import z faktur nie z raportu + kraj z geokodu), (4) przegenerować dashboardy (zysk +457 €). User dosyła też „zestawienie faktur+rozliczeń ze wszystkich dostawców" — Eurowag/E100 mają netto z raportu (OK), ale zweryfikować rabaty analogicznie.
+
+## 2026-08-10 (cd.) — Korekta Andamur WYKONANA (baza+costs+arkusz) + fix kodu (kraj z geokodu) + skrypt reconcile
+
+Domknięcie buga z rana. User dosłał 4 faktury zbiorcze serii **DC** (PDF, sumy krajowe FR/DE) → komplet pokrycia.
+
+### Rozstrzygnięcia (twarde, na danych)
+- **Reguła kraju = SERIA FAKTURY**, nie regex po nazwie: C26(itemized)=ES/21%, EDE=DE/19%, EFR=FR/20%. 37 tx ES = 37 wpisów C26 (matching plate+litry **1:1, zero kolizji**). Niepokryte = dokładnie stacje FR/DE.
+- **Dry-run z rana (−456,96) BYŁ BŁĘDNY**: klasyfikował **Gexa jako FR** (regex) → zły VAT na 9 tx. Reverse-geokod: **Gexa=ES** (Irún), Avermes=FR, Saint Rambert=FR, Neuss=DE. Poprawna liczba: **−467,22 €**.
+- Faktury DC: DC016102(31.05)→EDE 146,02(Neuss) · DC019802(30.06)→EFR 122,66(Onet) · DC021490(15.07)→EFR 111,73(Avermes) · DC023445(31.07)→EFR 139,32(Saint Rambert). Każda DC = 1 faktura krajowa (1 stacja/cykl). Neuss+Onet 2-liniowe (ON+AdBlue) → apportion po brutto raportu.
+
+### ✅ ZAPISANE i ZWERYFIKOWANE na żywo (backup = odwracalne)
+1. **`fuelTransactions` maj–lip: 43 tx** — nowe grossLocal/netEUR/netLocal/pricePerLNet/country + `corrected="andamur-rabat-2026-08-10"`. Weryfikacja: Andamur netto **2731,50→2264,28 €**, kraje **ES37/DE2/FR4**. Doc-id niezmienione (dedup zachowany). Backup: `backup_andamur_correction_*.json`.
+2. **`fleetv2_costs`: 8 pozycji paliwo** (v1/v3/v5, v3-cze pominięty bo 0) — `amountEUR −= Σ-delta`, transakcja z **asercją długości 1142** (nie ruszam pre-existing driftu vs arkusz — decyzja C). Notka audytowa per wpis.
+3. **Arkusz Total_26** (Sheets API) — Paliwo r7/49/91 · „inne"(AdBlue) r16/58/100, kol G/H/I. **maj=Σ na paliwo** (tam AdBlue siedzi), **cze/lip=ON na paliwo + AdBlue-delta na „inne"** (osobno, wg zasady usera). 13 komórek + 13 notatek, backup `backup_sheet_andamur_correction.json`. Suma: paliwo 458,07 + inne 9,15 = **467,22 ✓**. Arkusz był wewn. niespójny (maj AdBlue w paliwie, miejscami podwójne liczenie) — **driftu nie ścigano**.
+4. **Dashboard cze→lip przegenerowany**: **lipiec zysk 16 764→17 062 € (marża 37,4→38,0%)**, czerwiec +86. `Dashboard_porownanie_cze_lip_2026_v2.pdf`.
+
+### ✅ FIX KODU PRODUKCYJNEGO (Bug A — kraj), lint 0 err / build green
+- `fuelParsers.js parseAndamur`: kraj = `stationCountry[...] || null` (**koniec sztywnego „ES"**).
+- `PaliwoTab.jsx geocodeStations`: `addressdetails=1` + kraj z `address.country_code` (autorytatywny), zapis do cache; hint krajem tylko gdy z raportu (E100/Eurowag), Andamur szuka globalnie.
+- `PaliwoTab.jsx confirmImport`: dla `card==="andamur"` nadpisuje kraj+net z geokodu przed zapisem (VAT właściwy per kraj).
+- Poprawiono 2 stare wpisy cache `fuelStations` (Avermes/Saint Rambert ES→FR).
+- ⚠️ **NIE zweryfikowane end-to-end** — ścieżka importu chodzi w przeglądarce (dispatcher + geokod CORS), nie z CLI. Wymaga smoke-testu usera (import miesiąca → sprawdzić kraje FR/DE). `stationKey` **zostawiony z krajem** (mniejszy blast radius: tylko nowe stacje Andamur przejdą raz „XX__", inne karty bez zmian).
+
+### ✅ Bug B (kwoty) — decyzja usera: reconciliation jako skrypt (nie przepisywanie parsera)
+Realia danych: FR/DE faktury = tylko **sumy krajowe** (DC/PDF, bez itemizacji) → czysty „import z faktur" zgubiłby tankowania FR/DE. Rabat ES ~20% (duży), FR/DE ~2–4% (mały).
+- **`reconcile_andamur.mjs`** (gitignored, ops-tool jak `paliwo_import_fs.mjs`): config MONTHS+INVOICE_DIR(C26 XLSX)+FRDE(sumy z DC PDF), dry-run/`--write`, backup, transakcja costs. **Idempotentny — ponowny run po korekcie = Δ 0,00 / 0 tx** (dowód kompletności). Miesięczny flow: wrzuć C26 XLSX + wpisz sumy DC → run.
+
+### Otwarte / niezweryfikowane (uczciwie)
+- Fix kodu Bug A: **tylko lint+build**, brak in-browser E2E. Do smoke-testu przy najbliższym imporcie.
+- **Zestawienie dostawców Eurowag/E100** (weryfikacja rabatów analogicznie) — user NIE dosłał w tej sesji, do zrobienia.
+- Deploy src (PaliwoTab/fuelParsers) — do decyzji usera (branch backup vs push main), bo to ścieżka importu (2 realne bugi tej ery stąd).

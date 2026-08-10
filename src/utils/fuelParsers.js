@@ -156,7 +156,9 @@ export function parseAndamur(aoa, stationCountry = {}) {
     const ts = tsOf(cell(r, I.date));
     if (!liters || gross == null || !ts) continue;
     const station = String(cell(r, I.station) || "").trim();
-    const country = stationCountry[station.toLowerCase()] || "ES";
+    // Kraj z cache stacji (zasilanego reverse-geokodem przy imporcie), bez sztywnego "ES".
+    // Gdy nieznany → null; właściwy kraj+VAT ustawia confirmImport po geokodzie (patrz PaliwoTab).
+    const country = stationCountry[station.toLowerCase()] || null;
     out.push({
       card: "andamur", plateRaw: cell(r, I.plate), ts, product, liters: Math.abs(liters),
       country, station, address: "", currency: "EUR",
