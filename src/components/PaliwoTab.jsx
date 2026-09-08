@@ -354,8 +354,8 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
     const L = window.L;
     if (!L || !mapRef.current || mapObj.current) return;
     const m = L.map(mapRef.current, { zoomControl: true }).setView([48.5, 8], 5);
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-      { attribution: "© OpenStreetMap · CARTO", maxZoom: 19 }).addTo(m);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      { attribution: "© OpenStreetMap", maxZoom: 19 }).addTo(m);
     layerRef.current = L.layerGroup().addTo(m);
     m.on("zoomend", () => {
       const el = mapRef.current;
