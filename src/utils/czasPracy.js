@@ -443,22 +443,20 @@ function _mondayOf(ms) {
 
 // Wyrównanie za skrócone tygodniowe odpoczynki (Pakiet Mobilności, art. 8 ust. 6).
 // Kierowca może skrócić tygodniowy odpoczynek do 24h (zamiast 45h regularnego).
-// Brakujące godziny (45h - actual) muszą być wyrównane w ciągu 3 kolejnych
-// tygodni — przez dłuższy odpoczynek tygodniowy (>45h) lub dzienny.
-// Algorytm FIFO: najstarsze skrócenie najpierw kompensowane przez nadmiar.
+// Brakujące godziny (45h - actual) muszą być wyrównane przed końcem trzeciego
+// tygodnia następującego po danym tygodniu (art. 8 ust. 6), a samo wyrównanie
+// wykorzystuje się JEDNORAZOWO (en bloc) dołączone do innego odpoczynku
+// trwającego co najmniej 9 godzin (art. 8 ust. 6b).
 export function weeklyRestCompensation(segments, nowMs) {
   // Pre-coalesce: scal rest fragmenty oddzielone "ciszą" CSV (silnik OFF) —
   // bez tego weekend kierowcy bywa rozbity na 2-3 sub-24h fragmenty i żaden
   // nie kwalifikuje się jako weekly rest. Patrz coalesceRestGaps.
   const coalesced = coalesceRestGaps(segments);
   const lookbackMs = nowMs - 4 * 7 * 24 * 3600000; // 4 tygodnie wstecz
+  const inWindow = s => s.endMs >= lookbackMs && s.endMs <= nowMs;
+
   // Rest segments ≥ 24h kwalifikują się jako tygodniowy (mniejsze = dzienne).
-  const restsBig = coalesced.filter(s =>
-    s.type === "rest" &&
-    s.endMs >= lookbackMs &&
-    s.endMs <= nowMs &&
-    s.durMin >= 24 * 60
-  );
+  const restsBig = coalesced.filter(s => s.type === "rest" && inWindow(s) && s.durMin >= 24 * 60);
   // FIX (bug zawyżania, 2026-06-12): JEDEN tygodniowy odpoczynek na tydzień
   // kalendarzowy (pn–nd). Wcześniej KAŻDY rest ≥24h liczył się jako osobny
   // tygodniowy → dwa długie odpoczynki w jednym tygodniu = podwójny dług
@@ -470,29 +468,63 @@ export function weeklyRestCompensation(segments, nowMs) {
     const cur = byWeek.get(wk);
     if (!cur || s.durMin > cur.durMin) byWeek.set(wk, s);
   }
-  const weeklyRests = [...byWeek.entries()].sort((a, b) => a[0] - b[0]).map(e => e[1]);
+  const weeklyStarts = new Set([...byWeek.values()].map(s => s.startMs));
 
   const targetMin = 45 * 60; // 2700 min = 45h regularny tygodniowy
-  let owedMin = 0;
-  let oldestShortenedEnd = null;
 
-  weeklyRests.forEach(s => {
+  // Długi trzymamy OSOBNO per skrócenie, nie jako jedną sumę — art. 8 ust. 6b
+  // wymaga odebrania wyrównania "jednorazowo" (en bloc), więc brakujące 3h25
+  // musi pokryć JEDEN odpoczynek z taką nadwyżką, a nie trzy po godzinie.
+  const debts = [];
+  for (const [wk, s] of [...byWeek.entries()].sort((a, b) => a[0] - b[0])) {
     if (s.durMin < targetMin) {
-      // Skrócony — dodaj do brakujących
-      owedMin += targetMin - s.durMin;
-      if (oldestShortenedEnd === null) oldestShortenedEnd = s.endMs;
-    } else if (s.durMin > targetMin) {
-      // Wydłużony powyżej 45h — kompensuje brakujące (FIFO)
-      const extraMin = s.durMin - targetMin;
-      const used = Math.min(extraMin, owedMin);
-      owedMin -= used;
-      if (owedMin === 0) oldestShortenedEnd = null;
+      debts.push({
+        owedMin: targetMin - s.durMin,
+        fromMs: s.endMs,                       // wyrównanie musi nastąpić PO skróceniu
+        // Termin: koniec trzeciego tygodnia NASTĘPUJĄCEGO po tygodniu skrócenia
+        // (art. 8 ust. 6) = poniedziałek 00:00 cztery tygodnie po tygodniu skrócenia.
+        deadlineMs: wk + 4 * 7 * 24 * 3600000,
+        paid: false,
+      });
     }
-  });
+  }
 
+  // FIX (2026-09-11, case WGM 0507M / Volodymyr): wyrównanie odbiera się przez
+  // KAŻDY odpoczynek ≥9h, nie tylko przez tygodniowy dłuższy niż 45h (art. 8 ust. 6b:
+  // "dołączone do innego okresu odpoczynku trwającego co najmniej dziewięć godzin").
+  // Wcześniej kod uznawał wyłącznie nadwyżkę ponad 45h w odpoczynku tygodniowym →
+  // kierowca, który oddał brakujące godziny przedłużonym odpoczynkiem dziennym,
+  // w nieskończoność widniał jako zadłużony.
+  // Zdolność wyrównawcza nośnika:
+  //   • odpoczynek tygodniowy (wybrany dla swojego tygodnia) → nadwyżka ponad 45h
+  //   • każdy inny odpoczynek ≥9h                            → nadwyżka ponad 11h
+  //     (11h = regularny dzienny; dopiero to, co ponad niego, jest "doczepione")
+  const carriers = coalesced
+    .filter(s => s.type === "rest" && inWindow(s) && s.durMin >= REGULATION.DAILY_REST_REDUCED)
+    .sort((a, b) => a.startMs - b.startMs);
+
+  for (const s of carriers) {
+    const isWeekly = weeklyStarts.has(s.startMs);
+    let capacity = isWeekly
+      ? s.durMin - targetMin
+      : s.durMin - REGULATION.DAILY_REST_REGULAR;
+    if (capacity <= 0) continue;
+    // FIFO: najstarszy niespłacony dług powstały PRZED tym odpoczynkiem.
+    // Każdy dług pokrywany w CAŁOŚCI albo wcale (en bloc).
+    for (const d of debts) {
+      if (d.paid || d.fromMs > s.startMs) continue;
+      if (capacity >= d.owedMin) {
+        capacity -= d.owedMin;
+        d.paid = true;
+      }
+    }
+  }
+
+  const unpaid = debts.filter(d => !d.paid);
+  const owedMin = unpaid.reduce((acc, d) => acc + d.owedMin, 0);
   return {
     owedMin,
-    deadlineMs: oldestShortenedEnd ? oldestShortenedEnd + 3 * 7 * 24 * 3600000 : null,
+    deadlineMs: unpaid.length ? Math.min(...unpaid.map(d => d.deadlineMs)) : null,
   };
 }
 
