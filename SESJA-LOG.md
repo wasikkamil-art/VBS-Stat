@@ -3081,3 +3081,48 @@ Nowy temat: user chce wgrywać rachunki hotelowe (Booking) i zaczytywać dane AI
 
 ### TODO iteracja 2 (opcje)
 - Batch (wiele rachunków naraz, jak BulkUploadModal). Kolumna/filtr „hotele" z detalami noclegu w widoku. Ewentualnie netto per kraj gdyby user zmienił zdanie o VAT.
+
+## 2026-08-19 — Incydent GPS (widziszwszystko) + MIGRACJA modułu Płatności FS → faktury
+
+### Incydent GPS — Atlas API zwracał HTML zamiast JSON (naprawione po stronie dostawcy)
+- Objaw: GPS/Monitoring „Brak urządzeń GPS", 0 pojazdów. Diagnoza: `scheduledGpsPoll` + `gpsProxy` dostawały **stronę React SPA (HTTP 200 + `<!doctype html>`)** z `widziszwszystko.eu/atlas/vbs/vbs/{devices,positionsWithCanDetails}` zamiast JSON. `gpsProxy` fałszywie zwracał `success:true` z HTML → front parsował pustą listę. Działało do **17.08 ~17:50** (ostatnie breadcrumby v1/v3/v4/v5), padło **18.08 ~06:45**. Nie nasz kod (creds vbs/vbs/Vbs7 z `config/gps` bez zmian). **Po stronie widziszwszystko** — panel działał (sesyjnie), REST nie. Przelogowanie NIE pomogło; user wysłał specyfikację błędu na admin@widziwszystko.pl (dokładny URL+auth+objaw) → **naprawili u siebie**. Lekcja: gdy Atlas zwraca HTML=200, to zmiana/awaria ICH REST API, nie hasło. Opcjonalny debt: `gpsProxy` powinien wykrywać nie-JSON i zwracać czytelny błąd zamiast „Brak urządzeń".
+
+### ✅ MIGRACJA modułu „Płatności" z FleetStat do apki faktur (faktury.fleetstat.pl)
+Decyzja usera: przenieść moduł Płatności z FS (vbs-stats) do apki faktur (**vbs-invoices, OSOBNY projekt Firebase**), nazwa docelowa **„Płatności cykliczne"**. Pełny moduł z AI, potem czysta migracja (usunięcie z FS).
+- **Moduł w FS miał JUŻ pełną cykliczność** (`recurring` monthly/yearly, `expandPayment` rozwija szablon na instancje w oknie, `paidInstances[]`, `instanceOverrides{}`, split firma/prywatne, kalendarz+lista, AI multi-upload przez `/api/claude`). To było przeniesienie, nie pisanie od zera.
+- **Zbudowane w vbs-invoices** (wzorzec = moduł Leasingi): `src/utils/paymentsRecurring.js` (expandPayment+helpery) · `src/hooks/usePayments.js` (snapshot+CRUD+toggleInstancePaid+override+extractPaymentPdf) · `src/views/Platnosci.jsx` (~1060 linii, styl Apple/Tailwind, react-router; agent) · nav „Płatności cykliczne" + route `/platnosci` w App.jsx.
+- **AI**: nowy callable **`extractPayment`** (`functions/index.js`, prefix `payments/`, per plik = jedna FV) + `extractPaymentFields` w `functions/lib/claude.js` (prompt 1:1 z FS `PAYMENT_AI_PROMPT` — kategorie leasing/ubezp./paliwo/czesci/uslugi/inne, dwa konta, PLN/EUR/USD). Deploy OK.
+- **Rules**: blok `payments` w firestore.rules (read=auth, write=admin) + storage.rules (`payments/**`, PDF+obrazy, 25 MB).
+- **Migracja danych**: 2 rekordy (SKYDATA cykliczny 202,95 PLN + CHENCZKE 800 EUR jednorazowy) przez **Firestore REST + token gcloud** (ADC `applicationDefault()` NIE działał do zapisu — brak `gcloud auth application-default login`; REST z `gcloud auth print-access-token` = sprawdzona ścieżka dla vbs-invoices). createdAt ISO→timestampValue dla spójności. ⚠️ Załącznik SKYDATA nadal hostowany w Storage vbs-stats (fileUrl cross-project działa; nieblokujące).
+- **Usunięcie z FS** (agent w worktree, build-verify): App.jsx −1802 linie (18918→17116), usunięte nav/route/uprawnienie/state/onSnapshot/komponenty/helpery płatnościowe + blok rules. **Zachowane współdzielone** (Row, Field, lokalny statusOf@9818, hotele/costs). Build zielony (bundle 1,77→1,71 MB). Dane w vbs-stats/payments **zostawione** (nie kasowane).
+- **Deploy**: faktury front push main (`18c7f1e`) + backend (extractPayment+rules); FS front push main (`aba0f65`) + firestore:rules. User potwierdził że działa w fakturach; FS zakładka znika po Vercel rebuild + twardy refresh (service worker cache).
+- ⚠️ NIEZWERYFIKOWANE end-to-end przeze mnie (za loginem): klikanie modułu w fakturach, AI `extractPayment` na realnym PDF. User kliknął — „działa".
+
+## 2026-09-02 — Moduł Płatności w fakturach: iteracje + CODZIENNY raport mailem (LIVE)
+Kontynuacja migracji (patrz [[project_invoice_ai_scanner]]). Wszystko na produkcji `faktury.fleetstat.pl` (vbs-invoices).
+- **AI zweryfikowane na 6 realnych FV** (Trans.eu/Poczta/Globitel/Uniat/Południe/Centrum): numery/terminy/kwoty OK. „AI źle zaczytuje" okazało się bugiem formularza:
+- **FIX startu cyklu** (`631dd1e`): `recurring.startDate` defaultował na `todayISO()` → instancje w kalendarzu na dzień dodania, nie termin. Naprawione: default = `dueDate`. 5 rekordów poprawionych REST-em.
+- **Reguła „od daty dodania, nie wstecz"** (`884c424`): cykliczne instancje generowane od daty dodania dokumentu (`_migratedAt` migrowane / `createdAt` nowe), nie sprzed wprowadzenia. Spójne UI (`paymentsRecurring.js`) + backend raportu.
+- **Nowe cykliczności** (`f5cd4df`): quarterly (co 3mc) + semiannual (co pół roku) obok monthly/yearly. `expandPayment` step front+backend + PAY_FREQUENCIES.
+- **CODZIENNY raport płatności mailem** (`fced430`→`8604826`, LIVE): `functions/lib/paymentsReport.js` + `dailyPaymentsReport` (onSchedule **pon–pt 8:00** Europe/Warsaw) + `sendPaymentsReportNow` (callable admin) + przycisk „📧 Wyślij status". Wzorzec = raport leasingów (Resend). **Mail INFORMACYJNY** (bez akcji z maila — oznaczanie tylko w apce; pierwotny endpoint `markPaymentPaid` + token HMAC COFNIĘTY na prośbę usera). Okno = bieżący miesiąc + 7 dni na przełomie (bez dublowania). Mail HTML kartowy: grupy „Po terminie/Na dziś/Nadchodzące", **termin DZIŚ = pomarańczowa ramka + badge**. Pokazuje TYLKO niezapłacone (`collectUnpaid` pomija paid — zweryfikowane: 13 w bazie → 5 w mailu).
+- **UI**: kolumna listy „Nr FV"→„Cykl" (`2c0cbce`) + **ostrzeżenie o duplikacie** w saveForm (`ea686a8`, kontrahent+kwota+nrFV/termin).
+- ✅ **SCHEDULER WŁĄCZONY**: `settings/paymentsReport.enabled=true`, odbiorcy = info@vbstransport.com + wioletta.vbs@gmail.com + wasik.kamil@gmail.com, sender platnosci@fleetstat.pl. Pierwszy automat najbliższy dzień roboczy 8:00.
+- ⚠️ Otwarte: ad-hoc jednorazowe zaległe sprzed dodania (np. Slickshift marzec ×2 dubel) wchodzą do maila — reguła „od daty dodania" dotyczy tylko cyklicznych; user usuwa dubel ręcznie. Node 20 functions faktur = deprecated (decommission 2026-10-30). NIEZWERYFIKOWANE za loginem: sam mail na skrzynce (buildHtml oglądany jako podgląd HTML).
+
+## 2026-09-11 — Płatności cd. + fix mapy Paliwo + raport dyspozytorów sierpień (REGUŁA) + rozmowa o ulgach
+
+### Faktury / Płatności — dopracowanie (LIVE, patrz [[project_invoice_ai_scanner]])
+- **Raport → TYGODNIOWY** (`weeklyPaymentsReport`, poniedziałek 8:00; stara `dailyPaymentsReport` usunięta). Mail **kartowy**: grupy „Po terminie / Na dziś / Nadchodzące", termin DZIŚ = pomarańczowa ramka + badge (podgląd HTML pokazany userowi).
+- **Start cyklu = termin płatności**: usunięte pole „Start" z formularza (redundantne), `recurring.startDate` ustawiany z `dueDate`; notka w formularzu.
+- **Slickshift dubel** rozwiązany: były 2 rekordy (stary jednorazowy 16.03 + nowy cykliczny 16.09) — user usunął stary ręcznie, został cykliczny. Mail poprawnie pokazywał oba (to nie bug).
+- **Kolumna „Nr FV"→„Cykl"** + **ostrzeżenie o duplikacie** przy dodawaniu (kontrahent+kwota+nrFV/termin).
+
+### FIX mapy Paliwo — CARTO→OSM (FleetStat, commit `73866da`, LIVE)
+- CARTO basemaps zaczął wymagać klucza API → kafle tła mapy tankowań (PaliwoTab) pokazywały watermark „API KEY REQUIRED". Przełączone na darmowe **OpenStreetMap** tiles (jak GPS/Kalkulator/Frachty — te już były OSM). Piny/dane działały cały czas. Zewnętrzna zmiana dostawcy, nie nasz bug.
+
+### ✅ Raport dyspozytorów SIERPIEŃ 2026 + NOWA REGUŁA comiesięczna
+- Dashboard `Dashboard_dyspozytorzy_SIERPIEN_2026.pdf` (skrypt `make_dashboard_sierpien.js`, gitignored, dynamiczne KPI/wnioski/skala). **Sierpień: 26 frachtów / 39 520 € (−12% vs lipiec), AGA 7 / ARO 19** (AGA spadło 11→7, ARO utrzymał 19 → udział ARO wzrósł). Śr. fracht 1 520 €, €/km 1,16 (niżej niż lipcowe 1,27).
+- **REGUŁA (od 2026-09-11)**: co miesiąc po zamknięciu robimy raport dyspozytorów (frachty per spedytor AGA/ARO/ARO-AGA + porównanie do poprzedniego mc). Zapisana w **CLAUDE.md** (sekcja „Comiesięczne raporty", commit `19c727a`) ORAZ pamięci [[feedback_raport_dyspozytorow_miesieczny]]. Wzorzec: `make_dashboard_<miesiac>.js`.
+
+### Rozmowa (bez kodu): ulgi podatkowe IP Box / B+R dla FleetStat na sprzedaż
+- Przegląd polskich ulg dla SaaS/software: **IP Box** (5% od dochodu z licencji software), **ulga B+R** (odliczenie kosztów rozwoju, 100–200%), ulga na ekspansję. Kluczowe ustalenia dla VBS: (1) **osobna spółka na produkt** vs VBS Transport do rozważenia; (2) **umowa z programistą B2B MUSI przenosić prawa autorskie** — inaczej brak IP Box + problem własności produktu; (3) programista B2B słaby dla ulgi B+R (usługa obca), ale OK dla Nexus IP Box; (4) doradztwo działa zdalnie (Kielce nie wymóg). Firmy do porównania: RPMS, Efekta, K2Biznes, EY/UHY, Ewa Flor (Kraków, darmowy audyt wstępny). User rozważa kontakt.
