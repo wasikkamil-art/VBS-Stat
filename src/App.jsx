@@ -13399,6 +13399,12 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                     const yrTotal = isRate
                       ? (yrVals.length ? parseFloat((yrVals.reduce((s,v)=>s+v,0)/yrVals.length).toFixed(4)) : 0)
                       : (yearTotals[yr]||[]).reduce((s,v)=>s+(v||0),0);
+                    // Średnia NA MIESIĄC — liczona z miesięcy, w których są dane (nie z 12),
+                    // bo rok w toku i miesiące bez danych zaniżałyby wynik. Dla metryk
+                    // stawkowych bez sensu: ich "total" już JEST średnią.
+                    const yrAvg = (!isRate && yrVals.length)
+                      ? parseFloat((yrTotal / yrVals.length).toFixed(1))
+                      : null;
                     return (
                       <div key={yr} style={{display:"grid", gridTemplateColumns:`repeat(12,1fr) ${TOTAL_COL}px`,
                         background:bg, borderRadius:6, padding:"4px 0", marginTop:2, textAlign:"center", alignItems:"center"}}>
@@ -13410,9 +13416,15 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                             </div>
                           );
                         })}
-                        <div style={{paddingLeft:8,paddingRight:4,fontWeight:700,color:col,fontSize:10,whiteSpace:"nowrap",
-                          borderLeft:"1px solid "+(isCur?"#dbeafe":"#e5e7eb")}}>
-                          {yr}{isRate?" ⌀":""}: {fmtTk(yrTotal)}
+                        <div style={{paddingLeft:8,paddingRight:4,color:col,fontSize:10,whiteSpace:"nowrap",
+                          borderLeft:"1px solid "+(isCur?"#dbeafe":"#e5e7eb"), lineHeight:1.25}}>
+                          <div style={{fontWeight:700}}>{yr}{isRate?" ⌀":""}: {fmtTk(yrTotal)}</div>
+                          {yrAvg !== null && (
+                            <div style={{fontWeight:400, opacity:.7, fontSize:9}}
+                              title={`Średnia na miesiąc — ${yrTotal} ÷ ${yrVals.length} ${yrVals.length===1?"miesiąc":"mies."} z danymi`}>
+                              ⌀ {fmtTk(yrAvg)}/mc
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
