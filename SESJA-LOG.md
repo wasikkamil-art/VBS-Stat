@@ -3193,3 +3193,49 @@ Znalezione przy okazji: **vbs-invoices NIE MIAŁ ŻADNEGO workflowu backupu** (p
 - ⏳ **BRAKUJE OSTATNIEGO KROKU**: sekret `FIREBASE_SERVICE_ACCOUNT` w repo (repo nie ma dziś **żadnych** sekretów). Konto: `firebase-adminsdk-fbsvc@vbs-invoices.iam.gserviceaccount.com`. **Decyzja usera: klucz generuje sam** przez Firebase Console i ustawia `gh secret set` — klucz nie przechodzi przez agenta ani transkrypt. Do czasu ustawienia pierwszy nocny przebieg padnie z czytelnym komunikatem („Sekret FIREBASE_SERVICE_ACCOUNT pusty lub nieustawiony").
 
 **Stan backupów po tej sesji**: FleetStat ✅ (22:00, osobne repo `vbs-stat-backups`) · FOX ✅ (01:30, gałąź `backups`) · Faktury ⏳ (01:15, gałąź `backups` — czeka na sekret).
+
+## 2026-09-11 (cd.4) — Rentowność/Trendy: tryb „Rok do roku" + rozliczenie miesiąca wg DANYCH (commit `80c5e8f`)
+
+Zlecenie usera: porównanie rok do roku na wykresie (jedno auto lub grupa), bez „plątaniny kabli" przy wielu autach, plus linia zbiorcza z sumą roku.
+
+### Tryb „Rok do roku" (trzeci obok Porównaj pojazdy / Porównaj metryki)
+**Kodowanie wybrał user**: auto zostaje JEDNYM obiektem wizualnym niosącym 2–3 lata („dwie linie zaszyte w jednej jako jedno auto… klikając na auto podświetlałoby się").
+- **wiele aut** → kolor = auto, grubość = rok; **klik w legendzie** podświetla auto, reszta gaśnie
+- **jedno auto lub samo Σ** → kolor = ROK przy RÓWNEJ grubości (kolor nie jest wtedy zajęty przez auto) — poprawka po uwadze usera „w totalu powinna być takiej samej grubości tylko inny kolor"
+- **Σ** = suma zaznaczonych aut, a przy pustym zaznaczeniu **CAŁA FLOTA** (rate: średnia, nie suma — reguła z ZASADY-VBS-STAT, user wprost zdecydował „zostaw jak jest")
+- **Σ obok aut ma własną oś (prawa)** — na wspólnej skali suma 3 aut (27,5k) spłaszczała pojedyncze auta do kreski przy dolnej krawędzi; gdy Σ jest sama, wraca na lewą oś
+- **ogon poza oknem** (wrz–gru poprzednich lat) = cienka, blada kreska bez kropek. Rozdzielone znaczenia: przezroczystość = starszy rok, kreskowanie = poza oknem
+
+### ⭐ Miesiąc „ROZLICZONY" liczony z DANYCH, nie z kalendarza (cały moduł)
+Zgłoszenie usera: *„sierpień jest nie zamknięty ponieważ ma tylko frachty i nie ma zbyt wielu kosztów"*. Potwierdzone twardo w bazie:
+
+| miesiąc 2026 | auta z leasingiem | z wypłatą | pozycji | koszty |
+|---|---|---|---|---|
+| lipiec | 3 | 4 | 57 | 27 808 € |
+| **sierpień** | **0** | **0** | 19 | **2 315 €** |
+
+Te 19 pozycji to same projekcje stałych (zus/polisa/telefon/slickshift/uruchomienie, „Import Excel v17"). Import kosztów robimy ręcznie raz w miesiącu → miniony miesiąc bez importu dawał **fikcyjny skok zysku** (frachty pełne, koszty prawie zerowe).
+- **`isSettled(y, mi)`**: miesiąc ma koszty ZMIENNE (`paliwo`/`leasing`/`wyplata`) w `fleetv2_costs` **LUB** rekord z kosztami w starym modelu `fleetv2_records` (2025 trzyma je w OBU miejscach — bez tego fallbacku miesiąc obecny tylko w starym modelu wypadłby z sum)
+- **jedna definicja** w `RentownoscTab`, przekazana do `TrendyTab` propsem — koniec rozjazdu między zakładkami (user: „trzeba to jakoś uspójnić", wybrał wariant „cały moduł")
+- stosowana w: `getVal` (Trendy), `totalKoszt`, `totalZysk`, oknie porównania, scorecardzie YoY
+- **frachty BEZ ZMIAN** — kompletne od razu, im wystarcza kalendarz. Okno: zysk Sty–Lip, frachty Sty–Sie
+
+### Fixy przy okazji
+- **Σ bez zaznaczonego auta pokazywała pierwszy pojazd** (fallback `[vehicles[0]?.id]`) → user widział 124 € (WGM 0475M) zamiast **2 904 €** floty za czerwiec. Jedna przyczyna, dwa objawy z jego zgłoszenia. Liczba 124 € sama w sobie była poprawna (frachty 9 101 − koszty 8 977).
+- **Δ w tabeli zaszyta jako „2025 vs 2026"** → przy 2024+2025 nie pokazywała się w ogóle. Teraz dwa najnowsze wybrane lata + **PROCENT** obok kwoty (`Δ: +4,7k (+9,8%)`).
+- **scorecard YoY** miał `_now.getFullYear() === 2026` na sztywno — w 2027 porównywałby pełny rok z niepełnym.
+- **tabela pomijała Σ także gdy Σ była jedyną serią** → znikał nagłówek z miesiącami pod wykresem (user: „to wygląda ohydnie" — obok dwóch nierozróżnialnych czarnych linii Σ i grubych kropkowanych „koralików" ogona).
+
+### Wpływ na liczby (read-only na żywych danych, PRZED pushem)
+```
+flota 2026 zysk:  90 277 € → 53 072 €   (sierpień poza rozliczeniem)
+frachty 2026:     296 305 €  bez zmian
+2025:             bez zmian (wszystkie 12 mc rozliczone)
+2024:             zysk 7 900 € → 0  (rok ma 6 frachtów i ZERO kosztów — tamten „zysk" to były same przychody)
+```
+**Po imporcie kosztów za sierpień liczby wracają** — to nie jest utrata danych.
+
+### Metoda pracy (warte powtórzenia)
+Widok jest za loginem, więc zbudowałem **interaktywny podgląd HTML na prawdziwych danych z Firestore** (`mockup_trendy_yoy.html`, gitignored jako `mockup_*`) i oglądałem go w przeglądarce. Dwa błędy wyszły dopiero tam, nie w kodzie: Σ zjadająca skalę oraz granica czytelności przy 6 autach × 3 lata (21 linii — highlight ratuje po kliknięciu, ale widok domyślny jest gęsty; przy ≥4 autach i ≥3 latach starsze lata gasną mocniej). Pierwsza wersja podglądu rysowała łamane linie zamiast krzywych `monotone` — user to wychwycił; podgląd dostał interpolację Fritsch-Carlson, żeby był wierny.
+
+⚠️ **NIEZWERYFIKOWANE end-to-end**: sam widok w aplikacji (za loginem — klika user). Liczby i wygląd sprawdzone na podglądzie z żywymi danymi; lint 0 errors, build zielony.
