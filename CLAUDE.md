@@ -27,6 +27,13 @@ Patrz PODSUMOWANIE-PROJEKTU.md sekcje 7–9 po pełny opis:
 3. **Czas pracy kierowcy MVP** — stałe `REGULATION` (561/2006 + Pakiet Mobilności), `computeDriverCompliance` + `computeDriverPlan`, auto-detection GPS (speed > 3 km/h = drive), ręczne kliknięcia kierowcy, widok `GpsCzasPracySection` (admin) i `DriverCzasPracyDashboard` (mobile).
 4. **Parser DDD** — Cloud Function `parseDddFile` + biblioteka `readesm-js`. Upload admin (`GpsDddSection`) albo mobile kierowcy (`DriverDddUploadCard`). **Priorytet segmentów DDD nad GPS** w compliance (funkcja `preferDddSegments`).
 
+## Comiesięczne raporty (cykliczne taski)
+
+Po zamknięciu każdego miesiąca — stałe, powtarzalne raporty (pełne workflow w pamięci Claude, pliki `feedback_*`):
+
+- **Raport dyspozytorów** (od 2026-09) — dashboard frachtów **per spedytor** (AGA / ARO / ARO-AGA wspólne) + porównanie do poprzedniego miesiąca. Wzorzec: `make_dashboard_<miesiac>.js` (w repo root, **gitignored** — `make_dashboard*`) → PDF A4 landscape (KPI, tabela bieżący+poprzedni, donut udziału, słupki, wnioski). Źródło `fleet/data → fleetv2_frachty` (filtr po `dataZaladunku`, kwoty netto EUR); kubełkowanie `bucketFor` (Aga/Aro/oba-nazwiska→ARO-AGA, brak dysp.→AGA). Metryki: frachty, obrót, śr. fracht, km, €/km, udział %.
+- **Import kosztów** → arkusz Total_26 + `fleetv2_costs` oraz **import paliwa** (Eurowag/E100/Andamur → `fuelTransactions`) — patrz reguły workflow w pamięci.
+
 ## Gotchy (nietypowe w tym repo)
 
 - **NIE importować `React`** — JSX transform jest automatyczny w Vite; import wywala build.
