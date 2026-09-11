@@ -25,6 +25,9 @@ restore-*.js
 patch_*.py
 diagnose*.js
 diagnose*.mjs
+diagnose*.py
+import_*.mjs
+import-*.mjs
 fix_*.mjs
 migrate_*.mjs
 gen_*.mjs

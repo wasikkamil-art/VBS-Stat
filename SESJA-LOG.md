@@ -3239,3 +3239,40 @@ frachty 2026:     296 305 €  bez zmian
 Widok jest za loginem, więc zbudowałem **interaktywny podgląd HTML na prawdziwych danych z Firestore** (`mockup_trendy_yoy.html`, gitignored jako `mockup_*`) i oglądałem go w przeglądarce. Dwa błędy wyszły dopiero tam, nie w kodzie: Σ zjadająca skalę oraz granica czytelności przy 6 autach × 3 lata (21 linii — highlight ratuje po kliknięciu, ale widok domyślny jest gęsty; przy ≥4 autach i ≥3 latach starsze lata gasną mocniej). Pierwsza wersja podglądu rysowała łamane linie zamiast krzywych `monotone` — user to wychwycił; podgląd dostał interpolację Fritsch-Carlson, żeby był wierny.
 
 ⚠️ **NIEZWERYFIKOWANE end-to-end**: sam widok w aplikacji (za loginem — klika user). Liczby i wygląd sprawdzone na podglądzie z żywymi danymi; lint 0 errors, build zielony.
+
+## 2026-09-11 (cd.5) — Import danych operacyjnych z arkusza Total_26 → `operacyjne` (mar–lip 2026)
+
+**Zgłoszenie usera** po obejrzeniu nowego trybu: *„razem nie zaciąga danych dalej niż luty"*. Diagnoza: **to nie był bug wykresu** — Σ pokazywała dokładnie to, co jest w bazie.
+
+### Diagnoza
+Kolekcja `operacyjne` (źródło metryk **KM licznik / Paliwo L / Spalanie / €/km**) przestała być uzupełniana po lutym 2026: styczeń 5 aut, luty 4 auta, marzec **1 wpis z samym `srWaga`**, kwiecień–grudzień **pusto**. Od marca user wpisuje te dane do arkusza Google Total_26 i tam zostawały. Frachty/Koszty/Zysk ciągnęły się normalnie do lipca — mają inne źródło, więc objaw dotyczył tylko 4 metryk operacyjnych.
+- W bazie były też **realne tankowania z kart** (`fuelTransactions/YYYY-MM/tx`: maj 104 tx / 5 324 L, czerwiec 91 / 4 575, lipiec 117 / 5 927), ale moduł Rentowności o nich nie wie — czyta wyłącznie `operacyjne`. Rozważone jako alternatywa (fallback), user wybrał **import z arkusza** jako rozwiązanie pełne (daje też km, spalanie i €/km, nie samo paliwo).
+
+### Import (skrypt `import_operacyjne_2026.mjs`, gitignored)
+Odczyt przez Sheets API (SA `firebase-adminsdk-fbsvc@vbs-stats`, arkusz `1LcbdOe8h…`, zakładka Total_26) wg mapowania z [[feedback_google_sheet_total26_fill]]: bloki v3=r4, v1=r46, v5=r88, v4=r130; offsety KM licznik +31, Paliwo L +34, Spalanie 1 +35; kolumny C=styczeń…
+- **20 wpisów: 19 nowych + 1 UPDATE**. Razem **174 476 km / 26 530 L** za marzec–lipiec, 4 auta.
+- **Kontrola krzyżowa przeszła**: litry z arkusza vs `fuelTransactions` różnią się o 180–300 L/mc — dokładnie tyle, ile wynosi AdBlue, w arkuszu odseparowany. Dane wiarygodne.
+- **Pułapka ominięta**: wpis v1/marzec już istniał, ale pod **auto-ID** `nUlYRiyRfd0NywAAO66Z` (nie w konwencji `v1_2026_3` jak starsze) — powstał inną ścieżką, z UI. Zrobiony `set(..., {merge:true})` zamiast nowego dokumentu; `srWaga: 3500` zachowana. Drugi rekord byłby duplikatem, a front bierze **pierwszy** pasujący (`operacyjne.find(...)`).
+- Asercja przyrostu: 70 → 89 dokumentów, przyrost 19 = dokładnie tyle, ile CREATE. Po imporcie sprawdzone: **zero duplikatów** (pojazd+rok+mc).
+- **Spalanie zapisane Z ARKUSZA, nie przeliczane.** Sprawdziłem hipotezę, że arkuszowe spalanie liczy się z „KM google" (+30) — **obalona**: nie zgadza się ani z KM google, ani z KM licznik (odchyłki do 0,8 L/100 km). Było wpisywane osobno. Nie podmieniam liczb usera na własne wyliczenia; rozjazd zgłoszony.
+- **NIE zaimportowane**: sierpień (arkusz jeszcze pusty), TK 130EF (auto nieaktywne, cały rok pusty), pola `dni` i `cenaPaliwa` (nie ma ich w tych wierszach — puste zamiast zgadywania; metryka „Dni w trasie" zostaje pusta od marca).
+
+### Stan po imporcie (Σ Flota 2026)
+```
+mc   aut   KM licznik   Paliwo L   śr. spalanie
+ 1    5        33 134      5 355      15,2
+ 2    4        25 758      4 221      15,3
+ 3    4        38 552      5 899      14,8
+ 4    4        38 282      5 508      14,3
+ 5    4        32 547      5 098      15,2
+ 6    4        26 830      4 276      15,8
+ 7    4        38 265      5 749      15,1
+ 8    —             —          —        —
+```
+Ładnie spina się z regułą rozliczenia z cd.4 — dane operacyjne kończą się na lipcu, tak samo jak zysk.
+
+### Dług domknięty przy okazji
+`.gitignore` nie łapał `import_*.mjs` ani `diagnose*.py` (miał tylko warianty `.js`/`.mjs` dla części wzorców) — a te skrypty czytają `serviceAccountKey.json`. Dodane, oba są teraz ignorowane.
+
+### ⚠️ DO RUTYNY MIESIĘCZNEJ
+Po każdym wypełnieniu arkusza Total_26 trzeba **przenieść km/paliwo/spalanie do `operacyjne`**, inaczej metryki operacyjne w Rentowności znowu się urwą. Dopisane do [[feedback_google_sheet_total26_fill]]. Najbliższe: sierpień, gdy tylko arkusz zostanie uzupełniony.
