@@ -3126,3 +3126,31 @@ Kontynuacja migracji (patrz [[project_invoice_ai_scanner]]). Wszystko na produkc
 
 ### Rozmowa (bez kodu): ulgi podatkowe IP Box / B+R dla FleetStat na sprzedaż
 - Przegląd polskich ulg dla SaaS/software: **IP Box** (5% od dochodu z licencji software), **ulga B+R** (odliczenie kosztów rozwoju, 100–200%), ulga na ekspansję. Kluczowe ustalenia dla VBS: (1) **osobna spółka na produkt** vs VBS Transport do rozważenia; (2) **umowa z programistą B2B MUSI przenosić prawa autorskie** — inaczej brak IP Box + problem własności produktu; (3) programista B2B słaby dla ulgi B+R (usługa obca), ale OK dla Nexus IP Box; (4) doradztwo działa zdalnie (Kielce nie wymóg). Firmy do porównania: RPMS, Efekta, K2Biznes, EY/UHY, Ewa Flor (Kraków, darmowy audyt wstępny). User rozważa kontakt.
+
+## 2026-09-11 (cd.) — Case Tacho WGM 0507M: rekompensata 4h25 → 0h (art. 8.6b, commit `3373037` PROD)
+
+**Zgłoszenie**: Volodymyr Lukashuchuk (v5, WGM 0507M), po wgraniu świeżego DDD (upload 11.09 09:46, zakres do 11.09) zakładka Tacho pokazała **wyrównanie 4h25**. Agnieszka (spedycja) zakwestionowała: *„pierwsza pauza była 44, druga prawie 42, ale tę godzinę oddał w tygodniu, resztę oddał też — powinno być czyste 45"*.
+
+### Diagnoza (read-only na żywych danych, 1117 segmentów: 604 ddd / 490 ww_csv / 23 auto_gps)
+Rozbiór `weeklyRestCompensation`: dług = 1,00h (tydz. 24–30.08, pauza 44,00h) + 3,42h (tydz. 31.08–06.09, pauza 41,58h); wcześniejsze 0,93h (tydz. 10–16.08) spłacone nadmiarem z pauzy 142,53h (20–26.08). Arytmetyka UI zgodna co do minuty.
+- **Sprawdzone i ODRZUCONE jako przyczyna**: przypisanie odpoczynków do tygodni (art. 8 ust. 9 — odpoczynek na przełomie można zaliczyć do dowolnego z dwóch tygodni). Przeliczone **wszystkie 64 warianty** przypisania 6 odpoczynków ≥24h z 45 dni — tylko jedno przypisanie pokrywa każdy tydzień, dokładnie to z kodu. Minimalny możliwy dług = 4,42h. Odpoczynek 20–26.08 (142h na bazie, argument „wyjechał 26.08") **jest** uznany i to on wyzerował wcześniejszy dług; nie może pokryć skróceń z 29.08 i 5.09, bo wyrównanie musi nastąpić PO skróceniu.
+- **Sprawdzone, efekt częściowy**: praca 29.08 08:07–11:00 (2h53, auto stało — ani jednego segmentu jazdy 28.08 17:00 → 31.08 07:00) rozbiła odpoczynek 62h na 44h. Symulacja korekty: 4h25 → **3h25** (nie 0 — nadmiar 17h też jest przed skróceniem z 5–7.09). Korekty NIE wprowadzono (wymaga potwierdzenia od kierowcy co robił).
+- ✅ **ZNALEZIONA PRZYCZYNA = nasz bug**: `weeklyRestCompensation` uznawało spłatę WYŁĄCZNIE jako nadwyżkę ponad 45h w odpoczynku ≥24h. **Art. 8 ust. 6b 561/2006**: wyrównanie odbiera się jednorazowo (en bloc) **dołączone do dowolnego odpoczynku ≥9h**. Kierowca, który oddał godziny przedłużonym odpoczynkiem dziennym, wisiał jako zadłużony bez końca. Agnieszka opisała dokładnie ten przepis.
+
+### Fix (commit `3373037`, PROD `index-UG7U69if.js` zweryfikowany na fleetstat.pl)
+- Długi trzymane **osobno per skrócenie** (nie jedna suma) — en bloc wymaga, by całość pokrył JEDEN odpoczynek, nie kilka po kawałku.
+- Nośnik wyrównania = **każdy odpoczynek ≥9h po dacie skrócenia**; zdolność = nadwyżka ponad 11h (regularny dzienny), a dla odpoczynku wybranego jako tygodniowy — ponad 45h (bez double-countingu).
+- **Termin**: koniec 3. tygodnia następującego po tygodniu skrócenia (`weekStart + 28 dni`) zamiast `koniec odpoczynku + 21 dni` — poprzednio wypadał do ~7h za późno (inny dzień w kontroli ITD).
+
+**Gdzie Volodymyr oddał**: 1h → **01.09** (odpoczynek 14h02, nadwyżka 3h02); 3h25 → **08–09.09** (odpoczynek 23h54, nadwyżka 12h54). Oba w terminie.
+
+### Weryfikacja floty (przed → po, read-only przed deployem)
+| v1 Iwansky 3h27 → **0h00** | v3 Kolabu 8h11 → **8h11** | v4 Teper 0h00 → 0h00 | v5 Volodymyr 4h25 → **0h00** |
+
+**Nikomu dług nie wzrósł.** Siarhei słusznie zostaje — po 6.09 żaden jego odpoczynek nie ma nadwyżki ≥8h11 (en bloc), termin 27.09. To była dobra kontrola, że algorytm nie zeruje bezmyślnie.
+
+⚠️ **NIEZWERYFIKOWANE end-to-end**: sam widok zakładki Tacho po deployu (za loginem — klika user). Liczby liczone na żywych danych z Firestore, nie w przeglądarce. Skrypty diagnostyczne `diagnose_tacho_0507*.mjs` + `diagnose_tacho_flota.mjs` zostają w repo (gitignored) — przydadzą się przy kolejnych sporach o compliance.
+
+### Otwarte z tego case
+- Korekta 29.08 (praca 2h53 na postoju) — do decyzji po rozmowie z kierowcą; zdjęłaby 1h, ale po fixie dług i tak = 0, więc bez pilności.
+- Node 20 → 22: dotyczy **vbs-invoices (13 funkcji) + fox (2)**; FleetStat już na 22. Decommission 30.10.2026. Odłożone na prośbę usera.
