@@ -12395,6 +12395,35 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
   // Wszystkie dane (frachty + koszty) zaciągane z dynData (frachtyList + costs z Firestore).
   // Edycja w jednym miejscu (Rejestr kosztów / Frachty) aktualizuje automatycznie
   // wszystkie widoki: Flota, Pojazd, Trendy, YoY, Rentowność.
+  // ── ŹRÓDŁO PRAWDY: czy miesiąc jest ROZLICZONY (user 2026-09-11) ──
+  // Kalendarz nie wystarcza. Import kosztów robimy ręcznie raz w miesiącu, więc miesiąc
+  // już miniony potrafi mieć wyłącznie projekcje stałych: sierpień 2026 = 19 pozycji /
+  // 2 315 € na flotę, przy 57 pozycjach / 27 808 € w lipcu. Liczenie zysku z takiego
+  // miesiąca daje fikcyjny skok w górę (frachty pełne, koszty prawie zerowe).
+  // Sygnał rozliczenia = obecność kosztów ZMIENNYCH; te pojawiają się dopiero z importem.
+  const SETTLED_CATS = ["paliwo","leasing","wyplata"];
+  const settledMonths = useMemo(() => {
+    const set = new Set();
+    (costs||[]).forEach(c => {
+      if (c?.date && SETTLED_CATS.includes(c.category)) set.add(String(c.date).slice(0,7));
+    });
+    return set;
+  }, [costs]);
+  // Frachty są kompletne od razu — dla nich wystarcza kalendarz. Koszty/zysk/metryki
+  // operacyjne wymagają rozliczenia.
+  // Drugie źródło: STARY model `records` (fleetv2_records). Rok 2025 trzyma koszty
+  // w obu miejscach, ale miesiąc obecny tylko tam wypadłby z sum, gdybyśmy patrzyli
+  // wyłącznie na fleetv2_costs — stąd sprawdzamy oba (getRecord też ma ten fallback).
+  const settledLegacy = useMemo(() => {
+    const set = new Set();
+    (records||[]).forEach(r => {
+      if (r && Object.values(r.costs||{}).some(v => (v||0) > 0)) set.add(`${r.year}-${r.month}`);
+    });
+    return set;
+  }, [records]);
+  const isSettled = (y, mi) =>
+    settledMonths.has(`${y}-${String(mi+1).padStart(2,"0")}`) || settledLegacy.has(`${y}-${mi}`);
+
   const getRecord = (vid, y, m) => {
     const existing = records.find(r => r.vehicleId === vid && r.year === y && r.month === m);
     const monthStr = `${y}-${String(m+1).padStart(2,"0")}`;
@@ -12427,10 +12456,12 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
   // - Koszty: tylko closed (bieżący miesiąc nie zamknięty kosztowo)
   // - Zysk: tylko closed (bieżący ma niepełne dane — frachty bez kosztów = sztuczny zysk)
   const totalFrachty = (vid, y) => MONTHS_PL.reduce((s,_,m) => { if (!isMonthClosed(y,m) && !isMonthCurrent(y,m)) return s; const r = getRecord(vid,y,m); return s + (r?.frachty||0); }, 0);
-  const totalKoszt   = (vid, y) => MONTHS_PL.reduce((s,_,m) => { if (!isMonthClosed(y,m)) return s; const r = getRecord(vid,y,m); return s + Object.values(r?.costs||{}).reduce((a,v)=>a+(v||0),0); }, 0);
+  const totalKoszt   = (vid, y) => MONTHS_PL.reduce((s,_,m) => { if (!isMonthClosed(y,m) || !isSettled(y,m)) return s; const r = getRecord(vid,y,m); return s + Object.values(r?.costs||{}).reduce((a,v)=>a+(v||0),0); }, 0);
   // Zysk: per-month closed only — żeby NIE liczyć frachty bieżącego (bez kosztów = sztuczny boost)
   const totalZysk    = (vid, y) => MONTHS_PL.reduce((s,_,m) => {
-    if (!isMonthClosed(y,m)) return s;
+    // Miesiąc bez zaimportowanych kosztów NIE wchodzi do zysku — same frachty dałyby
+    // sztuczny zysk (ta sama zasada co dla miesiąca bieżącego).
+    if (!isMonthClosed(y,m) || !isSettled(y,m)) return s;
     const r = getRecord(vid,y,m);
     if (!r) return s;
     const f = r.frachty || 0;
@@ -12915,6 +12946,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
           operacyjne={operacyjne}
           selYear={selYear}
           getRecord={getRecord}
+          isSettled={isSettled}
         />
       )}
 
@@ -12938,7 +12970,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
   );
 }
 
-function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne, selYear, getRecord }) {
+function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne, selYear, getRecord, isSettled }) {
   const METRYKI = [
     { id: "frachty",  label: "Frachty €",      color: "#3b82f6" },
     { id: "koszty",   label: "Koszty €",       color: "#ef4444" },
@@ -12953,6 +12985,13 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
   const [tYears,    setTYears]    = useState([selYear]);
   const [tMetryki,  setTMetryki]  = useState(["frachty","zysk"]);
   const [tMode,     setTMode]     = useState("vehicle");
+  // ── Tryb "Rok do roku" (user 2026-09-11) ──
+  // hlVid: kliknięte auto zostaje w pełnym kolorze, reszta przygasa (anti-"plątanina kabli").
+  // tSumLine: dodatkowa gruba linia Σ = suma zaznaczonych aut (dla metryk stawkowych — średnia,
+  // zgodnie z regułą z ZASADY-VBS-STAT: rate agregujemy średnią, nie sumą).
+  const [hlVid,     setHlVid]     = useState(null);
+  const [tSumLine,  setTSumLine]  = useState(true);
+  // isSettled przychodzi z RentownoscTab — jedna definicja na cały moduł.
   useEffect(() => {
     if (vehicles.length && tVehicles.length === 0) setTVehicles([vehicles[0].id]);
   }, [vehicles]);
@@ -12962,8 +13001,10 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
     const current = isMonthCurrent(year, mi);
     // Future — return null (Recharts skipuje punkt)
     if (!closed && !current) return null;
-    // Bieżący miesiąc — TYLKO frachty pokazujemy; pozostałe metryki (koszty/zysk/km/paliwo/spalanie/eurKm/dni) = null
-    if (current && metId !== "frachty") return null;
+    // Bieżący LUB nierozliczony miesiąc — TYLKO frachty; pozostałe metryki
+    // (koszty/zysk/km/paliwo/spalanie/eurKm/dni) = null. Frachty są kompletne od razu,
+    // koszty dopiero po miesięcznym imporcie — patrz isSettled wyżej.
+    if ((current || !isSettled(year, mi)) && metId !== "frachty") return null;
     // Single source of truth: getRecord handles all corrections (2025 Excel, 2026 fleet)
     const r = getRecord(vid, year, mi);
     const op = operacyjne.find(o => o.vehicleId===vid && o.year===year && o.month===mi+1);
@@ -12983,8 +13024,87 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
     return 0;
   };
   const COLORS = ["#3b82f6","#ef4444","#16a34a","#8b5cf6","#f59e0b","#06b6d4","#ec4899","#64748b","#f97316","#0ea5e9"];
+  const RATE_IDS = ["spalanie","eurKm"];
+  // ── Okno porównania: ostatni ZAMKNIĘTY miesiąc bieżącego roku ──
+  // Rok do roku porównujemy tylko w zakresie faktycznie rozliczonym (user 2026-09-11:
+  // "w przestrzeni już rozliczonych miesięcy"), inaczej niepełny wrzesień 2026 wyglądałby
+  // jak załamanie względem pełnego września 2025. Ta sama zasada co w scorecardzie YoY niżej.
+  const _nowY = new Date().getFullYear(), _nowM = new Date().getMonth();
+  // Okno kończy się na ostatnim ROZLICZONYM miesiącu (nie na ostatnim kalendarzowym) —
+  // dla metryk kosztowych. Frachty są kompletne wcześniej, więc dla nich wystarczy kalendarz.
+  const _metIsFrachty = (tMetryki[0] || "frachty") === "frachty";
+  const closedMi = (() => {
+    if (!tYears.includes(_nowY)) return 12;
+    if (_metIsFrachty) return _nowM;
+    let last = 0;
+    for (let mi = 0; mi < _nowM; mi++) if (isSettled(_nowY, mi)) last = mi + 1;
+    return last;
+  })();
   const series = [];
-  if (tMode === "vehicle") {
+  if (tMode === "yoy") {
+    // KOLOR = AUTO, STYL = ROK (pomysł usera 2026-09-11): auto zostaje jednym obiektem
+    // wizualnym niosącym 2-3 lata, zamiast rozpadać się na osobne kolory per rok.
+    //   • rok bieżący  → pełna, gruba linia
+    //   • rok starszy  → ten sam kolor, cieńszy i półprzezroczysty (CIĄGŁY)
+    //   • poza oknem   → PRZERYWANY (osobne znaczenie niż "starszy rok", patrz tail niżej)
+    const met = tMetryki[0] || "frachty";
+    const isRate = RATE_IDS.includes(met);
+    // Bez zaznaczonego auta rysujemy SAMO Σ z całej floty. Wcześniej leciał fallback na
+    // pierwszy pojazd — user klikał "Σ Razem", a dostawał WGM 0475M i jego 124 € za czerwiec
+    // zamiast 2 904 € floty (zgłoszone 2026-09-11).
+    const vids = tVehicles.filter(Boolean);
+    const sumVids = (vids.length ? vids : vehicles.map(v=>v.id)).filter(Boolean);
+    const yearsAsc = [...tYears].sort();
+    const newestYr = yearsAsc[yearsAsc.length-1];
+    // Gdy rysujemy JEDNĄ encję (jedno auto albo samo Σ), kolor nie jest zajęty przez auto —
+    // więc niech koduje ROK, a linie mają równą grubość (user 2026-09-11: "w totalu powinna
+    // być takiej samej grubości tylko inny kolor"). Przy wielu autach wracamy do
+    // kolor = auto / grubość = rok, bo inaczej nie da się rozróżnić pojazdów.
+    const singleEntity = vids.length <= 1;
+    const sumOnly = vids.length === 0;   // na wykresie jest WYŁĄCZNIE linia zbiorcza
+    const YEAR_COLORS = { 0:"#3b82f6", 1:"#94a3b8", 2:"#c4b5fd" };  // najnowszy → najstarszy
+    // Σ na tle aut musi się wyróżniać (czarna), ale gdy jest sama — czarne byłyby OBA lata
+    // i nie dałoby się ich rozróżnić. Wtedy Σ przejmuje paletę roczną.
+    const SUM_YEAR_COLORS = { 0:"#0f172a", 1:"#94a3b8", 2:"#c4b5fd" };
+    const mkSeries = (label, color, vid, year, rawPts) => {
+      const isNewest = year === newestYr;
+      // Rozbicie na dwa odcinki: w oknie porównania (pełny) + ogon poza oknem (przerywany).
+      // Recharts nie zmienia stylu w połowie linii, więc to muszą być dwie serie.
+      // Punkt styku (closedMi-1) należy do OBU, żeby linia nie miała dziury.
+      const inWin = rawPts.map((v,mi) => mi < closedMi ? v : null);
+      const hasTail = closedMi < 12 && rawPts.some((v,mi) => mi >= closedMi && v !== null);
+      const yIdx = yearsAsc.length - 1 - yearsAsc.indexOf(year);   // 0 = najnowszy
+      const col = vid === "__SUM__"
+        ? (sumOnly ? (SUM_YEAR_COLORS[yIdx] || "#cbd5e1") : color)
+        : (singleEntity ? (YEAR_COLORS[yIdx] || "#cbd5e1") : color);
+      series.push({ label, color: col, pts: inWin, vid, year, isNewest, kind: "main", singleEntity, sumOnly });
+      if (hasTail) {
+        const tail = rawPts.map((v,mi) => mi >= closedMi-1 ? v : null);
+        series.push({ label: `${label} (poza oknem)`, color: col, pts: tail, vid, year, isNewest, kind: "tail", singleEntity, sumOnly });
+      }
+    };
+    vids.forEach((vid, i) => {
+      const veh = vehicles.find(v=>v.id===vid);
+      const color = COLORS[i % COLORS.length];
+      yearsAsc.forEach(year => {
+        const pts = Array.from({length:12}, (_,mi) => getVal(vid, year, mi, met));
+        mkSeries(`${veh?.plate||vid} ${year}`, color, vid, year, pts);
+      });
+    });
+    // Linia zbiorcza Σ — suma zaznaczonych aut, a przy pustym zaznaczeniu CAŁEJ floty
+    // (rate: średnia, nie suma — reguła z ZASADY-VBS-STAT).
+    if (tSumLine && sumVids.length > 1) {
+      yearsAsc.forEach(year => {
+        const pts = Array.from({length:12}, (_,mi) => {
+          const vals = sumVids.map(vid => getVal(vid, year, mi, met)).filter(v => v !== null);
+          if (!vals.length) return null;
+          const sum = vals.reduce((a,b)=>a+b,0);
+          return isRate ? parseFloat((sum/vals.length).toFixed(2)) : sum;
+        });
+        mkSeries(`${vids.length ? "Σ Razem" : "Σ Flota"} ${year}`, "#0f172a", "__SUM__", year, pts);
+      });
+    }
+  } else if (tMode === "vehicle") {
     const met = tMetryki[0] || "frachty";
     tVehicles.forEach((vid, i) => {
       const veh = vehicles.find(v=>v.id===vid);
@@ -13028,10 +13148,28 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
       <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4 space-y-3">
         <div className="flex gap-2 items-center flex-wrap">
           <span className="text-xs text-gray-500 w-20">Tryb:</span>
-          {[["vehicle","Porównaj pojazdy"],["metric","Porównaj metryki"]].map(([m,l])=>(
-            <button key={m} onClick={()=>setTMode(m)}
+          {[["vehicle","Porównaj pojazdy"],["metric","Porównaj metryki"],["yoy","Rok do roku"]].map(([m,l])=>(
+            <button key={m} onClick={()=>{
+              setTMode(m);
+              // Wejście w "Rok do roku" z jednym zaznaczonym rokiem nie pokazywałoby
+              // żadnego porównania — dobieramy poprzedni rok automatycznie.
+              if (m==="yoy") setTYears(ys => ys.length===1 ? [ys[0]-1, ys[0]].sort() : ys);
+              setHlVid(null);
+            }}
               className={"px-3 py-1 rounded-lg text-xs font-medium transition-all "+(tMode===m?"bg-blue-500 text-white":"bg-gray-100 text-gray-500 hover:bg-gray-200")}>{l}</button>
           ))}
+          {tMode==="yoy" && (
+            <button onClick={()=>setTSumLine(v=>!v)}
+              title="Gruba ciemna linia = suma zaznaczonych aut (dla spalania i €/km — średnia)"
+              className={"px-3 py-1 rounded-lg text-xs font-medium transition-all ml-2 "+(tSumLine?"bg-slate-800 text-white":"bg-gray-100 text-gray-500 hover:bg-gray-200")}>
+              Σ Razem
+            </button>
+          )}
+          {tMode==="yoy" && closedMi < 12 && (
+            <span className="text-[11px] text-gray-400 ml-1">
+              porównanie Sty–{MS[closedMi-1]} (miesiące rozliczone)
+            </span>
+          )}
         </div>
         <div className="flex gap-2 items-center flex-wrap">
           <span className="text-xs text-gray-500 w-20">Rok:</span>
@@ -13043,7 +13181,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
         <div className="flex gap-2 items-center flex-wrap">
           <span className="text-xs text-gray-500 w-20">Pojazd:</span>
           {vehicles.map(v=>(
-            <button key={v.id} onClick={()=>tMode==="vehicle"?toggleArr(tVehicles,setTVehicles,v.id):setTVehicles([v.id])}
+            <button key={v.id} onClick={()=>tMode==="metric"?setTVehicles([v.id]):toggleArr(tVehicles,setTVehicles,v.id)}
               className={"px-3 py-1 rounded-lg text-xs font-medium transition-all "+(tVehicles.includes(v.id)?"bg-indigo-500 text-white":"bg-gray-100 text-gray-500 hover:bg-gray-200")}>{v.plate}</button>
           ))}
         </div>
@@ -13057,13 +13195,73 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
         </div>
       </div>
       <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
-        <div className="flex gap-3 flex-wrap mb-3">
-          {series.map((s,i)=>(
+        <div className="flex gap-3 flex-wrap mb-3 items-center">
+          {tMode==="yoy" ? (() => {
+            // Jedna pozycja na AUTO (nie na serię) — auto niesie 2-3 lata w jednym kolorze.
+            // Klik = podświetlenie: wybrane auto zostaje, reszta przygasa. To jest odpowiedź
+            // na "plątaninę kabli" przy wielu autach (user 2026-09-11).
+            const seen = new Map();
+            const sumOnlyView = series.length > 0 && series.every(s => s.vid === "__SUM__");
+            if (sumOnlyView) {
+              // Sam agregat — legenda musi rozróżniać LATA, bo to one niosą kolor.
+              const byYear = new Map();
+              series.forEach(s => { if (s.kind==="main" && !byYear.has(s.year)) byYear.set(s.year, s); });
+              return [...byYear.entries()].sort((a,b)=>b[0]-a[0]).map(([yr,s]) => (
+                <span key={yr} className="flex items-center gap-1.5 px-2 py-1">
+                  <span className="rounded-full flex-shrink-0" style={{background:s.color, width:12, height:12}}/>
+                  <span className={"text-xs "+(s.isNewest?"font-semibold text-slate-800":"text-gray-500")}>
+                    {s.label.replace(/^Σ \S+ /, "")} · {s.label.replace(/ \d{4}$/,"")}
+                  </span>
+                </span>
+              ));
+            }
+            const oneEntity = series.some(s => s.singleEntity && s.vid !== "__SUM__");
+            if (oneEntity) {
+              // Kolor koduje rok → legenda wymienia lata, nie pojazdy.
+              const byYear = new Map();
+              series.forEach(s => { if (s.kind==="main" && s.vid!=="__SUM__" && !byYear.has(s.year)) byYear.set(s.year, s); });
+              const sumS = series.find(s => s.kind==="main" && s.vid==="__SUM__");
+              return [...[...byYear.entries()].sort((a,b)=>b[0]-a[0]).map(([yr,s]) => (
+                <span key={yr} className="flex items-center gap-1.5 px-2 py-1">
+                  <span className="rounded-full flex-shrink-0" style={{background:s.color, width:12, height:12}}/>
+                  <span className="text-xs text-gray-600">{yr}</span>
+                </span>
+              )), ...(sumS ? [(
+                <span key="sum" className="flex items-center gap-1.5 px-2 py-1">
+                  <span className="rounded-full flex-shrink-0" style={{background:"#0f172a", width:14, height:14}}/>
+                  <span className="text-xs font-semibold text-slate-800">{sumS.label.replace(/ \d{4}$/,"")} (prawa oś)</span>
+                </span>
+              )] : [])];
+            }
+            series.forEach(s => { if (s.kind==="main" && !seen.has(s.vid)) seen.set(s.vid, s); });
+            return [...seen.values()].map(s => {
+              const dim = hlVid && hlVid !== s.vid;
+              const isSum = s.vid === "__SUM__";
+              return (
+                <button key={s.vid} onClick={()=>setHlVid(h => h===s.vid ? null : s.vid)}
+                  title={dim ? "Kliknij, żeby podświetlić" : "Kliknij, żeby wyróżnić to auto"}
+                  className={"flex items-center gap-1.5 px-2 py-1 rounded-lg transition-all "+(hlVid===s.vid?"bg-gray-100":"hover:bg-gray-50")}
+                  style={{opacity: dim ? 0.35 : 1}}>
+                  <div className="rounded-full flex-shrink-0" style={{background:s.color, width:isSum?14:12, height:isSum?14:12}}/>
+                  <span className={"text-xs "+(isSum?"font-semibold text-slate-800":"text-gray-600")}>
+                    {s.label.replace(/ \d{4}$/, "")}
+                  </span>
+                </button>
+              );
+            });
+          })() : series.map((s,i)=>(
             <div key={i} className="flex items-center gap-1.5">
               <div className="w-3 h-3 rounded-full flex-shrink-0" style={{background:s.color}}/>
               <span className="text-xs text-gray-600">{s.label}</span>
             </div>
           ))}
+          {tMode==="yoy" && (
+            <span className="text-[11px] text-gray-400 ml-auto">
+              {tVehicles.length <= 1
+                ? "kolor = rok · przerywana = poza oknem porównania"
+                : `gruba = ${[...tYears].sort().slice(-1)[0]} · cienka = lata wcześniejsze · przerywana = poza oknem`}
+            </span>
+          )}
         </div>
         {(() => {
           // Grupuj serie wg roku — sumy lub średnie miesięczne
@@ -13073,6 +13271,12 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
           const yearTotals = {};
           const yearCounts = {}; // ile niezerowych wartości (do średniej)
           series.forEach(s => {
+            // Ogon leży poza oknem porównania — nigdy nie wchodzi do sum.
+            // Σ pomijamy tylko wtedy, gdy na wykresie są też auta (inaczej wiersz roku
+            // liczyłby te same dane dwa razy). Gdy Σ jest jedyną serią, to ONA jest treścią
+            // tabeli — bez tego znikał cały nagłówek z miesiącami pod wykresem.
+            if (s.kind === "tail") return;
+            if (s.vid === "__SUM__" && !s.sumOnly) return;
             const yrM = s.label.match(/(\d{4})$/);
             if (!yrM) return;
             const yr = yrM[1];
@@ -13091,8 +13295,12 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
             });
           }
           const sortedYrs = Object.keys(yearTotals).sort();
-          const yt25 = yearTotals["2025"], yt26 = yearTotals["2026"];
-          const hasDiff = yt25 && yt26;
+          // Δ liczona dla DWÓCH NAJNOWSZYCH wybranych lat. Było na sztywno "2025" vs "2026",
+          // więc porównanie 2024↔2025 (albo 2024↔2026) nie pokazywało różnicy w ogóle.
+          const _diffYrs = Object.keys(yearTotals).sort().slice(-2);
+          const ytPrev = _diffYrs.length === 2 ? yearTotals[_diffYrs[0]] : null;
+          const ytCur  = _diffYrs.length === 2 ? yearTotals[_diffYrs[1]] : null;
+          const hasDiff = !!(ytPrev && ytCur);
           const YRCOLORS = { "2024":"#8b5cf6", "2025":"#64748b", "2026":"#3b82f6" };
           const fmtTk = v => {
             if (v === 0) return "—";
@@ -13120,16 +13328,53 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false}/>
                   <XAxis dataKey="name" scale="band" tick={false} height={4} axisLine={false} tickLine={false} padding={{left:0,right:0}}/>
-                  <YAxis tick={{fontSize:10,fill:"#94a3b8"}} axisLine={false} tickLine={false} width={45}
+                  <YAxis yAxisId="left" tick={{fontSize:10,fill:"#94a3b8"}} axisLine={false} tickLine={false} width={45}
                     tickFormatter={v=>v>=1000?(v/1000).toFixed(1)+"k":v}/>
+                  {/* Σ na WŁASNEJ osi (prawa) — suma aut jest o rząd wielkości wyżej niż
+                      pojedyncze auto i na wspólnej skali spłaszczała je do płaskiej kreski
+                      przy dolnej krawędzi (zweryfikowane na podglądzie 2026-09-11). */}
+                  {tMode==="yoy" && tSumLine && series.some(s=>s.vid==="__SUM__" && !s.sumOnly) && (
+                    <YAxis yAxisId="sum" orientation="right" tick={{fontSize:10,fill:"#475569"}}
+                      axisLine={false} tickLine={false} width={52}
+                      tickFormatter={v=>v>=1000?(v/1000).toFixed(1)+"k":v}/>
+                  )}
                   <Tooltip formatter={(v,n)=>[v>=1000?(v/1000).toFixed(1)+"k":(isRate?v?.toFixed(v<1?2:1):v?.toFixed(0)), series[n]?.label||n]}
                     contentStyle={{fontSize:12,borderRadius:8,border:"1px solid #e2e8f0"}}
                     cursor={false}/>
-                  {series.map((s,si)=>(
-                    <Line key={si} type="monotone" dataKey={si} stroke={s.color} strokeWidth={2.5}
-                      dot={{r:3.5,fill:s.color,strokeWidth:2,stroke:"white"}}
-                      activeDot={{r:5}} connectNulls={false}/>
-                  ))}
+                  {series.map((s,si)=>{
+                    if (tMode !== "yoy") return (
+                      <Line key={si} yAxisId="left" type="monotone" dataKey={si} stroke={s.color} strokeWidth={2.5}
+                        dot={{r:3.5,fill:s.color,strokeWidth:2,stroke:"white"}}
+                        activeDot={{r:5}} connectNulls={false}/>
+                    );
+                    // Rok do roku: kolor niesie AUTO, a rok/okno kodujemy grubością, przezroczystością
+                    // i kreskowaniem — dzięki temu 3 auta × 2 lata czyta się jako 3 obiekty, nie 6 linii.
+                    const isSum = s.vid === "__SUM__";
+                    const dimmed = hlVid && hlVid !== s.vid;
+                    // Im więcej aut na wykresie, tym mocniej gasimy starsze lata — przy 6 autach
+                    // × 3 lata widok bez podświetlenia robi się nieczytelny (sprawdzone na
+                    // podglądzie 2026-09-11). Kliknięcie auta w legendzie i tak wygrywa.
+                    const dense = tVehicles.length >= 4 && tYears.length >= 3;
+                    // Gdy rok jest kodowany KOLOREM (jedna encja), grubość i krycie zostają
+                    // równe — inaczej starszy rok wyglądałby na "mniej ważny", a to jest
+                    // pełnoprawna druga strona porównania.
+                    let baseOp = s.singleEntity ? 1 : (s.isNewest ? 1 : (dense ? 0.25 : 0.45));
+                    if (s.kind === "tail") baseOp *= 0.55;
+                    const op = dimmed ? baseOp * 0.15 : baseOp;      // nie-podświetlone auto przygasa
+                    let w = s.singleEntity ? (isSum ? 3.5 : 3)
+                                           : (isSum ? (s.isNewest ? 4 : 2.5) : (s.isNewest ? 3 : 1.8));
+                    // Ogon to kontekst, nie treść — ma być cieńszy i bledszy od linii w oknie,
+                    // inaczej kropkowana gruba krecha przeciąga na siebie cały wykres.
+                    if (s.kind === "tail") w = Math.max(1.4, w * 0.55);
+                    return (
+                      <Line key={si} yAxisId={isSum && !s.sumOnly ? "sum" : "left"} type="monotone" dataKey={si} stroke={s.color}
+                        strokeWidth={w} strokeOpacity={op}
+                        strokeDasharray={s.kind==="tail" ? "4 5" : undefined}
+                        dot={dimmed || s.kind==="tail" || (!s.singleEntity && !s.isNewest) ? false
+                          : {r: isSum?4:3.5, fill:s.color, strokeWidth:2, stroke:"white"}}
+                        activeDot={dimmed ? false : {r:5}} connectNulls={false}/>
+                    );
+                  })}
                 </LineChart>
               </ResponsiveContainer>
 
@@ -13173,23 +13418,29 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                     );
                   })}
 
-                  {/* Wiersz Δ (różnica) — tylko gdy oba lata */}
+                  {/* Wiersz Δ — dwa najnowsze wybrane lata (etykieta mówi które) */}
                   {hasDiff && (()=>{
-                    let totalDiff;
+                    let totalDiff, basePrev;
                     if (isRate) {
-                      const avg26 = yt26.filter(v=>v>0); const avg25 = yt25.filter(v=>v>0);
-                      const m26 = avg26.length ? avg26.reduce((s,v)=>s+v,0)/avg26.length : 0;
-                      const m25 = avg25.length ? avg25.reduce((s,v)=>s+v,0)/avg25.length : 0;
-                      totalDiff = parseFloat((m26 - m25).toFixed(4));
+                      const aCur = ytCur.filter(v=>v>0); const aPrev = ytPrev.filter(v=>v>0);
+                      const mCur = aCur.length ? aCur.reduce((s,v)=>s+v,0)/aCur.length : 0;
+                      const mPrev = aPrev.length ? aPrev.reduce((s,v)=>s+v,0)/aPrev.length : 0;
+                      totalDiff = parseFloat((mCur - mPrev).toFixed(4));
+                      basePrev = mPrev;
                     } else {
-                      totalDiff = yt26.reduce((s,v,i)=>s+(v||0)-(yt25[i]||0),0);
+                      totalDiff = ytCur.reduce((s,v,i)=>s+(v||0)-(ytPrev[i]||0),0);
+                      basePrev = ytPrev.reduce((s,v)=>s+(v||0),0);
                     }
+                    // Procent obok kwoty — sama różnica nie mówi, czy to dużo (user 2026-09-11).
+                    const pct = basePrev ? (totalDiff / Math.abs(basePrev)) * 100 : null;
                     const totalC = totalDiff>0?"#15803d":totalDiff<0?"#dc2626":"#9ca3af";
                     return (
                       <div style={{display:"grid", gridTemplateColumns:`repeat(12,1fr) ${TOTAL_COL}px`,
-                        borderTop:"1px solid #e5e7eb", marginTop:4, paddingTop:4, textAlign:"center", alignItems:"center"}}>
+                        borderTop:"1px solid #e5e7eb", marginTop:4, paddingTop:4, textAlign:"center", alignItems:"center",
+                        position:"relative"}}
+                        title={`Różnica ${_diffYrs[1]} − ${_diffYrs[0]}`}>
                         {MS.map((_,mi)=>{
-                          const d = (yt26[mi]||0)-(yt25[mi]||0);
+                          const d = (ytCur[mi]||0)-(ytPrev[mi]||0);
                           const c = d===0?"#9ca3af":d>0?"#15803d":"#dc2626";
                           return (
                             <div key={mi} style={{fontWeight:700,fontSize:10,color:c}}>
@@ -13200,6 +13451,11 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                         <div style={{paddingLeft:8,paddingRight:4,fontWeight:700,color:totalC,fontSize:10,whiteSpace:"nowrap",
                           borderLeft:"1px solid #e5e7eb"}}>
                           Δ: {totalDiff>0?"+":""}{fmtTk(totalDiff)}
+                          {pct !== null && (
+                            <span style={{fontSize:9,opacity:.75,marginLeft:3}}>
+                              ({pct>0?"+":""}{Math.abs(pct)>=100?pct.toFixed(0):pct.toFixed(1)}%)
+                            </span>
+                          )}
                         </div>
                       </div>
                     );
@@ -13263,7 +13519,17 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
         // wniosków z niepełnych miesięcy/kwartałów. compareMaxMi = bieżący month index
         // (0-indexed) — dla maja 2026 = 4 → compare zakres = Sty-Kwi (mi 0..3).
         const _now = new Date();
-        const compareMaxMi = _now.getFullYear() === 2026 ? _now.getMonth() : 12;
+        // Do ostatniego ROZLICZONEGO miesiąca (user 2026-09-11) — nie do ostatniego
+        // kalendarzowego. Frachty są kompletne od razu, więc dla nich wystarcza kalendarz.
+        // Przy okazji: było `=== 2026` na sztywno, co w 2027 dawałoby compareMaxMi=12
+        // i porównanie pełnego roku z niepełnym.
+        const _curY = _now.getFullYear(), _curM = _now.getMonth();
+        const compareMaxMi = (() => {
+          if (yoyMet === "frachty") return _curM;
+          let last = 0;
+          for (let mi = 0; mi < _curM; mi++) if (isSettled(_curY, mi)) last = mi + 1;
+          return last;
+        })();
         // Sum tylko miesięcy w zakresie [startMi, endMi) AND zamkniętych
         const sumClosed = (vals, startMi=0, endMi=12) => {
           let s = 0;
