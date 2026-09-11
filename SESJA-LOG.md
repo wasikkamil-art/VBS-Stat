@@ -3154,3 +3154,21 @@ Rozbiór `weeklyRestCompensation`: dług = 1,00h (tydz. 24–30.08, pauza 44,00h
 ### Otwarte z tego case
 - Korekta 29.08 (praca 2h53 na postoju) — do decyzji po rozmowie z kierowcą; zdjęłaby 1h, ale po fixie dług i tak = 0, więc bez pilności.
 - Node 20 → 22: dotyczy **vbs-invoices (13 funkcji) + fox (2)**; FleetStat już na 22. Decommission 30.10.2026. Odłożone na prośbę usera.
+
+## 2026-09-11 (cd.2) — Node 20 → 22 w fakturach i FOX (deadline 30.10.2026 domknięty)
+
+Google kończy wsparcie runtime Node 20 na Cloud Functions **30.10.2026** (po tej dacie brak deployu, potem wyłączenie). FleetStat był już na Node 22 — zostały dwa repa.
+
+| Projekt | Funkcje | Commit | Runtime po deployu |
+|---|---|---|---|
+| **vbs-invoices** | 13/13 | `1959c65` | ✅ `nodejs22` (0× nodejs20) |
+| **fox** | 2/2 | `aeaeac1` | ✅ `nodejs22` |
+
+- Zmiana: `engines.node` 20→22 w `functions/package.json` + `runtime` nodejs20→nodejs22 w `firebase.json` (FOX nie ma pola `runtime` — bierze z engines). Zależności **bez zmian** (`firebase-functions ^6.1.0`, `firebase-admin ^12.x` — oba wspierają 22; FleetStat chodzi na 22 z tym samym stackiem).
+- **Weryfikacja na żywo (nie tylko „deploy OK")**: `scanIMAPMailboxes` chodzi co 10 min, więc złapany pierwszy cykl PO przełączeniu — deploy 10:50–10:51 UTC, nowa instancja wstała czysto, **scan 10:54:07 UTC `Run complete`, 3 skrzynki (info/radek/faktury), errors: 0**. Przeszło przez 4 sekrety (3× hasło IMAP + ANTHROPIC_API_KEY), połączenie IMAP i pełny przebieg. `firebase functions:list` potwierdza runtime w obu projektach.
+- Przy okazji wypchnięty zaległy commit faktur `ea280ee` (raport tygodniowy płatności) — siedział tylko lokalnie od poprzedniej sesji, backend był zdeployowany, ale kod nie był w GitHubie.
+- ⚠️ **NIEZWERYFIKOWANE end-to-end**: (1) FOX — obie funkcje są callable, odpalają się tylko z apki za loginem; załadowanie modułu OK, realnego wywołania nie było (user kliknie tłumaczenie szablonu / weryfikację kontrahenta). (2) `weeklyPaymentsReport` + `weeklyLeasingReport` — pierwszy przebieg na nowym runtime w poniedziałek 8:00 (ich kod się nie zmienił; i tak mieliśmy ten poniedziałek weryfikować na skrzynce).
+- ⚠️ gcloud CLI nadal się wywala (Python 3.9 vs wymagane 3.10+, `gcloud crashed TypeError`) — Cloud Scheduler niesprawdzony tą drogą; harmonogramy odczytane z kodu (`every 10 minutes`, 2× `every monday 08:00`).
+
+### 🔴 OTWARTE (zgłoszone przez usera, do osobnej sesji)
+**Nocny backup Firestore FOX pada** — GitHub Actions „Nocny backup Firestore (FOX)": *All jobs have failed*, job `backup` failed po 27 s, 1 annotation. Repo `wasikkamil-art/fox`. Nie diagnozowane — user powiedział „później się zajmiemy". Kontekst historyczny: analogiczny backup FleetStat padał 4 noce w czerwcu 2026 przez **nieprzypięty `firebase-admin`, który złapał v14 (breaking)** — fix był `pin @14` + modular API (patrz [[reference_backup_discipline]]). Warto sprawdzić ten trop jako pierwszy.
