@@ -3276,3 +3276,11 @@ mc   aut   KM licznik   Paliwo L   śr. spalanie
 
 ### ⚠️ DO RUTYNY MIESIĘCZNEJ
 Po każdym wypełnieniu arkusza Total_26 trzeba **przenieść km/paliwo/spalanie do `operacyjne`**, inaczej metryki operacyjne w Rentowności znowu się urwą. Dopisane do [[feedback_google_sheet_total26_fill]]. Najbliższe: sierpień, gdy tylko arkusz zostanie uzupełniony.
+
+### cd.5b — „Ilość dni" doimportowana + wyjaśnienie układu arkusza
+User: *„ilości dni w trasie nie zaciągnęło"*. Miał rację — **wiersz „Ilość dni" JEST w arkuszu (offset +38)**, tylko mapowanie w pamięci kończyło się na +36, więc przy pierwszym imporcie go nie zobaczyłem i błędnie stwierdziłem, że danych nie ma.
+- Doimportowane **20 update** (mar–lip, 4 auta) do pól `dni` + `iloscDni`; sty/lut pominięte (już były). Liczba dokumentów bez zmian (89 → 89 — same update, zero nowych). Kontrola: km/paliwo/spalanie/`srWaga` nietknięte przy merge.
+- Σ Flota dni 2026: sty 106,5 · lut 75 · mar 105 · kwi 97 · maj 93 · cze 77 · lip 94.
+- **Sanity check mapowania**: arkuszowe sty/lut (v1: 25/18) zgadzają się co do dnia z tym, co już było w bazie → wiersz trafiony pewnie.
+
+**⚠️ Gotcha arkusza, który omal nie wyprodukował fałszywej „poprawki"**: przy weryfikacji offsetów wyszło, że bloki aut mają RÓŻNE etykiety na +9/+10 (v3 „Nego/E-Toll", v1 „OC 2178/AC 2122") — wyglądało na niespójność układu i błąd w pamięci. **Fałszywy alarm: etykiety siedzą w kolumnie B, a kolumna A to ręczne notatki usera** o polisach. Odczyt `A or B` pokazywał notatkę zamiast nazwy wiersza. Układ wszystkich bloków jest **identyczny** (sprawdzone offsety 0–40), mapowanie w pamięci było poprawne. Dopisane do [[feedback_google_sheet_total26_fill]] razem z pełną listą offsetów 0–40, żeby nikt (ja) tego nie „naprawił" następnym razem.
