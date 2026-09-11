@@ -3172,3 +3172,24 @@ Google kończy wsparcie runtime Node 20 na Cloud Functions **30.10.2026** (po te
 
 ### 🔴 OTWARTE (zgłoszone przez usera, do osobnej sesji)
 **Nocny backup Firestore FOX pada** — GitHub Actions „Nocny backup Firestore (FOX)": *All jobs have failed*, job `backup` failed po 27 s, 1 annotation. Repo `wasikkamil-art/fox`. Nie diagnozowane — user powiedział „później się zajmiemy". Kontekst historyczny: analogiczny backup FleetStat padał 4 noce w czerwcu 2026 przez **nieprzypięty `firebase-admin`, który złapał v14 (breaking)** — fix był `pin @14` + modular API (patrz [[reference_backup_discipline]]). Warto sprawdzić ten trop jako pierwszy.
+
+## 2026-09-11 (cd.3) — Backup FOX naprawiony + NOWY backup faktur (luka: repo nie miało żadnego)
+
+### 🔧 Awaria backupu FOX — przyczyna i fix (commit `43bd55c` w repo fox, ZWERYFIKOWANY)
+Padł **tylko 11.09** (7 poprzednich nocy zielone) — więc nie był to trop z czerwca (unpinned major).
+- **Objaw**: `Cannot find module '@google-cloud/firestore'`, job failed po 27 s. Krok instalacji **zielony** (`added 62 packages`), tylko `npm warn EBADENGINE`.
+- **PRZYCZYNA**: `firebase-admin@14.4.0` podniósł wymaganie engine do **Node >=22**, a workflow miał `node-version: '20'`. **npm nie przerywa instalacji przy niezgodnym engine — po cichu POMIJA opcjonalne zależności**, a `@google-cloud/firestore` jest optional dependency firebase-admin. Install kończy się sukcesem, zrzut pada dopiero na wymaganiu modułu. Ten sam wzorzec co czerwiec 2026, ale piętro niżej: pin jest na major 14, a wymagania zmienił **minor** 14.4.0.
+- **Fix**: `node-version` '20'→'24' (FleetStat ma '24' i chodzi zielono) + **nowy krok-guard**: jawny `require('@google-cloud/firestore')` po instalacji → kolejne ciche pominięcie optional dep da czytelny błąd zamiast stack trace'a.
+- ✅ **Zweryfikowane na żywo**: `gh workflow run` → zielony w 26 s, gałąź `backups` dostała commit `Backup 2026-09-11`, `latest.json`: prospects 951, packages 37, users 6, config 1, **status OK**.
+- **Dane były bezpieczne** — backup z 10.09 kompletny. Stracona jedna noc.
+
+### ✅ NOWY: nocny backup Firestore dla bazy faktur (commit `1b4f983` w repo vbs-invoices)
+Znalezione przy okazji: **vbs-invoices NIE MIAŁ ŻADNEGO workflowu backupu** (pusty `.github/`), choć trzyma dane nieodtwarzalne z innego źródła — **228 faktur, 177 kontrahentów, 6 umów leasingowych z harmonogramami, 28 opłat leasingowych, 13 płatności cyklicznych**. FleetStat i FOX miały, faktury nie.
+- Wzorzec = workflow FOX (gałąź `backups` w tym samym **prywatnym** repo, `GITHUB_TOKEN` zamiast osobnego PAT) + poprawki wyniesione z dzisiejszej awarii (node 24, guard optional-dep, walidacja rozmiaru `sa.json`).
+- **Kolekcje (10)** potwierdzone przez `listCollectionIds` na żywej bazie, subkolekcji brak (notatki/pozycje = tablice w dokumentach): `invoices, contractors, leasings, leasingFees, payments, orphanDocs, users, settings, mailboxState, loginEvents`.
+- **Progi alertu** z zapasem do stanu 11.09: invoices 200 (jest 228), contractors 150 (177), leasingFees 20 (28), payments 10 (13), leasings 5 (6), users 2 (3), settings 1 (3). `orphanDocs` **celowo bez progu** — bufor roboczy, spada naturalnie po podlinkowaniu dokumentów.
+- Harmonogram **01:15 UTC** — nie koliduje z FleetStat (22:00) ani FOX (01:30). Gałąź `backups` utworzona i wypchnięta (README opisujący, że to gałąź bota).
+- Liczności odczytane przez **Firestore REST + `gcloud auth print-access-token`** — sam `gcloud` CLI nadal pada (Python 3.9), ale `print-access-token` działa; `runAggregationQuery` z COUNT to tania ścieżka do liczenia kolekcji bez SDK.
+- ⏳ **BRAKUJE OSTATNIEGO KROKU**: sekret `FIREBASE_SERVICE_ACCOUNT` w repo (repo nie ma dziś **żadnych** sekretów). Konto: `firebase-adminsdk-fbsvc@vbs-invoices.iam.gserviceaccount.com`. **Decyzja usera: klucz generuje sam** przez Firebase Console i ustawia `gh secret set` — klucz nie przechodzi przez agenta ani transkrypt. Do czasu ustawienia pierwszy nocny przebieg padnie z czytelnym komunikatem („Sekret FIREBASE_SERVICE_ACCOUNT pusty lub nieustawiony").
+
+**Stan backupów po tej sesji**: FleetStat ✅ (22:00, osobne repo `vbs-stat-backups`) · FOX ✅ (01:30, gałąź `backups`) · Faktury ⏳ (01:15, gałąź `backups` — czeka na sekret).
