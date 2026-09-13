@@ -3284,3 +3284,33 @@ User: *„ilości dni w trasie nie zaciągnęło"*. Miał rację — **wiersz �
 - **Sanity check mapowania**: arkuszowe sty/lut (v1: 25/18) zgadzają się co do dnia z tym, co już było w bazie → wiersz trafiony pewnie.
 
 **⚠️ Gotcha arkusza, który omal nie wyprodukował fałszywej „poprawki"**: przy weryfikacji offsetów wyszło, że bloki aut mają RÓŻNE etykiety na +9/+10 (v3 „Nego/E-Toll", v1 „OC 2178/AC 2122") — wyglądało na niespójność układu i błąd w pamięci. **Fałszywy alarm: etykiety siedzą w kolumnie B, a kolumna A to ręczne notatki usera** o polisach. Odczyt `A or B` pokazywał notatkę zamiast nazwy wiersza. Układ wszystkich bloków jest **identyczny** (sprawdzone offsety 0–40), mapowanie w pamięci było poprawne. Dopisane do [[feedback_google_sheet_total26_fill]] razem z pełną listą offsetów 0–40, żeby nikt (ja) tego nie „naprawił" następnym razem.
+
+## 2026-09-13 — Case Volodymyr: tacho OK, ale segmenty DDD bez `vehicleId` znikały z timeline (commit `9e76763`)
+
+### Zgłoszenie 1: „coś tacho się przywiesiło" (zdjęcie wyświetlacza VDO: `H+57h25`, czerwone tło)
+**Werdykt: tachograf w porządku, dane czyste.** Z plików zgranych 13.09 18:35:
+- ostatni odpoczynek **11.09 20:22 → 13.09 18:01 = 45h39** (pełny regularny tygodniowy)
+- jazda w tygodniu 7–13.09: **33h24** (limit 56h) · dwutygodniowo **79h** (limit 90h)
+- wyrównanie art. 8.6 = **0h**; w chwili zgłoszenia kierowca jechał 39 min po odpoczynku
+- `57h25` **nie jest długiem** — pasuje do licznika POZOSTAŁEGO czasu jazdy w okresie dwutygodniowym (90 − 33h24 = 56h36; różnica ~50 min z innego okna liczenia w urządzeniu). Czerwień na zdjęciu = bursztynowe podświetlenie VDO uchwycone aparatem.
+- ⚠️ Ubocznie: **raporty ww zawyżają jazdę ~10%** vs tachograf (35h07 vs 33h24 w tygodniu; 50h19 vs 45h01 tydzień wcześniej). Compliance liczy z DDD, więc bez wpływu — ale przy porównaniach panel ww ≠ karta.
+
+### Zgłoszenie 2: „a u nas coś się rozjechało" (screenshot: tooltip 23h01 vs podsumowanie dnia 24h00)
+**To był NASZ bug.** Tooltip trafiał w **syntetyczny wypełniacz** (fill-gap), nie w prawdziwy segment — bo widok nie widział danych z tachografu.
+- **PRZYCZYNA**: `extractDddVehicleRecords` parsował okres użycia pojazdu regexem wymagającym OBU dat (`From X To Y`). Okres **bez daty końcowej** (trasa trwająca w chwili zgrania karty) nie parsował się → rekord pomijany (`if (!vr.from || !vr.to …) continue`) → dni na końcu pliku bez `vehicleId`. `MultiDayActivityView` filtruje po pojeździe → segmenty znikały, dziury zaklejał domyślny odpoczynek.
+- **SKALA** (60 dni): **359 segmentów-sierot u WSZYSTKICH 4 kierowców**, w tym **129 JAZDY (64,8h) i 113 PRACY** — timeline pokazywał postój tam, gdzie kierowca jechał. Rozkład: TK 314CL 100 · WGM 0475M 97 · WGM 0507M 82 · WGM 5367K 80.
+- ✅ **Compliance był NIETKNIĘTY** — `TachografComplianceSection` filtruje po `driverEmail`, nie po pojeździe, więc limity/odpoczynki/wyrównanie liczyły się na komplecie. Zepsuty był **wyłącznie widok timeline**.
+
+### Fix A — widok (`src/App.jsx`, PROD po pushu)
+`belongsHere`: segment bez pojazdu należy do tego auta, gdy jego kierowca był przypisany w dniu segmentu (`driverHistory.from..to`). Dofetch dociąga sieroty po `driverEmail` w **oknie 180 dni** (indeks `driverEmail+startTs` istnieje) i **tylko te bez `vehicleId`** — bez okna ciągnęlibyśmy całą historię kierowcy przy każdym otwarciu (koszt Firestore, patrz 2026-07-20/24).
+**Symulacja read-only (180 dni): wraca 1044 segmentów, w tym 667 jazdy/pracy; ZERO trafiających do >1 pojazdu** (brak ryzyka dublowania).
+
+### Fix B — parser (`functions/index.js`, ✅ DEPLOYED `parseDddFile`)
+- `From X` bez `To` = okres otwarty, domykany ostatnim dniem aktywności w pliku
+- zapas: dzień bez bloku „Vehicles Used" (np. doba samego odpoczynku poza autem) dostaje pojazd z przypisania kierowcy
+- nowy log `[DDD parse] vehicleId: N dni bez pojazdu w pliku, M uzupełnionych z przypisania kierowcy`
+
+⚠️ **NIEZWERYFIKOWANE**: parser sprawdzony tylko statycznie (moduł się ładuje). **Realny dowód = następny wgrany plik DDD** — sprawdzić w logach, czy dni na końcu pliku dostały pojazd i czy licznik sierot spadł do zera.
+
+### ⏳ ZOSTAJE: backfill C
+359 sierot (60 dni) / 1044 (180 dni) nadal ma `vehicleId: null` w bazie. **Wszystkie dają się przypisać jednoznacznie** z `driverHistory` (0 spornych, 0 bez przypisania — zweryfikowane). Po fiksie A widok je pokazuje, więc **bez pilności**; do zrobienia przy okazji, jako zapis do produkcji z asercją liczby dokumentów.
