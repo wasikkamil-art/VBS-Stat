@@ -1651,7 +1651,14 @@ function extractDddVehicleRecords(parsed, vehicles = []) {
   for (const vr of records) {
     const vrn = vr?.registration?.vehicleRegistrationNumber || null;
     if (!vrn) continue;
-    const m = String(vr.vehicleUse || "").match(/From (\d{4}-\d{2}-\d{2})[^T]*To (\d{4}-\d{2}-\d{2})/);
+    // "From X To Y" albo sam "From X" — okres OTWARTY (trasa w toku w chwili zgrania karty).
+    // Wcześniej regex wymagał obu dat, więc otwarty okres dawał from=to=null i cały rekord
+    // był pomijany niżej → dni na końcu pliku zostawały BEZ vehicleId (bug 2026-09-13:
+    // 359 sierot w 60 dniach, w tym 129 segmentów jazdy).
+    const use = String(vr.vehicleUse || "");
+    const mFrom = use.match(/From (\d{4}-\d{2}-\d{2})/);
+    const mTo = use.match(/To (\d{4}-\d{2}-\d{2})/);
+    const m = mFrom ? [null, mFrom[1], mTo ? mTo[1] : null] : null;
     const odoBegin = parseInt(String(vr.vehicleOdometerBegin || "").replace(/[^\d]/g, ""), 10);
     const odoEnd = parseInt(String(vr.vehicleOdometerEnd || "").replace(/[^\d]/g, ""), 10);
     out.push({
@@ -1659,7 +1666,7 @@ function extractDddVehicleRecords(parsed, vehicles = []) {
       vehicleId: plateToId.get(vrn.replace(/\s+/g, "").toUpperCase()) || null,
       country: vr?.registration?.vehicleRegistrationNation || null,
       from: m ? m[1] : null,
-      to: m ? m[2] : null,
+      to: m ? m[2] : null,          // null = okres otwarty (patrz wyżej)
       odometerBegin: Number.isFinite(odoBegin) ? odoBegin : null,
       odometerEnd: Number.isFinite(odoEnd) ? odoEnd : null,
     });
@@ -1688,11 +1695,16 @@ function computeDddDailyReport(parsed, vehicles = [], downloadCutoff = null) {
 
   // Map: data → który pojazd kierowca prowadził (z CardVehiclesUsed)
   const vehicleRecords = extractDddVehicleRecords(parsed, vehicles);
+  // Ostatni dzień, dla którego plik ma aktywności — domyka okresy bez daty końcowej.
+  const lastActivityDay = Object.keys(dailyRecords || {})
+    .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d))
+    .sort()
+    .pop() || new Date().toISOString().slice(0, 10);
   const vehicleByDate = {};
   for (const vr of vehicleRecords) {
-    if (!vr.from || !vr.to || !vr.vehicleVrn) continue;
+    if (!vr.from || !vr.vehicleVrn) continue;      // brak daty KOŃCOWEJ już nie dyskwalifikuje
     let cur = new Date(vr.from + "T00:00:00Z");
-    const end = new Date(vr.to + "T00:00:00Z");
+    const end = new Date((vr.to || lastActivityDay) + "T00:00:00Z");
     while (cur <= end) {
       const day = cur.toISOString().slice(0, 10);
       if (!vehicleByDate[day]) {
@@ -1999,10 +2011,29 @@ exports.parseDddFile = onCall(
       }
 
       // Insert nowe segmenty z source=ddd
+      // Zapas na wypadek dnia bez bloku "Vehicles Used" w pliku (np. doba samego
+      // odpoczynku poza pojazdem): pojazd bierzemy z przypisania kierowcy na ten dzień.
+      // Bez tego segment rodzi się bez `vehicleId` i wypada z widoku timeline, który
+      // filtruje po pojeździe (bug 2026-09-13).
+      const vehicleForDay = (day) => {
+        if (!driverEmail) return null;
+        const em = String(driverEmail).toLowerCase();
+        for (const v of vehicles) {
+          for (const d of (v.driverHistory || [])) {
+            if (!d?.email || String(d.email).toLowerCase() !== em) continue;
+            const from = d.from || "0000-01-01";
+            const to = d.to || "9999-12-31";
+            if (day >= from && day <= to) return v.id;
+          }
+        }
+        return null;
+      };
       let batch = db.batch();
       let writeCount = 0;
+      let rescuedByDriver = 0;
       for (const [day, slot] of Object.entries(dailyTotals)) {
-        const vehicleId = slot.vehicleId || null;
+        let vehicleId = slot.vehicleId || null;
+        if (!vehicleId) { vehicleId = vehicleForDay(day); if (vehicleId) rescuedByDriver++; }
         for (const seg of slot.segments) {
           const startMs = Date.UTC(
             +day.slice(0,4), +day.slice(5,7) - 1, +day.slice(8,10),
@@ -2034,6 +2065,10 @@ exports.parseDddFile = onCall(
       }
       if (writeCount > 0) await batch.commit();
       console.log(`[DDD parse] Wrote ${activitiesWritten} segments to driverActivities (source=ddd, driver=${driverEmail})`);
+      const daysNoVehicle = Object.entries(dailyTotals).filter(([, sl]) => !sl.vehicleId).length;
+      if (daysNoVehicle || rescuedByDriver) {
+        console.log(`[DDD parse] vehicleId: ${daysNoVehicle} dni bez pojazdu w pliku, ${rescuedByDriver} uzupełnionych z przypisania kierowcy`);
+      }
     }
 
     return {

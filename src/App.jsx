@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, Fragment, lazy, Suspense } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, Fragment, lazy, Suspense } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, CartesianGrid } from "recharts";
 // v2025.03.31 — YoY Scorecard rebuild
 
@@ -8938,6 +8938,26 @@ function DddSummaryCard({ label, value, color, bg }) {
 function MultiDayActivityView({ vehicle, driverActivities = [], currentUser = null, isAdmin = false, showToast = () => {} }) {
   const vehicleId = vehicle?.id || "__none__";
 
+  // ── Segmenty-sieroty: DDD bez `vehicleId` (bug 2026-09-13) ──
+  // Parser nadaje pojazd z bloku "Vehicles Used" pliku DDD, ale okres użycia BEZ daty
+  // końcowej (trasa w toku) był pomijany → najświeższe dni zostawały bez przypisania.
+  // W 60 dniach uzbierało się 359 takich segmentów, w tym 129 JAZDY i 113 PRACY.
+  // Ten widok filtrował po `vehicleId`, więc znikały, a dziury zaklejał syntetyczny
+  // odpoczynek (fill-gap niżej) — timeline pokazywał postój tam, gdzie kierowca jechał.
+  // Ratujemy je po kierowcy: segment bez pojazdu należy do tego auta, jeśli jego
+  // kierowca był do niego przypisany w dniu segmentu (driverHistory.from..to).
+  const driverWindows = useMemo(() => (vehicle?.driverHistory || [])
+    .filter(d => d?.email)
+    .map(d => ({ email: String(d.email).toLowerCase(), from: d.from || "0000-01-01", to: d.to || "9999-12-31" })),
+  [vehicle?.driverHistory]);
+  const belongsHere = useCallback((a) => {
+    if (a?.vehicleId) return a.vehicleId === vehicleId;
+    const email = String(a?.driverEmail || "").toLowerCase();
+    if (!email || !a?.startTs) return false;
+    const day = String(a.startTs).slice(0, 10);
+    return driverWindows.some(w => w.email === email && day >= w.from && day <= w.to);
+  }, [driverWindows, vehicleId]);
+
   // Górna subskrypcja daje tylko ostatnie 45 dni (koszt Firestore). Ten widok pozwala
   // cofnąć się o miesiące, więc dociąga PEŁNĄ historię TEGO pojazdu własnym zapytaniem
   // (where vehicleId == — pojedyncza równość, bez indeksu złożonego), raz przy otwarciu.
@@ -8953,7 +8973,31 @@ function MultiDayActivityView({ vehicle, driverActivities = [], currentUser = nu
     (async () => {
       try {
         const snap = await getDocs(query(collection(db, "driverActivities"), where("vehicleId", "==", vehicleId)));
-        if (alive) setFetchedActs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        // Drugi przebieg: segmenty kierowców tego pojazdu (łapie te bez `vehicleId`).
+        // Osobne zapytania po równości na driverEmail — bez indeksu złożonego.
+        // OKNO 180 dni — bez niego ciągnęlibyśmy całą historię każdego kierowcy przy
+        // każdym otwarciu widoku (koszt Firestore, patrz SESJA-LOG 2026-07-20/24).
+        // To pomost do czasu uzupełnienia `vehicleId` w starych segmentach; nowe pliki
+        // po fixie parsera już go nie gubią. Indeks driverEmail+startTs istnieje.
+        const orphanCutoff = new Date(Date.now() - 180 * 86400000).toISOString();
+        const emails = [...new Set((vehicle?.driverHistory || []).map(d => d?.email).filter(Boolean))];
+        const seen = new Set(rows.map(r => r.id));
+        for (const em of emails) {
+          try {
+            const s2 = await getDocs(query(
+              collection(db, "driverActivities"),
+              where("driverEmail", "==", em),
+              where("startTs", ">=", orphanCutoff)
+            ));
+            s2.docs.forEach(d => {
+              const a = { id: d.id, ...d.data() };
+              if (a.vehicleId) return;                  // te mamy już z zapytania po pojeździe
+              if (!seen.has(d.id)) { seen.add(d.id); rows.push(a); }
+            });
+          } catch (e2) { console.error("MultiDay driver fetch error", em, e2); }
+        }
+        if (alive) setFetchedActs(rows);
       } catch (e) {
         console.error("MultiDayActivityView history fetch error", e);
         if (alive) setFetchedActs([]);   // fallback: zdamy się na okno z propsu
@@ -8961,15 +9005,15 @@ function MultiDayActivityView({ vehicle, driverActivities = [], currentUser = nu
       if (alive) setFetchingHist(false);
     })();
     return () => { alive = false; };
-  }, [vehicleId, refetchTick]);
+  }, [vehicleId, refetchTick, vehicle?.driverHistory]);
 
   const vehicleActivities = useMemo(() => {
-    const recent = driverActivities.filter(a => a.vehicleId === vehicleId);
+    const recent = driverActivities.filter(belongsHere);
     if (!fetchedActs) return recent;                       // dofetch jeszcze leci — pokaż okno
-    const byId = new Map(fetchedActs.map(a => [a.id, a]));
+    const byId = new Map(fetchedActs.filter(belongsHere).map(a => [a.id, a]));
     for (const a of recent) byId.set(a.id, a);             // props (live) wygrywa nad snapshotem
     return [...byId.values()];
-  }, [driverActivities, fetchedActs, vehicleId]);
+  }, [driverActivities, fetchedActs, belongsHere]);
 
   // ── Korekty tachografu (source="correction") — adnotacja avail→rest ──
   const corrections = useMemo(
