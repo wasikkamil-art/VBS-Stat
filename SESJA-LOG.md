@@ -3314,3 +3314,8 @@ User: *„ilości dni w trasie nie zaciągnęło"*. Miał rację — **wiersz �
 
 ### ⏳ ZOSTAJE: backfill C
 359 sierot (60 dni) / 1044 (180 dni) nadal ma `vehicleId: null` w bazie. **Wszystkie dają się przypisać jednoznacznie** z `driverHistory` (0 spornych, 0 bez przypisania — zweryfikowane). Po fiksie A widok je pokazuje, więc **bez pilności**; do zrobienia przy okazji, jako zapis do produkcji z asercją liczby dokumentów.
+
+### 2026-09-14 — domknięcie sesji: pamięć + komenda `/9`
+- Case sierot DDD zapisany jako [[reference_ddd_vehicleid_sieroty]] (z instrukcją wykrycia nawrotu i otwartym backfillem) — user: „mogą wracać takie akcje".
+- **Nowa reguła raportowania** [[feedback_limity_i_context]]: zgłaszam przy **≤10% budżetu tokenów sesji** (to widzę w liczniku tury). **Limitów 5h/tygodniowych NIE widzę** — brak dostępu programistycznego; user sprawdza `/usage` w interaktywnym terminalu `claude` (w oknie Code tab komendy dialogowe nie działają).
+- **Nowa komenda `/9`** (`~/.claude/commands/9.md`, globalna dla wszystkich projektów): domknięcie sesji = dopisanie do SESJA-LOG + aktualizacja pamięci + sprawdzenie `git status` w 3 repach + podsumowanie (prod / zweryfikowane vs nie / otwarte) + gotowy prompt do nowego okna.
