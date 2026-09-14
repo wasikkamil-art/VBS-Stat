@@ -3319,3 +3319,46 @@ User: *„ilości dni w trasie nie zaciągnęło"*. Miał rację — **wiersz �
 - Case sierot DDD zapisany jako [[reference_ddd_vehicleid_sieroty]] (z instrukcją wykrycia nawrotu i otwartym backfillem) — user: „mogą wracać takie akcje".
 - **Nowa reguła raportowania** [[feedback_limity_i_context]]: zgłaszam przy **≤10% budżetu tokenów sesji** (to widzę w liczniku tury). **Limitów 5h/tygodniowych NIE widzę** — brak dostępu programistycznego; user sprawdza `/usage` w interaktywnym terminalu `claude` (w oknie Code tab komendy dialogowe nie działają).
 - **Nowa komenda `/9`** (`~/.claude/commands/9.md`, globalna dla wszystkich projektów): domknięcie sesji = dopisanie do SESJA-LOG + aktualizacja pamięci + sprawdzenie `git status` w 3 repach + podsumowanie (prod / zweryfikowane vs nie / otwarte) + gotowy prompt do nowego okna.
+
+## 2026-09-14 — Backfill `vehicleId` w segmentach DDD: 4081 z 5748 + literówkowy alias maila u źródła
+
+Kontynuacja case'u sierot z 13.09 (punkt 3 z listy otwartych). Zmiana **wyłącznie w danych** — zero zmian w kodzie, zero deployu.
+
+### ⚠️ Skala była 16× większa, niż zakładaliśmy
+Dry-run na oknie 180 dni dał 1157 sierot, ale pełny skan `driverActivities` (26 710 dokumentów) pokazał **5748**, wszystkie `source=ddd`, od **2025-04** do 2026-04. Wpis z 13.09 mówił o 359/1044 — to była miara **okna widoku**, nie bazy. **Lekcja: przy takim objawie skanuj całą kolekcję, nie okno, przez które patrzy komponent.**
+
+### Trzy przebiegi backfillu
+Reguła: „segment bez pojazdu dostaje ten, do którego jego kierowca był przypisany w dniu segmentu (`driverHistory.from..to`)", kandydaci **deduplikowani po `vid`** (dwa wpisy historii na to samo auto to nie spór).
+
+| przebieg | segmentów | zakres |
+|---|---|---|
+| okno 180 dni | 1 043 | 03–09.2026 |
+| reszta kolekcji | 753 | 07.2025–03.2026 (Kolabu na v3 po 19.11.2025, Teper na v4) |
+| **alias Lukashchuka** (po potwierdzeniu usera) | **2 285** | 04.07.2025 → 13.04.2026, wszystkie → v5 WGM 0507M |
+| **razem** | **4 081** | sieroty 5748 → 2710 |
+
+Z samych 2285 Volodymyra: **959 jazdy, 666 pracy, 659 odpoczynku** — tyle timeline v5 pokazywał jako pusty postój.
+
+**Asercje przy każdym zapisie**: liczba dokumentów 26 710 → 26 710 (zero nowych/usuniętych), zero innych zmienionych pól (próbki porównane z backupem pole po polu), **zero kolizji** (osobny `diagnose_backfill_verify.mjs`: nigdzie dwóch kierowców w jednym aucie w tym samym czasie). Ślad audytowy w polu `vehicleIdBackfilledAt`; pełny stan sprzed zapisu w `backup_ddd_vehicleid_<ts>.json` (repo root, gitignored) — cofnięcie = przywrócenie `vehicleId: null` z pliku.
+
+### 🔍 Znalezione źródło 2285 sierot: literówka w mailu, nie bug parsera
+`driverHistory` v5 miał na okres 2025-01-08 → 2026-04-15 adres **`volodymyr.lukashuk@fleestat.pl`** — literówka **i w domenie („fleestat"), i w nazwisku („lukashuk")** — podczas gdy segmenty DDD (mapowane po `cardNumber`) niosą `volodymyr.lukashuchuk@fleetstat.pl`. Filtr po pojeździe nie miał szans dopasować. User potwierdził: ta sama osoba, to samo auto.
+- Przed poprawką sprawdzone, czy stary adres gdzieś pracuje: **0 trafień** w `driverActivities`, `users`, `driverEvents`, `dddFiles` — był martwy, trzymał tylko ten jeden wpis historii.
+- Poprawiony w `fleet/data` **transakcją z asercjami** (liczba pojazdów 6 → 6, łączna liczba wpisów historii bez zmian, dokładnie 1 dopasowanie), z backupem całej `driverHistory`.
+- v5 ma teraz **dwa kolejne wpisy z tym samym adresem** — przejrzane wszystkie użycia `driverHistory` w `App.jsx` i `functions/index.js`: każde czyta albo `.find(d => !d.to)` (aktywny kierowca), albo dopasowanie po dacie. Nieszkodliwe, kod bez zmian.
+
+### ⏳ ZOSTAJE 2710 — zablokowane na fakcie biznesowym, nie na kodzie
+- **Kolabu 2575** (2025-04-04 → 2025-11-18) — wpis na v3 startuje 19.11.2025; w tym **1093 segmenty jazdy**, czyli timeline wiosna–jesień 2025 nadal dziurawy
+- **Ivansky 135** (2025-12-19 → 2026-04-06) — wpis na v1 od 15.04.2026
+
+Sprawdzone, czy coś rozstrzyga niezależnie — **nie**: te dni mają wyłącznie segmenty DDD (zero `ww_csv`/`auto_gps` z pojazdem), a `fleetv2_frachty` nie niesie kierowcy. Nie zgaduję czyje auto. Rozwiązanie: user podaje/rozszerza `from` w `driverHistory`, potem `diagnose_backfill_apply2.mjs` dobija resztę bez zmian w kodzie.
+
+**Compliance przez cały czas nietknięty** — `TachografComplianceSection` filtruje po `driverEmail`, nie po pojeździe.
+
+### Zweryfikowany stan pozostałych punktów otwartych (na żywo, nie z pamięci)
+- **Sekret faktur**: `gh secret list -R wasikkamil-art/vbs-invoices` **pusty**; backup padł 12. i 13.09 dokładnie zaplanowanym komunikatem „Sekret FIREBASE_SERVICE_ACCOUNT pusty lub nieustawiony". Guard działa jak zamierzono.
+- **Sierpień**: kolumna J w Total_26 **pusta**, `fuelTransactions/2026-08` **0 tx**, `fleetv2_costs` 19 pozycji / 2 315 € (same projekcje stałych). Import czeka na pliki usera.
+- **Parser DDD**: deploy 13.09 **17:00 UTC**, ostatni upload **16:35 UTC** → **żaden plik jeszcze nie przeszedł przez nowy parser**, linii `[DDD parse] vehicleId:` w logach brak. Dowód = następny wgrany plik.
+- **Wrzesień**: miesiąc otwarty (10 frachtów) — raport dyspozytorów po zamknięciu.
+
+⚠️ **NIEZWERYFIKOWANE end-to-end**: widok zakładki Tacho po backfillu (za loginem — klika user). Dobry test: v5 WGM 0507M, lipiec–sierpień 2025.
