@@ -3362,3 +3362,18 @@ Sprawdzone, czy coś rozstrzyga niezależnie — **nie**: te dni mają wyłączn
 - **Wrzesień**: miesiąc otwarty (10 frachtów) — raport dyspozytorów po zamknięciu.
 
 ⚠️ **NIEZWERYFIKOWANE end-to-end**: widok zakładki Tacho po backfillu (za loginem — klika user). Dobry test: v5 WGM 0507M, lipiec–sierpień 2025.
+
+### cd. — domknięte: sieroty ZERO (user podał brakujące daty)
+
+User dostarczył fakty, których baza nie mogła znać: **Kolabu jeździ v3 od kwietnia 2024, Ivansky v1 od kwietnia 2025**. Wpisane do `driverHistory` jako `2024-04-01` / `2025-04-01` (dnia nie podał) — transakcją, z asercjami (6 pojazdów → 6, łączna liczba wpisów historii bez zmian, dokładnie 2 dopasowania) i kontrolą, czy rozszerzenie okna nie tworzy sporu o pojazd z innym autem (brak).
+
+Czwarty przebieg backfillu: **2710 segmentów**, sieroty **2710 → 0**. Bilans dnia: **6791 uzupełnionych, 26 712 segmentów z pojazdem, zero bez**. Kolizji nadal 0.
+
+Największe odzyski: v3 kwi–lis 2025 (~2770 segmentów, wcześniej cały ten okres był poza timeline'em), v5 lip–gru 2025 (~2111).
+
+### 🔑 Wzorzec do zapamiętania
+Obie przyczyny były **w danych, nie w kodzie**, i obie wrócą przy następnym kierowcy:
+1. **literówka w mailu** w `driverHistory` (v5: `lukashuk@fleestat` vs `lukashuchuk@fleetstat`) — filtr po pojeździe nie ma jak dopasować,
+2. **`driverHistory` zakładana „od dziś"**, a nie od objęcia auta — DDD niesie miesiące wstecz i wszystko sprzed wpisu zostaje sierotą.
+
+Kontrola stanu na przyszłość: liczba `driverActivities` bez `vehicleId` w **całej** kolekcji ma być **0**. Cokolwiek powyżej = nawrót buga parsera albo nowy kierowca bez pełnej historii.
