@@ -3434,3 +3434,55 @@ Nowy wpis w `.claude/launch.json`: **`dashboardy` → port 5191**, serwuje katal
 
 ### Następny krok
 **Import kosztów za sierpień.** Stan na dziś: `fleetv2_costs` 2026-08 ma **19 pozycji / 2 315 €**, same projekcje stałych (`Import Excel v17`); brakuje `paliwo, leasing, wyplata, serwis, oplaty, inne, hotele, imi, ocpd`. Kolumna J w Total_26 pusta, `fuelTransactions/2026-08` puste. Import ma być **top-upem** (bez ruszania tych 19) z oznaczeniem `Import Total_26 2026-08` — konwencja jak lipiec.
+
+## 2026-09-15 (cd.) — Zamknięcie sierpnia + korekta NegoMetalu za pół roku + zakładka Ranking w aplikacji
+
+Długa sesja operacyjna: import miesiąca, dwa znalezione błędy w danych, jeden realny bug produkcyjny i nowy moduł. **Pięć deployów na Vercel, każdy potwierdzony hashem bundla na `fleetstat.pl`.**
+
+### Sierpień 2026 domknięty
+| krok | wynik |
+|---|---|
+| `fuelTransactions/2026-08` | **104 tankowania, 9 080,56 € netto**, 104/104 z krajem i współrzędnymi (`paliwo_import_fs_sierpien.mjs`) |
+| Arkusz Total_26 kol. J | 32+8 komórek z notatkami, odczytane z powrotem bez różnic |
+| `fleetv2_costs` 2026-08 | **+37 pozycji (1142 → 1179)**, note `Import Total_26 2026-08`, projekcje v17 nietknięte |
+| `operacyjne/2026-08` | 4 dokumenty (km, litry, spalanie, dni), asercja 89 → 93 |
+| kontrola | **suma per auto = „suma kosztów" arkusza co do grosza** (v3/v5 po +0,01 z zaokrąglenia formuły E-Tolla) |
+
+Sierpień: **56 pozycji / 28 514,45 €** wobec lipca 57 / 28 492,02. KM z raportu ww (7785/10652/9786/6337), spalanie 14,1 / 14,2 / 13,8 / 17,1.
+
+### 🚨 NegoMetal zaniżony od marca — filtr „ukryj transakcje na które wystawiono FV"
+Sierpniowy eksport miał **1 transakcję (1,65 €)** przy 118 w lipcu. Po odhaczeniu filtra w portalu (podpowiedź usera) pełny eksport dał 1 344 tx za 01.01–28.08.
+- **Marzec–lipiec zaniżone o 3 024,04 €** (III −659, IV −906, V −699, VI −76, VII −684). Styczeń i luty zgadzały się co do złotówki → metodologia była dobra, psuł zakres eksportu.
+- Korekta: 16 wpisów w `fleetv2_costs` **transakcją z asercją 1142→1142** + 16 komórek arkusza z notatką. Backupy `backup_nego_correction_*.json`, `backup_sheet_nego_fix.json`.
+- Sierpień: **2 109,31 €** (v1 590,18 · v3 801,33 · v5 717,80 · v4 0 — bus nie płaci). Sanity: sumy per waluta = subtotale pliku co do grosza.
+- **E-Toll z eksportu portalu e-TOLL** (612 przejazdów): kwota **należna** 1 778,39 PLN. 369,98 PLN „nieuiszczone" (12–14.08, trzy auta) — user: płacimy przez VAT-Polska, oni ściągają i fakturują, więc należna = właściwa podstawa.
+
+### 🐛 Formularz „Nowy koszt" NIGDY nie zapisał żadnego kosztu (commit `06551ec`)
+User dodał hotele przez UI — audyt zarejestrował 4 próby (10:44, 10:50, 11:34, 11:35), baza ani jednej. PITR na 10:47/10:53/11:01 → wszędzie 1142.
+- **Przyczyna**: `AddCostModal.handleSave` zawsze wkładał `liters: undefined` (pole puste dla wszystkiego poza paliwem), Firestore odrzuca `undefined` i przerywa CAŁY zapis tablicy, a `dbSet` łykał błąd w `catch` → `console.error` bez toasta.
+- **Dowód**: wśród 1142 kosztów **ZERO** ma pola `liters`/`hotel`/`fileUrl` — nic nigdy nie przeszło przez ten formularz; wszystko w bazie pochodzi z importów.
+- Fix: `liters` dopisywane tylko gdy niepuste + `ignoreUndefinedProperties` w `firebase.js` + **błąd zapisu leci toastem do usera**.
+- ⚠️ `fleet/data` ma **850 KB z limitu 1 MiB (81%)**, frachty 517 KB — przy ~717 B/fracht zostaje miejsce na ~277 frachtów, czyli **~7–9 miesięcy**. Sprawdzone przy diagnozie, do zaplanowania.
+
+### Uzgodnienie baza ↔ arkusz (wszystkie 40 komórek)
+- **Koszty**: po korekcie zgadza się wszystko poza znanym driftem; dołożone **725,84 €** luki v2 (ZUS 400 + polisa 147,92 + slickshift 15 w styczniu, polisa + slickshift w lutym) — import v17 pomijał je dla nieaktywnego auta.
+- **Frachty**: dodane dwa brakujące (Nimbus cargo 1 050 € v3, WEN 800 € v1 — z zakładek kierowców, bez nr zlecenia). Zostaje świadomie **−1 019 €** drobnych różnic (v1 maj 550 bez klienta, Bojno 200, Rudzki 200, TFT 1250 vs 1400).
+- **Reguła potwierdzona na danych**: miesiąc frachtu = **data załadunku**. User powiedział „data zlecenia, nie zakończenia", ale w 6 frachtach przełomu miesiąca zakładki zgadzają się z załadunkiem — i tak liczą dashboardy.
+
+### ✅ NOWE: zakładka „🏁 Ranking kierowców" (commity `7a16c16`, `f15ba31`, `1cb6daa`, `7222581`)
+Format prezentacji PDF wszedł do aplikacji. Logika w **`src/utils/rankingKierowcow.js`** (czysta, bez React/Firebase — jak `fuelParsers.js`), więc zakładka i generator liczą z jednego kodu.
+- Widzą: **admin (7 rankingów, z kosztami + przełącznik), dyspozytor i podgląd (6, bez kosztów)**. Kierowcy NIE (ich panel nie ładuje kosztów floty — decyzja usera).
+- Okres **wykrywany automatycznie** = miesiące rozliczone (`isSettled`), więc wrzesień wskoczy sam po imporcie kosztów.
+- Do rankingu wchodzą auta **czynne w ostatnim miesiącu okresu**; przy pierwszym uruchomieniu TK 130EF wygrywał spalanie wynikiem ze stycznia. Pominięte lądują w nocie „Poza rankingiem".
+- Nazwy prostowane z loginu (`volodymyr.lukashuchuk` → `Volodymyr Lukashuchuk`), bo tak siedzą w `driverHistory`.
+- **Wydruk: `window.print()` + klon treści pod `<body>`.** Pierwsza wersja (`visibility:hidden`) dała userowi **12 stron zamiast 7** — ukryty sidebar zostawiał po sobie miejsce. Mój test tego nie złapał, bo podgląd nie miał sidebara; drugi test z **atrapą sidebara** odtworzył warunki i potwierdził 7/7.
+- Pułapki przy okazji: bez klasy na klonie wydruk gubi `.rank-tab table` (liczby zlewają się w ciąg); bez `body.ranking-printing` zwykłe Cmd+P dawałoby pustą stronę; `print-color-adjust: exact` ratuje kolory przy odhaczonym „Obraz w tle".
+- Na prośbę usera **paski SVG usunięte** — zostają tabele + „Co widać".
+
+### Materiały o kierowcach przegenerowane (sty–sie)
+`Dashboard_kierowcy_2026.pdf`, `Prezentacja_rankingi_2026.pdf`, `Dashboard_rankingi_kierowcy_2026.pdf`. **Kolabu wyszedł na prowadzenie** (20 356 € zysku) po dodaniu brakującego frachtu. Flota sty–sie: 224 frachty · 279 531 € · **64 953 € zysku** · marża 23,2%. Kontrola: 64 953,30 + TK 130EF (−2 775,33) = 62 177,97 € = wynik floty policzony niezależnie.
+
+### ⚠️ NIEZWERYFIKOWANE end-to-end
+- **Zakładka Ranking i formularz kosztów w prawdziwej aplikacji za loginem** — klika user. Zakładkę sprawdziłem na tymczasowym podglądzie z prawdziwymi danymi (skasowany) i headless, ale nie przez sidebar i uprawnienia.
+- **Fix formularza kosztów** — dowodem będzie dopiero koszt dodany przez UI i widoczny w bazie.
+- Sierpień w zakładkach Koszty / Rentowność / Paliwo — dane sprawdzone zapytaniami, widoki nie oglądane.
