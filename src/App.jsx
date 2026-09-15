@@ -4112,6 +4112,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               frachtyList={frachtyList}
               costs={costs}
               operacyjne={operacyjne}
+              isAdmin={isAdmin}
             />
           )}
 
@@ -12380,8 +12381,13 @@ function rentKey(vehicleId, year, month) { return `${vehicleId}_${year}_${month}
 //  i generator PDF (make_dashboard_rankingi.js) liczyły to samo.
 //  „Pobierz PDF" = window.print() + @media print — bez chromium w CF.
 // ═══════════════════════════════════════════════════════════════════
-export function RankingTab({ vehicles = [], frachtyList = [], costs = [], operacyjne = [] }) {
+export function RankingTab({ vehicles = [], frachtyList = [], costs = [], operacyjne = [], isAdmin = false }) {
   const [rok, setRok] = useState(new Date().getFullYear());
+  // Ranking kosztów widzi TYLKO admin (decyzja usera 15.09) — dyspozytor i podgląd
+  // dostają wersję prezentacyjną. Przełącznik zostaje, żeby admin mógł go schować
+  // przed wydrukiem, gdy pokazuje zestawienie komuś z zewnątrz (to samo, co
+  // BEZ_KOSZTOW=0 w generatorze PDF).
+  const [pokazKoszty, setPokazKoszty] = useState(true);
   const lata = useMemo(() => {
     const set = new Set();
     (costs || []).forEach(c => { const y = Number(String(c?.date || "").slice(0, 4)); if (y) set.add(y); });
@@ -12391,8 +12397,9 @@ export function RankingTab({ vehicles = [], frachtyList = [], costs = [], operac
   useEffect(() => { if (!lata.includes(rok)) setRok(lata[0]); }, [lata, rok]);
 
   const dane = useMemo(() => buildRankingi({
-    frachty: frachtyList, costs, operacyjne, vehicles, rok, bezKosztow: true,
-  }), [frachtyList, costs, operacyjne, vehicles, rok]);
+    frachty: frachtyList, costs, operacyjne, vehicles, rok,
+    bezKosztow: !(isAdmin && pokazKoszty),
+  }), [frachtyList, costs, operacyjne, vehicles, rok, isAdmin, pokazKoszty]);
 
   const { okres, rankings, pusty, pominieci = [] } = dane;
   const MONTHS = okres.months;
@@ -12444,6 +12451,12 @@ export function RankingTab({ vehicles = [], frachtyList = [], costs = [], operac
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {isAdmin && (
+            <label className="flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-200 text-sm text-gray-700 cursor-pointer select-none">
+              <input type="checkbox" checked={pokazKoszty} onChange={e => setPokazKoszty(e.target.checked)} />
+              Ranking kosztów
+            </label>
+          )}
           <select value={rok} onChange={e => setRok(Number(e.target.value))}
             className="px-3 py-2 rounded-xl border border-gray-200 text-sm font-semibold text-gray-700">
             {lata.map(y => <option key={y} value={y}>{y}</option>)}
