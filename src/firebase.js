@@ -43,7 +43,11 @@ export const app = initializeApp(firebaseConfig);
 // mode i tak był nieużywalny. Memory cache = świeże dane zawsze.
 let _db;
 try {
-  _db = initializeFirestore(app, { localCache: memoryLocalCache() });
+  // ignoreUndefinedProperties (2026-09-15): pojedyncze `undefined` w obiekcie
+  // wywalało CAŁY setDoc (FirebaseError "Unsupported field value: undefined"),
+  // a dbSet łykał błąd w catch → koszt dodany w UI znikał bez śladu.
+  // Patrz incydent „Nowy koszt nie zapisuje" — 4 utracone wpisy 15.09.
+  _db = initializeFirestore(app, { localCache: memoryLocalCache(), ignoreUndefinedProperties: true });
 } catch (e) {
   console.warn("Firestore memoryLocalCache niedostępny — fallback na getFirestore default:", e?.message);
   _db = getFirestore(app);

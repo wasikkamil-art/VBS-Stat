@@ -175,6 +175,11 @@ async function dbGet(key) {
 const _pendingWrites = new Set();
 const WRITE_COOLDOWN = 2000; // 2s blokada onSnapshot po zapisie
 
+// Sink na toast z modułowego scope (showToast żyje w komponencie App).
+// Bez tego błąd zapisu leciał tylko do console.error — user widział wpis w UI,
+// baza go nie miała, nikt nie wiedział (15.09: 4 utracone koszty).
+let _notifyWriteError = null;
+
 async function dbSet(key, value) {
   try {
     _pendingWrites.add(key);
@@ -183,6 +188,7 @@ async function dbSet(key, value) {
     setTimeout(() => _pendingWrites.delete(key), WRITE_COOLDOWN);
   } catch (e) {
     console.error("dbSet error", e);
+    if (_notifyWriteError) _notifyWriteError(`⚠️ Nie zapisano (${key}): ${e?.message || e}. Odśwież i spróbuj ponownie.`);
     _pendingWrites.delete(key);
   }
 }
@@ -1807,6 +1813,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
   // ── ACTIONS ──
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2500); };
+  useEffect(() => { _notifyWriteError = showToast; return () => { _notifyWriteError = null; }; }, []);
 
   const addCost = async (entry) => {
     const costId = uid();
@@ -12116,8 +12123,11 @@ function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, 
       amountEUR: form.amountEUR ? parseFloat(form.amountEUR) : (hasAmount ? (toEUR(parseFloat(form.amountPLN)) || null) : 0),
       date:      form.date,
       note:      form.note,
-      liters:    form.liters ? parseFloat(form.liters) : undefined,
     };
+    // NIE dopisuj `liters: undefined` — Firestore odrzuca undefined i wywala CAŁY
+    // zapis tablicy kosztów (incydent 15.09: żaden koszt z tego formularza nigdy
+    // się nie zapisał, bo przy nie-paliwie pole litrów jest puste).
+    if (form.liters) entry.liters = parseFloat(form.liters);
     if (isSerwis && !hasAmount) entry.pendingSerwis = true;
     if (file) Object.assign(entry, { fileUrl: file.fileUrl, filePath: file.filePath, fileName: file.fileName, fileType: file.fileType, fileSize: file.fileSize });
     if (hotel) { const { _match, ...h } = hotel; entry.hotel = h; }
