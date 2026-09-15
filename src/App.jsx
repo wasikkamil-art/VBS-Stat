@@ -12457,12 +12457,11 @@ export function RankingTab({ vehicles = [], frachtyList = [], costs = [], operac
           body.ranking-printing #ranking-portal { display: block !important; }
           .ranking-noprint { display: none !important; }
           .ranking-page {
-            page-break-after: always; break-after: page;
             page-break-inside: avoid; break-inside: avoid;
+            margin-bottom: 10mm !important;
             border: none !important; box-shadow: none !important;
-            border-radius: 0 !important; padding: 0 !important; margin: 0 !important;
+            border-radius: 0 !important; padding: 0 !important;
           }
-          .ranking-page:last-child { page-break-after: auto; break-after: auto; }
           /* kolory drukują się nawet przy odhaczonym „Obraz w tle" */
           #ranking-portal, #ranking-portal * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         }
@@ -12512,7 +12511,6 @@ export function RankingTab({ vehicles = [], frachtyList = [], costs = [], operac
 
       <div id="ranking-print" className="rank-tab space-y-5">
         {rankings.map(r => {
-          const maxAbs = Math.max(...r.wiersze.map(w => Math.abs(w.suma)), 1);
           return (
             <div key={r.key} className="ranking-page bg-white rounded-2xl border border-gray-100 p-5">
               <div className="flex items-start justify-between gap-4 mb-3 pb-3 border-b border-gray-100">
@@ -12575,36 +12573,16 @@ export function RankingTab({ vehicles = [], frachtyList = [], costs = [], operac
                 </tbody>
               </table>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mt-4">
-                <div>
-                  <div className="text-xs font-semibold text-gray-600 mb-2">
-                    Wynik okresu <span className="text-gray-400 font-normal">— {r.etykietaRazem.toLowerCase()}</span>
-                  </div>
-                  <svg viewBox={`0 0 330 ${r.wiersze.length * 27 + 2}`} width="100%">
-                    {r.wiersze.map((w, i) => {
-                      const y = i * 27 + 4;
-                      const bw = Math.max(2, Math.abs(w.suma) / maxAbs * 165);
-                      return (
-                        <g key={w.vid}>
-                          <text x="0" y={y + 12} fontSize="10" fill="#334155">{w.short}</text>
-                          <rect x="80" y={y + 2} width={bw} height="14" rx="2.5" fill={w.col} opacity={w.suma < 0 ? 0.35 : 0.9} />
-                          <text x={80 + bw + 6} y={y + 13} fontSize="10" fontWeight="700" fill={w.suma < 0 ? "#dc2626" : "#0f172a"}>{w.sumaTxt}</text>
-                        </g>
-                      );
-                    })}
-                  </svg>
-                </div>
-                <div>
-                  <div className="text-xs font-semibold text-gray-600 mb-2">Co widać</div>
-                  <ul className="space-y-1.5">
-                    {r.wnioski.map((segs, i) => (
-                      <li key={i} className="text-[11px] text-gray-700 leading-relaxed pl-3 relative">
-                        <span className="absolute left-0 text-blue-500">▸</span>
-                        {segs.map((sg, j) => sg.b ? <b key={j} className="text-gray-900">{sg.s}</b> : <span key={j}>{sg.s}</span>)}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+              <div className="mt-4">
+                <div className="text-xs font-semibold text-gray-600 mb-2">Co widać</div>
+                <ul className="space-y-1.5">
+                  {r.wnioski.map((segs, i) => (
+                    <li key={i} className="text-[11px] text-gray-700 leading-relaxed pl-3 relative">
+                      <span className="absolute left-0 text-blue-500">▸</span>
+                      {segs.map((sg, j) => sg.b ? <b key={j} className="text-gray-900">{sg.s}</b> : <span key={j}>{sg.s}</span>)}
+                    </li>
+                  ))}
+                </ul>
               </div>
 
               <div className="mt-3 pt-2 border-t border-gray-100 text-[9px] text-gray-400 leading-relaxed">
