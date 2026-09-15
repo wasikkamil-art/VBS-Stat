@@ -12388,6 +12388,31 @@ export function RankingTab({ vehicles = [], frachtyList = [], costs = [], operac
   // przed wydrukiem, gdy pokazuje zestawienie komuś z zewnątrz (to samo, co
   // BEZ_KOSZTOW=0 w generatorze PDF).
   const [pokazKoszty, setPokazKoszty] = useState(true);
+
+  // Wydruk: klonujemy treść do kontenera bezpośrednio pod <body> i chowamy resztę
+  // przez display:none. Pierwsze podejście (visibility:hidden na body *) ZOSTAWIAŁO
+  // miejsce po sidebarze i nagłówku — user dostawał 12 stron zamiast 7, bo drukarka
+  // dostawała dokument wysokości całej aplikacji. display:none na rodzeństwie
+  // kontenera usuwa te elementy z układu i strony wracają 1:1 do sekcji.
+  const drukuj = () => {
+    const src = document.getElementById("ranking-print");
+    if (!src) { window.print(); return; }
+    const holder = document.createElement("div");
+    holder.id = "ranking-portal";
+    // KLASA JEST KONIECZNA: reguły tabeli są zapisane jako `.rank-tab table {...}`,
+    // a klon nie dziedziczy klasy z kontenera — bez niej wydruk wychodzi bez ramek
+    // i bez odstępów w komórkach (liczby zlewają się w jeden ciąg).
+    holder.className = src.className;
+    holder.innerHTML = src.innerHTML;
+    document.body.appendChild(holder);
+    // Klasa na <body> włącza reguły druku tylko na czas tego wywołania. Bez niej
+    // zwykłe Cmd+P na zakładce dałoby PUSTĄ stronę (wszystko schowane, klonu brak).
+    document.body.classList.add("ranking-printing");
+    try { window.print(); } finally {
+      document.body.classList.remove("ranking-printing");
+      holder.remove();
+    }
+  };
   const lata = useMemo(() => {
     const set = new Set();
     (costs || []).forEach(c => { const y = Number(String(c?.date || "").slice(0, 4)); if (y) set.add(y); });
@@ -12423,14 +12448,23 @@ export function RankingTab({ vehicles = [], frachtyList = [], costs = [], operac
   return (
     <div>
       <style>{`
+        #ranking-portal { display: none; }
         @media print {
           @page { size: A4 landscape; margin: 8mm; }
-          body * { visibility: hidden !important; }
-          #ranking-print, #ranking-print * { visibility: visible !important; }
-          #ranking-print { position: absolute; left: 0; top: 0; width: 100%; }
+          html, body { height: auto !important; overflow: visible !important; background: #fff !important; }
+          /* wszystko poza klonem znika Z UKŁADU (nie samo „visibility") */
+          body.ranking-printing > *:not(#ranking-portal) { display: none !important; }
+          body.ranking-printing #ranking-portal { display: block !important; }
           .ranking-noprint { display: none !important; }
-          .ranking-page { page-break-after: always; border: none !important; box-shadow: none !important; }
-          .ranking-page:last-child { page-break-after: auto; }
+          .ranking-page {
+            page-break-after: always; break-after: page;
+            page-break-inside: avoid; break-inside: avoid;
+            border: none !important; box-shadow: none !important;
+            border-radius: 0 !important; padding: 0 !important; margin: 0 !important;
+          }
+          .ranking-page:last-child { page-break-after: auto; break-after: auto; }
+          /* kolory drukują się nawet przy odhaczonym „Obraz w tle" */
+          #ranking-portal, #ranking-portal * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         }
         .rank-tab table { border-collapse: collapse; width: 100%; font-size: 11.5px; }
         .rank-tab th { text-align: right; padding: 5px 6px; color: #64748b; font-weight: 600;
@@ -12461,7 +12495,7 @@ export function RankingTab({ vehicles = [], frachtyList = [], costs = [], operac
             className="px-3 py-2 rounded-xl border border-gray-200 text-sm font-semibold text-gray-700">
             {lata.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
-          <button onClick={() => window.print()}
+          <button onClick={drukuj}
             className="px-4 py-2 rounded-xl text-sm font-semibold text-white"
             style={{ background: "#0071e3" }}>
             📄 Pobierz PDF
