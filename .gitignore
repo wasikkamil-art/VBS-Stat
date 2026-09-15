@@ -82,3 +82,4 @@ reconcile_andamur.mjs
 andamur_faktury/
 backup_andamur_*.json
 backup_sheet_andamur_*.json
+podglad/

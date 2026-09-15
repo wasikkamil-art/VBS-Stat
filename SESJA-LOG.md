@@ -3377,3 +3377,60 @@ Obie przyczyny były **w danych, nie w kodzie**, i obie wrócą przy następnym 
 2. **`driverHistory` zakładana „od dziś"**, a nie od objęcia auta — DDD niesie miesiące wstecz i wszystko sprzed wpisu zostaje sierotą.
 
 Kontrola stanu na przyszłość: liczba `driverActivities` bez `vehicleId` w **całej** kolekcji ma być **0**. Cokolwiek powyżej = nawrót buga parsera albo nowy kierowca bez pełnej historii.
+
+## 2026-09-15 — Analityka pracy kierowców: dashboard + rankingi + prezentacja (bez zmian w aplikacji)
+
+Cała sesja to **materiały wyjściowe generowane ze skryptów** — zero zmian w `src/`, zero deployu. Dane czytane read-only z Firestore.
+
+### Co powstało
+| plik | zawartość |
+|---|---|
+| `Dashboard_kierowcy_2026.pdf` | 3 strony: KPI + tabela zbiorcza, przebieg miesięczny, struktura kosztów + porównanie odporne na różnice między autami |
+| `Dashboard_rankingi_kierowcy_2026.pdf` | 9 stron: 2 slajdy zestawienia + 7 rankingów z wnioskami |
+| `Prezentacja_rankingi_2026.pdf` | 8 stron: to samo **bez rankingu kosztów** (`BEZ_KOSZTOW=0` generuje wersję pełną) |
+
+Generatory (gitignored wzorcem `make_dashboard*`): `make_dashboard_kierowcy.js`, `make_dashboard_rankingi.js`. Drugi ma **jeden generyczny blok rankingu** (`ranking()` + `tabelaKompakt()` na wspólnym `oblicz()`) — dołożenie metryki to kilka linii spec-a.
+
+### Zakres i reguła okresu
+**Styczeń–lipiec 2026.** Sierpień/wrzesień mają frachty (37 szt. / 56 284 €), ale nie mają kosztów zmiennych, więc zysk byłby fikcyjny — ta sama reguła co `isSettled` w module Rentowności. Na kartach kierowców sierpień+wrzesień pokazane osobno, jako **sam obrót**.
+
+**Flota sty–lip: 630,5 dnia · 196 frachtów · 238 161 € · koszty 183 049 € · zysk 55 112 € (marża 23,1%)**
+
+| kierowca | dni | frachty | zysk | marża | spalanie | €/dzień |
+|---|--:|--:|--:|--:|--:|--:|
+| Lukashuchuk (v5) | 177,0 | 56 | 18 817 € | 27,0% | 15,44 | 394 |
+| Teper (v4) | 144,0 | 43 | 15 408 € | 30,7% | 16,91 | 348 |
+| Kolabu (v3) | 146,5 | 50 | 15 087 € | 24,7% | 14,44 | 417 |
+| Iwansky (v1) | 163,0 | 47 | 5 800 € | 10,2% | 15,55 | 350 |
+
+### ✅ Kontrola zgodności z aplikacją
+Zysk 4 kierowców **55 111,79 €** + TK 130EF (−2 039,49 €) = **53 072,30 €** — **co do grosza** wartość floty 2026 z zakładki Rentowność (liczba z sesji 11.09). Dashboard i aplikacja liczą to samo.
+
+### 🔍 Znalezione przy okazji: arkuszowe spalanie ≠ policzone (sty–maj)
+Spalanie liczę jako **litry z kart ÷ km z licznika × 100**. Porównanie z ręczną kolumną „Spalanie" w Total_26:
+- **czerwiec i lipiec zgadzają się co do setnych** (wypełniane z tych samych danych),
+- **styczeń–maj arkusz jest NIŻSZY o 0,5–1,6 L/100 km**; 16 z 28 miesięcy różni się o >0,5 L.
+- Hipoteza „arkusz liczy z KM google" **obalona** — wychodzą absurdy (21–27 L/100 km). Tamte liczby wymagałyby przebiegu wyższego o 300–500 km/mc niż licznik.
+- W materiałach zostaje wartość policzona (sprawdzalna z dwóch twardych źródeł), z jawną notą w stopce. **Skąd pochodziły wpisy sty–maj — pytanie otwarte do usera.**
+
+### Decyzje układu (iteracje z userem)
+- **Wyleciały**: bump chart „zmiana pozycji w rankingu" i kolumna „miesiące na 1. miejscu".
+- **Zestawienie na dwóch slajdach**: cz. 1 pieniądze i wolumen (frachty, zysk, liczba frachtów), cz. 2 czas pracy i wydajność (dni, średnio na dzień, miejsca w rankingach).
+- **Nowa metryka „fracht na dzień w trasie"** = kwota frachtów okresu ÷ dni okresu (nie średnia z miesięcy). **Odwraca ranking**: Kolabu 417 €/dzień przy najmniejszej liczbie dni po Teperze, Lukashuchuk 394 mimo wygranej we wszystkich sumach.
+- Kolumna wyniku w tej tabeli nazywa się **„Średnio na dzień"** (było „Okres”), tak samo w macierzy miejsc.
+- Nazewnictwo ujednolicone: **„frachty", nie „obrót"**.
+
+### Pułapki techniczne złapane na żywo (warte pamięci)
+- **Strony przelewały się poza A4** mimo `height:194mm` — `page-break` nie chroni przed przepełnieniem, treść była ucinana w PDF. Dodany skrypt `diagnose_pdf_fit.js`: mierzy `scrollHeight` każdej `.page` i porównuje z limitem 733 px. **Każdą zmianę układu weryfikuję tym skryptem.**
+- **`node skrypt.js | head -2` ubija proces SIGPIPE-em** zanim zapisze wszystkie zrzuty — oglądałem nieaktualne PNG i uznałem poprawkę za niedziałającą. Przekierowanie do pliku zamiast `head`.
+- **Miesiące rozjeżdżały się między tabelami** — każda dobierała szerokości do treści. Fix: `table-layout:fixed` + `colgroup`, gdzie kolumny stałe sumują się **do tej samej wartości w każdej tabeli** (118 + 72 px), niezależnie od tego, czy tabela ma „Śr./mc", czy kolumnę dodatkową.
+- **Polski cudzysłów `„` w stringu JS** zamkniętym `"` — `„Dni w trasie"` kończy string i wywala parser. Trzeba `”`.
+- **Logo**: `public/app-fleetstat.png` jako data URI w **jednej regule CSS**, nie `<img>` na stronę (base64 × liczba stron = spuchnięty PDF).
+
+### Podgląd na localhost
+Nowy wpis w `.claude/launch.json`: **`dashboardy` → port 5191**, serwuje katalog **`podglad/`** (a nie repo — w katalogu głównym leży `serviceAccountKey.json`). `podglad/` dopisany do `.gitignore`.
+
+⚠️ **NIEZWERYFIKOWANE**: nic w aplikacji nie było ruszane, więc nie ma czego klikać — ale **liczby w materiałach pochodzą z moich zapytań, nie ze zrzutu ekranu z aplikacji**. Zgodność z Rentownością potwierdzona rachunkowo (patrz wyżej), nie wizualnie.
+
+### Następny krok
+**Import kosztów za sierpień.** Stan na dziś: `fleetv2_costs` 2026-08 ma **19 pozycji / 2 315 €**, same projekcje stałych (`Import Excel v17`); brakuje `paliwo, leasing, wyplata, serwis, oplaty, inne, hotele, imi, ocpd`. Kolumna J w Total_26 pusta, `fuelTransactions/2026-08` puste. Import ma być **top-upem** (bez ruszania tych 19) z oznaczeniem `Import Total_26 2026-08` — konwencja jak lipiec.
