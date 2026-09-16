@@ -3556,3 +3556,21 @@ Od teraz `scheduledGpsPoll` dopisuje do każdego punktu pole **`cc`** (kraj), a 
 **Pierwszy w pełni wiarygodny dzień to 17.09.** Od października miesiąc będzie kompletny — wtedy €/km per kraj policzymy z twardych danych zamiast z tras zleceń.
 
 Pułapki złapane po drodze: wzorzec `*.json` w `.gitignore` zjadał plik granic (bez wyjątku deploy z czystego klona padłby na `require`); pokrycie liczone dopiero od 20 km/dobę, bo przy postoju 2 km wobec 1 km dawało 200%; `gcloud` na tej maszynie nadal się wywala (`TypeError` w `scheduler jobs list`), więc backfill poszedł skryptem lokalnym używającym **tych samych modułów** co CF.
+
+### cd. — zakładka „Analizy", etap 1 (commity `379db45`, `5895efb`, na main)
+
+Zamiast osobnej zakładki Ranking mamy jedno miejsce na zestawienia, które dotąd powstawały ręcznie ze skryptów.
+
+- **`src/components/AnalizyTab.jsx`** — kontener z pod-nawigacją (wzorzec jak przełącznik widoków w Rentowności), **lazy chunk** (21,7 kB): główny bundle **1 740 → 1 722 kB** mimo dołożonego kodu.
+- **`src/components/RankingTab.jsx`** — 222 linie wyjęte z `App.jsx` bez zmian w logice (komponent był już samodzielny — zależał tylko od `buildRankingi` i `MIES`/`MIES_K`).
+- Odnogi 2 i 3 to na razie opis zawartości **i jawnie napisane, czego brakuje**.
+
+**Uprawnienia odnóg** (decyzja usera): rankingi kierowców — wszyscy; **opłaty drogowe — admin + dyspozytor** (planują trasy, koszt myta ich dotyczy); **dashboard dyspozytorów — tylko admin** (ocenia ich pracę). Przy jednej widocznej odnodze pod-nawigacja się nie pokazuje.
+
+⚠️ **Znalezione przy okazji: dyspozytorzy NIE widzieli zakładki Ranking wdrożonej 15.09.** Jawna lista `allowedTabs` całkowicie nadpisuje `DEFAULT_TABS_BY_ROLE`, a żaden z czterech dyspozytorów nie miał `"ranking"` na liście — zakładkę widzieli wyłącznie dwaj adminowie. Dopisane `"analizy"` batchem z backupem (`backup_allowedTabs_*.json`), asercja 4/4, każde konto zweryfikowane po zapisie.
+
+Identyfikator zakładki zmieniony `ranking` → `analizy`, więc `effectiveTabs` dostał alias starej nazwy — bez niego ktokolwiek z jawną listą zawierającą `"ranking"` straciłby dostęp.
+
+**Zweryfikowane w przeglądarce na trzech rolach z atrapą sidebara**: admin 3 odnogi + przełącznik kosztów, dyspozytor 2 odnogi (rankingi + opłaty), podgląd bez pod-nawigacji. Zero błędów w konsoli, przełączenie roli nie gubi widoku (fallback na rankingi).
+
+**Następne etapy**: (2) dashboard dyspozytorów w aplikacji — dane są w `fleetv2_frachty`, logika `bucketFor` do przeniesienia z generatora do `src/utils/`; (3) opłaty drogowe — wymaga **importu transakcji NegoMetal do Firestore** (wzorzec: `fuelTransactions` + `fuelParsers.js`), do ustalenia czy uploader w UI, czy skrypt.
