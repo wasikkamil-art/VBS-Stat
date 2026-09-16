@@ -3574,3 +3574,21 @@ Identyfikator zakładki zmieniony `ranking` → `analizy`, więc `effectiveTabs`
 **Zweryfikowane w przeglądarce na trzech rolach z atrapą sidebara**: admin 3 odnogi + przełącznik kosztów, dyspozytor 2 odnogi (rankingi + opłaty), podgląd bez pod-nawigacji. Zero błędów w konsoli, przełączenie roli nie gubi widoku (fallback na rankingi).
 
 **Następne etapy**: (2) dashboard dyspozytorów w aplikacji — dane są w `fleetv2_frachty`, logika `bucketFor` do przeniesienia z generatora do `src/utils/`; (3) opłaty drogowe — wymaga **importu transakcji NegoMetal do Firestore** (wzorzec: `fuelTransactions` + `fuelParsers.js`), do ustalenia czy uploader w UI, czy skrypt.
+
+### cd. — Analizy etapy 2 i 3: dashboard dyspozytorów i opłaty drogowe w aplikacji (`a9d271d`, `a7b3b56`)
+
+**Etap 2 — dyspozytorzy.** `src/utils/dyspozytorzy.js` (kubełkowanie + agregacja wyjęte z generatora PDF) + `src/components/DyspozytorzyAnaliza.jsx`. Dwa ujęcia: **miesiąc** (z porównaniem do poprzedniego) i **narastająco** od stycznia, z rozbiciem miesiąc po miesiącu.
+- Zgodność z raportem: lipiec 31 frachtów / 44 870 € / AGA 35,8% / ARO 62,7% / wsp. 1,6% — **co do liczby jak w PDF**.
+- **Nowe wobec generatora**: frachty z dyspozytorem spoza trójki lądują w pozycji „poza podziałem" zamiast po cichu wypadać. Sty–wrz: **17 frachtów / 22 760 €** (Karol, Przemo, Miki, „ARUŚ :D", V. Iwanski…). TOTAL zostaje sumą trzech kubełków (zgodność z wcześniejszymi raportami), ale reszta jest widoczna z nazwiskami.
+- Kafelki zmian dostały jednostki (%, pkt%, sztuki) — samo „−63,4" nie mówiło, czego dotyczy.
+
+**Etap 3 (część) — opłaty drogowe.** Nowa kolekcja **`tollAnalysis/{YYYY-MM}`**; zapisane lipiec i sierpień 2026 (`zrodlo: "reczna"`, w UI chip „analiza policzona ręcznie z eksportów"). Struktura dobrana tak, żeby **przyszłe miesiące z licznika CAN i importu transakcji weszły w to samo miejsce bez zmian w widoku**.
+- Widok: opłaty per kraj ze zmianą mc/mc, stawka €/km per kraj, kontrola e-TOLL wobec taryfy urzędowej (612 przejazdów, 0,409 vs 0,41 PLN/km, 0 duplikatów, 369,98 PLN nieuiszczone), struktura zleceń w pkt%.
+- Kraje z realnym przebiegiem i zerem opłat pokazują **„bez opłat"** zamiast kreski (Szwajcaria: 388 km, 0 €) — to informacja, nie brak danych.
+- Nota metodologiczna jest **częścią widoku**: mówi wprost, że km pochodzą z tras zleceń i pomijają puste przebiegi.
+
+**`firestore.rules`**: `tollAnalysis` — odczyt zalogowani, zapis admin; `countryKmDaily` — odczyt zalogowani, **zapis tylko z Cloud Function**. Bez tego domyślne `deny` blokowałoby widok. Reguły wdrożone.
+
+⚠️ **Wpadka złapana w porę**: do podglądu zrzuciłem frachty do `public/frachty2026.json` — katalog publiczny, plik wszedłby do `dist/` i byłby dostępny bez logowania. Usunięty przed buildem i commitem; w repo nigdy nie był.
+
+Bundle: `AnalizyTab` 42,9 kB (gzip 13,0) jako osobny chunk; główny bez zmian.
