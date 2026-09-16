@@ -16,18 +16,19 @@ export const KUBELKI = [
 
 const normName = (s) => String(s || "").trim().toLowerCase();
 
-/** Nazwisko z pola dyspozytora → kubełek. Null, gdy pole puste albo nierozpoznane. */
+/** Nazwisko z pola dyspozytora → kubełek. Null, gdy pole puste albo nierozpoznane.
+ *  „ARUŚ” to Arek — potwierdzone przez usera 2026-09-16, wariant bez ogonka też łapiemy. */
 export function bucketFor(name) {
   const n = normName(name);
   if (!n) return null;
   const hasAga = n.includes("aga") || n.includes("agnies");
-  const hasAro = n.includes("aro") || n.includes("arek") || n.includes("arkad");
+  const hasAro = n.includes("aro") || n.includes("arek") || n.includes("arkad") || n.includes("aruś") || n.includes("arus");
   const explicitJoint = n.includes("aro-aga") || n.includes("aga-aro") || n.includes("aga-arek") || n.includes("arek-aga");
   if (explicitJoint || (hasAga && hasAro && (n.includes("-") || n.includes("+") || n.includes("/") || n.includes(" ")))) {
     if (hasAga && hasAro) return "AroAga";
   }
   if (n.startsWith("aga") || n.includes("agnies")) return "Aga";
-  if (n.startsWith("aro") || n.includes("arek") || n.includes("arkad")) return "Aro";
+  if (n.startsWith("aro") || n.includes("arek") || n.includes("arkad") || n.includes("aruś") || n.includes("arus")) return "Aro";
   return null;
 }
 
