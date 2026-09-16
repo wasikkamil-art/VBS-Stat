@@ -3486,3 +3486,51 @@ Format prezentacji PDF wszedł do aplikacji. Logika w **`src/utils/rankingKierow
 - **Zakładka Ranking i formularz kosztów w prawdziwej aplikacji za loginem** — klika user. Zakładkę sprawdziłem na tymczasowym podglądzie z prawdziwymi danymi (skasowany) i headless, ale nie przez sidebar i uprawnienia.
 - **Fix formularza kosztów** — dowodem będzie dopiero koszt dodany przez UI i widoczny w bazie.
 - Sierpień w zakładkach Koszty / Rentowność / Paliwo — dane sprawdzone zapytaniami, widoki nie oglądane.
+
+## 2026-09-16 — Opłaty drogowe: skąd wzrost, dashboard, dwa bugi GPS naprawione
+
+Dzień w całości o mycie: skąd skok kosztów w sierpniu, czy dostawcy nie zawyżają, i czym to liczyć precyzyjnie od września.
+
+### 🔍 Skąd wzrost — nie z przebiegu, tylko z kierunków
+Sierpień **1 731 € → 2 524 € (+46%)** przy przebiegu **38 265 → 34 560 km (−10%)**. Flota przejechała mniej, a zapłaciła o 793 € więcej.
+
+Cały wzrost to **Niemcy: 933 → 1 624 € (+691 €)**. Powód widać w strukturze zleceń: udział frachtów dotykających DE **18% → 38%**, kosztem Francji i Hiszpanii (68% → 46%), gdzie jeździmy krajówkami za ułamek stawki. Toll Collect nalicza każdy km autostrady i drogi krajowej — nie da się objechać.
+
+Najlepszy dowód to **v3: przebieg 10 639 → 10 652 km (+13 km), myto w Niemczech 203 → 654 €**.
+
+### ✅ Kontrola dostawców — nie zawyżają
+| co | wynik |
+|---|---|
+| stawka DE miesiąc do miesiąca | **0,224 → 0,221 €/km** (−2%) |
+| stawka DE fracht po frachcie (23 trasy) | mediana **0,205 €/km**, taryfa Toll Collect 7,5–12 t Euro 6 = 0,19–0,22 |
+| e-TOLL | **0,409 PLN/km** wobec taryfy urzędowej 0,41 |
+| duplikaty e-TOLL | 0 na 612 przejazdów |
+| opłaty bez ruchu pojazdu | nie znaleziono (v1 75/75 tx w oknach frachtów, v3 69/74, v5 33/40 — sieroty to przełomy miesiąca i powroty) |
+
+Kilometry per kraj policzone z tras zleceń (routing + granice państw), bo Atlas nie przechowuje śladu przejazdu. Pokrycie 24 072/29 605 km (VII) i 18 573/28 223 (VIII) — brak pustych przebiegów, więc stawki bezwzględne zawyżone, ale porównanie miesięcy spójne.
+
+### 📊 Dashboard (3 strony A4 landscape)
+`make_dashboard_myto.js` → `Dashboard_oplaty_drogowe_sierpien_2026.pdf`. Str. 1 skąd wzrost (KPI, wkład krajów, km per kraj, myto per pojazd, struktura zleceń, wniosek), str. 2 kontrola dostawców (stawki per kraj, e-TOLL per auto, Atlas vs arkusz, pokrycie opłat, „co zostało sprawdzone" + czego kontrola NIE obejmuje), str. 3 Niemcy fracht po frachcie. Wszystkie strony przez `diagnose_pdf_fit` (733/733 px).
+
+⚠️ Pułapki: xlsx czyta daty Nego jako **numer seryjny Excela**; rejestracje w eksporcie Nego mają **dwie pisownie** (CZ Myto, NL RDW, PL A1 bez spacji — 55 tx).
+
+### 🐛 Dwa bugi w `scheduledGpsPoll` (commit `8a4d69b`, DEPLOYED)
+Szukając źródła km per kraj wyszło, że breadcrumby są zanieczyszczone:
+
+1. **Pusty `devPlate` dopasowywał się do pierwszego pojazdu** — `fp.includes("")` jest zawsze prawdziwe, a devPlate jest pusty gdy `/devices` padnie na timeoucie. Cały ruch floty + urządzenie spoza floty trafiał do **v1**. Ślad: 10 punktów z licznikami v3/v4/v5 i WE 2CG94, wszystkie z nocy **13.09 21:19–23:19** (tyle trwała awaria).
+2. **`atlasTs = ... || startMs`** — punkt bez sparsowanego czasu dostawał czas odpytania, więc zaległa pozycja udawała bieżącą. Przeskoki **141 km w minutę**; w v3 **1 205 takich skoków = 96 308 km fikcji** przez tydzień.
+
+Fix: brak rejestracji albo brak czasu = punkt pomijany, z licznikiem i `console.warn`. Kompromis świadomy — przy awarii `/devices` wolimy lukę niż błędne przypisanie.
+
+Weryfikacja: 4 testy na żywych danych (normalnie 4 auta OK + WE 2CG94 pominięte; przy symulowanej awarii `/devices` nic nie trafia do v1 — wcześniej wszystko). Produkcja: „5 pozycji, breadcrumby 4, zero pominięć".
+
+**Czyszczenie v1**: 10 obcych punktów usuniętych transakcyjnie z backupem (`backup_v1_breadcrumbs_*.json`), asercja 378 → 368, pozostałe obce 0. Największy skok spadł z **2 074 km na 3,7 km**.
+
+### 📏 Co GPS realnie daje (do liczenia od września)
+Odstęp punktów w ruchu **1,0 min**, skok mediana **1,4 km** → granica kraju z dokładnością ±1,5 km. **99% punktów ma licznik CAN**. Test na v3: suma odcinków po filtrze **3 096 km** vs licznik **3 109 km** — **0,4% różnicy**.
+⚠️ Przy postoju haversine zawyża (szum GPS: v1 33 km GPS vs 9 km licznika) → **liczyć z licznika CAN, nie z odległości między punktami**.
+
+Ograniczenia potwierdzone na żywo: Atlas `/history` = 1 pozycja per pojazd (ale kumulacyjny `distance` → km/mc zgodne z arkuszem do 2%); `gpsBreadcrumbs` żyją **7 dni** (`cleanupBreadcrumbs`); `driverActivities` mają km, ale **zero współrzędnych**.
+
+### Następny krok — czeka na decyzję
+Liczenie km per kraj od września: **wariant A** (kraj zapisywany w breadcrumbie od razu + dzienny agregat do `vehicleCountryKm/{YYYY-MM}/{vehicleId}`) albo **B** (sama agregacja dzienna, ryzyko utraty doby przy nieudanym przebiegu). User ma własny pomysł na narzędzie do precyzyjnej weryfikacji — wraca do tematu.
