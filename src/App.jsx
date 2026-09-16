@@ -13,7 +13,6 @@ import { logAction, logFleetWrite } from "./utils/logAction";
 import { logLoginEvent } from "./utils/loginLog";
 // safeHref — sanityzacja URL (wydzielone 2026-04-29 #5c krok 6, 10 użyć)
 import { safeHref } from "./utils/safeHref";
-import { buildRankingi, MIES, MIES_K } from "./utils/rankingKierowcow";
 // ZlecenieUploadBtn — przycisk uploadu PDF zlecenia (wydzielone 2026-04-29 #5c krok 6)
 // Używane w 3 miejscach (FVTab, FrachtyTab, FrachtyModal). Nie lazy — używane stale.
 import ZlecenieUploadBtn from "./components/ZlecenieUploadBtn";
@@ -42,6 +41,7 @@ const FrachtyModal = lazy(() => import("./components/FrachtyModal"));
 // Kalkulator tras — szacunkowy koszt trasy (paliwo per kraj + myto). Lazy chunk.
 const KalkulatorTras = lazy(() => import("./components/KalkulatorTras"));
 const PaliwoTab = lazy(() => import("./components/PaliwoTab"));
+const AnalizyTab = lazy(() => import("./components/AnalizyTab"));
 
 // ─── FIREBASE ───────────────────────────────────────────────────────────────
 // Init wydzielony do src/firebase.js (2026-04-28 TODO #5c) — pozwala lazy-loaded
@@ -1239,9 +1239,9 @@ function exportCostsToExcel(costs, vehicles, categories, filterYear, filterMonth
 
 // ── Per-role default tab access (fallback kiedy user nie ma jeszcze allowedTabs) ──
 const DEFAULT_TABS_BY_ROLE = {
-  admin:      ["dashboard","frachty","kalkulator","fv","costs","paliwo","vehicles","serwis","rent","ranking","docs","imi","users","email","logi","logowania","sprawy","kierowcy","chat","gps"],
-  dyspozytor: ["dashboard","frachty","kalkulator","fv","costs","paliwo","vehicles","serwis","rent","ranking","docs","imi","sprawy","chat","gps"],
-  podglad:    ["dashboard","frachty","vehicles","serwis","ranking","docs","imi","chat"],
+  admin:      ["dashboard","frachty","kalkulator","fv","costs","paliwo","vehicles","serwis","rent","analizy","docs","imi","users","email","logi","logowania","sprawy","kierowcy","chat","gps"],
+  dyspozytor: ["dashboard","frachty","kalkulator","fv","costs","paliwo","vehicles","serwis","rent","analizy","docs","imi","sprawy","chat","gps"],
+  podglad:    ["dashboard","frachty","vehicles","serwis","analizy","docs","imi","chat"],
   kierowca:   ["driver"],  // kierowca widzi TYLKO swój panel
 };
 // Zakładki zawsze admin-only (nie da się ich przyznać przez checkboxy)
@@ -1276,9 +1276,13 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   // fallback do DEFAULT_TABS_BY_ROLE[role]. Zawsze wykluczamy ADMIN_ONLY_TABS dla non-adminów.
   const effectiveTabs = useMemo(() => {
     if (isAdmin) return DEFAULT_TABS_BY_ROLE.admin;
-    const base = Array.isArray(allowedTabs) && allowedTabs.length > 0
+    let base = Array.isArray(allowedTabs) && allowedTabs.length > 0
       ? allowedTabs
       : (DEFAULT_TABS_BY_ROLE[role] || DEFAULT_TABS_BY_ROLE.podglad);
+    // "ranking" przemianowane na "analizy" (16.09.2026). Zapisane w Firestore listy
+    // uprawnień niosą starą nazwę — bez tego aliasu ktoś, kto miał dostęp do Rankingu,
+    // straciłby go po deployu.
+    if (base.includes("ranking") && !base.includes("analizy")) base = [...base, "analizy"];
     return base.filter(t => !ADMIN_ONLY_TABS.includes(t));
   }, [isAdmin, allowedTabs, role]);
   const canSeeTab = (id) => effectiveTabs.includes(id);
@@ -2920,7 +2924,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 )}
 
                 <NavBtn id="rent" label="Rentowność" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>} />
-                <NavBtn id="ranking" label="Ranking" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>} />
+                <NavBtn id="analizy" label="Analizy" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>} />
                 <NavBtn id="sprawy" label="Sprawy" badge={sprawyList.filter(s => !['zamknieta','wygrana','przegrana'].includes(s.status) && (s.przypisani||[]).includes(user?.email)).length || null} icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v6"/><line x1="7" y1="13" x2="12" y2="13"/><line x1="7" y1="17" x2="10" y2="17"/></svg>} />
                 <NavBtn id="users" label="Użytkownicy" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>} />
                 <NavBtn id="email" label="Email statusy" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>} />
@@ -4106,14 +4110,17 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             </div>
           )}
 
-          {tab === "ranking" && canSeeTab("ranking") && (
-            <RankingTab
-              vehicles={vehicles}
-              frachtyList={frachtyList}
-              costs={costs}
-              operacyjne={operacyjne}
-              isAdmin={isAdmin}
-            />
+          {tab === "analizy" && canSeeTab("analizy") && (
+            <Suspense fallback={<div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-sm text-gray-500">📊 Ładowanie analiz…</div>}>
+              <AnalizyTab
+                vehicles={vehicles}
+                frachtyList={frachtyList}
+                costs={costs}
+                operacyjne={operacyjne}
+                isAdmin={isAdmin}
+                role={role}
+              />
+            </Suspense>
           )}
 
           {tab === "rent" && canSeeTab("rent") && (
@@ -4597,8 +4604,8 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             ...(canFinance ? [
               { id: "rent", label: "Rentow.", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg> },
             ] : []),
-            ...(canSeeTab("ranking") ? [
-              { id: "ranking", label: "Ranking", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg> },
+            ...(canSeeTab("analizy") ? [
+              { id: "analizy", label: "Analizy", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg> },
             ] : []),
             ...(canSeeTab("paliwo") ? [
               { id: "paliwo", label: "Paliwo", icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/><path d="M4 8h12"/><path d="M18 8v9a2 2 0 0 0 2 2 2 2 0 0 0 2-2V9l-3-4"/></svg> },
@@ -9527,7 +9534,7 @@ const ASSIGNABLE_TABS = [
   { id: "vehicles",  label: "Pojazdy",       icon: "🚚" },
   { id: "serwis",    label: "Serwis",        icon: "🔧" },
   { id: "rent",      label: "Rentowność",    icon: "📈" },
-  { id: "ranking",   label: "Ranking kierowców", icon: "🏁" },
+  { id: "analizy",   label: "Analizy",           icon: "📊" },
   { id: "docs",      label: "Dokumenty",     icon: "📄" },
   { id: "imi",       label: "IMI / SIPSI",   icon: "🌍" },
   { id: "logi",      label: "Logi aktywności", icon: "📝" },
@@ -9938,10 +9945,10 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
 
   // Defaulty per rola (muszą być zgodne z DEFAULT_TABS_BY_ROLE w App)
   const DEFAULTS = {
-    admin:      ["dashboard","frachty","fv","costs","vehicles","serwis","rent","ranking","docs","imi","sprawy","chat","gps"],
-    dyspozytor: ["dashboard","frachty","fv","costs","vehicles","serwis","rent","ranking","docs","imi","sprawy","chat","gps"],
+    admin:      ["dashboard","frachty","fv","costs","vehicles","serwis","rent","analizy","docs","imi","sprawy","chat","gps"],
+    dyspozytor: ["dashboard","frachty","fv","costs","vehicles","serwis","rent","analizy","docs","imi","sprawy","chat","gps"],
     kierowca:   ["driver"],
-    podglad:    ["dashboard","frachty","vehicles","serwis","ranking","docs","imi","chat"],
+    podglad:    ["dashboard","frachty","vehicles","serwis","analizy","docs","imi","chat"],
   };
 
   async function saveAllowedTabs(uid, newTabs, userRole) {
@@ -12374,229 +12381,6 @@ function isMonthCurrent(year, month) {
 
 function rentKey(vehicleId, year, month) { return `${vehicleId}_${year}_${month}`; }
 
-
-// ═══════════════════════════════════════════════════════════════════
-//  RANKING KIEROWCÓW — ten sam układ co prezentacja PDF (15.09.2026)
-//  Logika liczenia siedzi w utils/rankingKierowcow.js, żeby zakładka
-//  i generator PDF (make_dashboard_rankingi.js) liczyły to samo.
-//  „Pobierz PDF" = window.print() + @media print — bez chromium w CF.
-// ═══════════════════════════════════════════════════════════════════
-export function RankingTab({ vehicles = [], frachtyList = [], costs = [], operacyjne = [], isAdmin = false }) {
-  const [rok, setRok] = useState(new Date().getFullYear());
-  // Ranking kosztów widzi TYLKO admin (decyzja usera 15.09) — dyspozytor i podgląd
-  // dostają wersję prezentacyjną. Przełącznik zostaje, żeby admin mógł go schować
-  // przed wydrukiem, gdy pokazuje zestawienie komuś z zewnątrz (to samo, co
-  // BEZ_KOSZTOW=0 w generatorze PDF).
-  const [pokazKoszty, setPokazKoszty] = useState(true);
-
-  // Wydruk: klonujemy treść do kontenera bezpośrednio pod <body> i chowamy resztę
-  // przez display:none. Pierwsze podejście (visibility:hidden na body *) ZOSTAWIAŁO
-  // miejsce po sidebarze i nagłówku — user dostawał 12 stron zamiast 7, bo drukarka
-  // dostawała dokument wysokości całej aplikacji. display:none na rodzeństwie
-  // kontenera usuwa te elementy z układu i strony wracają 1:1 do sekcji.
-  const drukuj = () => {
-    const src = document.getElementById("ranking-print");
-    if (!src) { window.print(); return; }
-    const holder = document.createElement("div");
-    holder.id = "ranking-portal";
-    // KLASA JEST KONIECZNA: reguły tabeli są zapisane jako `.rank-tab table {...}`,
-    // a klon nie dziedziczy klasy z kontenera — bez niej wydruk wychodzi bez ramek
-    // i bez odstępów w komórkach (liczby zlewają się w jeden ciąg).
-    holder.className = src.className;
-    holder.innerHTML = src.innerHTML;
-    document.body.appendChild(holder);
-    // Klasa na <body> włącza reguły druku tylko na czas tego wywołania. Bez niej
-    // zwykłe Cmd+P na zakładce dałoby PUSTĄ stronę (wszystko schowane, klonu brak).
-    document.body.classList.add("ranking-printing");
-    try { window.print(); } finally {
-      document.body.classList.remove("ranking-printing");
-      holder.remove();
-    }
-  };
-  const lata = useMemo(() => {
-    const set = new Set();
-    (costs || []).forEach(c => { const y = Number(String(c?.date || "").slice(0, 4)); if (y) set.add(y); });
-    const arr = [...set].sort((a, b) => b - a);
-    return arr.length ? arr : [new Date().getFullYear()];
-  }, [costs]);
-  useEffect(() => { if (!lata.includes(rok)) setRok(lata[0]); }, [lata, rok]);
-
-  const dane = useMemo(() => buildRankingi({
-    frachty: frachtyList, costs, operacyjne, vehicles, rok,
-    bezKosztow: !(isAdmin && pokazKoszty),
-  }), [frachtyList, costs, operacyjne, vehicles, rok, isAdmin, pokazKoszty]);
-
-  const { okres, rankings, pusty, pominieci = [] } = dane;
-  const MONTHS = okres.months;
-  const podpis = okres.mFrom
-    ? `${MIES[okres.mFrom]} – ${MIES[okres.mTo]} ${rok}`.toLowerCase()
-    : "brak rozliczonych miesięcy";
-
-  if (pusty) {
-    return (
-      <div className="bg-white rounded-2xl border border-gray-100 p-8 text-center">
-        <div className="text-3xl mb-2">🏁</div>
-        <div className="font-semibold text-gray-900 mb-1">Brak danych do rankingu za {rok}</div>
-        <p className="text-sm text-gray-500">
-          Ranking pokazuje wyłącznie miesiące <b>rozliczone</b> — takie, które mają zaimportowane koszty
-          zmienne (paliwo, leasing, wypłaty). Miesiąc z samymi frachtami dałby fikcyjny zysk.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <style>{`
-        #ranking-portal { display: none; }
-        @media print {
-          @page { size: A4 landscape; margin: 8mm; }
-          html, body { height: auto !important; overflow: visible !important; background: #fff !important; }
-          /* wszystko poza klonem znika Z UKŁADU (nie samo „visibility") */
-          body.ranking-printing > *:not(#ranking-portal) { display: none !important; }
-          body.ranking-printing #ranking-portal { display: block !important; }
-          .ranking-noprint { display: none !important; }
-          .ranking-page {
-            page-break-inside: avoid; break-inside: avoid;
-            margin-bottom: 10mm !important;
-            border: none !important; box-shadow: none !important;
-            border-radius: 0 !important; padding: 0 !important;
-          }
-          /* kolory drukują się nawet przy odhaczonym „Obraz w tle" */
-          #ranking-portal, #ranking-portal * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-        }
-        .rank-tab table { border-collapse: collapse; width: 100%; font-size: 11.5px; }
-        .rank-tab th { text-align: right; padding: 5px 6px; color: #64748b; font-weight: 600;
-          border-bottom: 1.5px solid #cbd5e1; font-size: 9px; text-transform: uppercase; letter-spacing: .2px; }
-        .rank-tab td { text-align: right; padding: 5px 6px; border-bottom: 1px solid #f1f5f9;
-          font-variant-numeric: tabular-nums; }
-        .rank-tab th.lbl, .rank-tab td.lbl { text-align: left; }
-        .rank-tab td.sum, .rank-tab th.sep { border-left: 1.5px solid #cbd5e1; }
-        .rank-tab td.sum { font-weight: 700; font-size: 12.5px; }
-        .rank-tab tr.flota td { font-weight: 700; background: #f8fafc; border-top: 1.5px solid #cbd5e1; }
-      `}</style>
-
-      <div className="flex items-center justify-between flex-wrap gap-3 mb-4 ranking-noprint">
-        <div>
-          <h2 className="text-xl font-bold text-gray-900 mb-1">Ranking kierowców</h2>
-          <p className="text-sm text-gray-400">
-            Okres rozliczony: {podpis} · {MONTHS.length} {MONTHS.length === 1 ? "miesiąc" : "miesięcy"} · kwoty netto EUR
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {isAdmin && (
-            <label className="flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-200 text-sm text-gray-700 cursor-pointer select-none">
-              <input type="checkbox" checked={pokazKoszty} onChange={e => setPokazKoszty(e.target.checked)} />
-              Ranking kosztów
-            </label>
-          )}
-          <select value={rok} onChange={e => setRok(Number(e.target.value))}
-            className="px-3 py-2 rounded-xl border border-gray-200 text-sm font-semibold text-gray-700">
-            {lata.map(y => <option key={y} value={y}>{y}</option>)}
-          </select>
-          <button onClick={drukuj}
-            className="px-4 py-2 rounded-xl text-sm font-semibold text-white"
-            style={{ background: "#0071e3" }}>
-            📄 Pobierz PDF
-          </button>
-        </div>
-      </div>
-
-      {pominieci.length > 0 && (
-        <div className="mb-4 px-4 py-3 rounded-xl text-xs" style={{ background: "#fffbeb", border: "1px solid #fde68a", color: "#78350f" }}>
-          <b>Poza rankingiem:</b> {pominieci.map(x => `${x.name} (${x.plate})`).join(", ")} — {pominieci.length === 1 ? "pojazd nie jeździł" : "pojazdy nie jeździły"} w
-          {" "}{MIES[okres.mTo].toLowerCase()}, więc wynik z wcześniejszych miesięcy zaburzałby porównanie (np. spalanie z jednego miesiąca wygrywałoby cały ranking).
-        </div>
-      )}
-
-      <div id="ranking-print" className="rank-tab space-y-5">
-        {rankings.map(r => {
-          return (
-            <div key={r.key} className="ranking-page bg-white rounded-2xl border border-gray-100 p-5">
-              <div className="flex items-start justify-between gap-4 mb-3 pb-3 border-b border-gray-100">
-                <div>
-                  <h3 className="text-base font-bold text-gray-900">Ranking — {r.tytul.toLowerCase()}</h3>
-                  <div className="text-xs text-gray-400 mt-0.5">
-                    {podpis} · {r.podtytul}{r.jednostka ? ` · ${r.jednostka}` : ""}
-                    {r.mniejLepiej ? " · mniej = lepiej" : ""}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <img src="/app-fleetstat.png" alt="FleetStat" style={{ height: 22, width: "auto" }} />
-                  <div className="text-[10px] text-gray-400 leading-tight">VBS Transport<br />{new Date().toLocaleDateString("pl-PL")}</div>
-                </div>
-              </div>
-
-              <table>
-                <thead>
-                  <tr>
-                    <th style={{ width: 28 }}>#</th>
-                    <th className="lbl">Kierowca</th>
-                    {MONTHS.map(mo => <th key={mo}>{MIES_K[mo]}</th>)}
-                    <th className="sep">{r.etykietaRazem}</th>
-                    {r.pokazSrednia && <th>Śr./mc</th>}
-                    {r.extraNaglowek && <th>{r.extraNaglowek}</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {r.wiersze.map(w => (
-                    <tr key={w.vid}>
-                      <td>
-                        <span className="inline-block rounded-full text-center"
-                          style={{ width: 18, height: 18, lineHeight: "18px", fontSize: 10, fontWeight: 700,
-                            background: w.miejsce === 1 ? w.col : "#e2e8f0", color: w.miejsce === 1 ? "#fff" : "#475569" }}>
-                          {w.miejsce}
-                        </span>
-                      </td>
-                      <td className="lbl">
-                        <span className="inline-block mr-2 align-middle" style={{ width: 8, height: 8, borderRadius: 2, background: w.col }} />
-                        <span className="font-semibold text-gray-800">{w.name}</span>
-                        <span className="text-gray-400 ml-2 text-[10px]">{w.plate}</span>
-                      </td>
-                      {w.wartosciTxt.map((v, i) => (
-                        <td key={i} style={{ color: w.lider[i] ? w.col : (w.wartosci[i] < 0 ? "#dc2626" : undefined),
-                          fontWeight: w.lider[i] ? 700 : undefined }}>{v}</td>
-                      ))}
-                      <td className="sum" style={{ color: w.suma < 0 ? "#dc2626" : undefined }}>{w.sumaTxt}</td>
-                      {r.pokazSrednia && <td className="text-gray-500">{w.sredniaTxt}</td>}
-                      {r.extraNaglowek && <td className="text-gray-500">{w.extraTxt}</td>}
-                    </tr>
-                  ))}
-                  <tr className="flota">
-                    <td />
-                    <td className="lbl">FLOTA — {r.wiersze.length} kierowców</td>
-                    {r.flota.wartosciTxt.map((v, i) => <td key={i}>{v}</td>)}
-                    <td className="sum">{r.flota.sumaTxt}</td>
-                    {r.pokazSrednia && <td>{r.flota.sredniaTxt}</td>}
-                    {r.extraNaglowek && <td>{r.flota.extraTxt}</td>}
-                  </tr>
-                </tbody>
-              </table>
-
-              <div className="mt-4">
-                <div className="text-xs font-semibold text-gray-600 mb-2">Co widać</div>
-                <ul className="space-y-1.5">
-                  {r.wnioski.map((segs, i) => (
-                    <li key={i} className="text-[11px] text-gray-700 leading-relaxed pl-3 relative">
-                      <span className="absolute left-0 text-blue-500">▸</span>
-                      {segs.map((sg, j) => sg.b ? <b key={j} className="text-gray-900">{sg.s}</b> : <span key={j}>{sg.s}</span>)}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              <div className="mt-3 pt-2 border-t border-gray-100 text-[9px] text-gray-400 leading-relaxed">
-                Źródło: FleetStat — frachty i koszty z bazy, dni w trasie, km licznika oraz litry z danych
-                operacyjnych. Kierowca przypisany do pojazdu wg historii kierowców. {r.opisMetody}
-                {" "}Ranking obejmuje wyłącznie miesiące rozliczone (z kosztami zmiennymi), żeby wszystkie metryki liczyły ten sam czas.
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRate, operacyjne = [], onSaveOperacyjne, onAdd, onUpdate, onDelete }) {
   const [view, setView]           = useState("flota");
