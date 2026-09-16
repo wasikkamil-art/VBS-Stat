@@ -7,8 +7,8 @@ import RankingTab from "./RankingTab";
 
 const ODNOGI = [
   { id: "rankingi",     label: "🏁 Rankingi kierowców", rola: "wszyscy" },
-  { id: "nego",         label: "🛣️ Opłaty drogowe",     rola: "admin" },
-  { id: "dyspozytorzy", label: "📊 Dyspozytorzy",        rola: "dyspozytor" },
+  { id: "nego",         label: "🛣️ Opłaty drogowe",     rola: "dyspozytor" },
+  { id: "dyspozytorzy", label: "📊 Dyspozytorzy",        rola: "admin" },
 ];
 
 function Wkrotce({ tytul, opis, punkty, blokada }) {
@@ -40,8 +40,9 @@ function Wkrotce({ tytul, opis, punkty, blokada }) {
 export default function AnalizyTab({ vehicles = [], frachtyList = [], costs = [], operacyjne = [], isAdmin = false, role = "podglad" }) {
   const [widok, setWidok] = useState("rankingi");
 
-  // Opłaty drogowe pokazują strukturę kosztów floty — tylko admin.
-  // Dyspozytorzy: admin i dyspozytor (podgląd nie ocenia pracy spedytorów).
+  // Podział wg decyzji usera (16.09.2026): dyspozytorzy widzą opłaty drogowe,
+  // bo planują trasy i koszt myta jest ich sprawą. Dashboard dyspozytorów ocenia
+  // ICH pracę, więc zostaje u admina. Podgląd ma same rankingi kierowców.
   const widoczne = ODNOGI.filter(o =>
     o.rola === "wszyscy" ||
     (o.rola === "admin" && isAdmin) ||
