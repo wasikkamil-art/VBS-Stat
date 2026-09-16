@@ -4,6 +4,7 @@
 // zgadywał, czy to jeszcze nie działa, czy już się zepsuło.
 import { useState } from "react";
 import RankingTab from "./RankingTab";
+import DyspozytorzyAnaliza from "./DyspozytorzyAnaliza";
 
 const ODNOGI = [
   { id: "rankingi",     label: "🏁 Rankingi kierowców", rola: "wszyscy" },
@@ -93,18 +94,7 @@ export default function AnalizyTab({ vehicles = [], frachtyList = [], costs = []
         />
       )}
 
-      {aktywny === "dyspozytorzy" && (
-        <Wkrotce
-          tytul="Dashboard dyspozytorów"
-          opis="Frachty w podziale na spedytorów, z porównaniem do poprzedniego miesiąca"
-          punkty={[
-            "Liczba frachtów, obrót, średni fracht, kilometry i €/km dla każdego kubełka",
-            "Udziały procentowe i przesunięcie między miesiącami",
-            "Wnioski liczone z danych, nie wpisywane ręcznie",
-          ]}
-          blokada={null}
-        />
-      )}
+      {aktywny === "dyspozytorzy" && <DyspozytorzyAnaliza frachtyList={frachtyList} />}
     </div>
   );
 }
