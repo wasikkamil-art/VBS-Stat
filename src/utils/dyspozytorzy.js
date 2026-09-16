@@ -12,7 +12,15 @@ export const KUBELKI = [
   { id: "Aga", label: "AGA", kolor: "#2563eb" },
   { id: "Aro", label: "ARO", kolor: "#ea7a17" },
   { id: "AroAga", label: "ARO-AGA", kolor: "#8b5cf6" },
+  // Karol, Wasiu (Kamil) i Przemek (Boss) dokładają się sporadycznie — to realne
+  // frachty, więc mają być widoczne w podziale, a nie ginąć w przypisie.
+  { id: "Inni", label: "POZOSTALI", kolor: "#64748b" },
 ];
+
+// Analizę prowadzimy od 2026. Wcześniej frachty rozdzielali też Bojno i inni,
+// którzy już nie pracują — podział AGA/ARO nie opisywałby tamtych lat uczciwie
+// (2025: 156 frachtów za 162 898 € poza trójką, czyli ponad połowa roku).
+export const OD_ROKU = 2026;
 
 const normName = (s) => String(s || "").trim().toLowerCase();
 
@@ -66,22 +74,32 @@ export function statystyki(frachty) {
     // całości okresu. `total` zostaje sumą trzech kubełków, tak jak w raportach PDF.
     else inni.push(f);
   }
-  const total = agg([...kub.Aga, ...kub.Aro, ...kub.AroAga]);
+  const total = agg([...kub.Aga, ...kub.Aro, ...kub.AroAga, ...inni]);
   const udzialy = (x) => ({
     ...x,
     frP: total.fr ? (x.fr / total.fr) * 100 : 0,
     eurP: total.eur ? (x.eur / total.eur) * 100 : 0,
     kmP: total.km ? (x.km / total.km) * 100 : 0,
   });
-  const C = agg(kub.AroAga);
+  const C = agg(kub.AroAga), I = agg(inni);
+  // Kto konkretnie siedzi w „Pozostałych" — z kwotami, żeby dało się ocenić,
+  // czy to sporadyczna pomoc, czy ktoś, kto zasługuje na własny kubełek.
+  const wgOsob = {};
+  for (const f of inni) {
+    const d = String(f.dyspozytor).trim();
+    wgOsob[d] = wgOsob[d] || { fr: 0, eur: 0 };
+    wgOsob[d].fr++; wgOsob[d].eur += parseFloat(f.cenaEur) || 0;
+  }
   return {
     total,
     Aga: udzialy(agg(kub.Aga)),
     Aro: udzialy(agg(kub.Aro)),
     AroAga: C.fr ? udzialy(C) : null,
+    Inni: I.fr ? udzialy(I) : null,
     bezDyspozytora,
-    inni: { ...agg(inni), nazwiska: [...new Set(inni.map(f => String(f.dyspozytor).trim()))].sort() },
-    frachty: kub,
+    inni: { ...I, nazwiska: [...new Set(inni.map(f => String(f.dyspozytor).trim()))].sort(),
+            osoby: Object.entries(wgOsob).sort((a, b) => b[1].eur - a[1].eur) },
+    frachty: { ...kub, Inni: inni },
   };
 }
 
@@ -114,7 +132,7 @@ export function lataZDanymi(frachty) {
   const set = new Set();
   for (const f of frachty) {
     const m = miesiacFrachtu(f);
-    if (m) set.add(+m.slice(0, 4));
+    if (m && +m.slice(0, 4) >= OD_ROKU) set.add(+m.slice(0, 4));
   }
   return [...set].sort((a, b) => b - a);
 }

@@ -90,9 +90,9 @@ function Nota({ stat }) {
         <>Frachtów bez wpisanego dyspozytora: <b>{stat.bezDyspozytora}</b> (doliczone do AGA). </>
       )}
       {stat.inni.fr > 0 && (
-        <>Poza podziałem: <b>{stat.inni.fr}</b> {stat.inni.fr === 1 ? "fracht" : "frachtów"} za <b>{eur0(stat.inni.eur)}</b> —
-          pole dyspozytora wypełnione nazwiskiem spoza trójki ({stat.inni.nazwiska.join(", ")}).
-          Te pozycje nie wchodzą do udziałów.</>
+        <>W kolumnie POZOSTALI: {stat.inni.osoby.map(([nazwa, x], i) => (
+          <span key={nazwa}>{i > 0 ? " · " : ""}<b>{nazwa}</b> {x.fr} {x.fr === 1 ? "fracht" : "szt."} ({eur0(x.eur)})</span>
+        ))}.</>
       )}
     </div>
   );
