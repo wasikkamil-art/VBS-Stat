@@ -3534,3 +3534,25 @@ Ograniczenia potwierdzone na żywo: Atlas `/history` = 1 pozycja per pojazd (ale
 
 ### Następny krok — czeka na decyzję
 Liczenie km per kraj od września: **wariant A** (kraj zapisywany w breadcrumbie od razu + dzienny agregat do `vehicleCountryKm/{YYYY-MM}/{vehicleId}`) albo **B** (sama agregacja dzienna, ryzyko utraty doby przy nieudanym przebiegu). User ma własny pomysł na narzędzie do precyzyjnej weryfikacji — wraca do tematu.
+
+### cd. — wariant A wdrożony: km per kraj liczone z licznika CAN (commit `621499a`, DEPLOYED)
+
+Od teraz `scheduledGpsPoll` dopisuje do każdego punktu pole **`cc`** (kraj), a nowa **`aggregateCountryKm`** o **2:10** (przed czyszczeniem breadcrumbów o 2:30) przelicza dobę na km per kraj i zapisuje do **`countryKmDaily/{YYYY-MM-DD}`**. Doszła też `backfillCountryKm` (onCall, admin) do ręcznego przeliczenia zakresu dni.
+
+**Dystans z przyrostu licznika CAN, nie z odległości między punktami** — przy postoju szum GPS zawyża (v1 przez tydzień: 33 km z pozycji wobec 9 km z licznika).
+
+| moduł | co robi |
+|---|---|
+| `functions/lib/geo.js` | point-in-polygon na uproszczonych granicach (Natural Earth 50m, tol. ~400 m, 38 krajów, **240 KB**) + cache po siatce ~1 km |
+| `functions/lib/countryKm.js` | czysta `kmPerKraj(punkty)`; odrzuca odcinki z cofniętym licznikiem, >200 km, >130 km/h, przerwa >3 h; zwraca `kmLicznik` i `odrzucone` |
+| `functions/lib/czas.js` | granice doby w Europe/Warsaw (miesiące liczymy lokalnie) |
+
+**Weryfikacja granic**: 11 503 realnych punktów floty, **100% zgodności** z granicami pełnej rozdzielczości, zero rozbieżności.
+**Weryfikacja doby**: 25.10 wychodzi 25 h, 29.03 — 23 h (zmiana czasu), przejście przez 31.12 OK.
+**Po deployu**: punkty dostają `cc` (v4 Limoges → FR, v5 pod Arras → FR, auta w kraju → PL).
+
+⚠️ **Jakość zależy od naprawy z dzisiaj**: dane po fixie — v5 **zero odrzuconych, pokrycie 100,0%**; dane sprzed fixu — 23–32% odrzuceń i pokrycie 66–125%. Backfill **10–16.09 zapisany z adnotacją, że jest orientacyjny** (7 dokumentów, 7 547 km: DE 1 999 · ES 1 909 · FR 1 604 · AT 1 245 · PL 235 · CZ 214 · PT 127 · NL 116 · HU 98).
+
+**Pierwszy w pełni wiarygodny dzień to 17.09.** Od października miesiąc będzie kompletny — wtedy €/km per kraj policzymy z twardych danych zamiast z tras zleceń.
+
+Pułapki złapane po drodze: wzorzec `*.json` w `.gitignore` zjadał plik granic (bez wyjątku deploy z czystego klona padłby na `require`); pokrycie liczone dopiero od 20 km/dobę, bo przy postoju 2 km wobec 1 km dawało 200%; `gcloud` na tej maszynie nadal się wywala (`TypeError` w `scheduler jobs list`), więc backfill poszedł skryptem lokalnym używającym **tych samych modułów** co CF.
