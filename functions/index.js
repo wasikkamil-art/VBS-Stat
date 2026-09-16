@@ -695,12 +695,18 @@ exports.scheduledGpsPoll = onSchedule(
 
     const nowIso = new Date(startMs).toISOString();
     let breadcrumbsWritten = 0, segmentsOpened = 0, segmentsClosed = 0;
+    let skippedNoPlate = 0, skippedNoTs = 0;
 
     // 4. Per-pozycja: match + breadcrumb + activity
     for (const pos of positions) {
       const devNameFromMap = pos?.deviceId ? deviceMap[String(pos.deviceId)] : "";
       const devPlate = String(pos?.dev?.deviceName || pos?.dev?.plate || pos?.deviceName || pos?.plate || devNameFromMap || "")
         .replace(/\s+/g, "").toUpperCase();
+      // Bez rejestracji NIE zgadujemy pojazdu. Wcześniej pusty devPlate (np. gdy /devices
+      // padło na timeoucie) przechodził przez `fp.includes("")`, które jest zawsze prawdziwe,
+      // i CAŁY ruch — łącznie z urządzeniem spoza floty — lądował w pierwszym pojeździe listy.
+      // Ślad w bazie: breadcrumby v1 z licznikami v3/v4/v5 i WE 2CG94 (2026-09-16).
+      if (devPlate.length < 4) { skippedNoPlate++; continue; }
       const vehicle = vehicles.find(v => {
         const fp = String(v.plate || "").replace(/\s+/g, "").toUpperCase();
         return fp && (fp === devPlate || devPlate.includes(fp) || fp.includes(devPlate));
@@ -716,7 +722,11 @@ exports.scheduledGpsPoll = onSchedule(
       // CAN paliwowy (fuelUsage / fuelLevelCan) CELOWO NIE zapisywany — decyzja usera 2026-07-24:
       // paliwo liczymy z raportów kart (dokument księgowy), CAN to szacunek z czujnika i myliłby się
       // (bak raportowany w % u ciężarówek, w litrach u WE 2CG94; brak kalibracji, tankowania do pełna).
-      const atlasTs = atlasDateTimeToMsBackend(pos?.dateTime) || startMs;
+      // Punkt bez wiarygodnego czasu ODRZUCAMY. Wcześniejszy fallback na startMs datował
+      // zaległą pozycję "na teraz", przez co stary punkt udawał bieżący — stąd przeskoki
+      // rzędu 141 km w jedną minutę (v3: 1205 takich skoków = 96 308 km fikcji w tydzień).
+      const atlasTs = atlasDateTimeToMsBackend(pos?.dateTime);
+      if (!atlasTs) { skippedNoTs++; continue; }
 
       // 4a. Breadcrumb (docId = ts, dedup idempotentnie)
       try {
@@ -781,7 +791,12 @@ exports.scheduledGpsPoll = onSchedule(
     }
 
     const durMs = Date.now() - startMs;
-    console.log(`scheduledGpsPoll OK — ${positions.length} pozycji, breadcrumby ${breadcrumbsWritten}, segmenty +${segmentsOpened}/−${segmentsClosed}, ${durMs}ms`);
+    const skipped = skippedNoPlate || skippedNoTs
+      ? `, pominięte: bez rejestracji ${skippedNoPlate}, bez czasu ${skippedNoTs}` : "";
+    console.log(`scheduledGpsPoll OK — ${positions.length} pozycji, breadcrumby ${breadcrumbsWritten}, segmenty +${segmentsOpened}/−${segmentsClosed}${skipped}, ${durMs}ms`);
+    // Stała obecność pominięć oznacza awarię /devices albo zmianę formatu dateTime po stronie Atlasa.
+    if (skippedNoPlate > 0) console.warn(`scheduledGpsPoll: ${skippedNoPlate} pozycji bez rejestracji — sprawdź /devices`);
+    if (skippedNoTs > 0) console.warn(`scheduledGpsPoll: ${skippedNoTs} pozycji bez czasu — sprawdź format dateTime z Atlasa`);
   }
 );
 

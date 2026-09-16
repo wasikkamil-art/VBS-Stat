@@ -83,3 +83,7 @@ andamur_faktury/
 backup_andamur_*.json
 backup_sheet_andamur_*.json
 podglad/
+myto_km_per_fracht.json
+backup_v1_breadcrumbs_*.json
+make_dashboard*
+dashboard_*.html
