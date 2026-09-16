@@ -119,6 +119,24 @@ service cloud.firestore {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // ANALIZY OPŁAT DROGOWYCH — gotowe zestawienia per miesiąc (zakładka Analizy).
+    // Zapis tylko z backendu (Admin SDK omija reguły) albo ręcznie przez admina.
+    // ═══════════════════════════════════════════════════════════════
+    match /tollAnalysis/{docId} {
+      allow read: if canRead();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // KM PER KRAJ — agregat dobowy z GPS (aggregateCountryKm).
+    // Pisze wyłącznie Cloud Function; front tylko czyta.
+    // ═══════════════════════════════════════════════════════════════
+    match /countryKmDaily/{docId} {
+      allow read: if canRead();
+      allow write: if false;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // SPRAWY — tickety / sprawy
     // ═══════════════════════════════════════════════════════════════
     match /sprawy/{docId} {

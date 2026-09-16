@@ -1,42 +1,15 @@
-// Analizy — jedno miejsce na materiały, które wcześniej powstawały ręcznie ze skryptów.
-// Etap 1 (16.09.2026): szkielet z trzema odnogami + przeniesione Rankingi.
-// Dwie pozostałe czekają na dane — opis stanu jest w samych sekcjach, żeby nikt nie
-// zgadywał, czy to jeszcze nie działa, czy już się zepsuło.
+// Analizy — jedno miejsce na materiały, które wcześniej powstawały ręcznie ze skryptów:
+// rankingi kierowców, opłaty drogowe (NegoMetal + e-TOLL) i dashboard dyspozytorów.
 import { useState } from "react";
 import RankingTab from "./RankingTab";
 import DyspozytorzyAnaliza from "./DyspozytorzyAnaliza";
+import OplatyDrogoweAnaliza from "./OplatyDrogoweAnaliza";
 
 const ODNOGI = [
   { id: "rankingi",     label: "🏁 Rankingi kierowców", rola: "wszyscy" },
   { id: "nego",         label: "🛣️ Opłaty drogowe",     rola: "dyspozytor" },
   { id: "dyspozytorzy", label: "📊 Dyspozytorzy",        rola: "admin" },
 ];
-
-function Wkrotce({ tytul, opis, punkty, blokada }) {
-  return (
-    <div className="bg-white rounded-2xl border border-gray-100 p-6">
-      <div className="flex items-start gap-3 mb-3">
-        <div className="text-2xl">🚧</div>
-        <div>
-          <h3 className="text-base font-bold text-gray-900">{tytul}</h3>
-          <div className="text-sm text-gray-500 mt-0.5">{opis}</div>
-        </div>
-      </div>
-      <ul className="text-sm text-gray-700 space-y-1.5 mb-4 ml-1">
-        {punkty.map((p, i) => (
-          <li key={i} className="flex gap-2">
-            <span className="text-blue-500 font-bold">▸</span><span>{p}</span>
-          </li>
-        ))}
-      </ul>
-      {blokada && (
-        <div className="text-xs rounded-xl p-3 border" style={{ background: "#fffbeb", borderColor: "#fde68a", color: "#92400e" }}>
-          <b>Czego brakuje:</b> {blokada}
-        </div>
-      )}
-    </div>
-  );
-}
 
 export default function AnalizyTab({ vehicles = [], frachtyList = [], costs = [], operacyjne = [], isAdmin = false, role = "podglad" }) {
   const [widok, setWidok] = useState("rankingi");
@@ -79,20 +52,7 @@ export default function AnalizyTab({ vehicles = [], frachtyList = [], costs = []
                     operacyjne={operacyjne} isAdmin={isAdmin} />
       )}
 
-      {aktywny === "nego" && (
-        <Wkrotce
-          tytul="Opłaty drogowe — NegoMetal i e-TOLL"
-          opis="Skąd biorą się zmiany kosztu myta i czy dostawcy naliczają poprawnie"
-          punkty={[
-            "Rozbicie opłat na kraje, miesiąc do miesiąca, z kwotą zmiany dla każdego z nich",
-            "Stawka €/km per kraj — kontrola, czy taryfa stoi w miejscu, gdy rachunek rośnie",
-            "Kilometry per kraj z licznika CAN (zbierane od 16.09.2026 do countryKmDaily)",
-            "Sprawdzenie, czy każda opłata ma pokrycie w realnym przejeździe pojazdu",
-          ]}
-          blokada={"transakcji NegoMetal nie ma jeszcze w bazie — dziś są tylko w plikach eksportu z portalu. " +
-                   "Potrzebny import do Firestore, tak jak przy tankowaniach. Do tego czasu analiza powstaje ręcznie ze skryptu."}
-        />
-      )}
+      {aktywny === "nego" && <OplatyDrogoweAnaliza />}
 
       {aktywny === "dyspozytorzy" && <DyspozytorzyAnaliza frachtyList={frachtyList} />}
     </div>
