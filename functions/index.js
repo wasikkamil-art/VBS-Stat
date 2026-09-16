@@ -729,9 +729,13 @@ exports.scheduledGpsPoll = onSchedule(
       if (!atlasTs) { skippedNoTs++; continue; }
 
       // 4a. Breadcrumb (docId = ts, dedup idempotentnie)
+      // `cc` = kraj wyliczony offline z granic (lib/geo). Zapisujemy przy punkcie, bo
+      // breadcrumby żyją 7 dni — agregat dobowy ma potem gotową daną, a nie musi
+      // odtwarzać geografii. Null poza zasięgiem granic (np. prom, Afryka).
+      const cc = countryOf(lat, lng);
       try {
         await db.collection("gpsBreadcrumbs").doc(vehicle.id).collection("points").doc(String(atlasTs))
-          .set({ lat, lng, ts: atlasTs, speed, mileage });
+          .set({ lat, lng, ts: atlasTs, speed, mileage, cc });
         breadcrumbsWritten++;
       } catch (e) {
         console.warn(`scheduledGpsPoll: breadcrumb write ${vehicle.id}:`, e.message);
@@ -1187,6 +1191,96 @@ exports.snapshotOdometerNow = onCall(
 );
 
 // ═══════════════════════════════════════════════════════════════
+// KM PER KRAJ — agregat dobowy. Breadcrumby żyją 7 dni, więc zanim znikną,
+// przeliczamy je na kilometry w rozbiciu na kraje i zapisujemy trwale.
+// Dystans z PRZYROSTU LICZNIKA CAN (nie z odległości między punktami — przy
+// postoju szum GPS zawyża). Po co: rozliczanie myta per kraj i kontrola,
+// czy stawki dostawców (Toll Collect, e-TOLL) zgadzają się z przebiegiem.
+// Dokument dzienny nadpisywany w całości → ponowne uruchomienie jest bezpieczne.
+// ═══════════════════════════════════════════════════════════════
+const { TZ_PL, lokalnaPolnoc, nastepnyDzien, dataLokalna } = require("./lib/czas");
+
+async function agregujDobe(db, dateStr) {
+  const od = lokalnaPolnoc(dateStr, TZ_PL);
+  // Koniec doby = północ następnego dnia LOKALNIE. +36 h zawsze wpada w następny dzień,
+  // także gdy doba ma 23 lub 25 godzin przy zmianie czasu.
+  const koniec = lokalnaPolnoc(nastepnyDzien(dateStr), TZ_PL);
+
+  const vehicles = ((await db.doc("fleet/data").get()).data() || {}).fleetv2_vehicles || [];
+  const pojazdy = {}, jakosc = {};
+  for (const v of vehicles) {
+    let snap;
+    try {
+      snap = await db.collection("gpsBreadcrumbs").doc(v.id).collection("points")
+        .where("ts", ">=", od).where("ts", "<", koniec).orderBy("ts").get();
+    } catch (e) { console.warn(`aggregateCountryKm: odczyt ${v.id} ${dateStr}:`, e.message); continue; }
+    if (snap.empty) continue;
+    const r = kmPerKraj(snap.docs.map(d => d.data()));
+    if (r.kmPrzypisane <= 0 && !Object.keys(r.perKraj).length) continue;
+    pojazdy[v.id] = r.perKraj;
+    jakosc[v.id] = {
+      kmPrzypisane: r.kmPrzypisane, kmLicznik: r.kmLicznik,
+      punkty: r.punkty, odrzucone: r.odrzucone,
+      // Przy postoju (kilka km na dobę) wskaźnik nic nie mówi — 2 km wobec 1 km to 200%.
+      pokrycie: r.kmLicznik >= 20 ? Math.round((r.kmPrzypisane / r.kmLicznik) * 1000) / 10 : null,
+    };
+  }
+  await db.collection("countryKmDaily").doc(dateStr).set({
+    date: dateStr, vehicles: pojazdy, jakosc,
+    metoda: "licznik CAN + granice offline (lib/geo)", tz: TZ_PL,
+    updatedAt: new Date().toISOString(),
+  });
+  const suma = Object.values(pojazdy).reduce((a, k) => a + Object.values(k).reduce((x, y) => x + y, 0), 0);
+  return { pojazdy: Object.keys(pojazdy).length, km: Math.round(suma), jakosc };
+}
+
+exports.aggregateCountryKm = onSchedule(
+  // 2:10 — przed cleanupBreadcrumbs (2:30), żeby liczyć na pełnym komplecie punktów
+  { schedule: "10 2 * * *", timeZone: TZ_PL, region: "europe-west1", timeoutSeconds: 300 },
+  async () => {
+    const db = getFirestore();
+    const wczoraj = dataLokalna(Date.now() - 24 * 3600000);
+    try {
+      const r = await agregujDobe(db, wczoraj);
+      console.log(`aggregateCountryKm ${wczoraj}: ${r.pojazdy} pojazdów, ${r.km} km`, JSON.stringify(r.jakosc));
+      for (const [vid, j] of Object.entries(r.jakosc)) {
+        // Pokrycie daleko od 100% = luki w punktach albo odcinki odrzucone przez filtry.
+        if (j.pokrycie != null && (j.pokrycie < 90 || j.pokrycie > 110)) {
+          console.warn(`aggregateCountryKm ${wczoraj}: ${vid} pokrycie ${j.pokrycie}% (${j.kmPrzypisane}/${j.kmLicznik} km, odrzucone ${j.odrzucone})`);
+        }
+      }
+    } catch (e) { console.error(`aggregateCountryKm ${wczoraj}:`, e.message); }
+  }
+);
+
+// Ręczne przeliczenie zakresu dni (admin) — po zmianie metody albo gdy agregat
+// nie wystartował. Ograniczone do tego, co jeszcze jest w breadcrumbach (7 dni).
+exports.backfillCountryKm = onCall(
+  { region: "europe-west1", timeoutSeconds: 540 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musisz byc zalogowany.");
+    if (request.auth.token.role !== "admin") throw new HttpsError("permission-denied", "Tylko admin.");
+    const { from, to } = request.data || {};
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from || "") || !/^\d{4}-\d{2}-\d{2}$/.test(to || "")) {
+      throw new HttpsError("invalid-argument", "Wymagane from i to w formacie YYYY-MM-DD.");
+    }
+    const db = getFirestore();
+    const wyniki = [];
+    let d = lokalnaPolnoc(from, TZ_PL);
+    const stop = lokalnaPolnoc(to, TZ_PL);
+    if (stop < d) throw new HttpsError("invalid-argument", "to wcześniejsze niż from.");
+    if ((stop - d) / 86400000 > 40) throw new HttpsError("invalid-argument", "Zakres max 40 dni.");
+    while (d <= stop) {
+      const ds = dataLokalna(d);
+      const r = await agregujDobe(db, ds);
+      wyniki.push({ date: ds, ...r });
+      d = lokalnaPolnoc(nastepnyDzien(ds), TZ_PL);
+    }
+    return { success: true, dni: wyniki.length, wyniki };
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════
 // CLEANUP GPS BREADCRUMBS — kasuje punkty starsze niż 7 dni
 // Raz dziennie o 2:30 CET. Chroni przed niekontrolowanym wzrostem storage.
 // ═══════════════════════════════════════════════════════════════
@@ -1331,6 +1425,9 @@ exports.onNewChatMessage = onDocumentCreated(
 //    Credentiale w Firestore: config/gps
 //    Dostępne endpointy: devices, positions, positionsWithCanDetails, history
 // ═══════════════════════════════════════════════════════════════
+const { countryOf } = require("./lib/geo");
+const { kmPerKraj } = require("./lib/countryKm");
+
 const ATLAS_BASE = "https://widziszwszystko.eu/atlas";
 const ATLAS_ALLOWED = ["devices", "positions", "positionsWithDistance", "positionsWithCanDistance", "positionsWithCanDetails", "history"];
 

@@ -87,3 +87,7 @@ myto_km_per_fracht.json
 backup_v1_breadcrumbs_*.json
 make_dashboard*
 dashboard_*.html
+
+# granice państw dla agregatu km per kraj (functions/lib/geo.js) — MUSI być w repo,
+# inaczej deploy Cloud Functions z czystego klona padnie
+!functions/data/europe-borders.json
