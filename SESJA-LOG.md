@@ -3772,3 +3772,40 @@ nisko dla tej floty — bo mianownik z lipca jest zawyżony mniej więcej dwukro
 naprawia: oznacza tylko takie km **bursztynową gwiazdką** z podpowiedzią „snapshot z SZACOWANYM
 stanem początkowym — wartość niepewna" (wcześniej wpadały pod mylące „delta Atlas (±1%)").
 Do rozstrzygnięcia: wpisać lipiec ręcznie z raportu panelu albo naprawić CF `monthlyOdometerSnapshot`.
+
+### cd. 17.09 — km za lipiec: przyczyna znaleziona, to nie był „szacowany start"
+
+Moja pierwsza hipoteza (zawyżony stan początkowy licznika) była **błędna**. Dokument
+`vehicleKmMonthly/2026-07` miał w środku `from: "2026-07-01"`, `to: "2026-08-31"` — czyli
+**przebieg dwóch miesięcy zapisany pod lipcem**. Sierpień nie dostał nic.
+
+**Przyczyna w kodzie**: `runOdometerSnapshot` datował granicę przez `toISOString()`, czyli
+czasem **UTC**, a harmonogram chodzi o **00:05 Europe/Warsaw**. Latem to 22:05 UTC dnia
+poprzedniego, więc snapshot lądował pod datą ostatniego dnia starego miesiąca
+(`odometerSnapshots/2026-08-31` zamiast `2026-09-01`). Kolejny przebieg szukał punktu
+odniesienia pod właściwą datą, nie znajdował go i sięgał po zasiany ręcznie snapshot sprzed
+dwóch miesięcy. Błąd był **samopodtrzymujący się** — każdy kolejny miesiąc pogłębiałby lukę.
+Ślad w bazie: snapshoty automatyczne zapisane jako `2026-07-31` i `2026-08-31`.
+
+**Dowód liczbowy** (arkusz Total_26 wobec różnicy liczników Atlasa, lipiec i sierpień osobno):
+
+| pojazd | VII arkusz / Atlas | VIII arkusz / Atlas | w bazie jako „lipiec" | VII+VIII z arkusza |
+|---|---|---|--:|--:|
+| v1 | 10 197 / 10 096 | 7 785 / 7 720 | 17 816 | 17 982 |
+| v3 | 10 639 / 10 166 | 10 652 / 10 497 | 20 663 | 21 291 |
+| v4 | 8 660 / 8 431 | 6 337 / 6 215 | 14 646 | 14 997 |
+| v5 | 8 769 / 8 655 | 9 786 / 9 614 | 18 269 | 18 555 |
+
+Zapisana „lipcowa" wartość to suma dwóch miesięcy z dokładnością do 1%. Atlas zaniża wobec
+arkusza o 1–4% — to znana właściwość, nie błąd.
+
+**Naprawa kodu (WDROŻONA, `firebase deploy` przeszedł)**: granica liczona z daty lokalnej
+(`dataLokalna(nowMs, TZ_PL)`), miesiąc poprzedni wyprowadzany z niej, a delta miesięczna
+liczona **tylko gdy granica wypada 1. dnia** — ręczny przebieg w środku miesiąca zapisuje sam
+odczyt liczników i nic więcej. Logika przetestowana na czterech przypadkach: czas letni,
+zimowy, przełom roku i przebieg ręczny — wszystkie wychodzą poprawnie.
+
+**Naprawa danych — NIE WYKONANA, czeka na usera.** Skrypt `diagnose_km_fix.mjs` (backup →
+km z `operacyjne` z pominięciem wpisów `source: "report"` → kopia snapshotów pod właściwe daty
+→ weryfikacja). Uruchomienie zablokował klasyfikator (zapis do współdzielonych zasobów), więc
+odpala go user: `node diagnose_km_fix.mjs` na sucho, potem `--zapisz`.

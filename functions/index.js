@@ -1118,7 +1118,12 @@ function matchVehicleByPlate(vehicles, deviceName) {
 // Wspólna logika: zapis snapshotu + policzenie miesiąca który się właśnie zamknął.
 async function runOdometerSnapshot(db, nowMs) {
   const now = new Date(nowMs);
-  const boundary = now.toISOString().slice(0, 10);                       // np. "2026-08-01"
+  // Granicę datujemy czasem LOKALNYM, nie UTC. Harmonogram to 00:05 Europe/Warsaw
+  // 1. dnia miesiąca, czyli latem 22:05 UTC dnia POPRZEDNIEGO — przez `toISOString()`
+  // snapshot lądował pod datą ostatniego dnia starego miesiąca. Kolejny przebieg szukał
+  // wtedy punktu odniesienia, którego nie było, i liczył dwa miesiące naraz:
+  // `vehicleKmMonthly/2026-07` dostał przebieg od 1.07 do 1.09 (incydent 17.09.2026).
+  const boundary = dataLokalna(nowMs, TZ_PL);                            // np. "2026-09-01"
   const devices = await fetchAtlasOdometers(db);
   const vehicles = ((await db.doc("fleet/data").get()).data() || {}).fleetv2_vehicles || [];
 
@@ -1134,10 +1139,20 @@ async function runOdometerSnapshot(db, nowMs) {
     boundary, takenAt: now.toISOString(), source: "atlas_positions", devices: devMap,
   }, { merge: true });
 
-  // Miesiąc który się zamknął = miesiąc poprzedzający granicę
-  const prev = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
-  const prevMonth = prev.toISOString().slice(0, 7);                      // "2026-07"
-  const prevBoundary = prev.toISOString().slice(0, 10);                  // "2026-07-01"
+  // Deltę miesięczną liczymy TYLKO na granicy miesiąca. Ręczny przebieg w połowie
+  // miesiąca ma zapisać sam odczyt liczników i nic więcej — inaczej podstawiłby
+  // do miesiąca okno „1. dnia do dziś".
+  if (!boundary.endsWith("-01")) {
+    console.log(`odometerSnapshot: zapisany ${boundary} (poza granicą miesiąca — km nieliczone)`);
+    return { boundary, month: null, computed: 0 };
+  }
+
+  // Miesiąc który się zamknął = miesiąc poprzedzający granicę (liczony z daty lokalnej)
+  const [bYear, bMonth] = boundary.split("-").map(Number);
+  const prevYear = bMonth === 1 ? bYear - 1 : bYear;
+  const prevNum = bMonth === 1 ? 12 : bMonth - 1;
+  const prevBoundary = `${prevYear}-${String(prevNum).padStart(2, "0")}-01`;   // "2026-08-01"
+  const prevMonth = prevBoundary.slice(0, 7);                                  // "2026-08"
   const prevSnap = await db.doc(`odometerSnapshots/${prevBoundary}`).get();
   if (!prevSnap.exists) {
     console.log(`odometerSnapshot: zapisany ${boundary}; brak ${prevBoundary} → km za ${prevMonth} nieliczone (pierwszy miesiąc)`);
@@ -1158,6 +1173,7 @@ async function runOdometerSnapshot(db, nowMs) {
     // to wynik jest przybliżony (~1%) — nie udawaj że jest dokładny.
     const source = prevSnap.data().approx ? "snapshot_approx_start" : "snapshot";
     out[vid] = { km, plate: after.plate, source, from: prevBoundary, to: boundary };
+    // from/to MUSZĄ być odległe o jeden miesiąc — jeśli nie są, mamy znowu incydent z 17.09
     computed++;
   }
   await db.doc(`vehicleKmMonthly/${prevMonth}`).set({
