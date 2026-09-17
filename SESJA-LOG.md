@@ -3828,3 +3828,26 @@ co do dziesiątej z kolumną `spalanie` w arkuszu Total_26** (v1 VII 14,2 · v3 
 czyli aplikacja liczy to samo, co user ma w arkuszu, tylko sama.
 
 Październikowy przebieg CF policzy wrzesień poprawnie — snapshot `2026-09-01` już istnieje.
+
+### cd. 17.09 — ranking stacji w lewej kolumnie (materiał dla opiekuna karty)
+
+W lewej kolumnie, pod kafelkami KPI: **„🏪 Gdzie tankujemy najwięcej"** — 10 stacji
+z największym wolumenem **w skali roku**, z ceną roczną i ceną za wybrany miesiąc.
+Cel podany przez usera wprost: wysyłać to opiekunom kart, żeby na tych stacjach dali
+niższą cenę. Stąd jeden miesiąc nie wystarczy — o rabat prosi się wolumenem rocznym.
+
+- **Zestawienie idzie za filtrem karty** — opiekunowi Eurowagu wysyłasz stacje Eurowagu,
+  nie całą flotę wszystkich kart. Test na żywo: po odklikaniu E100 i Andamura z rankingu
+  wypadają Gexa i Andamur La Junquera, zostają stacje Eurowagu.
+- **📋 Kopiuj** daje TSV gotowy do maila: stacja, kraj, liczba tankowań, litry roku,
+  średnia cena roczna, cena za bieżący miesiąc (pełne nazwy stacji, nie skrócone).
+- Cena roczna kolorowana wobec średniej roku w tym zestawie filtrów; „—" w kolumnie
+  miesiąca znaczy, że w tym miesiącu tam nie tankowano. W trybie rocznym kolumna miesiąca
+  w ogóle się nie pokazuje.
+- **Dociąg całego roku jest na żądanie** (przycisk „Pokaż ranking roku (4 mies.)"), nie przy
+  wejściu w zakładkę — to tyle zapytań, ile miesięcy w bazie. Cache dzielony z panelem
+  „Trend cen", więc otwarcie jednego uzbraja drugi.
+
+**Weryfikacja**: ranking przeliczony niezależnym skryptem — **262 stacje, 20 353 L, średnia
+1,613 €/L**, a pierwsza dziesiątka zgodna co do litra i do trzeciego miejsca po przecinku
+(Gexa ES 609 L rok 1,240 / sierpień 1,488 · Eurowag Krzywa 591 L 1,372 / 1,436 …).

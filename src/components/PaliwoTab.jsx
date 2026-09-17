@@ -139,7 +139,9 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
   // Trend cen miesiąc-do-miesiąca — opt-in. Świadomie NIE listener onSnapshot: jednorazowy
   // dociąg wszystkich miesięcy przy pierwszym otwarciu, cache w stanie (dyscyplina kosztów).
   const [showSummary, setShowSummary] = useState(false);
+  const [pokazRanking, setPokazRanking] = useState(false);   // ranking stacji — wymaga całego roku
   const [tsvRecznie, setTsvRecznie] = useState(null);   // fallback, gdy schowek zablokowany
+  const [tsvRankingu, setTsvRankingu] = useState(null);
   const [showTrend, setShowTrend] = useState(false);
   const [trendData, setTrendData] = useState(null);   // { [month]: tx[] } | null
   const [trendLoading, setTrendLoading] = useState(false);
@@ -222,9 +224,11 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
     return () => { alive = false; };
   }, [month, months]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Trend: dociągnij WSZYSTKIE miesiące raz, gdy user otworzy panel trendu ──
+  // ── Dociąg WSZYSTKICH miesięcy raz — potrzebny i trendowi, i rankingowi stacji.
+  // Świadomie na żądanie (klik użytkownika), nie przy wejściu w zakładkę: to tyle
+  // zapytań, ile miesięcy w bazie, a większość wizyt dotyczy jednego miesiąca.
   useEffect(() => {
-    if (!showTrend || trendData || trendLoading || !months.length) return;
+    if ((!showTrend && !pokazRanking) || trendData || trendLoading || !months.length) return;
     let alive = true;
     (async () => {
       setTrendLoading(true);
@@ -237,12 +241,12 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
         if (alive) setTrendData(byMonth);
       } catch (e) {
         console.warn("[Paliwo] trend:", e);
-        showToast("❌ Nie udało się wczytać trendu miesięcy");
+        showToast("❌ Nie udało się wczytać wszystkich miesięcy");
       }
       if (alive) setTrendLoading(false);
     })();
     return () => { alive = false; };
-  }, [showTrend, months]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [showTrend, pokazRanking, months]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Filtrowanie ──
   const filtered = useMemo(() => txs.filter(t =>
@@ -298,6 +302,59 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
         eurKm: kmKryte ? eKryte / kmKryte : null };
     }).sort((a, b) => b.l - a.l);
   }, [filtered, kmMonthly, month]);
+
+  // ── RANKING STACJI — materiał do rozmowy z opiekunem karty ────────────────
+  // Gdzie realnie zostawiamy pieniądze w skali ROKU (nie miesiąca — jeden miesiąc
+  // to za mała próbka, żeby prosić o rabat). Cena pokazana dwojako: za wybrany
+  // miesiąc i za cały rok, bo opiekun pyta „ile u nas tankujecie" i „po ile".
+  //
+  // Filtry widoku (karta, produkt, kraj, auta) OBOWIĄZUJĄ — zestawienie dla opiekuna
+  // Eurowagu ma zawierać stacje Eurowagu, a nie całą flotę wszystkich kart.
+  const rankingStacji = useMemo(() => {
+    if (!trendData) return null;
+    const rok = month.slice(0, 4);
+    const mcBiezacy = rokTryb ? null : month;
+    const pasuje = t => (fCars.size === 0 || fCars.has(t.vehicleId)) && fCards.has(t.card)
+      && t.product === product && (country === "all" || t.country === country);
+
+    const st = {};
+    let litrowRazem = 0;
+    for (const [m, lista] of Object.entries(trendData)) {
+      if (m.slice(0, 4) !== rok) continue;
+      for (const t of lista) {
+        if (!pasuje(t) || !(t.liters > 0)) continue;
+        const nazwa = (t.station || t.address || "—").trim();
+        const k = `${t.country || "??"}|${nazwa.toLowerCase()}`;
+        const o = st[k] = st[k] || { nazwa, cc: t.country || "??", l: 0, e: 0, n: 0, lM: 0, eM: 0, nM: 0 };
+        o.l += t.liters; o.e += t.netEUR || 0; o.n++;
+        litrowRazem += t.liters;
+        if (mcBiezacy && m === mcBiezacy) { o.lM += t.liters; o.eM += t.netEUR || 0; o.nM++; }
+      }
+    }
+    const lista = Object.values(st)
+      .map(o => ({ ...o, cena: o.l ? o.e / o.l : 0, cenaM: o.lM ? o.eM / o.lM : null,
+        udzial: litrowRazem ? o.l / litrowRazem * 100 : 0 }))
+      .sort((a, b) => b.l - a.l);
+    return { rok, lista, top: lista.slice(0, 10), litrowRazem,
+      cenaRoku: lista.reduce((a, o) => a + o.e, 0) / (litrowRazem || 1) };
+  }, [trendData, month, rokTryb, fCars, fCards, product, country]);
+
+  const kopiujRanking = async () => {
+    if (!rankingStacji) return;
+    const naglowek = ["Stacja", "Kraj", "Tankowań", `Litry ${rankingStacji.rok}`, `Śr. cena netto EUR/L ${rankingStacji.rok}`];
+    if (!rokTryb) naglowek.push(`Cena netto EUR/L ${monthLabel(month)}`);
+    const wiersze = [naglowek, ...rankingStacji.top.map(o => {
+      const r = [o.nazwa, o.cc, String(o.n), o.l.toFixed(0), o.cena.toFixed(3)];
+      if (!rokTryb) r.push(o.cenaM ? o.cenaM.toFixed(3) : "");
+      return r;
+    })];
+    const tsv = wiersze.map(r => r.join("\t")).join("\n");
+    try {
+      await navigator.clipboard.writeText(tsv);
+      setTsvRankingu(null);
+      showToast("✅ Ranking skopiowany — wklej do maila do opiekuna");
+    } catch { setTsvRankingu(tsv); showToast("⚠️ Schowek zablokowany — skopiuj z pola pod tabelą"); }
+  };
 
   // ── Podsumowanie miesiąca do Total_26 i do kosztów ────────────────────────
   // Świadomie liczone z `txs`, a NIE z `filtered`: zestawienie kosztowe musi objąć
@@ -1115,6 +1172,83 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
                 <div className="text-[10.5px] uppercase tracking-wide text-gray-400">{b}</div>
               </div>
             ))}
+          </div>
+
+          {/* ── RANKING STACJI — do rozmowy z opiekunem karty ── */}
+          <div className="bg-white rounded-2xl border border-gray-100 p-4">
+            <div className="flex items-start justify-between gap-2 mb-1">
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">
+                  🏪 Gdzie tankujemy najwięcej
+                </div>
+                <div className="text-[11px] text-gray-400">
+                  {rankingStacji
+                    ? <>10 stacji z największym wolumenem w {rankingStacji.rok} — materiał do rozmowy o rabacie</>
+                    : <>Ranking liczy się z całego roku, więc wymaga dociągnięcia wszystkich miesięcy</>}
+                </div>
+              </div>
+              {rankingStacji && (
+                <button onClick={kopiujRanking}
+                  className="shrink-0 px-2.5 py-1 rounded-lg text-[11px] font-medium text-white" style={{ background: "#0071e3" }}>
+                  📋 Kopiuj
+                </button>
+              )}
+            </div>
+
+            {!pokazRanking && !trendData && (
+              <button onClick={() => setPokazRanking(true)}
+                className="mt-1 w-full px-3 py-2 rounded-xl text-[12px] font-medium border border-gray-200 text-gray-700 hover:bg-gray-50">
+                Pokaż ranking roku ({months.length} {months.length === 1 ? "miesiąc" : "mies."} do dociągnięcia)
+              </button>
+            )}
+            {pokazRanking && trendLoading && <div className="text-[12px] text-gray-400 py-2">⏳ Wczytuję wszystkie miesiące…</div>}
+
+            {rankingStacji && (rankingStacji.top.length === 0
+              ? <div className="text-[12px] text-gray-400 py-2">Brak tankowań w {rankingStacji.rok} przy tych filtrach.</div>
+              : <>
+                <table className="w-full text-[11.5px] mt-2">
+                  <thead className="text-[9.5px] uppercase tracking-wide text-gray-400">
+                    <tr>
+                      <th className="text-left pb-1">Stacja</th>
+                      <th className="text-right pb-1 px-1">Litry</th>
+                      <th className="text-right pb-1 px-1">€/L {rankingStacji.rok}</th>
+                      {!rokTryb && <th className="text-right pb-1">€/L mc</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rankingStacji.top.map((o, i) => (
+                      <tr key={o.cc + o.nazwa} className="border-t border-gray-100">
+                        <td className="py-1 pr-1">
+                          <span className="text-gray-300 mr-1 tabular-nums">{i + 1}.</span>
+                          <span className="mr-1">{FLAG[o.cc] || ""}</span>
+                          <span className="text-gray-900" title={`${o.nazwa} · ${o.n} tankowań · ${o.udzial.toFixed(1)}% litrów roku`}>
+                            {o.nazwa.length > 20 ? o.nazwa.slice(0, 19) + "…" : o.nazwa}
+                          </span>
+                        </td>
+                        <td className="py-1 px-1 text-right tabular-nums text-gray-500">{Math.round(o.l).toLocaleString("pl-PL")}</td>
+                        <td className="py-1 px-1 text-right tabular-nums font-semibold"
+                          style={{ color: o.cena > rankingStacji.cenaRoku ? "#dc2626" : "#16a34a" }}>
+                          {p3(o.cena)}
+                        </td>
+                        {!rokTryb && (
+                          <td className="py-1 text-right tabular-nums text-gray-500">{o.cenaM ? p3(o.cenaM) : "—"}</td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {tsvRankingu && (
+                  <textarea readOnly value={tsvRankingu} rows={rankingStacji.top.length + 2}
+                    onFocus={e => e.target.select()} ref={el => el && el.select()}
+                    className="mt-2 w-full text-[10px] font-mono border border-gray-200 rounded-lg p-2 bg-gray-50" />
+                )}
+                <div className="text-[10.5px] text-gray-400 mt-2 leading-relaxed">
+                  Kolor ceny rocznej wobec <b>średniej całego roku {p3(rankingStacji.cenaRoku)} €/L</b> w tym zestawie
+                  filtrów. „€/L mc" to ta sama stacja w {monthLabel(month)} — „—" znaczy, że w tym miesiącu tam nie tankowano.
+                  {rankingStacji.lista.length > 10 && <> Poza pierwszą dziesiątką jest jeszcze {rankingStacji.lista.length - 10} stacji.</>}
+                  {" "}Zestawienie idzie za filtrem karty, więc opiekunowi wysyłasz jego stacje.
+                </div>
+              </>)}
           </div>
 
         </div>
