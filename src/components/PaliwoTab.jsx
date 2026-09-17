@@ -19,6 +19,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { db } from "../firebase";
 import { collection, doc, getDoc, getDocs, setDoc, writeBatch } from "firebase/firestore";
 import { logAction } from "../utils/logAction";
+import PaliwoDashboard from "./PaliwoDashboard";
 import {
   CARDS, FLAG, SKIP_PLATE, VAT, norm, detectAndParse, txId, stationQueries, stationKey,
   csvToAoa, nettujStorno,
@@ -1238,24 +1239,31 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
           </div>
         </div>
 
-        {/* MAPA */}
-        <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden relative min-h-[420px]">
-          <div className="absolute z-[500] top-3 left-3 flex gap-1.5 items-center bg-white/95 backdrop-blur border border-gray-100 rounded-xl px-2.5 py-2 shadow-sm">
-            <span className="text-[11px] text-gray-400 mr-1">Etykiety:</span>
-            {chip(labelMode === "price", () => setLabelMode("price"), "€/L")}
-            {chip(labelMode === "liters", () => setLabelMode("liters"), "litry")}
-            {chip(labelMode === "none", () => setLabelMode("none"), "bez")}
+        {/* MAPA + dashboard pod nią */}
+        <div className="space-y-4 self-start">
+          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden relative min-h-[420px]">
+            <div className="absolute z-[500] top-3 left-3 flex gap-1.5 items-center bg-white/95 backdrop-blur border border-gray-100 rounded-xl px-2.5 py-2 shadow-sm">
+              <span className="text-[11px] text-gray-400 mr-1">Etykiety:</span>
+              {chip(labelMode === "price", () => setLabelMode("price"), "€/L")}
+              {chip(labelMode === "liters", () => setLabelMode("liters"), "litry")}
+              {chip(labelMode === "none", () => setLabelMode("none"), "bez")}
+            </div>
+            <div className="absolute z-[500] bottom-4 left-3 bg-white/95 backdrop-blur border border-gray-100 rounded-xl px-3 py-2.5 shadow-sm">
+              <div className="text-[10.5px] uppercase tracking-wide text-gray-400 font-semibold mb-1">Karta</div>
+              {Object.entries(CARDS).map(([k, v]) => (
+                <div key={k} className="flex items-center gap-1.5 text-[11.5px] text-gray-700">
+                  <span className="w-2 h-2 rounded-full" style={{ background: v.color }} />{v.name}
+                </div>
+              ))}
+              <div className="text-[10.5px] uppercase tracking-wide text-gray-400 font-semibold mt-2">Wielkość = litry</div>
+            </div>
+            <div ref={mapRef} className="w-full min-h-[420px]" style={{ height: "calc(100vh - 220px)" }} />
           </div>
-          <div className="absolute z-[500] bottom-4 left-3 bg-white/95 backdrop-blur border border-gray-100 rounded-xl px-3 py-2.5 shadow-sm">
-            <div className="text-[10.5px] uppercase tracking-wide text-gray-400 font-semibold mb-1">Karta</div>
-            {Object.entries(CARDS).map(([k, v]) => (
-              <div key={k} className="flex items-center gap-1.5 text-[11.5px] text-gray-700">
-                <span className="w-2 h-2 rounded-full" style={{ background: v.color }} />{v.name}
-              </div>
-            ))}
-            <div className="text-[10.5px] uppercase tracking-wide text-gray-400 font-semibold mt-2">Wielkość = litry</div>
-          </div>
-          <div ref={mapRef} className="w-full h-full min-h-[420px]" style={{ height: "calc(100vh - 220px)" }} />
+
+          {/* Pod mapą: wykresy z tych samych transakcji, które są na pinach.
+              Karta mapy ma własną wysokość, więc dashboard wypełnia resztę kolumny
+              zamiast białej przestrzeni ciągnącej się do końca lewej kolumny. */}
+          <PaliwoDashboard txs={filtered} month={month} plateOf={plateOf} product={product} />
         </div>
       </div>
     </div>

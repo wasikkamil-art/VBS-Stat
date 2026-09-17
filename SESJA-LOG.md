@@ -3704,3 +3704,41 @@ dodania przełącznika aplikacji: doszedł drugi obrazek `alt="FleetStat Faktury
 dopasowuje przez „zawiera", więc łapał dwa elementy (strict mode violation). Poprawione na
 dopasowanie dokładne (commit `5c03c82`). **Lekcja: suite odpalany tylko ręcznie przed dużym
 deployem potrafi gnić przez ~2 miesiące** — poprzedni pełny przebieg był w lipcu.
+
+### cd. 17.09 — dashboard pod mapą w Paliwie
+
+Pod mapą zostawało **1838 px białej przestrzeni** (mapa 548 px, a karta rozciągała się do
+długości lewej kolumny). User poprosił o wykorzystanie tego miejsca; wybrał trzy kafelki.
+
+**`src/components/PaliwoDashboard.jsx`** — osobny plik, żeby nie puchł `PaliwoTab` (już 60 kB):
+
+| kafelek | co odpowiada |
+|---|---|
+| ⛽ Kiedy tankowali i po ile | dzień po dniu: słupki litrów + kropka na każde tankowanie, wysokość = €/L, kolor względem średniej floty, wielkość = litry |
+| 🏪 Gdzie jest drogo | stacje wg **nadpłaty** = (cena stacji − średnia kraju) × litry |
+| 🚚 Każde auto osobno | pasek per pojazd na tej samej skali dni i cen — auta są porównywalne między sobą |
+
+Karta mapy dostała `self-start`, więc przestaje się rozciągać; dashboard wypełnia resztę
+kolumny (prawa 1640 px wobec lewej 2498 px).
+
+**Metodyka, która wymagała decyzji**: średnia kraju do porównania stacji liczona jest **bez tej
+stacji**. Inaczej stacja porównywałaby się sama ze sobą, a przy jednym punkcie w kraju odchyłka
+zawsze wychodziłaby zero. Gdy w kraju nie ma innych tankowań, kolumna pokazuje „—", nie zero.
+
+Dashboard czyta **te same transakcje co piny na mapie** (czyli po filtrach auta/karty/produkt/kraj),
+świadomie NIE cały miesiąc — od tego jest „Podsumowanie miesiąca" nad mapą. Wykresy to inline SVG,
+nie biblioteka: kolumna ma 545 px i gęstość, której gotowy komponent nie utrzyma.
+
+**Weryfikacja w podglądzie na prawdziwych danych**:
+- Ranking stacji **przeliczony niezależnym skryptem** — wszystkie 8 wierszy zgodne co do centa
+  (ORLEN Kielce 2 tank./79 L/1,616 €/L/Δ +0,133/nadpłata 10,54 €), „…i 65 innych stacji" = 73 − 8.
+- Sierpień i maj: skale, średnie i rankingi przeliczają się poprawnie przy zmianie miesiąca.
+- AdBlue: skala schodzi do 0,484–1,280 €/L, średnia 0,959 zgodna z „Wnioskami" obok.
+- 🐛 Złapane i naprawione: przy **jednej cenie w widoku** (np. AdBlue + Włochy = 1 tankowanie)
+  rozpiętość skali wynosi zero i kropka lądowała przyklejona do dolnej krawędzi. Teraz siada
+  na środku, a oś pokazuje jedną etykietę zamiast dwóch identycznych.
+- Filtr dający **zero transakcji** (odklikane wszystkie karty): dashboard znika bez błędu w konsoli.
+
+⚠️ Do sprawdzenia przez usera: wygląd na szerokim monitorze (podgląd chodził na 1280 px)
+i na tablecie — przy wąskim ekranie kolumny schodzą pod siebie i dashboard ląduje pod mapą,
+czyli tam, gdzie ma być, ale tego nie klikałem.
