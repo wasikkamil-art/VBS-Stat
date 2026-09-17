@@ -3611,3 +3611,22 @@ Bundle: `AnalizyTab` 42,9 kB (gzip 13,0) jako osobny chunk; główny bez zmian.
 Pokrycie 16.09: v4 **100,4%** (284 km przypisane / 283 z licznika), v5 **94,3%** — oba w zakresie 90–110%, więc żadnego `console.warn`. v1 i v3 stały, stąd tylko dwa pojazdy. Km per kraj: v4 FR 284, v5 FR 310 + BE 57.
 
 **Mechanizm działa end-to-end**: punkt → kraj przy zapisie → agregat dobowy → trwały dokument. Od października miesiąc będzie kompletny i €/km per kraj policzymy z licznika zamiast z tras zleceń.
+
+### cd. — uploader eksportów NegoMetal / e-TOLL (commity `80ef75e`, `26b4549`)
+
+Opłaty drogowe przestają wymagać mojego udziału co miesiąc. W zakładce Analizy → Opłaty drogowe (admin) przycisk **„⬆️ Wgraj eksporty"**: user wrzuca NegoMetal `.xlsx` i e-TOLL `.csv` (można oba naraz), a aplikacja rozpoznaje pliki, dopasowuje rejestracje do floty, przelicza na EUR **kursem NBP z dnia transakcji**, deduplikuje i przelicza analizę miesiąca.
+
+| moduł | rola |
+|---|---|
+| `src/utils/tollParsers.js` | parsery Nego (xlsx) + e-TOLL (csv), `txId` do dedupu, `csvToAoa` |
+| `src/utils/tollAnalysis.js` | budowa dokumentu `tollAnalysis` z transakcji — ta sama struktura co analizy ręczne |
+| `src/utils/nbp.js` | kurs NBP wyjęty z PaliwoTab do wspólnego modułu |
+| `tollTransactions/{YYYY-MM}/tx/{id}` | nowa kolekcja, zapis partiami po 400 |
+
+**Weryfikacja symulacją pełnego przepływu** (pliki sierpniowe, bez zapisu): 1956 transakcji, wszystkie dopasowane do floty, dedup usunął **3 duplikaty portalu** (ta sama bramka, minuta, kwota — lipiec, kwiecień, czerwiec; sierpień czysty). Wobec analizy ręcznej: Nego **2109,34 €** vs 2108,75 €, e-TOLL **412,60 €** vs 415,51 € — kwoty w EUR co do centa, różnice tylko przy przeliczeniu walut (import dokładniejszy, bo NBP z dnia zamiast kursu orientacyjnego). Kursów pobiera **16 zamiast 630** (grupowanie po parze waluta-dzień).
+
+⚠️ **Złapane przed wdrożeniem**: eksport Nego obejmuje CAŁY rok, więc wgranie go przeliczy wszystkie miesiące w pliku. Dla lipca i sierpnia nie ma `countryKmDaily` (mechanizm ruszył 10.09), więc pusty zestaw km **skasowałby stawki €/km policzone z tras zleceń**. Fix (`26b4549`): gdy import nie przynosi kilometrów, zostają te z poprzedniej analizy wraz z opisem metody.
+
+⚠️ **NIEZWERYFIKOWANE**: kliknięcie importu w działającej aplikacji — zapis wymaga zalogowanego admina, podgląd tego nie ma. Sprawdzona jest logika (symulacja na prawdziwych plikach) i wygląd panelu. Pierwszy prawdziwy import przy zamykaniu września.
+
+Przypomnienie do tamtego momentu: w portalu NegoMetalu **odhaczyć filtr „ukryj transakcje, na które wystawiono FV"** — inaczej eksport gubi połowę miesiąca (tak zniknęło 3 024 € marzec–lipiec).
