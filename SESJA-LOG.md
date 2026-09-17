@@ -3630,3 +3630,19 @@ Opłaty drogowe przestają wymagać mojego udziału co miesiąc. W zakładce Ana
 ⚠️ **NIEZWERYFIKOWANE**: kliknięcie importu w działającej aplikacji — zapis wymaga zalogowanego admina, podgląd tego nie ma. Sprawdzona jest logika (symulacja na prawdziwych plikach) i wygląd panelu. Pierwszy prawdziwy import przy zamykaniu września.
 
 Przypomnienie do tamtego momentu: w portalu NegoMetalu **odhaczyć filtr „ukryj transakcje, na które wystawiono FV"** — inaczej eksport gubi połowę miesiąca (tak zniknęło 3 024 € marzec–lipiec).
+
+### cd. 17.09 — zasady panelu, decyzja o km, naprawiony backup faktur
+
+**Zasady panelu Analizy spisane w `ZASADY-VBS-STAT.md`** (commit `72c56ea`) — dotąd żyły tylko w pamięci. Kalendarz danych: frachty na bieżąco · km per kraj automat 2:10 · koszty **user + Claude razem, w dwa miejsca (baza + Total_26) z kontrolą sum** · eksporty Nego/e-TOLL user pobiera **5–10 dnia** kolejnego miesiąca. Odnogi zapalają się różnie: rankingi po imporcie kosztów (~10–15), dyspozytorzy od razu, opłaty po eksportach.
+
+🐛 **Naprawione przy okazji: miesiąc w toku porównywany z pełnym poprzednim.** 17.09 wrzesień pokazywał **−52,4%** wobec sierpnia. Po obcięciu porównania do tego samego dnia wyszło **+52,7%** — miesiąc szedł o połowę lepiej, nie gorzej. `zaMiesiac(fr, mies, doDnia)` + `miesiacWToku` + chip w widoku.
+
+**Km we frachcie — zostaje ręcznie** (commit `d9ee652`, decyzja usera, nie wracać). Automat z routingu odrzucony: routing liczy sam odcinek ładowny, a dyspozytor wpisuje cały przebieg — z pustym dojazdem i tym, co auto załatwia po drodze (serwis, odbiór). Test na 46 trasach: mediana odchylenia **15,7%**, 11 tras >25%, zawsze w dół (Hameln→Straubing: wpisane 1220, routing 581). Wpisy są rzetelne: 241/242 wypełnione, pokrycie wobec licznika 81–103%.
+
+🚨 **Backup bazy FAKTUR nigdy nie działał** (repo `vbs-invoices`, poza tym repo). Workflow wdrożony 11.09, ale **sekret `FIREBASE_SERVICE_ACCOUNT` nigdy nie został ustawiony** → 6 przebiegów, 6 porażek, gałąź `backups` z samym README. **Tydzień bez kopii leasingów, płatności i skanów.** Guard w workflow działał poprawnie — padał z jasnym komunikatem zamiast udawać sukces.
+- Naprawa: user wygenerował klucz SA w Firebase Console, uruchomił `gh secret set` (⚠️ **Claude nie ma uprawnień do zapisu sekretów** — blokuje klasyfikator). Pierwszy udany przebieg 17.09 10:28: **10 kolekcji / ~776 KB** (invoices 566 KB, contractors 75, leasings 66, orphanDocs 35, payments 17, leasingFees 11, +4 drobne).
+- Oba klucze SA usunięte z `~/Downloads` na prośbę usera (zweryfikowane: ten do `vbs-stats` był duplikatem `serviceAccountKey.json` z repo).
+- Stan trzech backupów: FleetStat ✅ · FOX ✅ · Faktury ✅.
+- **Reguła: po wdrożeniu workflow backupu sprawdź pierwszy przebieg** — sam plik niczego nie zabezpiecza.
+
+**Zaplanowana kontrola na 18.09 9:00**: wszystkie trzy backupy — status przebiegu **z harmonogramu** (nie ręcznego) + weryfikacja rozmiarów kopii wobec dnia poprzedniego (zielony status przy niepełnym zrzucie jest możliwy).
