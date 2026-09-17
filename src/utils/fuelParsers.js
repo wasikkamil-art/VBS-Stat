@@ -46,9 +46,47 @@ const cell = (row, i) => (row && i >= 0 && row[i] !== undefined ? row[i] : "");
 
 export const numOf = v => {
   if (typeof v === "number") return v;
-  const n = parseFloat(String(v ?? "").replace(/\s/g, "").replace(",", "."));
+  let s = String(v ?? "").replace(/\s/g, "");
+  // Gdy w liczbie są oba znaki („1.234,56" albo „1,234.56"), ten ostatni jest
+  // separatorem dziesiętnym, a wcześniejsze grupują tysiące.
+  const ostKropka = s.lastIndexOf("."), ostPrzecinek = s.lastIndexOf(",");
+  if (ostKropka >= 0 && ostPrzecinek >= 0) {
+    const dziesietny = ostKropka > ostPrzecinek ? "." : ",";
+    const grupujacy = dziesietny === "." ? "," : ".";
+    s = s.split(grupujacy).join("").replace(dziesietny, ".");
+  } else s = s.replace(",", ".");
+  const n = parseFloat(s);
   return isFinite(n) ? n : null;
 };
+
+// ── CSV → tablica tablic ───────────────────────────────────────────────────
+// Świadomie NIE przez XLSX: jego zgadywanie formatu potrafi zjeść przecinek
+// dziesiętny i zrobić z „376,66" liczbę 37666 (sprawdzone na raporcie E100 w node).
+// Separator rozpoznajemy z nagłówka — E100 daje średniki, Eurowag przecinki.
+export function csvToAoa(text) {
+  const czysty = String(text || "").replace(/^\ufeff/, "").trim();
+  const naglowek = czysty.split(/\r?\n/, 1)[0] || "";
+  const poza = (linia, znak) => {
+    let n = 0, wCudzyslowie = false;
+    for (const z of linia) {
+      if (z === '"') wCudzyslowie = !wCudzyslowie;
+      else if (z === znak && !wCudzyslowie) n++;
+    }
+    return n;
+  };
+  const sep = poza(naglowek, ";") >= poza(naglowek, ",") ? ";" : ",";
+  return czysty.split(/\r?\n/).map(linia => {
+    const pola = []; let biezace = "", wCudzyslowie = false;
+    for (let i = 0; i < linia.length; i++) {
+      const z = linia[i];
+      if (z === '"') { if (wCudzyslowie && linia[i + 1] === '"') { biezace += '"'; i++; } else wCudzyslowie = !wCudzyslowie; }
+      else if (z === sep && !wCudzyslowie) { pola.push(biezace); biezace = ""; }
+      else biezace += z;
+    }
+    pola.push(biezace);
+    return pola;
+  });
+}
 
 // Data z komórki: XLSX z cellDates daje Date, CSV/JSON może dać "31.03.2026 21:49:42"
 // albo "2026-06-30 22:15:11". Zwraca ISO "YYYY-MM-DDTHH:mm" (czas lokalny) albo null.
@@ -96,11 +134,11 @@ export function parseEurowag(aoa) {
     const ts = tsOf(cell(r, I.ts));
     if (!liters || net == null || !ts) continue;
     out.push({
-      card: "eurowag", plateRaw: cell(r, I.plate), ts, product, liters: Math.abs(liters),
+      card: "eurowag", plateRaw: cell(r, I.plate), ts, product, liters, storno: net < 0 || liters < 0,
       country: String(cell(r, I.country) || "").toUpperCase().slice(0, 2),
       station: String(cell(r, I.loc) || "").trim(), address: "",
       currency: String(cell(r, I.cur) || "EUR").toUpperCase(),
-      netLocal: Math.abs(net), grossLocal: Math.abs(numOf(cell(r, I.gross)) ?? net),
+      netLocal: net, grossLocal: numOf(cell(r, I.gross)) ?? net,
     });
   }
   return out;
@@ -126,11 +164,12 @@ export function parseE100(aoa) {
     const country = String(cell(r, I.country) || "").toUpperCase().slice(0, 2);
     if (!liters || gross == null || !ts) continue;
     out.push({
-      card: "e100", plateRaw: cell(r, I.plate), ts, product, liters: Math.abs(liters), country,
+      card: "e100", plateRaw: cell(r, I.plate), ts, product, liters, country,
+      storno: gross < 0 || liters < 0,
       station: [cell(r, I.brand), cell(r, I.station)].filter(Boolean).join(" ").trim(),
       address: String(cell(r, I.addr) || "").trim(),
       currency: String(cell(r, I.cur) || "EUR").toUpperCase(),
-      grossLocal: Math.abs(gross), netLocal: Math.abs(gross) / (1 + (VAT[country] ?? 0.21)),
+      grossLocal: gross, netLocal: gross / (1 + (VAT[country] ?? 0.21)),
     });
   }
   return out;
@@ -160,9 +199,10 @@ export function parseAndamur(aoa, stationCountry = {}) {
     // Gdy nieznany → null; właściwy kraj+VAT ustawia confirmImport po geokodzie (patrz PaliwoTab).
     const country = stationCountry[station.toLowerCase()] || null;
     out.push({
-      card: "andamur", plateRaw: cell(r, I.plate), ts, product, liters: Math.abs(liters),
+      card: "andamur", plateRaw: cell(r, I.plate), ts, product, liters,
+      storno: gross < 0 || liters < 0,
       country, station, address: "", currency: "EUR",
-      grossLocal: Math.abs(gross), netLocal: Math.abs(gross) / (1 + (VAT[country] ?? 0.21)),
+      grossLocal: gross, netLocal: gross / (1 + (VAT[country] ?? 0.21)),
     });
   }
   return out;
@@ -175,6 +215,43 @@ export function detectAndParse(aoa, stationCountry = {}) {
   if (flat.includes("moje zużycie") || (flat.includes("stacja") && flat.includes("litry")))
     return { kind: "andamur", rows: parseAndamur(aoa, stationCountry) };
   return { kind: null, rows: [] };
+}
+
+// ══════════════════════════════════════════════════════════════════
+// STORNO (korekta) — wiersz z kwotą ujemną
+// ══════════════════════════════════════════════════════════════════
+// Karta potrafi zaksięgować transakcję i ją wycofać; E100 dodatkowo dubluje wpis
+// w portalu, a storno kasuje wtedy kopię, nie oryginał (w raporcie widać wówczas
+// dwa wiersze dodatnie i jeden ujemny z TYM SAMYM znacznikiem czasu).
+//
+// Do 17.09.2026 parsery brały `Math.abs`, więc storno wchodziło jako kolejne
+// tankowanie: korekta nie odejmowała nic, a klucz dedup (liczony z tych samych
+// wartości bezwzględnych) zlepiał ją z oryginałem. Wycofane tankowanie zostawało
+// w kosztach, a przy innym znaczniku czasu kwota policzyłaby się dwa razy.
+//
+// Reguła: jedno storno kasuje JEDEN pasujący wiersz dodatni z tego samego importu
+// (karta, rejestracja, czas, produkt, litry, kwota). Storno bez pary zostaje jako
+// wiersz ujemny — odejmie transakcję wciągniętą wcześniejszym importem.
+export function nettujStorno(rows) {
+  const klucz = t => [t.card, norm(t.plateRaw), t.ts, t.product,
+    Math.round(Math.abs(t.liters) * 100), Math.round(Math.abs(t.grossLocal) * 100)].join("|");
+  const dodatnie = new Map();
+  rows.forEach((t, i) => {
+    if (t.storno) return;
+    const k = klucz(t);
+    if (!dodatnie.has(k)) dodatnie.set(k, []);
+    dodatnie.get(k).push(i);
+  });
+  const usuniete = new Set();
+  const osierocone = [];
+  let sparowane = 0;
+  rows.forEach((t, i) => {
+    if (!t.storno) return;
+    const lista = dodatnie.get(klucz(t));
+    if (lista && lista.length) { usuniete.add(lista.shift()); usuniete.add(i); sparowane++; }
+    else osierocone.push(t);
+  });
+  return { rows: rows.filter((_, i) => !usuniete.has(i)), sparowane, osierocone };
 }
 
 // ── Klucz dedup: ta sama transakcja z tego samego raportu = ten sam dokument ──

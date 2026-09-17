@@ -21,6 +21,7 @@ import { collection, doc, getDoc, getDocs, setDoc, writeBatch } from "firebase/f
 import { logAction } from "../utils/logAction";
 import {
   CARDS, FLAG, SKIP_PLATE, VAT, norm, detectAndParse, txId, stationQueries, stationKey,
+  csvToAoa, nettujStorno,
 } from "../utils/fuelParsers";
 
 const eur = n => (Number(n) || 0).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
@@ -136,6 +137,8 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
 
   // Trend cen miesiąc-do-miesiąca — opt-in. Świadomie NIE listener onSnapshot: jednorazowy
   // dociąg wszystkich miesięcy przy pierwszym otwarciu, cache w stanie (dyscyplina kosztów).
+  const [showSummary, setShowSummary] = useState(false);
+  const [tsvRecznie, setTsvRecznie] = useState(null);   // fallback, gdy schowek zablokowany
   const [showTrend, setShowTrend] = useState(false);
   const [trendData, setTrendData] = useState(null);   // { [month]: tx[] } | null
   const [trendLoading, setTrendLoading] = useState(false);
@@ -255,6 +258,58 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
         l100: km ? o.l / km * 100 : null, eurKm: km ? o.e / km : null };
     }).sort((a, b) => b.l - a.l);
   }, [filtered, kmMonthly]);
+
+  // ── Podsumowanie miesiąca do Total_26 i do kosztów ────────────────────────
+  // Świadomie liczone z `txs`, a NIE z `filtered`: zestawienie kosztowe musi objąć
+  // oba produkty, wszystkie karty i wszystkie auta niezależnie od tego, co user
+  // ustawił w filtrach widoku. Filtr na widoku zaniżyłby kwotę wpisywaną do arkusza.
+  const podsumowanieMc = useMemo(() => {
+    const auta = {};
+    const karty = {};
+    let storno = 0;
+    for (const t of txs) {
+      const a = auta[t.vehicleId] = auta[t.vehicleId] || { on: { l: 0, e: 0 }, adblue: { l: 0, e: 0 }, n: 0 };
+      const k = t.product === "adblue" ? a.adblue : a.on;
+      k.l += t.liters || 0;
+      k.e += t.netEUR || 0;
+      a.n++;
+      const c = karty[t.card] = karty[t.card] || { e: 0, n: 0 };
+      c.e += t.netEUR || 0; c.n++;
+      if ((t.netEUR || 0) < 0) storno++;
+    }
+    const wiersze = Object.entries(auta)
+      .map(([vid, o]) => ({ vid, ...o, razem: o.on.e + o.adblue.e }))
+      .sort((a, b) => b.razem - a.razem);
+    const suma = wiersze.reduce((s2, w) => ({
+      onL: s2.onL + w.on.l, onE: s2.onE + w.on.e,
+      abL: s2.abL + w.adblue.l, abE: s2.abE + w.adblue.e, razem: s2.razem + w.razem,
+    }), { onL: 0, onE: 0, abL: 0, abE: 0, razem: 0 });
+    return {
+      wiersze, suma, storno,
+      karty: Object.entries(karty).map(([card, o]) => ({ card, ...o })).sort((a, b) => b.e - a.e),
+    };
+  }, [txs]);
+
+  // TSV — wkleja się wprost do arkusza jako tabela, nie jako jedna komórka
+  const kopiujPodsumowanie = async () => {
+    const wier = [
+      ["Pojazd", "Litry ON", "ON netto EUR", "Litry AdBlue", "AdBlue netto EUR", "Razem EUR"],
+      ...podsumowanieMc.wiersze.map(w => [plateOf(w.vid),
+        w.on.l.toFixed(2), w.on.e.toFixed(2), w.adblue.l.toFixed(2), w.adblue.e.toFixed(2), w.razem.toFixed(2)]),
+      ["RAZEM", podsumowanieMc.suma.onL.toFixed(2), podsumowanieMc.suma.onE.toFixed(2),
+        podsumowanieMc.suma.abL.toFixed(2), podsumowanieMc.suma.abE.toFixed(2), podsumowanieMc.suma.razem.toFixed(2)],
+    ];
+    const tsv = wier.map(r => r.join("\t")).join("\n");
+    try {
+      await navigator.clipboard.writeText(tsv);
+      setTsvRecznie(null);
+      showToast("✅ Podsumowanie skopiowane — wklej do arkusza");
+      return;
+    } catch { /* brak https albo zgody na schowek — niżej pole do zaznaczenia */ }
+    // Świadomie NIE window.prompt: bywa zablokowany i wtedy user nie dostaje NIC.
+    setTsvRecznie(tsv);
+    showToast("⚠️ Przeglądarka nie dała dostępu do schowka — zaznacz i skopiuj z pola pod tabelą");
+  };
 
   // ── Trend cen: per miesiąc → per kraj (średnia ważona litrami) + średnia flotowa ──
   // Respektuje filtr PRODUKTU i KART; po autach jest fleet-wide (ceny to kwestia kraju/karty,
@@ -449,14 +504,20 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
       let raw = [];
       const detected = [];
       for (const f of files) {
-        const ab = await f.arrayBuffer();
-        const wb = XLSX.read(ab, { type: "array", cellDates: true });
         let kind = null, rows = [];
-        for (const sn of wb.SheetNames) {
-          const aoa = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: "" });
-          const r = detectAndParse(aoa, stationCountry);
-          if (r.rows.length) { kind = r.kind; rows = r.rows; break; }
-          if (r.kind && !kind) kind = r.kind;
+        if (/\.csv$/i.test(f.name)) {
+          // CSV własnym parserem, NIE przez XLSX: jego zgadywanie formatu potrafi
+          // zjeść przecinek dziesiętny (376,66 → 37666) i pogubić wiersze.
+          const r = detectAndParse(csvToAoa(await f.text()), stationCountry);
+          kind = r.kind; rows = r.rows;
+        } else {
+          const wb = XLSX.read(await f.arrayBuffer(), { type: "array", cellDates: true });
+          for (const sn of wb.SheetNames) {
+            const aoa = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: "" });
+            const r = detectAndParse(aoa, stationCountry);
+            if (r.rows.length) { kind = r.kind; rows = r.rows; break; }
+            if (r.kind && !kind) kind = r.kind;
+          }
         }
         detected.push({ name: f.name, kind, count: rows.length });
         raw = raw.concat(rows);
@@ -465,6 +526,11 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
         setImportState({ phase: "error", detected, msg: "Nie rozpoznałem żadnych transakcji. Czy to raporty Eurowag / E100 / Andamur?" });
         return;
       }
+
+      // Storno (kwota ujemna) kasuje pasujące tankowanie z tego samego importu.
+      // Bez tego korekta wchodziła jako kolejne tankowanie — patrz nettujStorno.
+      const netto = nettujStorno(raw);
+      raw = netto.rows;
 
       // Dopasowanie do floty + odrzucenie obcych rejestracji
       const skipped = [];
@@ -512,6 +578,10 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
 
       setImportState({
         phase: "preview", detected, fresh, dupes, skipped: [...new Set(skipped)], fxMissing: [...new Set(fxMissing)],
+        storno: netto.sparowane,
+        stornoOsierocone: netto.osierocone
+          .filter(t => !SKIP_PLATE.test(norm(t.plateRaw)))
+          .map(t => `${t.ts.slice(0, 10)} ${t.plateRaw} ${t.product} ${Math.abs(t.grossLocal).toFixed(2)} ${t.currency}`),
         summary: Object.entries(byMonth).map(([m, arr]) => ({
           month: m, n: arr.length,
           liters: arr.filter(t => t.product === "on").reduce((s, t) => s + t.liters, 0),
@@ -649,6 +719,15 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
             📊 Trend cen
           </button>
         )}
+        {txs.length > 0 && (
+          <button onClick={() => setShowSummary(v => !v)}
+            className="px-4 py-2 rounded-xl text-sm font-medium border transition-all"
+            style={showSummary
+              ? { background: "#0071e3", borderColor: "#0071e3", color: "#fff" }
+              : { background: "#fff", borderColor: "#e5e5ea", color: "#1d1d1f" }}>
+            📋 Podsumowanie miesiąca
+          </button>
+        )}
         {canEdit && (
           <button onClick={() => { setShowImport(true); setImportState(null); }}
             className="px-4 py-2 rounded-xl text-sm font-medium text-white"
@@ -727,6 +806,15 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
                 {importState.fxMissing?.length > 0 && (
                   <div className="text-amber-700">⚠️ Brak kursu NBP dla: {importState.fxMissing.join(", ")} — te pozycje pominięte.</div>
                 )}
+                {importState.storno > 0 && (
+                  <div>↩️ Storno rozliczone: <b>{importState.storno}</b> — korekta i wycofane tankowanie wypadły z importu.</div>
+                )}
+                {importState.stornoOsierocone?.length > 0 && (
+                  <div className="text-amber-700">
+                    ⚠️ Storno bez pary w pliku ({importState.stornoOsierocone.length}) — wejdą jako pozycje ujemne i odejmą
+                    tankowania z wcześniejszych importów: {importState.stornoOsierocone.join(" · ")}
+                  </div>
+                )}
               </div>
               <button onClick={confirmImport} disabled={!importState.fresh.length}
                 className="px-4 py-2 rounded-xl text-sm font-medium text-white disabled:opacity-40"
@@ -735,6 +823,89 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── PODSUMOWANIE MIESIĄCA — liczby do Total_26 i do kosztów ── */}
+      {showSummary && (
+        <div className="bg-white rounded-2xl border border-gray-100 p-4">
+          <div className="flex items-start justify-between mb-3 gap-2">
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">
+                📋 Podsumowanie {monthLabel(month)} — netto EUR
+              </div>
+              <div className="text-[11px] text-gray-400">
+                Wszystkie karty i oba produkty, <b>niezależnie od filtrów widoku</b>. Kursy NBP z dnia transakcji.
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button onClick={kopiujPodsumowanie}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium text-white" style={{ background: "#0071e3" }}>
+                📋 Kopiuj tabelę
+              </button>
+              <button onClick={() => setShowSummary(false)} className="text-sm text-gray-400 hover:text-gray-600">Zwiń ✕</button>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-gray-100 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500">
+                <tr>
+                  <th className="text-left px-3 py-2">Pojazd</th>
+                  <th className="text-right px-3 py-2">Litry ON</th>
+                  <th className="text-right px-3 py-2">ON netto</th>
+                  <th className="text-right px-3 py-2">Litry AdBlue</th>
+                  <th className="text-right px-3 py-2">AdBlue netto</th>
+                  <th className="text-right px-3 py-2">Razem</th>
+                </tr>
+              </thead>
+              <tbody>
+                {podsumowanieMc.wiersze.map(w => (
+                  <tr key={w.vid} className="border-t border-gray-100">
+                    <td className="px-3 py-2 font-medium text-gray-900">{plateOf(w.vid)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{litr(w.on.l)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{eur(w.on.e)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-gray-500">{w.adblue.l ? litr(w.adblue.l) : "—"}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-gray-500">{w.adblue.e ? eur(w.adblue.e) : "—"}</td>
+                    <td className="px-3 py-2 text-right tabular-nums font-semibold">{eur(w.razem)}</td>
+                  </tr>
+                ))}
+                <tr className="border-t-2 border-gray-200 bg-gray-50 font-semibold">
+                  <td className="px-3 py-2">RAZEM</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{litr(podsumowanieMc.suma.onL)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{eur(podsumowanieMc.suma.onE)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{litr(podsumowanieMc.suma.abL)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{eur(podsumowanieMc.suma.abE)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{eur(podsumowanieMc.suma.razem)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* Kontrola sum — do zestawienia z fakturami dostawców */}
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-gray-500">
+            <span className="font-semibold uppercase tracking-wide text-gray-400">Kontrola per karta:</span>
+            {podsumowanieMc.karty.map(k => (
+              <span key={k.card}>
+                <b style={{ color: CARDS[k.card]?.color }}>{CARDS[k.card]?.name || k.card}</b> {eur(k.e)} ({k.n} tx)
+              </span>
+            ))}
+          </div>
+          {podsumowanieMc.storno > 0 && (
+            <div className="mt-1 text-[11px] text-amber-700">
+              ↩️ W miesiącu jest {podsumowanieMc.storno} {podsumowanieMc.storno === 1 ? "pozycja ujemna" : "pozycji ujemnych"} (storno z wcześniejszego importu) — kwoty są już o nie pomniejszone.
+            </div>
+          )}
+          {tsvRecznie && (
+            <textarea readOnly value={tsvRecznie} rows={podsumowanieMc.wiersze.length + 3}
+              onFocus={e => e.target.select()}
+              ref={el => el && el.select()}
+              className="mt-3 w-full text-[11px] font-mono border border-gray-200 rounded-lg p-2 bg-gray-50" />
+          )}
+          <div className="mt-2 text-[11px] text-gray-400 leading-relaxed">
+            Kwoty netto: Eurowag ma netto w raporcie, E100 i Andamur przeliczamy z brutto stawką VAT kraju tankowania.
+            <b> W Total_26 koszty wpisujemy ze znakiem minus.</b> Opłaty drogowe są osobno — w Analizy → Opłaty drogowe.
+          </div>
         </div>
       )}
 
