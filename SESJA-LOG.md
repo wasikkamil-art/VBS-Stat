@@ -3805,7 +3805,26 @@ liczona **tylko gdy granica wypada 1. dnia** — ręczny przebieg w środku mies
 odczyt liczników i nic więcej. Logika przetestowana na czterech przypadkach: czas letni,
 zimowy, przełom roku i przebieg ręczny — wszystkie wychodzą poprawnie.
 
-**Naprawa danych — NIE WYKONANA, czeka na usera.** Skrypt `diagnose_km_fix.mjs` (backup →
-km z `operacyjne` z pominięciem wpisów `source: "report"` → kopia snapshotów pod właściwe daty
-→ weryfikacja). Uruchomienie zablokował klasyfikator (zapis do współdzielonych zasobów), więc
-odpala go user: `node diagnose_km_fix.mjs` na sucho, potem `--zapisz`.
+**Naprawa danych — WYKONANA przez usera** skryptem `diagnose_km_fix.mjs` (mnie uruchomienie
+zablokował klasyfikator — zapis do współdzielonych zasobów). Backup przed zmianą:
+`backup_km_2026-09-17T13-29-17-577Z.json`. **29 wpisów zmienionych, 4 pominięte** — pominięte to
+czerwiec, czyli ręczne wpisy usera (`source: "report"`), zgodnie z regułą „ręczny wpis wygrywa".
+Lipiec spadł o 41–52% (z sum dwumiesięcznych na jeden miesiąc), sierpień doszedł jako nowe wpisy,
+styczeń–maj dobite z arkusza, snapshoty skopiowane pod `2026-08-01` i `2026-09-01`.
+
+**Weryfikacja po naprawie** — spalanie w widoku całego 2026:
+
+| pojazd | spalanie | €/km | km |
+|---|--:|--:|--:|
+| WGM 0507M | 15,8 L/100 | 0,246 | 34 740 |
+| WGM 0475M | 14,9 L/100 | 0,236 | 35 973 |
+| WGM 5367K | 14,7 L/100 | 0,244 | 34 128 |
+| TK 314CL | 16,5 L/100 | 0,274 | 27 367 |
+| **flota** | **15,4 L/100** | **0,248** | **132 208** |
+
+Przed naprawą ten sam widok pokazywał 8,6–11,9 L/100. Adnotacje „spalanie z X z Y mc" zniknęły —
+wszystkie cztery miesiące mają komplet km. **Kontrola domykająca: policzone spalanie zgadza się
+co do dziesiątej z kolumną `spalanie` w arkuszu Total_26** (v1 VII 14,2 · v3 VIII 14,2 · v4 VIII 17,1),
+czyli aplikacja liczy to samo, co user ma w arkuszu, tylko sama.
+
+Październikowy przebieg CF policzy wrzesień poprawnie — snapshot `2026-09-01` już istnieje.
