@@ -513,6 +513,9 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
     if (!m || !t.lat) return;
     m.setView([t.lat, t.lng], 9);
     layerRef.current?.eachLayer(l => { if (l._txid === t.id) l.openPopup(); });
+    // Lista tankowań jest POD mapą, więc samo przesunięcie mapy user by przegapił —
+    // przewijamy do niej. (Gdy lista była w lewej kolumnie, mapa była obok.)
+    mapRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   // ══════════════════════════════════════════════════════════════════
