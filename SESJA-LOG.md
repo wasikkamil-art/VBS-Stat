@@ -3690,7 +3690,17 @@ Pliki `.csv` czytamy teraz własnym parserem z rozpoznaniem separatora z nagłó
   rozliczone: 1"**; wycofana para zniknęła, przecinek dziesiętny policzony poprawnie.
 - Eurowag (271 tx, 5 miesięcy) przez UI: rozpoznany, kursy NBP pobrane, zero braków.
 
+✅ **Kopiowanie do schowka potwierdzone przez usera na produkcji** — zielony toast poniżej 2 s.
+W podglądzie schowek jest zablokowany, więc tam przetestowany był **fallback** (pole z TSV do
+zaznaczenia). `window.prompt` jako fallback wyleciał — w tym środowisku rzuca wyjątkiem
+i user nie dostaje nic.
+
 ⚠️ **NIEZWERYFIKOWANE**: sam zapis do Firestore z poziomu UI (wymaga zalogowanego admina —
-atrapa podglądu zapis blokuje) i kopiowanie do schowka w prawdziwej przeglądarce; w podglądzie
-schowek jest zablokowany, więc przetestowany został **fallback** (pole z TSV do zaznaczenia).
-`window.prompt` jako fallback wyleciał — w tym środowisku rzuca wyjątkiem i user nie dostaje nic.
+atrapa podglądu zapis blokuje). Rozstrzygnie się przy pierwszym imporcie za wrzesień.
+
+**Przy okazji, po deployu: smoke E2E 18/18.** Najpierw 2 testy padały, ale **nie z powodu
+dzisiejszych zmian** — test logo na ekranie logowania nie przechodził od **27.07**, czyli od
+dodania przełącznika aplikacji: doszedł drugi obrazek `alt="FleetStat Faktury"`, a `getByAltText`
+dopasowuje przez „zawiera", więc łapał dwa elementy (strict mode violation). Poprawione na
+dopasowanie dokładne (commit `5c03c82`). **Lekcja: suite odpalany tylko ręcznie przed dużym
+deployem potrafi gnić przez ~2 miesiące** — poprzedni pełny przebieg był w lipcu.
