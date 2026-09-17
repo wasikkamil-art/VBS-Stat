@@ -523,44 +523,67 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
     const L = window.L, m = mapObj.current, layer = layerRef.current;
     if (!L || !m || !layer) return;
     layer.clearLayers();
+    // JEDNA PINEZKA NA STACJĘ, nie na transakcję. Wcześniej każde tankowanie było osobnym
+    // punktem, a powtórzenia w tym samym miejscu rozrzucało się losowo do ~5 km, żeby się nie
+    // zasłaniały — przy jednym miesiącu niewidoczne, przy całym roku 11 wizyt na jednej stacji
+    // robiło się kilkanaście pinezek w różnych miejscach (zgłoszone 17.09.2026).
     const pts = filtered.filter(t => t.lat && t.lng);
-    const jitter = {};
+    const grupy = new Map();
     for (const t of pts) {
-      const k = `${t.lat.toFixed(3)},${t.lng.toFixed(3)}`;
-      const n = (jitter[k] = (jitter[k] || 0) + 1) - 1;
-      const lat = t.lat + (n ? 0.035 * Math.cos(n * 2.2) : 0);
-      const lng = t.lng + (n ? 0.05 * Math.sin(n * 2.2) : 0);
-      const color = CARDS[t.card]?.color || "#666";
+      const k = stationKey(t);
+      const g = grupy.get(k) || { station: t.station || t.address || "—", country: t.country,
+        lat: t.lat, lng: t.lng, l: 0, e: 0, n: 0, txids: new Set(), karty: new Set(),
+        auta: new Set(), produkty: new Set(), od: t.ts, do: t.ts };
+      g.l += t.liters; g.e += t.netEUR || 0; g.n++;
+      g.txids.add(t.id); g.karty.add(t.card); g.auta.add(t.plate);
+      g.produkty.add(t.product === "on" ? "Diesel" : "AdBlue");
+      if (t.ts < g.od) g.od = t.ts;
+      if (t.ts > g.do) g.do = t.ts;
+      grupy.set(k, g);
+    }
+    const lista = [...grupy.values()].map(g => ({ ...g, cena: g.l ? g.e / g.l : 0 }));
+
+    // Rozsuwamy TYLKO różne stacje, które wypadły w tym samym punkcie siatki — i o ~400 m,
+    // a nie o kilka kilometrów. Ta sama stacja nigdy się już nie rozjeżdża.
+    const kolizje = {};
+    for (const g of lista) {
+      const k = `${g.lat.toFixed(3)},${g.lng.toFixed(3)}`;
+      const n = (kolizje[k] = (kolizje[k] || 0) + 1) - 1;
+      const lat = g.lat + (n ? 0.004 * Math.cos(n * 2.2) : 0);
+      const lng = g.lng + (n ? 0.005 * Math.sin(n * 2.2) : 0);
+      const karta = g.karty.size === 1 ? [...g.karty][0] : null;
+      const color = karta ? (CARDS[karta]?.color || "#666") : "#6e6e73";   // szary = kilka kart
       const mk = L.circleMarker([lat, lng], {
-        radius: 5 + Math.sqrt(t.liters) * 0.9, color: "#fff", weight: 1.5,
+        radius: 5 + Math.sqrt(g.l) * 0.9, color: "#fff", weight: 1.5,
         fillColor: color, fillOpacity: 0.82,
       }).addTo(layer);
+      const wiersz = (etykieta, wartosc) =>
+        `<tr><td style="color:#6e6e73">${etykieta}</td><td style="text-align:right">${wartosc}</td></tr>`;
       mk.bindPopup(
-        `<div style="font:13px/1.5 -apple-system,sans-serif;min-width:190px">`
-        + `<div style="font-weight:600;margin-bottom:4px">${t.station || "—"}</div>`
+        `<div style="font:13px/1.5 -apple-system,sans-serif;min-width:200px">`
+        + `<div style="font-weight:600;margin-bottom:4px">${esc(g.station)}</div>`
         + `<table style="font-size:12.5px;width:100%">`
-        + `<tr><td style="color:#6e6e73">Data</td><td style="text-align:right">${String(t.ts).replace("T", " ")}</td></tr>`
-        + `<tr><td style="color:#6e6e73">Auto</td><td style="text-align:right"><b>${t.plate}</b></td></tr>`
-        + `<tr><td style="color:#6e6e73">Karta</td><td style="text-align:right">${CARDS[t.card]?.name || t.card}</td></tr>`
-        + `<tr><td style="color:#6e6e73">Produkt</td><td style="text-align:right">${t.product === "on" ? "Diesel" : "AdBlue"}</td></tr>`
-        + `<tr><td style="color:#6e6e73">Litry</td><td style="text-align:right"><b>${String(t.liters).replace(".", ",")} L</b></td></tr>`
-        + `<tr><td style="color:#6e6e73">Cena netto</td><td style="text-align:right"><b>${p3(t.pricePerLNet)} €/L</b></td></tr>`
-        + `<tr><td style="color:#6e6e73">Kwota netto</td><td style="text-align:right">${eur(t.netEUR)}</td></tr>`
-        + `<tr><td style="color:#6e6e73">Zapłacono</td><td style="text-align:right">${String(t.grossLocal).replace(".", ",")} ${t.currency} brutto</td></tr>`
-        + `<tr><td style="color:#6e6e73">Kraj</td><td style="text-align:right">${FLAG[t.country] || ""} ${t.country}</td></tr>`
+        + wiersz("Tankowań", `<b>${g.n}</b>${g.n > 1 ? ` (${String(g.od).slice(0, 10)} – ${String(g.do).slice(0, 10)})` : ""}`)
+        + wiersz("Auta", esc([...g.auta].join(", ")))
+        + wiersz("Karta", [...g.karty].map(k2 => CARDS[k2]?.name || k2).join(", "))
+        + wiersz("Produkt", [...g.produkty].join(", "))
+        + wiersz("Litry", `<b>${Math.round(g.l).toLocaleString("pl-PL")} L</b>`)
+        + wiersz(g.n > 1 ? "Średnia cena netto" : "Cena netto", `<b>${p3(g.cena)} €/L</b>`)
+        + wiersz("Kwota netto", eur(g.e))
+        + wiersz("Kraj", `${FLAG[g.country] || ""} ${g.country || "?"}`)
         + `</table></div>`);
       if (labelMode !== "none") {
-        const txt = labelMode === "price" ? p3(t.pricePerLNet) : `${Math.round(t.liters)} L`;
+        const txt = labelMode === "price" ? p3(g.cena) : `${Math.round(g.l)} L`;
         mk.bindTooltip(
           `<span style="background:#fff;border:1.5px solid ${color};border-radius:8px;padding:1px 5px;`
           + `font:600 11px/1.5 -apple-system,sans-serif;color:#1d1d1f;white-space:nowrap;`
-          + `box-shadow:0 1px 4px rgba(0,0,0,.18)">${txt}</span>`,
+          + `box-shadow:0 1px 4px rgba(0,0,0,.18)">${txt}${g.n > 1 ? `<span style="color:#86868b"> ×${g.n}</span>` : ""}</span>`,
           { permanent: true, direction: "top", offset: [0, -4], className: "paliwo-pin" });
       }
-      mk._txid = t.id;
+      mk._txids = g.txids;
     }
-    if (pts.length) {
-      try { m.fitBounds(L.latLngBounds(pts.map(t => [t.lat, t.lng])).pad(0.12)); } catch { /* noop */ }
+    if (lista.length) {
+      try { m.fitBounds(L.latLngBounds(lista.map(g => [g.lat, g.lng])).pad(0.12)); } catch { /* noop */ }
     }
     const el = mapRef.current;
     if (el) el.classList.toggle("paliwo-nolbl", m.getZoom() < 6);
@@ -570,7 +593,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
     const m = mapObj.current;
     if (!m || !t.lat) return;
     m.setView([t.lat, t.lng], 9);
-    layerRef.current?.eachLayer(l => { if (l._txid === t.id) l.openPopup(); });
+    layerRef.current?.eachLayer(l => { if (l._txids?.has(t.id)) l.openPopup(); });
     // Lista tankowań jest POD mapą, więc samo przesunięcie mapy user by przegapił —
     // przewijamy do niej. (Gdy lista była w lewej kolumnie, mapa była obok.)
     mapRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });

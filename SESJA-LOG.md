@@ -3874,3 +3874,27 @@ setce metrów potrafią stać dwie różne stacje różnych sieci (Narbonne: E.L
 Kąty Wrocławskie: BP i Dyskont Paliwowy) — automatyczne scalanie zrobiłoby z nich jedną.
 Przy właściwym użyciu panelu (filtr karty przed wysyłką do opiekuna) problem nie występuje,
 bo w obrębie jednej karty nazewnictwo jest spójne. Do decyzji usera, czy scalać ręcznym słownikiem.
+
+### cd. 17.09 — mapa: jedna pinezka na stację zamiast na transakcję
+
+User zauważył na zrzucie, że w widoku całego roku pinezki „nie pokazują dobrze". Przyczyna była
+gorsza niż zwykłe nakładanie się: marker powstawał **per transakcja**, a powtórzenia w tym samym
+miejscu kod **rozrzucał losowo do ~0,035° szerokości i 0,05° długości**, czyli nawet o kilka
+kilometrów, żeby się nie zasłaniały. Przy jednym miesiącu niewidoczne; przy całym roku jedna
+stacja odwiedzona kilkanaście razy zamieniała się w konstelację punktów w różnych miejscach —
+dokładnie to, co user zobaczył wokół Irún.
+
+**Teraz jedna pinezka na stację** (`stationKey`): wielkość = suma litrów, etykieta = **średnia
+ważona €/L** plus `×N` przy wielokrotnych wizytach, a w popupie liczba tankowań z zakresem dat,
+auta, karty, produkty, litry i kwota. Kolor = karta, a **szary, gdy na stacji tankowano różnymi
+kartami**. Rozsuwanie zostało tylko dla RÓŻNYCH stacji w tym samym punkcie siatki i zmalało do
+~400 m. `flyTo` z listy tankowań dalej otwiera właściwy popup (marker trzyma zbiór `_txids`).
+
+Efekt na 2026: **259 pinezek zamiast 349**, 44 stacje z krotnością. Gexa: jeden punkt
+„1,297 ×7", popup „7 tankowań (2026-07-15 – 2026-08-24), WGM 0507M + WGM 5367K, Andamur,
+411 L, 533,77 €".
+
+⚠️ **Różnica ranking vs mapa jest poprawna, ale warto o niej wiedzieć**: ranking liczy wszystkie
+transakcje, mapa tylko te ze współrzędnymi. W 2026 bez geokodu jest **11 z 416 (3%)**, wszystkie
+z maja (Gexa, Neuss, Q8 Berchem West, TEXACO Gravenmacher, FAL Distri) — stąd Gexa ma w rankingu
+11 tankowań diesla, a na mapie ×7.
