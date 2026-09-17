@@ -3851,3 +3851,26 @@ niższą cenę. Stąd jeden miesiąc nie wystarczy — o rabat prosi się wolume
 **Weryfikacja**: ranking przeliczony niezależnym skryptem — **262 stacje, 20 353 L, średnia
 1,613 €/L**, a pierwsza dziesiątka zgodna co do litra i do trzeciego miejsca po przecinku
 (Gexa ES 609 L rok 1,240 / sierpień 1,488 · Eurowag Krzywa 591 L 1,372 / 1,436 …).
+
+### cd. 17.09 — ranking: liczba tankowań + dwa znaleziska w danych
+
+Do rankingu doszła kolumna **Tank.** — liczba tankowań w roku, a po ukośniku ile z nich
+w wybranym miesiącu (np. Gexa `11/4`). W TSV dla opiekuna to dwie osobne kolumny.
+
+🚩 **ZNALEZISKO 1 — sierpniowy Andamur nigdy nie przeszedł rekoncyliacji rabatu.**
+Rabat (ES ~20%, FR/DE 2–4%) nie jest w imporcie, tylko w osobnym `reconcile_andamur.mjs`,
+puszczanym co miesiąc na podstawie faktur. Maj–lipiec mają flagę `corrected` na komplecie
+transakcji (11/11, 10/10, 22/22), **sierpień ma 0 z 8**. Skutki: Andamur sierpień **530,65 €
+zamiast ~439,91 €** (~90,74 € za dużo), Gexa pokazuje **1,488 €/L zamiast ~1,19**, a cena roczna
+w rankingu miesza trzy miesiące po rabacie z jednym przed. Do sprawdzenia, czy `fleetv2_costs`
+i Total_26 za sierpień też są zawyżone. **User pobiera faktury i wraca do tematu — mam
+przypominać** (zapisane w pamięci jako reguła miesięczna).
+
+🚩 **ZNALEZISKO 2 — ta sama stacja ma różne nazwy w różnych kartach**, więc wolumen się rozjeżdża:
+`Gexa` (Andamur, 14 tx) i `GEXA - Oiartzun` (Eurowag, 2 tx) to jedno miejsce. Podobnie
+`G&V BE27` / `G&V - Oostende`, `E LECLERC FR1096` / `E.Leclerc - Clermont Ferrand`.
+Na siatce ~1 km znalazłem **18 takich miejsc**. **Celowo NIE scalam po współrzędnych**: w tej samej
+setce metrów potrafią stać dwie różne stacje różnych sieci (Narbonne: E.Leclerc i ESSO;
+Kąty Wrocławskie: BP i Dyskont Paliwowy) — automatyczne scalanie zrobiłoby z nich jedną.
+Przy właściwym użyciu panelu (filtr karty przed wysyłką do opiekuna) problem nie występuje,
+bo w obrębie jednej karty nazewnictwo jest spójne. Do decyzji usera, czy scalać ręcznym słownikiem.

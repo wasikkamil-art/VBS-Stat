@@ -341,11 +341,12 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
 
   const kopiujRanking = async () => {
     if (!rankingStacji) return;
-    const naglowek = ["Stacja", "Kraj", "Tankowań", `Litry ${rankingStacji.rok}`, `Śr. cena netto EUR/L ${rankingStacji.rok}`];
-    if (!rokTryb) naglowek.push(`Cena netto EUR/L ${monthLabel(month)}`);
+    const naglowek = ["Stacja", "Kraj", `Tankowań ${rankingStacji.rok}`,
+      `Litry ${rankingStacji.rok}`, `Śr. cena netto EUR/L ${rankingStacji.rok}`];
+    if (!rokTryb) naglowek.push(`Tankowań ${monthLabel(month)}`, `Cena netto EUR/L ${monthLabel(month)}`);
     const wiersze = [naglowek, ...rankingStacji.top.map(o => {
       const r = [o.nazwa, o.cc, String(o.n), o.l.toFixed(0), o.cena.toFixed(3)];
-      if (!rokTryb) r.push(o.cenaM ? o.cenaM.toFixed(3) : "");
+      if (!rokTryb) r.push(String(o.nM), o.cenaM ? o.cenaM.toFixed(3) : "");
       return r;
     })];
     const tsv = wiersze.map(r => r.join("\t")).join("\n");
@@ -1210,6 +1211,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
                   <thead className="text-[9.5px] uppercase tracking-wide text-gray-400">
                     <tr>
                       <th className="text-left pb-1">Stacja</th>
+                      <th className="text-right pb-1 px-1">Tank.</th>
                       <th className="text-right pb-1 px-1">Litry</th>
                       <th className="text-right pb-1 px-1">€/L {rankingStacji.rok}</th>
                       {!rokTryb && <th className="text-right pb-1">€/L mc</th>}
@@ -1222,8 +1224,13 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
                           <span className="text-gray-300 mr-1 tabular-nums">{i + 1}.</span>
                           <span className="mr-1">{FLAG[o.cc] || ""}</span>
                           <span className="text-gray-900" title={`${o.nazwa} · ${o.n} tankowań · ${o.udzial.toFixed(1)}% litrów roku`}>
-                            {o.nazwa.length > 20 ? o.nazwa.slice(0, 19) + "…" : o.nazwa}
+                            {o.nazwa.length > 16 ? o.nazwa.slice(0, 15) + "…" : o.nazwa}
                           </span>
+                        </td>
+                        <td className="py-1 px-1 text-right tabular-nums text-gray-500"
+                          title={rokTryb ? `${o.n} tankowań w ${rankingStacji.rok}`
+                            : `${o.n} tankowań w ${rankingStacji.rok}, w tym ${o.nM} w ${monthLabel(month)}`}>
+                          {o.n}{!rokTryb && o.nM > 0 && <span className="text-gray-300">/{o.nM}</span>}
                         </td>
                         <td className="py-1 px-1 text-right tabular-nums text-gray-500">{Math.round(o.l).toLocaleString("pl-PL")}</td>
                         <td className="py-1 px-1 text-right tabular-nums font-semibold"
@@ -1243,6 +1250,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
                     className="mt-2 w-full text-[10px] font-mono border border-gray-200 rounded-lg p-2 bg-gray-50" />
                 )}
                 <div className="text-[10.5px] text-gray-400 mt-2 leading-relaxed">
+                  <b>Tank.</b> = liczba tankowań w {rankingStacji.rok}{!rokTryb && <> (po ukośniku ile z nich w {monthLabel(month)})</>}.
                   Kolor ceny rocznej wobec <b>średniej całego roku {p3(rankingStacji.cenaRoku)} €/L</b> w tym zestawie
                   filtrów. „€/L mc" to ta sama stacja w {monthLabel(month)} — „—" znaczy, że w tym miesiącu tam nie tankowano.
                   {rankingStacji.lista.length > 10 && <> Poza pierwszą dziesiątką jest jeszcze {rankingStacji.lista.length - 10} stacji.</>}
