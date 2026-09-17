@@ -5,6 +5,9 @@
 //   - 2026-04-28: kierowca nie mógł zalogować się z telefonu, bo autoCapitalize
 //     zmieniał pierwszą literę hasła na wielką. Fix: dodane attrs autoCapitalize="off",
 //     autoCorrect="off", autoComplete="current-password" do password input.
+//   - 2026-09-17: test logo przestał przechodzić po dodaniu przełącznika aplikacji
+//     (27.07.2026) — na ekranie logowania jest teraz drugi obrazek „FleetStat Faktury",
+//     więc getByAltText („zawiera") łapał dwa elementy. Stąd exact: true.
 
 import { test, expect } from "@playwright/test";
 
@@ -12,7 +15,7 @@ test.describe("Login screen", () => {
   test("renderuje się z formularzem email + hasło", async ({ page }) => {
     await page.goto("/");
     // Logo FleetStat widoczne
-    await expect(page.getByAltText("FleetStat")).toBeVisible();
+    await expect(page.getByAltText("FleetStat", { exact: true })).toBeVisible();
     // Pola formularza
     await expect(page.getByPlaceholder("twoj@email.com")).toBeVisible();
     await expect(page.getByPlaceholder("••••••••")).toBeVisible();
