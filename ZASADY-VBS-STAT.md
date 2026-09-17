@@ -440,3 +440,13 @@ Rankingi i Opłaty tego problemu nie mają, bo z założenia pokazują tylko okr
 
 ### Kontrola zgodności
 Koszty wpisujemy w dwa miejsca (baza + Total_26), więc **po każdym imporcie sprawdzamy sumy per auto w obu** — rozjazd oznacza błąd importu, nie różnicę metodologiczną. Świadome różnice na zamkniętych miesiącach zostają (zasada snapshotu) i są odnotowane w SESJA-LOG.
+
+### Kilometry we frachcie — wpisuje dyspozytor, NIE liczymy automatem (decyzja 2026-09-17)
+
+Pole km wypełniają dyspozytorzy ręcznie i tak zostaje. Rozważone i **odrzucone**: automatyczne liczenie trasy z routingu przy zapisie frachtu.
+
+**Dlaczego nie**: routing liczy wyłącznie odcinek z ładunkiem (załadunek → rozładunek), a dyspozytor wpisuje **cały realny przebieg** — z pustym dojazdem i z tym, co auto załatwia po drodze (serwis, odbiór czegoś, objazd). Porównanie na 46 trasach z lipca i sierpnia: mediana odchylenia **15,7%**, tylko 15 tras w granicach 10%, 11 rozjechanych o ponad 25%, zawsze w dół (Hameln → Straubing: wpisane 1 220 km, routing 581).
+
+Potwierdzenie, że ręczne wpisy są rzetelne: pokrycie sumy km z frachtów wobec licznika floty to **81–103%** (gdyby w polu siedziały same odcinki ładowne, byłoby ~70%), a wypełnienie **241 z 242 frachtów 2026**.
+
+⚠️ Podstawienie tam wyniku routingu zaniżyłoby €/km w rankingach i u dyspozytorów. **Nie wracać do tematu bez nowego powodu.**
