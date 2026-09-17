@@ -3646,3 +3646,51 @@ Przypomnienie do tamtego momentu: w portalu NegoMetalu **odhaczyć filtr „ukry
 - **Reguła: po wdrożeniu workflow backupu sprawdź pierwszy przebieg** — sam plik niczego nie zabezpiecza.
 
 **Zaplanowana kontrola na 18.09 9:00**: wszystkie trzy backupy — status przebiegu **z harmonogramu** (nie ręcznego) + weryfikacja rozmiarów kopii wobec dnia poprzedniego (zielony status przy niepełnym zrzucie jest możliwy).
+
+### cd. 17.09 — import paliwa: storno, CSV i podsumowanie miesiąca (commit `6f44bd9`)
+
+User poprosił o „import paliwa w stylu uploadera myta". Importer paliwa był już w `PaliwoTab`
+(3 karty, NBP, dedup, geokod), więc brakującym kawałkiem było to, co przy mycie robi
+`tollAnalysis`: **gotowe liczby miesiąca bez mojego skryptu**. Decyzja usera: podsumowanie
+do skopiowania, **bez automatycznego zapisu do `fleetv2_costs`** (koszty dalej wspólnie,
+`fleet/data` jest na 82,5% limitu).
+
+**Panel „📋 Podsumowanie miesiąca"** — litry i netto EUR per pojazd w rozbiciu ON/AdBlue,
+wiersz RAZEM, kontrola sum per karta (do zestawienia z fakturami) i kopiowanie tabeli jako
+TSV. Liczone z **całego miesiąca, nie z filtrów widoku** — filtr „Diesel" zaniżyłby kwotę
+wpisywaną do arkusza o AdBlue.
+
+🐛 **Storno liczyło się jako tankowanie.** Parsery brały `Math.abs` z litrów i kwoty, więc
+wiersz korekty wchodził jako kolejne tankowanie, a klucz dedup (z tych samych wartości
+bezwzględnych) zlepiał go z oryginałem. Skutek: wycofane tankowanie zostawało w kosztach,
+a gdyby storno miało własny znacznik czasu — kwota policzyłaby się dwa razy.
+Teraz znak zostaje, a `nettujStorno` kasuje parę korekta+tankowanie z jednego importu;
+storno bez pary wchodzi jako pozycja ujemna i jest **pokazane userowi z rejestracją i kwotą**.
+W raporcie E100 leżącym w repo: **9 storn, 4 na autach floty**. W bazie (maj–sierpień) pozycji
+ujemnych nie ma — bug nie zdążył zepsuć danych.
+
+Wzorzec w danych jest nieoczywisty: E100 dubluje wpis w portalu i storno kasuje **kopię**,
+nie oryginał (dwa wiersze dodatnie + jeden ujemny, ten sam czas). Dlatego reguła to
+„jedno storno kasuje JEDEN pasujący wiersz", a nie „wszystkie pasujące".
+
+🐛 **XLSX psuje CSV.** Przy okazji testu w node: `XLSX.read` na raporcie E100 robi
+z „376,66" liczbę **37666** i gubi 40% wierszy (476 z 798), a raport Eurowag parsuje na
+**zero** transakcji. W przeglądarce działało, ale zależeć od różnicy między buildami to
+proszenie się o cichy błąd w kwotach — moduł myta miał już z tego powodu własny `csvToAoa`.
+Pliki `.csv` czytamy teraz własnym parserem z rozpoznaniem separatora z nagłówka
+(E100 średniki, Eurowag przecinki). `numOf` radzi sobie z „1.234,56".
+
+**Weryfikacja** (nie tylko lint/build):
+- Parsery wobec **niezależnego parsu w Pythonie** na obu prawdziwych raportach — liczba
+  transakcji, litry i kwoty **zgodne co do grosza** w każdym kubełku waluta×produkt.
+- Podgląd `PaliwoTab` w przeglądarce na **prawdziwych danych sierpnia** (atrapa Firestore,
+  `podglad/paliwo/`, port 5192): podsumowanie **9 080,56 €**, tyle samo co suma w bazie;
+  kontrola per karta sumuje się do tej samej kwoty.
+- Import pliku ze stornem przez UI: 4 wiersze → **2 transakcje, 109,77 €, „Storno
+  rozliczone: 1"**; wycofana para zniknęła, przecinek dziesiętny policzony poprawnie.
+- Eurowag (271 tx, 5 miesięcy) przez UI: rozpoznany, kursy NBP pobrane, zero braków.
+
+⚠️ **NIEZWERYFIKOWANE**: sam zapis do Firestore z poziomu UI (wymaga zalogowanego admina —
+atrapa podglądu zapis blokuje) i kopiowanie do schowka w prawdziwej przeglądarce; w podglądzie
+schowek jest zablokowany, więc przetestowany został **fallback** (pole z TSV do zaznaczenia).
+`window.prompt` jako fallback wyleciał — w tym środowisku rzuca wyjątkiem i user nie dostaje nic.
