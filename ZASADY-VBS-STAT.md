@@ -404,3 +404,39 @@ cd ~/Desktop/VBS-Stat.nosync && node diagnose4.js
 - **npm audit** — regularne sprawdzanie podatności w zależnościach
 - **Weryfikacja kosztów sty–maj 2025** — czy stare dane są netto czy brutto
 - **Panel kierowcy z funkcją skanowania CMR** — osobny widok/panel dla kierowców z możliwością robienia zdjęć dokumentów (CMR, listy przewozowe) telefonem. Zdjęcie przetwarzane w przeglądarce (Canvas API) na formę skanu: zwiększenie kontrastu, binaryzacja, usunięcie cieni, auto-crop. Zapisywane w Firebase Storage, widoczne dla admina/dyspozytora. Opcjonalnie OCR (rozpoznawanie tekstu).
+
+---
+
+## Panel „Analizy" — kiedy pojawiają się wyniki (ustalone 2026-09-17)
+
+Trzy odnogi zasilają się z różnych źródeł i **zapalają w różnych momentach miesiąca**. To jest zamierzone, ale musi być jawne — inaczej ta sama aplikacja odpowiada na to samo pytanie trzema różnymi datami.
+
+### Kalendarz danych
+
+| dane | kiedy trafiają do bazy | kto |
+|---|---|---|
+| **Frachty** (kwoty, km, dyspozytor) | na bieżąco, w trakcie miesiąca | dyspozytorzy w aplikacji |
+| **Km per kraj** z licznika CAN | **codziennie 2:10**, automatycznie | `aggregateCountryKm` |
+| **Koszty** (paliwo, leasing, wypłaty, opłaty) | po zamknięciu miesiąca | **user + Claude razem** — wpis idzie w DWA miejsca (baza `fleetv2_costs` + arkusz Total_26) i sumy muszą się zgadzać w obu |
+| **Eksporty NegoMetal / e-TOLL** | **5–10 dnia następnego miesiąca** | user pobiera z portali przy zamykaniu miesiąca |
+
+### Kiedy zapala się która odnoga
+
+| odnoga | warunek | praktycznie |
+|---|---|---|
+| 🏁 **Rankingi kierowców** | miesiąc ma **koszty zmienne** (`paliwo`, `leasing`, `wyplata`) — `zakresRozliczony` | po wspólnym imporcie kosztów, ~10–15 dnia kolejnego miesiąca |
+| 📊 **Dyspozytorzy** | jest choć jeden fracht | **od razu**, także w trakcie miesiąca |
+| 🛣️ **Opłaty drogowe** | dokument w `tollAnalysis/{YYYY-MM}` | po pobraniu eksportów przez usera, ~5–10 dnia kolejnego miesiąca |
+
+### Miesiąc w toku ≠ miesiąc zamknięty
+
+Dyspozytorzy pokazują bieżący miesiąc, ale:
+- oznaczają go chipem **„miesiąc w toku"**,
+- porównują **dzień do dnia** z poprzednim miesiącem, nie z jego pełną wartością.
+
+⚠️ **Dlaczego to ważne**: 17.09 aplikacja pokazywała wrzesień jako **−52,4%** wobec sierpnia. Po obcięciu porównania do tego samego dnia wyszło **+52,7%** — miesiąc szedł o połowę lepiej, nie o połowę gorzej. Zestawianie niepełnego miesiąca z pełnym produkuje fałszywe alarmy.
+
+Rankingi i Opłaty tego problemu nie mają, bo z założenia pokazują tylko okresy zamknięte.
+
+### Kontrola zgodności
+Koszty wpisujemy w dwa miejsca (baza + Total_26), więc **po każdym imporcie sprawdzamy sumy per auto w obu** — rozjazd oznacza błąd importu, nie różnicę metodologiczną. Świadome różnice na zamkniętych miesiącach zostają (zasada snapshotu) i są odnotowane w SESJA-LOG.

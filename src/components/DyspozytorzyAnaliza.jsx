@@ -4,7 +4,7 @@
 import { useState, useMemo } from "react";
 import {
   KUBELKI, MIES, zaMiesiac, narastajaco, serieMiesieczne,
-  miesiaceZDanymi, lataZDanymi, poprzedniMiesiac,
+  miesiaceZDanymi, lataZDanymi, poprzedniMiesiac, miesiacWToku, dzienDzis,
 } from "../utils/dyspozytorzy";
 
 const eur0 = (n) => Math.round(n).toLocaleString("pl-PL") + " €";
@@ -107,8 +107,16 @@ export default function DyspozytorzyAnaliza({ frachtyList = [] }) {
   const [mies, setMies] = useState(null);
   const aktMies = mies && miesiace.includes(mies) ? mies : miesiace[miesiace.length - 1];
 
+  // Miesiąc w toku porównujemy z tym samym wycinkiem poprzedniego (dzień do dnia).
+  // Zestawienie 17 dni z pełnym miesiącem pokazywało spadek 52%, podczas gdy
+  // naprawdę było o połowę lepiej.
+  const wToku = aktMies ? miesiacWToku(aktMies) : false;
+  const dzien = dzienDzis();
   const stat = useMemo(() => (aktMies ? zaMiesiac(frachtyList, aktMies) : null), [frachtyList, aktMies]);
-  const poprz = useMemo(() => (aktMies ? zaMiesiac(frachtyList, poprzedniMiesiac(aktMies)) : null), [frachtyList, aktMies]);
+  const poprz = useMemo(() => (aktMies
+    ? zaMiesiac(frachtyList, poprzedniMiesiac(aktMies), wToku ? dzien : 0)
+    : null), [frachtyList, aktMies, wToku, dzien]);
+  const poprzPelny = useMemo(() => (aktMies ? zaMiesiac(frachtyList, poprzedniMiesiac(aktMies)) : null), [frachtyList, aktMies]);
   const ostatniMies = aktMies ? +aktMies.slice(5, 7) : 12;
   const ytd = useMemo(() => narastajaco(frachtyList, rok, ostatniMies), [frachtyList, rok, ostatniMies]);
   const seria = useMemo(() => serieMiesieczne(frachtyList, rok), [frachtyList, rok]);
@@ -150,23 +158,29 @@ export default function DyspozytorzyAnaliza({ frachtyList = [] }) {
           {miesiace.map(m => <option key={m} value={m}>{nazwaMies(m)}</option>)}
         </select>
         {tryb === "ytd" && <span className="text-xs text-gray-500">narastająco do: {MIES[ostatniMies - 1]}</span>}
+        {wToku && tryb === "miesiac" && (
+          <span className="text-[11px] px-2 py-1 rounded-lg" style={{ background: "#fffbeb", color: "#92400e" }}>
+            miesiąc w toku — porównanie do {dzien}. dnia poprzedniego
+          </span>
+        )}
       </div>
 
       {tryb === "miesiac" ? (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
             <Kpi etykieta={`Obrót — ${MIES[ostatniMies - 1]}`} wartosc={eur0(stat.total.eur)}
-                 zmiana={dObrot} jednostka="%" opis={`vs ${eur0(poprz.total.eur)}`} />
+                 zmiana={dObrot} jednostka="%" opis={`vs ${eur0(poprz.total.eur)}${wToku ? ` (do ${dzien}.)` : ""}`} />
             <Kpi etykieta="Frachty" wartosc={stat.total.fr} zmiana={dFr} calkowita
                  opis={`vs ${poprz.total.fr}`} />
             <Kpi etykieta="Udział ARO · obrót" wartosc={pl1(stat.Aro.eurP) + "%"} zmiana={dAro} jednostka=" pkt%" />
             <Kpi etykieta="Udział AGA · obrót" wartosc={pl1(stat.Aga.eurP) + "%"} zmiana={dAga} jednostka=" pkt%" />
           </div>
-          <TabelaOkresu stat={stat} tytul={nazwaMies(aktMies)} podtytul={`${stat.total.fr} frachtów`} />
+          <TabelaOkresu stat={stat} tytul={nazwaMies(aktMies)}
+            podtytul={`${stat.total.fr} frachtów${wToku ? ` · miesiąc w toku, dane do ${dzien}.${aktMies.slice(5, 7)}` : ""}`} />
           <Nota stat={stat} />
-          {poprz.total.fr > 0 && (
-            <TabelaOkresu stat={poprz} tytul={nazwaMies(poprzedniMiesiac(aktMies))}
-                          podtytul={`${poprz.total.fr} frachtów · kontekst porównawczy`} />
+          {poprzPelny.total.fr > 0 && (
+            <TabelaOkresu stat={poprzPelny} tytul={nazwaMies(poprzedniMiesiac(aktMies))}
+                          podtytul={`${poprzPelny.total.fr} frachtów · cały miesiąc, kontekst porównawczy`} />
           )}
         </>
       ) : (

@@ -103,9 +103,32 @@ export function statystyki(frachty) {
   };
 }
 
-/** Statystyki jednego miesiąca "YYYY-MM". */
-export function zaMiesiac(frachty, mies) {
-  return statystyki(frachty.filter(f => miesiacFrachtu(f) === mies));
+/** Dzień miesiąca z daty frachtu (1-31), 0 gdy brak daty. */
+function dzien(f) {
+  const d = String(f?.dataZaladunku || f?.dataZlecenia || "").slice(8, 10);
+  return d ? +d : 0;
+}
+
+/**
+ * Statystyki jednego miesiąca "YYYY-MM".
+ * `doDnia` obcina zbiór do N-tego dnia — służy porównaniu miesiąca w toku
+ * z tym samym wycinkiem poprzedniego. Bez tego 17 dni września wobec pełnego
+ * sierpnia pokazywało „−55%", czyli zapaść, której nie ma.
+ */
+export function zaMiesiac(frachty, mies, doDnia = 0) {
+  return statystyki(frachty.filter(f =>
+    miesiacFrachtu(f) === mies && (!doDnia || dzien(f) <= doDnia)));
+}
+
+/** Czy „YYYY-MM” to miesiąc, który jeszcze trwa. */
+export function miesiacWToku(mies, dzisiaj = new Date()) {
+  const teraz = `${dzisiaj.getFullYear()}-${String(dzisiaj.getMonth() + 1).padStart(2, "0")}`;
+  return String(mies) === teraz;
+}
+
+/** Dzisiejszy dzień miesiąca — do obcięcia porównania. */
+export function dzienDzis(dzisiaj = new Date()) {
+  return dzisiaj.getDate();
 }
 
 /** Narastająco od stycznia do wskazanego miesiąca włącznie. */
