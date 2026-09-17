@@ -153,8 +153,18 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
             zrodloKm = `kilometry z licznika CAN (countryKmDaily, ${dni.size} ${dni.size === 1 ? "doba" : "dni"})`;
           }
         } catch { /* brak danych dobowych */ }
+        // Brak danych dobowych (mamy je dopiero od 10.09.2026) — NIE kasujemy kilometrów
+        // policzonych wcześniej inną metodą. Pusty zapis zabrałby stawki €/km z lipca
+        // i sierpnia, które pochodzą z tras zleceń.
+        let zachowaneKm = null;
         if (!Object.keys(kmPerKraj).length) {
-          zrodloKm = "brak kilometrów per kraj — stawki €/km niedostępne dla tego miesiąca";
+          const poprzednia = dane?.find(d => d.month === m);
+          if (poprzednia && Object.keys(poprzednia.km || {}).length) {
+            zachowaneKm = { km: poprzednia.km, stawki: poprzednia.stawki || {} };
+            zrodloKm = poprzednia.metoda || "kilometry z poprzedniej analizy";
+          } else {
+            zrodloKm = "brak kilometrów per kraj — stawki €/km niedostępne dla tego miesiąca";
+          }
         }
 
         const kmFloty = operacyjne
@@ -167,6 +177,8 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
           month: m, transakcje: tx, kmPerKraj, zrodloKm, kmFloty,
           frachty: frachtyM, krajeFrachtu: krajeFrachtuDomyslne,
         });
+        // Kilometry i stawki z wcześniejszej metody zostają, gdy import ich nie przyniósł.
+        if (zachowaneKm) Object.assign(analiza, zachowaneKm);
         await setDoc(doc(db, "tollAnalysis", m), analiza, { merge: true });
       }
 
@@ -184,7 +196,7 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
     } catch (e) {
       setImp({ faza: "blad", msg: e?.message || String(e) });
     }
-  }, [vehicles, frachtyList, operacyjne, wczytaj]);
+  }, [vehicles, frachtyList, operacyjne, wczytaj, dane]);
 
   const aktMies = useMemo(() => {
     if (!dane?.length) return null;
