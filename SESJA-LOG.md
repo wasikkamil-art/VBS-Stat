@@ -3898,3 +3898,18 @@ Efekt na 2026: **259 pinezek zamiast 349**, 44 stacje z krotnością. Gexa: jede
 transakcje, mapa tylko te ze współrzędnymi. W 2026 bez geokodu jest **11 z 416 (3%)**, wszystkie
 z maja (Gexa, Neuss, Q8 Berchem West, TEXACO Gravenmacher, FAL Distri) — stąd Gexa ma w rankingu
 11 tankowań diesla, a na mapie ×7.
+
+### cd. 17.09 — skok do stacji na mapie z listy i z rankingu
+
+Klik w pozycję listy tankowań działał już wcześniej, ale **przybliżał do zoomu 9**, czyli
+pokazywał region wielkości ~100 km — nie było widać, gdzie ta stacja stoi. Teraz `flyTo`
+robi animowany dolot do **zoomu 13** (poziom ulicy) i dopiero po dolocie otwiera popup
+(przy otwieraniu w trakcie animacji Leaflet go zamykał).
+
+**Klikalne są też wiersze rankingu stacji** — kursor, podświetlenie, a w opisie pod tabelą
+napisane wprost, że mapa pokaże dane wybranego okresu, nie całego roku (ranking mówi
+„Gexa 11/4", a popup po kliknięciu „4 tankowania w sierpniu" — to jest spójne, ale trzeba
+o tym powiedzieć, żeby nie wyglądało na sprzeczność).
+
+**Brak współrzędnych nie jest już cichy** — wcześniej `flyTo` po prostu nic nie robiło, user
+klikał i nie wiedział dlaczego. Teraz toast z nazwą stacji. Dotyczy 11 z 416 transakcji 2026 (3%).

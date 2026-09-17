@@ -325,7 +325,9 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
         if (!pasuje(t) || !(t.liters > 0)) continue;
         const nazwa = (t.station || t.address || "—").trim();
         const k = `${t.country || "??"}|${nazwa.toLowerCase()}`;
-        const o = st[k] = st[k] || { nazwa, cc: t.country || "??", l: 0, e: 0, n: 0, lM: 0, eM: 0, nM: 0 };
+        const o = st[k] = st[k] || { nazwa, cc: t.country || "??", l: 0, e: 0, n: 0, lM: 0, eM: 0, nM: 0,
+          lat: null, lng: null, stationKey: stationKey(t) };
+        if (o.lat == null && t.lat != null) { o.lat = t.lat; o.lng = t.lng; }
         o.l += t.liters; o.e += t.netEUR || 0; o.n++;
         litrowRazem += t.liters;
         if (mcBiezacy && m === mcBiezacy) { o.lM += t.liters; o.eM += t.netEUR || 0; o.nM++; }
@@ -531,7 +533,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
     const grupy = new Map();
     for (const t of pts) {
       const k = stationKey(t);
-      const g = grupy.get(k) || { station: t.station || t.address || "—", country: t.country,
+      const g = grupy.get(k) || { klucz: k, station: t.station || t.address || "—", country: t.country,
         lat: t.lat, lng: t.lng, l: 0, e: 0, n: 0, txids: new Set(), karty: new Set(),
         auta: new Set(), produkty: new Set(), od: t.ts, do: t.ts };
       g.l += t.liters; g.e += t.netEUR || 0; g.n++;
@@ -581,6 +583,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
           { permanent: true, direction: "top", offset: [0, -4], className: "paliwo-pin" });
       }
       mk._txids = g.txids;
+      mk._stationKey = g.klucz;
     }
     if (lista.length) {
       try { m.fitBounds(L.latLngBounds(lista.map(g => [g.lat, g.lng])).pad(0.12)); } catch { /* noop */ }
@@ -589,14 +592,25 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
     if (el) el.classList.toggle("paliwo-nolbl", m.getZoom() < 6);
   }, [filtered, labelMode]);
 
+  // Skok do stacji na mapie — z listy tankowań albo z rankingu stacji.
+  // Zoom 13, nie 9: przy 9 widać region wielkości 100 km, czyli NIE widać, gdzie
+  // stacja stoi. Brak współrzędnych kończył się wcześniej cichym niczym — teraz toast,
+  // bo user klika i ma prawo wiedzieć, dlaczego nic się nie stało.
   const flyTo = t => {
     const m = mapObj.current;
-    if (!m || !t.lat) return;
-    m.setView([t.lat, t.lng], 9);
-    layerRef.current?.eachLayer(l => { if (l._txids?.has(t.id)) l.openPopup(); });
-    // Lista tankowań jest POD mapą, więc samo przesunięcie mapy user by przegapił —
-    // przewijamy do niej. (Gdy lista była w lewej kolumnie, mapa była obok.)
+    if (!m) return;
+    if (!t.lat || !t.lng) {
+      showToast(`📍 ${t.station || "Ta stacja"} nie ma jeszcze współrzędnych — nie pokażę jej na mapie`);
+      return;
+    }
     mapRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    m.flyTo([t.lat, t.lng], 13, { duration: 0.8 });
+    // popup dopiero po dolocie, inaczej Leaflet zamyka go w trakcie animacji
+    m.once("moveend", () => {
+      layerRef.current?.eachLayer(l => {
+        if (t.id ? l._txids?.has(t.id) : l._stationKey === t.stationKey) l.openPopup();
+      });
+    });
   };
 
   // ══════════════════════════════════════════════════════════════════
@@ -1242,7 +1256,10 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
                   </thead>
                   <tbody>
                     {rankingStacji.top.map((o, i) => (
-                      <tr key={o.cc + o.nazwa} className="border-t border-gray-100">
+                      <tr key={o.cc + o.nazwa}
+                        onClick={() => flyTo({ lat: o.lat, lng: o.lng, station: o.nazwa, stationKey: o.stationKey })}
+                        title={o.lat ? "Pokaż na mapie" : "Brak współrzędnych tej stacji"}
+                        className="border-t border-gray-100 cursor-pointer hover:bg-gray-50">
                         <td className="py-1 pr-1">
                           <span className="text-gray-300 mr-1 tabular-nums">{i + 1}.</span>
                           <span className="mr-1">{FLAG[o.cc] || ""}</span>
@@ -1273,7 +1290,8 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
                     className="mt-2 w-full text-[10px] font-mono border border-gray-200 rounded-lg p-2 bg-gray-50" />
                 )}
                 <div className="text-[10.5px] text-gray-400 mt-2 leading-relaxed">
-                  <b>Tank.</b> = liczba tankowań w {rankingStacji.rok}{!rokTryb && <> (po ukośniku ile z nich w {monthLabel(month)})</>}.
+                  Klik w wiersz pokazuje stację na mapie — z danymi {rokTryb ? "całego roku" : `za ${monthLabel(month)}`},
+                  bo mapa pracuje na wybranym okresie. <b>Tank.</b> = liczba tankowań w {rankingStacji.rok}{!rokTryb && <> (po ukośniku ile z nich w {monthLabel(month)})</>}.
                   Kolor ceny rocznej wobec <b>średniej całego roku {p3(rankingStacji.cenaRoku)} €/L</b> w tym zestawie
                   filtrów. „€/L mc" to ta sama stacja w {monthLabel(month)} — „—" znaczy, że w tym miesiącu tam nie tankowano.
                   {rankingStacji.lista.length > 10 && <> Poza pierwszą dziesiątką jest jeszcze {rankingStacji.lista.length - 10} stacji.</>}
