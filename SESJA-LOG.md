@@ -3592,3 +3592,22 @@ Identyfikator zakładki zmieniony `ranking` → `analizy`, więc `effectiveTabs`
 ⚠️ **Wpadka złapana w porę**: do podglądu zrzuciłem frachty do `public/frachty2026.json` — katalog publiczny, plik wszedłby do `dist/` i byłby dostępny bez logowania. Usunięty przed buildem i commitem; w repo nigdy nie był.
 
 Bundle: `AnalizyTab` 42,9 kB (gzip 13,0) jako osobny chunk; główny bez zmian.
+
+## 2026-09-17 — Kontrola: agregat km per kraj wystartował sam
+
+`aggregateCountryKm` uruchomiła się **2026-09-17 02:10** czasu polskiego, bez ingerencji: `aggregateCountryKm 2026-09-16: 2 pojazdów, 651 km`. Dokument `countryKmDaily/2026-09-16` nadpisany przez Cloud Function (brak pola `zrodlo`, które zostawia backfill lokalny), `updatedAt` z nocy.
+
+**Jakość po naprawie `scheduledGpsPoll` skoczyła skokowo** — odsetek odrzuconych odcinków:
+
+| doba | źródło | odrzucone |
+|---|---|--:|
+| 10.09 | backfill | **44%** |
+| 11.09 | backfill | 40% |
+| 13.09 | backfill | 15% |
+| 14.09 | backfill | 13% |
+| 15.09 | backfill | 28% |
+| **16.09** | **Cloud Function** | **3%** (21 z 750 punktów) |
+
+Pokrycie 16.09: v4 **100,4%** (284 km przypisane / 283 z licznika), v5 **94,3%** — oba w zakresie 90–110%, więc żadnego `console.warn`. v1 i v3 stały, stąd tylko dwa pojazdy. Km per kraj: v4 FR 284, v5 FR 310 + BE 57.
+
+**Mechanizm działa end-to-end**: punkt → kraj przy zapisie → agregat dobowy → trwały dokument. Od października miesiąc będzie kompletny i €/km per kraj policzymy z licznika zamiast z tras zleceń.
