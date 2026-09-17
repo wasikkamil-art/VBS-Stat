@@ -2,9 +2,12 @@
 // Czyta gotowe analizy z kolekcji `tollAnalysis/{YYYY-MM}`. Sierpień i lipiec policzone
 // ręcznie z eksportów (pole `zrodlo: "reczna"`); od października dane mają pochodzić
 // z licznika CAN (countryKmDaily) i importu transakcji — struktura dokumentu ta sama.
-import { useState, useEffect, useMemo } from "react";
-import { collection, getDocs } from "firebase/firestore";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { collection, doc, getDocs, setDoc, writeBatch, query, where } from "firebase/firestore";
 import { db } from "../firebase";
+import { detectAndParse, csvToAoa, txId, norm, SKIP_PLATE } from "../utils/tollParsers";
+import { zbudujAnalize, krajeFrachtuDomyslne, kmZDni } from "../utils/tollAnalysis";
+import { toEUR } from "../utils/nbp";
 
 const MIES = ["styczeń", "luty", "marzec", "kwiecień", "maj", "czerwiec",
   "lipiec", "sierpień", "wrzesień", "październik", "listopad", "grudzień"];
@@ -22,20 +25,166 @@ const sgn = (n) => (n >= 0 ? "+" : "") + Math.round(n).toLocaleString("pl-PL");
 
 // `analizy` pozwala podać dane z zewnątrz zamiast czytać kolekcję — używane
 // w podglądzie bez logowania, a docelowo gdyby App miał już te dane u siebie.
-export default function OplatyDrogoweAnaliza({ analizy = null }) {
+export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, vehicles = [], frachtyList = [], operacyjne = [] }) {
   const [pobrane, setPobrane] = useState(null);
   const [blad, setBlad] = useState(null);
   const [mies, setMies] = useState(null);
+  const [imp, setImp] = useState(null);     // {faza, msg, szczegoly}
   const dane = analizy || pobrane;
 
-  useEffect(() => {
-    if (analizy) return;
-    let zyje = true;
+  const wczytaj = useCallback(() => {
     getDocs(collection(db, "tollAnalysis"))
-      .then(q => { if (zyje) setPobrane(q.docs.map(d => d.data()).sort((a, b) => a.month.localeCompare(b.month))); })
-      .catch(e => { if (zyje) setBlad(e?.message || String(e)); });
-    return () => { zyje = false; };
-  }, [analizy]);
+      .then(q => setPobrane(q.docs.map(d => d.data()).sort((a, b) => a.month.localeCompare(b.month))))
+      .catch(e => setBlad(e?.message || String(e)));
+  }, []);
+
+  useEffect(() => { if (!analizy) wczytaj(); }, [analizy, wczytaj]);
+
+  // ── IMPORT eksportów NegoMetal / e-TOLL ───────────────────────────────
+  // Ten sam wzorzec, co import paliwa: parsujemy plik, mapujemy na flotę, przeliczamy
+  // na EUR kursem NBP z dnia transakcji, deduplikujemy i dopiero wtedy zapisujemy.
+  // Ponowny import tego samego pliku nie tworzy duplikatów.
+  const importuj = useCallback(async (fileList) => {
+    const pliki = Array.from(fileList || []);
+    if (!pliki.length) return;
+    setImp({ faza: "czytanie", msg: `Czytam ${pliki.length} ${pliki.length === 1 ? "plik" : "pliki"}…` });
+    try {
+      const XLSX = window.XLSX || await new Promise((res, rej) => {
+        const sc = document.createElement("script");
+        sc.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+        sc.onload = () => res(window.XLSX);
+        sc.onerror = () => rej(new Error("Nie udało się wczytać biblioteki XLSX"));
+        document.head.appendChild(sc);
+      });
+
+      let surowe = [];
+      const rozpoznane = [];
+      for (const f of pliki) {
+        let aoa;
+        if (/\.csv$/i.test(f.name)) {
+          aoa = csvToAoa(await f.text());          // XLSX myli się na CSV ze średnikiem
+        } else {
+          const wb = XLSX.read(await f.arrayBuffer(), { type: "array", cellDates: true });
+          aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: "" });
+        }
+        const r = detectAndParse(aoa);
+        rozpoznane.push({ nazwa: f.name, rodzaj: r.kind, ile: r.rows.length });
+        surowe = surowe.concat(r.rows);
+      }
+      if (!surowe.length) {
+        setImp({ faza: "blad", msg: "Nie rozpoznałem żadnych transakcji. Czy to eksport NegoMetal (xlsx) albo e-TOLL (csv)?", szczegoly: rozpoznane });
+        return;
+      }
+
+      // Mapowanie na flotę — obce rejestracje odrzucamy, ale mówimy które
+      const poRej = {};
+      for (const v of vehicles) { const fp = norm(v.plate); if (fp) poRej[fp] = v.id; }
+      const obce = new Set();
+      const nasze = surowe.filter(t => {
+        if (SKIP_PLATE.test(t.plate)) { obce.add(t.plateRaw); return false; }
+        const vid = poRej[t.plate];
+        if (!vid) { obce.add(t.plateRaw); return false; }
+        t.vehicleId = vid;
+        return true;
+      });
+      if (!nasze.length) {
+        setImp({ faza: "blad", msg: `Żadna transakcja nie pasuje do floty. Rejestracje w pliku: ${[...obce].join(", ")}`, szczegoly: rozpoznane });
+        return;
+      }
+
+      // Kursy NBP — po jednym zapytaniu na parę (waluta, dzień), nie na transakcję
+      setImp({ faza: "kursy", msg: `Przeliczam ${nasze.length} transakcji na EUR kursem NBP…` });
+      const pary = [...new Set(nasze.filter(t => t.currency !== "EUR").map(t => `${t.currency}|${t.day}`))];
+      const kursy = {};
+      for (const para of pary) {
+        const [cur, day] = para.split("|");
+        kursy[para] = await toEUR(1, cur, day);
+      }
+      let bezKursu = 0;
+      for (const t of nasze) {
+        if (t.currency === "EUR") { t.amountEUR = t.amountLocal; continue; }
+        const k = kursy[`${t.currency}|${t.day}`];
+        if (k == null) { t.amountEUR = null; bezKursu++; }
+        else t.amountEUR = Math.round(t.amountLocal * k * 100) / 100;
+      }
+
+      // Dedup wobec tego, co już jest w bazie
+      const miesiace = [...new Set(nasze.map(t => t.month))].sort();
+      setImp({ faza: "zapis", msg: `Sprawdzam duplikaty w ${miesiace.length} ${miesiace.length === 1 ? "miesiącu" : "miesiącach"}…` });
+      let nowych = 0, pominietych = 0;
+      for (const m of miesiace) {
+        const istnieje = new Set();
+        try {
+          const snap = await getDocs(collection(db, "tollTransactions", m, "tx"));
+          snap.forEach(d => istnieje.add(d.id));
+        } catch { /* pierwszy import tego miesiąca */ }
+        const doZapisu = [];
+        const widziane = new Set();
+        for (const t of nasze.filter(x => x.month === m)) {
+          const id = txId(t);
+          if (istnieje.has(id) || widziane.has(id)) { pominietych++; continue; }
+          widziane.add(id);
+          doZapisu.push({ id, t });
+        }
+        for (let i = 0; i < doZapisu.length; i += 400) {
+          const batch = writeBatch(db);
+          for (const { id, t } of doZapisu.slice(i, i + 400)) {
+            batch.set(doc(db, "tollTransactions", m, "tx", id), { ...t, importedAt: new Date().toISOString() });
+          }
+          await batch.commit();
+        }
+        await setDoc(doc(db, "tollTransactions", m), { month: m, updatedAt: new Date().toISOString() }, { merge: true });
+        nowych += doZapisu.length;
+      }
+
+      // Przeliczenie analizy dla każdego dotkniętego miesiąca
+      setImp({ faza: "analiza", msg: "Przeliczam analizę…" });
+      for (const m of miesiace) {
+        const snap = await getDocs(collection(db, "tollTransactions", m, "tx"));
+        const tx = snap.docs.map(d => d.data());
+
+        // Kilometry: najpierw z licznika CAN (countryKmDaily), bo to twarde dane.
+        let kmPerKraj = {}, zrodloKm = "";
+        try {
+          const dni = await getDocs(query(collection(db, "countryKmDaily"),
+            where("date", ">=", `${m}-01`), where("date", "<=", `${m}-31`)));
+          if (!dni.empty) {
+            kmPerKraj = kmZDni(dni.docs.map(d => d.data()));
+            zrodloKm = `kilometry z licznika CAN (countryKmDaily, ${dni.size} ${dni.size === 1 ? "doba" : "dni"})`;
+          }
+        } catch { /* brak danych dobowych */ }
+        if (!Object.keys(kmPerKraj).length) {
+          zrodloKm = "brak kilometrów per kraj — stawki €/km niedostępne dla tego miesiąca";
+        }
+
+        const kmFloty = operacyjne
+          .filter(o => o.year === +m.slice(0, 4) && o.month === +m.slice(5, 7))
+          .reduce((a, o) => a + (o.kmLicznik || 0), 0);
+        const frachtyM = frachtyList.filter(f =>
+          String(f.dataZaladunku || f.dataZlecenia || "").slice(0, 7) === m && f.vehicleId !== "v4");
+
+        const analiza = zbudujAnalize({
+          month: m, transakcje: tx, kmPerKraj, zrodloKm, kmFloty,
+          frachty: frachtyM, krajeFrachtu: krajeFrachtuDomyslne,
+        });
+        await setDoc(doc(db, "tollAnalysis", m), analiza, { merge: true });
+      }
+
+      setImp({
+        faza: "ok",
+        msg: `Zapisano ${nowych} ${nowych === 1 ? "transakcję" : "transakcji"}, pominięto ${pominietych} już istniejących.`,
+        szczegoly: rozpoznane,
+        miesiace,
+        uwagi: [
+          obce.size ? `Pominięte rejestracje spoza floty: ${[...obce].join(", ")}` : null,
+          bezKursu ? `${bezKursu} transakcji bez kursu NBP — nie weszły do kwot w EUR` : null,
+        ].filter(Boolean),
+      });
+      wczytaj();
+    } catch (e) {
+      setImp({ faza: "blad", msg: e?.message || String(e) });
+    }
+  }, [vehicles, frachtyList, operacyjne, wczytaj]);
 
   const aktMies = useMemo(() => {
     if (!dane?.length) return null;
@@ -73,6 +222,44 @@ export default function OplatyDrogoweAnaliza({ analizy = null }) {
 
   return (
     <div className="space-y-4">
+      {isAdmin && (
+        <div className="rounded-xl border p-3" style={{ background: "#f8fafc", borderColor: "#e2e8f0" }}>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="text-xs font-semibold px-3 py-2 rounded-lg cursor-pointer"
+                   style={{ background: "#2563eb", color: "#fff" }}>
+              ⬆️ Wgraj eksporty
+              <input type="file" multiple accept=".xlsx,.xls,.csv" className="hidden"
+                     onChange={e => { importuj(e.target.files); e.target.value = ""; }} />
+            </label>
+            <div className="text-[11px] text-gray-500 leading-relaxed flex-1 min-w-[220px]">
+              NegoMetal (<code>.xlsx</code>) i e-TOLL (<code>.csv</code>) — można oba naraz.
+              Kwoty przeliczam na EUR kursem NBP z dnia transakcji, duplikaty pomijam,
+              analizę miesiąca przeliczam po zapisie.
+            </div>
+          </div>
+          {imp && (
+            <div className="mt-2 text-xs rounded-lg p-2.5" style={{
+              background: imp.faza === "blad" ? "#fef2f2" : imp.faza === "ok" ? "#f0fdf4" : "#eff6ff",
+              color: imp.faza === "blad" ? "#991b1b" : imp.faza === "ok" ? "#166534" : "#1e40af" }}>
+              <div className="font-semibold">
+                {imp.faza === "ok" ? "✅ " : imp.faza === "blad" ? "❌ " : "⏳ "}{imp.msg}
+              </div>
+              {imp.szczegoly?.length > 0 && (
+                <div className="mt-1 text-[11px] opacity-80">
+                  {imp.szczegoly.map((d, i) => (
+                    <div key={i}>{d.nazwa} → {d.rodzaj === "nego" ? "NegoMetal" : d.rodzaj === "etoll" ? "e-TOLL" : "nierozpoznany"} ({d.ile})</div>
+                  ))}
+                </div>
+              )}
+              {imp.miesiace?.length > 0 && (
+                <div className="mt-1 text-[11px] opacity-80">Przeliczone miesiące: {imp.miesiace.join(", ")}</div>
+              )}
+              {imp.uwagi?.map((u, i) => <div key={i} className="mt-1 text-[11px]">⚠️ {u}</div>)}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-2">
         <select value={aktMies} onChange={e => setMies(e.target.value)}
           className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
@@ -81,6 +268,11 @@ export default function OplatyDrogoweAnaliza({ analizy = null }) {
         {biez.zrodlo === "reczna" && (
           <span className="text-[11px] px-2 py-1 rounded-lg" style={{ background: "#fffbeb", color: "#92400e" }}>
             analiza policzona ręcznie z eksportów
+          </span>
+        )}
+        {biez.zrodlo === "import" && (
+          <span className="text-[11px] px-2 py-1 rounded-lg" style={{ background: "#eff6ff", color: "#1e40af" }}>
+            z importu · {biez.transakcji ? `${biez.transakcji.nego} Nego + ${biez.transakcji.etoll} e-TOLL` : "transakcje w bazie"}
           </span>
         )}
       </div>

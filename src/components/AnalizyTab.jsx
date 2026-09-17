@@ -52,7 +52,10 @@ export default function AnalizyTab({ vehicles = [], frachtyList = [], costs = []
                     operacyjne={operacyjne} isAdmin={isAdmin} />
       )}
 
-      {aktywny === "nego" && <OplatyDrogoweAnaliza />}
+      {aktywny === "nego" && (
+        <OplatyDrogoweAnaliza isAdmin={isAdmin} vehicles={vehicles}
+                              frachtyList={frachtyList} operacyjne={operacyjne} />
+      )}
 
       {aktywny === "dyspozytorzy" && <DyspozytorzyAnaliza frachtyList={frachtyList} />}
     </div>

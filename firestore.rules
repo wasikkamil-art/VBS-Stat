@@ -122,6 +122,17 @@ service cloud.firestore {
     // ANALIZY OPŁAT DROGOWYCH — gotowe zestawienia per miesiąc (zakładka Analizy).
     // Zapis tylko z backendu (Admin SDK omija reguły) albo ręcznie przez admina.
     // ═══════════════════════════════════════════════════════════════
+    // Transakcje opłat drogowych z importu (NegoMetal + e-TOLL).
+    // Zapis z aplikacji robi admin — import idzie przez przeglądarkę, nie przez CF.
+    match /tollTransactions/{month} {
+      allow read: if canRead();
+      allow create, update, delete: if isAdmin();
+      match /tx/{txId} {
+        allow read: if canRead();
+        allow create, update, delete: if isAdmin();
+      }
+    }
+
     match /tollAnalysis/{docId} {
       allow read: if canRead();
       allow create, update, delete: if isAdmin();
