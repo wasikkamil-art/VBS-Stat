@@ -19,7 +19,6 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { db } from "../firebase";
 import { collection, doc, getDoc, getDocs, setDoc, writeBatch } from "firebase/firestore";
 import { logAction } from "../utils/logAction";
-import PaliwoDashboard from "./PaliwoDashboard";
 import {
   CARDS, FLAG, SKIP_PLATE, VAT, norm, detectAndParse, txId, stationQueries, stationKey,
   csvToAoa, nettujStorno,
@@ -121,6 +120,7 @@ function FilterRow({ label, action, children }) {
 
 export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = () => {}, currentUser }) {
   const [months, setMonths] = useState([]);
+  const [lata, setLata] = useState([]);
   const [month, setMonth] = useState("");
   const [txs, setTxs] = useState([]);
   const [kmMonthly, setKmMonthly] = useState({});
@@ -148,6 +148,9 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
   const mapObj = useRef(null);
   const layerRef = useRef(null);
 
+  // Wybrany okres to albo miesiąc „2026-08", albo cały rok „2026" (4 znaki).
+  const rokTryb = month.length === 4;
+
   const activeVehicles = useMemo(() => vehicles.filter(v => !v.archived), [vehicles]);
   const plateOf = id => activeVehicles.find(v => v.id === id)?.plate || vehicles.find(v => v.id === id)?.plate || id;
 
@@ -172,6 +175,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
         const snap = await getDocs(collection(db, "fuelTransactions"));
         const ms = snap.docs.map(d => d.id).sort().reverse();
         setMonths(ms);
+        setLata([...new Set(ms.map(m => m.slice(0, 4)))].sort().reverse());
         setMonth(prev => prev || ms[0] || "");
       } catch (e) { console.warn("[Paliwo] months:", e); }
       setLoading(false);
@@ -185,12 +189,29 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
     (async () => {
       setLoading(true);
       try {
-        const snap = await getDocs(collection(db, "fuelTransactions", month, "tx"));
-        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        const kmDoc = await getDoc(doc(db, "vehicleKmMonthly", month));
+        // Rok = doczytanie wszystkich jego miesięcy. Świadomie sekwencyjnie i tylko
+        // na żądanie (user musi wybrać rok w selektorze) — dyscyplina kosztów odczytów.
+        const okresy = month.length === 4
+          ? months.filter(m => m.slice(0, 4) === month)
+          : [month];
+        const rows = [];
+        const km = {};
+        for (const m of okresy) {
+          const snap = await getDocs(collection(db, "fuelTransactions", m, "tx"));
+          snap.forEach(d => rows.push({ id: d.id, ...d.data() }));
+          const kmDoc = await getDoc(doc(db, "vehicleKmMonthly", m));
+          const vs = kmDoc.exists() ? (kmDoc.data().vehicles || {}) : {};
+          // km całego roku = suma miesięcy; źródło „mieszane", gdy miesiące mają różne
+          for (const [vid, o] of Object.entries(vs)) {
+            const a = km[vid] = km[vid] || { km: 0, plate: o.plate, source: o.source, mies: 0, perM: {} };
+            a.km += o.km || 0;
+            if (o.km) { a.mies++; a.perM[m] = o.km; }
+            if (a.source !== o.source) a.source = "mixed";
+          }
+        }
         if (!alive) return;
         setTxs(rows);
-        setKmMonthly(kmDoc.exists() ? (kmDoc.data().vehicles || {}) : {});
+        setKmMonthly(km);
         setFCars(new Set([...new Set(rows.map(r => r.vehicleId))].filter(Boolean)));
       } catch (e) {
         console.warn("[Paliwo] load:", e);
@@ -199,7 +220,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
       if (alive) setLoading(false);
     })();
     return () => { alive = false; };
-  }, [month]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [month, months]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Trend: dociągnij WSZYSTKIE miesiące raz, gdy user otworzy panel trendu ──
   useEffect(() => {
@@ -249,16 +270,34 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
   const byVehicle = useMemo(() => {
     const m = {};
     for (const t of filtered) {
-      const o = m[t.vehicleId] = m[t.vehicleId] || { l: 0, e: 0, n: 0 };
+      const o = m[t.vehicleId] = m[t.vehicleId] || { l: 0, e: 0, n: 0, mies: new Set(), perM: {} };
       o.l += t.liters; o.e += t.netEUR; o.n++;
+      if (t.month) {
+        o.mies.add(t.month);
+        const pm = o.perM[t.month] = o.perM[t.month] || { l: 0, e: 0 };
+        pm.l += t.liters; pm.e += t.netEUR;
+      }
     }
     return Object.entries(m).map(([vid, o]) => {
       const kmRec = kmMonthly[vid];
       const km = kmRec?.km || null;
-      return { vid, ...o, km, kmSource: kmRec?.source || null,
-        l100: km ? o.l / km * 100 : null, eurKm: km ? o.e / km : null };
+
+      // Spalanie i €/km liczymy TYLKO z miesięcy, które mają jednocześnie km i tankowania.
+      // W widoku rocznym litry są z całego roku, a km bywają z części miesięcy (sierpień
+      // 2026 nie ma ich wcale) — dzielenie wprost zawyżałoby spalanie o brakujące miesiące.
+      const perM = kmRec?.perM || (km ? { [month]: km } : {});
+      const kryte = Object.keys(perM).filter(mm => o.mies.has(mm));
+      const kmKryte = kryte.reduce((a2, mm) => a2 + perM[mm], 0);
+      const lKryte = kryte.reduce((a2, mm) => a2 + (o.perM[mm]?.l || 0), 0);
+      const eKryte = kryte.reduce((a2, mm) => a2 + (o.perM[mm]?.e || 0), 0);
+
+      return { vid, l: o.l, e: o.e, n: o.n, km, kmSource: kmRec?.source || null,
+        mcTx: o.mies.size, mcKm: kryte.length, kmPelne: kryte.length >= o.mies.size,
+        lKryte, eKryte, kmKryte,
+        l100: kmKryte ? lKryte / kmKryte * 100 : null,
+        eurKm: kmKryte ? eKryte / kmKryte : null };
     }).sort((a, b) => b.l - a.l);
-  }, [filtered, kmMonthly]);
+  }, [filtered, kmMonthly, month]);
 
   // ── Podsumowanie miesiąca do Total_26 i do kosztów ────────────────────────
   // Świadomie liczone z `txs`, a NIE z `filtered`: zestawienie kosztowe musi objąć
@@ -656,6 +695,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
 
   // ── Ręczne km z raportu panelu (źródło nadrzędne, CF tego nie nadpisze) ──
   const saveKm = async (vid) => {
+    if (rokTryb) { showToast("❌ km wpisuje się w konkretnym miesiącu, nie w widoku rocznym"); return; }
     const val = parseFloat(String(kmEdit[vid] ?? "").replace(",", "."));
     if (!isFinite(val) || val <= 0) { showToast("❌ Podaj km jako liczbę"); return; }
     try {
@@ -689,6 +729,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
 
   const monthLabel = m => {
     if (!m) return "—";
+    if (m.length === 4) return `cały rok ${m}`;
     const NM = ["styczeń","luty","marzec","kwiecień","maj","czerwiec","lipiec","sierpień","wrzesień","październik","listopad","grudzień"];
     return `${NM[+m.slice(5, 7) - 1]} ${m.slice(0, 4)}`;
   };
@@ -710,6 +751,12 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
           className="px-3 py-2 rounded-xl border border-gray-200 bg-gray-50 text-sm">
           {months.length === 0 && <option value="">brak danych</option>}
           {months.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
+          {lata.length > 0 && <option disabled>──────────</option>}
+          {lata.map(r => (
+            <option key={r} value={r}>
+              {monthLabel(r)} ({months.filter(m => m.slice(0, 4) === r).length} mc)
+            </option>
+          ))}
         </select>
         {months.length > 0 && (
           <button onClick={() => setShowTrend(s => !s)}
@@ -726,7 +773,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
             style={showSummary
               ? { background: "#0071e3", borderColor: "#0071e3", color: "#fff" }
               : { background: "#fff", borderColor: "#e5e5ea", color: "#1d1d1f" }}>
-            📋 Podsumowanie miesiąca
+            📋 Podsumowanie {rokTryb ? "roku" : "miesiąca"}
           </button>
         )}
         {canEdit && (
@@ -833,10 +880,11 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
           <div className="flex items-start justify-between mb-3 gap-2">
             <div>
               <div className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">
-                📋 Podsumowanie {monthLabel(month)} — netto EUR
+                📋 Podsumowanie — {monthLabel(month)}, netto EUR
               </div>
               <div className="text-[11px] text-gray-400">
                 Wszystkie karty i oba produkty, <b>niezależnie od filtrów widoku</b>. Kursy NBP z dnia transakcji.
+                {rokTryb && <> Suma <b>{months.filter(m => m.slice(0, 4) === month).length} miesięcy</b> tego roku.</>}
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
@@ -1066,6 +1114,32 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
             ))}
           </div>
 
+        </div>
+
+        {/* MAPA + reszta widoku pod nią */}
+        <div className="space-y-4 self-start">
+          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden relative min-h-[420px]">
+            <div className="absolute z-[500] top-3 left-3 flex gap-1.5 items-center bg-white/95 backdrop-blur border border-gray-100 rounded-xl px-2.5 py-2 shadow-sm">
+              <span className="text-[11px] text-gray-400 mr-1">Etykiety:</span>
+              {chip(labelMode === "price", () => setLabelMode("price"), "€/L")}
+              {chip(labelMode === "liters", () => setLabelMode("liters"), "litry")}
+              {chip(labelMode === "none", () => setLabelMode("none"), "bez")}
+            </div>
+            <div className="absolute z-[500] bottom-4 left-3 bg-white/95 backdrop-blur border border-gray-100 rounded-xl px-3 py-2.5 shadow-sm">
+              <div className="text-[10.5px] uppercase tracking-wide text-gray-400 font-semibold mb-1">Karta</div>
+              {Object.entries(CARDS).map(([k, v]) => (
+                <div key={k} className="flex items-center gap-1.5 text-[11.5px] text-gray-700">
+                  <span className="w-2 h-2 rounded-full" style={{ background: v.color }} />{v.name}
+                </div>
+              ))}
+              <div className="text-[10.5px] uppercase tracking-wide text-gray-400 font-semibold mt-2">Wielkość = litry</div>
+            </div>
+            <div ref={mapRef} className="w-full min-h-[420px]" style={{ height: "calc(100vh - 220px)" }} />
+          </div>
+
+{/* Pod mapą: wnioski, ceny per kraj, auta i lista tankowań — wszystko, co
+              wcześniej tłoczyło się w wąskiej lewej kolumnie. Lewa zostaje panelem
+              sterowania (filtry + podsumowanie), a szerokie tabele mają tu miejsce. */}
           {/* Wnioski */}
           {insights.length > 0 && (
             <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
@@ -1140,21 +1214,31 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
                       <span><b className="text-gray-900 font-semibold">{p3(v.l ? v.e / v.l : 0)} €/L</b> średnia</span>
                       <span>{v.l100 ? <><b className="text-gray-900 font-semibold">{v.l100.toFixed(1)}</b> L/100</> : "L/100 —"}</span>
                       <span>{v.eurKm ? `${v.eurKm.toFixed(3)} €/km` : "€/km —"}</span>
+                      {rokTryb && v.mcTx > 1 && !v.kmPelne && (
+                        <span className="text-amber-700">
+                          spalanie z {v.mcKm} z {v.mcTx} mc — tylko te mają km
+                        </span>
+                      )}
                       <span>
                         {v.km
                           ? <span title={v.kmSource === "report" ? "z raportu panelu (dokładne)"
-                              : v.kmSource === "snapshot" ? "snapshot licznika (dokładne)" : "delta Atlas (±1%)"}>
+                              : v.kmSource === "snapshot" ? "snapshot licznika (dokładne)"
+                              : v.kmSource === "snapshot_approx_start" ? "snapshot z SZACOWANYM stanem początkowym — wartość niepewna, sprawdź z raportem panelu"
+                              : v.kmSource === "mixed" ? "miesiące z różnych źródeł"
+                              : "delta Atlas (±1%)"}>
                               {Math.round(v.km).toLocaleString("pl-PL")} km
-                              {v.kmSource !== "report" && v.kmSource !== "snapshot" && <span className="text-gray-400">*</span>}
+                              {v.kmSource !== "report" && v.kmSource !== "snapshot" && (
+                                <span className={v.kmSource === "snapshot_approx_start" ? "text-amber-600 font-semibold" : "text-gray-400"}>*</span>
+                              )}
                             </span>
-                          : canEdit
+                          : canEdit && !rokTryb
                             ? <span className="inline-flex gap-1 items-center">
                                 <input value={kmEdit[v.vid] ?? ""} onChange={e => setKmEdit(p => ({ ...p, [v.vid]: e.target.value }))}
                                   placeholder="km z raportu"
                                   className="w-24 px-1.5 py-0.5 border border-gray-200 rounded text-right text-[11px]" />
                                 <button onClick={() => saveKm(v.vid)} className="text-[11px] text-blue-600">✔</button>
                               </span>
-                            : "brak km"}
+                            : rokTryb ? "brak km" : "brak km"}
                       </span>
                     </div>
                   </div>
@@ -1165,10 +1249,11 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
                   const l = byVehicle.reduce((s, v) => s + v.l, 0);
                   const e = byVehicle.reduce((s, v) => s + v.e, 0);
                   const n = byVehicle.reduce((s, v) => s + v.n, 0);
-                  const withKm = byVehicle.filter(v => v.km);
-                  const km = withKm.reduce((s, v) => s + v.km, 0);
-                  const lKm = withKm.reduce((s, v) => s + v.l, 0);      // litry TYLKO aut z km
-                  const eKm = withKm.reduce((s, v) => s + v.e, 0);
+                  // Flota liczona z miesięcy POKRYTYCH km (te same po obu stronach ułamka).
+                  const withKm = byVehicle.filter(v => v.kmKryte > 0);
+                  const km = withKm.reduce((s, v) => s + v.kmKryte, 0);
+                  const lKm = withKm.reduce((s, v) => s + v.lKryte, 0);
+                  const eKm = withKm.reduce((s, v) => s + v.eKryte, 0);
                   return (
                     <div className="py-2 bg-gray-50 -mx-4 px-4 mt-1">
                       <div className="flex items-baseline justify-between gap-2">
@@ -1237,33 +1322,6 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
               ))}
             </div>
           </div>
-        </div>
-
-        {/* MAPA + dashboard pod nią */}
-        <div className="space-y-4 self-start">
-          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden relative min-h-[420px]">
-            <div className="absolute z-[500] top-3 left-3 flex gap-1.5 items-center bg-white/95 backdrop-blur border border-gray-100 rounded-xl px-2.5 py-2 shadow-sm">
-              <span className="text-[11px] text-gray-400 mr-1">Etykiety:</span>
-              {chip(labelMode === "price", () => setLabelMode("price"), "€/L")}
-              {chip(labelMode === "liters", () => setLabelMode("liters"), "litry")}
-              {chip(labelMode === "none", () => setLabelMode("none"), "bez")}
-            </div>
-            <div className="absolute z-[500] bottom-4 left-3 bg-white/95 backdrop-blur border border-gray-100 rounded-xl px-3 py-2.5 shadow-sm">
-              <div className="text-[10.5px] uppercase tracking-wide text-gray-400 font-semibold mb-1">Karta</div>
-              {Object.entries(CARDS).map(([k, v]) => (
-                <div key={k} className="flex items-center gap-1.5 text-[11.5px] text-gray-700">
-                  <span className="w-2 h-2 rounded-full" style={{ background: v.color }} />{v.name}
-                </div>
-              ))}
-              <div className="text-[10.5px] uppercase tracking-wide text-gray-400 font-semibold mt-2">Wielkość = litry</div>
-            </div>
-            <div ref={mapRef} className="w-full min-h-[420px]" style={{ height: "calc(100vh - 220px)" }} />
-          </div>
-
-          {/* Pod mapą: wykresy z tych samych transakcji, które są na pinach.
-              Karta mapy ma własną wysokość, więc dashboard wypełnia resztę kolumny
-              zamiast białej przestrzeni ciągnącej się do końca lewej kolumny. */}
-          <PaliwoDashboard txs={filtered} month={month} plateOf={plateOf} product={product} />
         </div>
       </div>
     </div>

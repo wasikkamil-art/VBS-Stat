@@ -3742,3 +3742,33 @@ nie biblioteka: kolumna ma 545 px i gęstość, której gotowy komponent nie utr
 ⚠️ Do sprawdzenia przez usera: wygląd na szerokim monitorze (podgląd chodził na 1280 px)
 i na tablecie — przy wąskim ekranie kolumny schodzą pod siebie i dashboard ląduje pod mapą,
 czyli tam, gdzie ma być, ale tego nie klikałem.
+
+### cd. 17.09 — Paliwo: przebudowa układu, dashboard cofnięty, widok całego roku
+
+**Dashboard z poprzedniego punktu USUNIĘTY na prośbę usera** („nie pasuje mi"). `PaliwoDashboard.jsx`
+skasowany. Zamiast wykresów pod mapą wylądowało to, co dotąd tłoczyło się w wąskiej lewej kolumnie:
+**Wnioski · Ceny per kraj · Auto i kierowca · Tankowania**.
+
+**Nowy podział:** lewa kolumna to panel sterowania — filtry (auta / karty / produkt / kraje) i cztery
+kafelki KPI, nic więcej. Cała treść jest po prawej, pod mapą, gdzie tabele mają szerokość.
+
+**Widok całego roku.** Selektor okresu dostał pozycję „cały rok 2026 (4 mc)" pod separatorem.
+Okres 4-znakowy = rok: doczytywane są wszystkie miesiące roku, km sumowane per pojazd.
+Wybór roku jest świadomie ręczny (dyscyplina odczytów — rok to tyle zapytań, ile miesięcy).
+Cały 2026 zweryfikowany niezależnym przeliczeniem: **349 tankowań, 20 353 L, 32 837,77 €,
+1,613 €/L** (diesel) i **33 464,29 €** w podsumowaniu obu produktów — co do centa.
+km wpisuje się tylko w widoku miesiąca; w rocznym pole edycji znika, a `saveKm` ma straż.
+
+🐛 **Złapane przy okazji i naprawione: spalanie roczne było liczone z litrów 4 miesięcy i km z 2–3.**
+Sierpień nie ma km wcale, więc pierwsza wersja pokazywała 14,8–21,3 L/100 — wartości wyssane
+z niepełnego mianownika. Teraz **L/100 i €/km liczą się tylko z miesięcy, które mają JEDNOCZEŚNIE
+km i tankowania**, a przy wierszu pojawia się „spalanie z 2 z 4 mc — tylko te mają km".
+To samo dotyczy wiersza floty.
+
+🚩 **Do decyzji usera — dane km za lipiec wyglądają na błędne.** Źródło `snapshot_approx_start`
+daje 14 646–20 663 km na auto w miesiącu, podczas gdy czerwiec (źródło `report`, wpisany ręcznie)
+ma 2 922–8 854 km. Po poprawce spalanie roczne wychodzi **8,6–11,9 L/100**, czyli wciąż nierealnie
+nisko dla tej floty — bo mianownik z lipca jest zawyżony mniej więcej dwukrotnie. Kod tego nie
+naprawia: oznacza tylko takie km **bursztynową gwiazdką** z podpowiedzią „snapshot z SZACOWANYM
+stanem początkowym — wartość niepewna" (wcześniej wpadały pod mylące „delta Atlas (±1%)").
+Do rozstrzygnięcia: wpisać lipiec ręcznie z raportu panelu albo naprawić CF `monthlyOdometerSnapshot`.
