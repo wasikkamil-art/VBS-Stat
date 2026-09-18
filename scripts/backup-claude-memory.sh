@@ -15,6 +15,7 @@ set -uo pipefail
 # z "Resource deadlock avoided" (race z iCloud sync daemon). Nie chcemy żeby
 # pojedynczy fail killa całego skryptu. Track błędów ręcznie w ERRORS.
 ERRORS=0
+FAILED_STEPS=""   # nazwy kroków, które padły — do podsumowania (zamiast zgadywania „sprawdź .env.local")
 
 # === Konfiguracja ===
 SOURCE_MEMORY="$HOME/.claude/projects/-Users-kamilwasik-Desktop-VBS-Stat-nosync/memory"
@@ -67,11 +68,25 @@ if [ -d "$SOURCE_TRANSCRIPTS" ]; then
         SRC_TOTAL=$(du -ch "$SOURCE_TRANSCRIPTS"/*.jsonl 2>/dev/null | tail -1 | awk '{print $1}')
         echo "[DRY] rsync $SRC_COUNT .jsonl files (~$SRC_TOTAL) → $DEST_TRANSCRIPTS/"
     else
-        # rsync --update: skip jeśli destination jest nowszy/identyczny; kopiuje nowe + zmienione
-        rsync -a --update "$SOURCE_TRANSCRIPTS"/*.jsonl "$DEST_TRANSCRIPTS/" 2>/dev/null || {
-            echo "⚠️  rsync transkryptów fail (kontynuuję)"
+        # rsync --update: skip jeśli destination jest nowszy/identyczny; kopiuje nowe + zmienione.
+        # Do 2026-09-18 stderr szedł do /dev/null, a błąd był liczony bez podania przyczyny —
+        # transkrypty nie trafiały do iCloud od 29.08 i przez 3 tygodnie log mówił o czymś innym.
+        # Teraz: 3 próby (iCloud „Resource deadlock avoided" przy plikach w trakcie synchronizacji,
+        # ten sam błąd, który obchodzimy dla .env.local), a komunikat rsync ląduje w logu.
+        # Kod 24 = plik zniknął w trakcie (aktywna sesja) — to nie jest błąd backupu.
+        TR_OK=0
+        for ATTEMPT in 1 2 3; do
+            RSYNC_ERR=$(rsync -a --update "$SOURCE_TRANSCRIPTS"/*.jsonl "$DEST_TRANSCRIPTS/" 2>&1)
+            RC=$?
+            if [ "$RC" -eq 0 ] || [ "$RC" -eq 24 ]; then TR_OK=1; break; fi
+            echo "⚠️  rsync transkryptów: kod $RC (próba $ATTEMPT/3): $(echo "$RSYNC_ERR" | tail -2 | tr '\n' ' ')"
+            sleep 5
+        done
+        if [ "$TR_OK" -eq 0 ]; then
+            echo "❌ Transkrypty NIE zsynchronizowane po 3 próbach"
             ERRORS=$((ERRORS + 1))
-        }
+            FAILED_STEPS="$FAILED_STEPS transkrypty"
+        fi
         TC_COUNT=$(find "$DEST_TRANSCRIPTS" -maxdepth 1 -name "*.jsonl" 2>/dev/null | wc -l | xargs)
         TC_SIZE=$(du -sh "$DEST_TRANSCRIPTS" 2>/dev/null | awk '{print $1}')
         echo "✅ Transkrypty: $DEST_TRANSCRIPTS/ ($TC_COUNT plików, $TC_SIZE) — rolling, bez retention"
@@ -101,6 +116,7 @@ if [ -f "$SOURCE_ENV" ]; then
         if [ "$ENV_OK" -eq 0 ]; then
             echo "❌ .env.local NIE skopiowany po 3 próbach (resource deadlock?)"
             ERRORS=$((ERRORS + 1))
+            FAILED_STEPS="$FAILED_STEPS .env.local"
         fi
     fi
 else
@@ -114,13 +130,21 @@ if [ -z "$DRY_RUN" ]; then
     if [ "$ERRORS" -gt 0 ]; then
         STATUS_LABEL="partial ($ERRORS errors)"
     fi
-    echo "$TIMESTAMP | snapshot $DATE | ${FILE_COUNT:-0} memory files | $STATUS_LABEL" >> "$MANIFEST"
+    # Dopisanie do pliku w iCloud też potrafi dostać „Resource deadlock avoided" — 3 próby.
+    # Nieudany zapis manifestu NIE jest błędem backupu (dane już są), tylko informacją w logu.
+    for ATTEMPT in 1 2 3; do
+        if echo "$TIMESTAMP | snapshot $DATE | ${FILE_COUNT:-0} memory files | $STATUS_LABEL" >> "$MANIFEST" 2>/dev/null; then
+            break
+        fi
+        [ "$ATTEMPT" -eq 3 ] && echo "⚠️  manifest.txt: nie dopisano wpisu (iCloud deadlock) — dane backupu są, brakuje tylko linijki w dzienniku"
+        sleep 2
+    done
 fi
 
 # === Retention: usuń memory snapshots starsze niż RETENTION_DAYS ===
 if [ -z "$DRY_RUN" ]; then
-    DELETED=$(find "$DEST_BASE/memory" -maxdepth 1 -type d -name "20*" -mtime +$RETENTION_DAYS -print -exec rm -rf {} \; 2>/dev/null | wc -l | xargs)
-    if [ "$DELETED" -gt 0 ]; then
+    DELETED=$(find "$DEST_BASE/memory" -maxdepth 1 -type d -name "20*" -mtime +$RETENTION_DAYS -print -exec rm -rf {} \; 2>/dev/null | wc -l | tr -dc '0-9')
+    if [ "${DELETED:-0}" -gt 0 ]; then
         echo "🗑️  Usunięto $DELETED snapshot(s) starszych niż $RETENTION_DAYS dni"
     fi
 fi
@@ -129,7 +153,7 @@ echo
 if [ "$ERRORS" -gt 0 ]; then
     echo "⚠️  Backup zakończony z $ERRORS błędem(ami) — $TIMESTAMP"
     echo "   Lokalizacja: $DEST_BASE"
-    echo "   Memory snapshot OK, ale sprawdź .env.local powyżej"
+    echo "   Nie powiodło się:${FAILED_STEPS:- (krok bez nazwy — patrz komunikaty wyżej)}"
     exit 0  # NIE failujemy launchd job — partial backup też wartościowy
 else
     echo "✅ Backup zakończony — $TIMESTAMP"

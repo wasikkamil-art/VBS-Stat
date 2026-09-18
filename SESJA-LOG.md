@@ -3941,3 +3941,34 @@ za każdym razem nic). `m.once("moveend")` rejestrowany PO `flyTo` i brak zdarze
 stoi w tym miejscu. Teraz nasłuch przed lotem, zapasowe otwarcie po 1,1 s i dopasowanie pinezki
 po id transakcji, a gdy się nie znajdzie — po stacji. Sprawdzone: Gexa ×2 pod rząd + Krzywa —
 za każdym razem właściwa tabela (7 i 9 wierszy).
+
+### cd. 18.09 — kontrola czterech backupów: trzy zdrowe, czwarty cicho padał od 3 tygodni
+
+| backup | przebieg z harmonogramu 18.09 | kompletność wobec 17.09 |
+|---|---|---|
+| **FleetStat** (Actions → `vbs-stat-backups`) | ✅ 00:00 UTC | `fleet/data` 1 385 972 → 1 386 276 B (+304), DDD 36,98 MB i `sprawy` bez zmian |
+| **Faktury** (Actions → `vbs-invoices@backups`) | ✅ 05:55 UTC — **pierwszy automatyczny sukces w historii** (17.09 był tylko ręczny, wcześniej 6 porażek) | 10/10 kolekcji, 794 773 → 799 173 B (+4 400: faktury +2 736, orphanDocs +1 256, kontrahenci +416), status OK, 0 alertów |
+| **FOX** (Actions → `fox@backups`) | ✅ 06:08 UTC | 4/4 kolekcje, 1 374 843 B bajt w bajt jak wczoraj (dzień bez zmian w CRM), status OK |
+| **Pamięć + transkrypty + .env** (launchd 22:00 → iCloud) | ⚠️ „partial" **co noc od 1.09** | **transkrypty nie trafiały do iCloud od 29.08** — 7 sesji brakowało |
+
+GitHub opóźnia crony o 2–5 h (Faktury planowo 01:15 UTC, ruszyły 05:55) — to normalne zachowanie
+Actions, dla bezpieczeństwa danych bez znaczenia, ale „nocny" backup ląduje w praktyce rano.
+
+🐛 **Czwarta warstwa — przyczyna i dlaczego nikt tego nie widział.** Log co noc kończył się
+`integer expression expected` i radą „sprawdź .env.local powyżej" — **oba komunikaty mylące**:
+.env.local kopiował się poprawnie, a błąd porównania był skutkiem ubocznym. Prawdziwe błędy:
+1. `rsync` transkryptów padał co noc, ale stderr szedł do `/dev/null` — log mówił tylko „fail".
+2. `echo >> manifest.txt` dostawał **„Resource deadlock avoided"** — znany błąd iCloud Drive przy
+   zapisie do pliku w trakcie synchronizacji (skrypt obchodził go już dla `.env.local`, ale tylko tam).
+   Ślad: ostatni wpis w manifeście sprzed naprawy był z **31.08**.
+3. Zepsuty zapis rozjeżdżał zmienną w warunku retencji → `integer expression expected`.
+
+**Naprawa** (`scripts/backup-claude-memory.sh`): 3 próby z przerwą dla transkryptów i manifestu
+(ten sam wzorzec, który działał dla `.env.local`), komunikat rsync do logu, kod 24 („plik zniknął
+w trakcie" — aktywna sesja) nie jest błędem, warunek retencji odporny na śmieci, podsumowanie
+**nazywa krok, który padł** zamiast zgadywać. Zaległość nadrobiona ręcznie: 7 brakujących sesji
+w iCloud, potem pełny przebieg na żywo — wszystkie kroki zielone, manifest dostał wpis.
+
+⚠️ **NIEZWERYFIKOWANE**: przebieg z launchd dziś o 22:00. Ręcznie z terminala rsync przechodził
+zawsze — nie wiem na pewno, czy nocą padał przez deadlock iCloud (wtedy próby pomogą), czy przez
+coś w kontekście launchd (uprawnienia). Jutrzejszy log to rozstrzygnie, bo teraz pokaże przyczynę.
