@@ -3997,3 +3997,20 @@ Test: lato bajt w bajt jak stare, zima +01:00, doba 25.10 = 25 h, 29.03 = 23 h.
 Deploy wszystkich 28 funkcji, `scheduledGpsPoll` na nowej wersji OK, 0 błędów w 10 min.
 ⚠️ **NIEZWERYFIKOWANE na żywo**: efekt zimowy (dopiero od 25.10) i `trackerData`/`finalizeTrip`
 (nikt ich nie wywołał po deployu). Kontrola: 26.10 rano log `scheduledHistorySync OK … (2026-10-25)`.
+
+### cd. 18.09 — rabat Andamur: „Importe" to NETTO, nie brutto — maj–sierpień przeliczone
+
+User przysłał faktury C26 (PDF + XLSX z ZIP) za maj–sierpień i 4 podsumowania DC (FR/DE).
+**Znalezisko**: na każdej C26 suma pozycji „Importe" = BASE IMPONIBLE, VAT doliczany od niej →
+Importe to **netto**. `reconcile_andamur.mjs` (gitignored) zakładał brutto i dzielił przez 1,21 →
+maj–lipiec ES zaniżone ~17%. Sierpień (nierozliczony) zawyżony o 33,47 € — nie ~90 €, jak notowałem
+(ta liczba z tego samego błędu). DC: „Razem" = „Suma do zapłaty" = brutto → FR/DE liczone dobrze.
+**Naprawa**: skrypt bierze Importe jako netto, MONTHS maj–sie, asercje (pozycja C26 użyta dokładnie
+raz, 0 tx bez faktury → inaczej STOP), rozbicie Δ na ON/AdBlue dla arkusza. User odpalił `--write`.
+**Weryfikacja niezależna** (suma Importe z XLSX per auto/mc vs `fuelTransactions`): **10/10 zgodne**,
+ponowny dry-run 0 zmian. Andamur maj–sie netto 2 794,93 → **3 145,78 € (+350,85)**:
+maj +94,75 · cze +82,18 · lip +207,39 · sie −33,47.
+`fleetv2_costs`: 10 pozycji paliwa (transakcja, długość 1185 zachowana, `correctionNote`).
+**Total_26**: 14 komórek przez Sheets API z asercją stanu przed zapisem i backupem
+(`backup_total26_andamur_*.json`): ON → Paliwo, AdBlue → „inne" (tylko składnik AdBlue w formułach
+H58/I58), maj całość w Paliwie (tak jak stara korekta z 10.08). Notatki komórek dopisane.
