@@ -18,6 +18,7 @@ const { getFirestore }        = require("firebase-admin/firestore");
 const { getMessaging }        = require("firebase-admin/messaging");
 const { getStorage }          = require("firebase-admin/storage");
 const crypto                  = require("crypto");
+const { TZ_PL, lokalnyCzas, lokalnaPolnoc, nastepnyDzien, dataLokalna } = require("./lib/czas");
 
 // Inicjalizacja Firebase Admin
 initializeApp();
@@ -817,14 +818,13 @@ exports.scheduledHistorySync = onSchedule(
     const db = getFirestore();
     const startMs = Date.now();
 
-    // Wczoraj (Europe/Warsaw). Bierzemy "Y-m-d" lokalnie, potem konwertujemy na UTC zakres.
-    const yesterdayWarsaw = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Warsaw" }));
-    yesterdayWarsaw.setDate(yesterdayWarsaw.getDate() - 1);
-    const year = yesterdayWarsaw.getFullYear();
-    const month = yesterdayWarsaw.getMonth() + 1;
-    const day = yesterdayWarsaw.getDate();
-    const dayStartMs = Date.parse(`${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T00:00:00+02:00`);
-    const dayEndMs = dayStartMs + 24 * 3600 * 1000;
+    // Wczoraj (Europe/Warsaw) → zakres UTC od lokalnej północy do następnej lokalnej północy.
+    // Offset liczony dla daty (zimą +01:00), a doba przy zmianie czasu ma 23/25 h —
+    // wcześniej sztywne `+02:00` i 24 h przesuwały dobę o godzinę od końca października.
+    const wczoraj = dataLokalna(Date.now() - 24 * 3600 * 1000);
+    const [year, month, day] = wczoraj.split("-").map(Number);
+    const dayStartMs = lokalnaPolnoc(wczoraj);
+    const dayEndMs = lokalnaPolnoc(nastepnyDzien(wczoraj));
 
     // Fleet + credentials
     const fleetSnap = await db.doc("fleet/data").get();
@@ -1214,7 +1214,6 @@ exports.snapshotOdometerNow = onCall(
 // czy stawki dostawców (Toll Collect, e-TOLL) zgadzają się z przebiegiem.
 // Dokument dzienny nadpisywany w całości → ponowne uruchomienie jest bezpieczne.
 // ═══════════════════════════════════════════════════════════════
-const { TZ_PL, lokalnaPolnoc, nastepnyDzien, dataLokalna } = require("./lib/czas");
 
 async function agregujDobe(db, dateStr) {
   const od = lokalnaPolnoc(dateStr, TZ_PL);
@@ -2939,8 +2938,7 @@ exports.trackerData = onRequest(
       // 2. Planowane czasy (Europe/Warsaw) — hasR2 już wyznaczone wcześniej
       const toMs = (date, time) => {
         if (!date) return null;
-        const t = time || "00:00";
-        const p = Date.parse(`${date}T${t}:00+02:00`);
+        const p = lokalnyCzas(date, time || "00:00");
         return isNaN(p) ? null : p;
       };
       // Stopy R1..maxR — jedno źródło dla steppera, kart dat i galerii CMR.
@@ -3287,7 +3285,7 @@ async function importWWForVehicle(db, vehicles, plate, segments) {
   const endIso = new Date(endMs).toISOString();
 
   // Znajdź kierowcę dla tego okresu (driverHistory aktywny w dacie raportu)
-  const reportDay = startIso.slice(0, 10); // YYYY-MM-DD
+  const reportDay = dataLokalna(startMs); // YYYY-MM-DD lokalnie — raport od 00:30 to jeszcze ten dzień
   const driver = (vehicle.driverHistory || []).find(d => {
     const from = (d.from || "0000-00-00").slice(0, 10);
     const to = (d.to || "9999-12-31").slice(0, 10);
@@ -3528,8 +3526,7 @@ function computeTripStats(fracht, events) {
     const plannedDate = fracht[`dataRozladunku${sfx}`];
     const plannedTime = fracht[`godzRozladunku${sfx}`];
     if (plannedDate) {
-      const t = plannedTime || "00:00";
-      const plannedMs = Date.parse(`${plannedDate}T${t}:00+02:00`);
+      const plannedMs = lokalnyCzas(plannedDate, plannedTime || "00:00");
       if (!isNaN(plannedMs)) {
         const actualMs = new Date(lastDotarcieRoz.ts).getTime();
         const diffMin = Math.round((actualMs - plannedMs) / 60000);
