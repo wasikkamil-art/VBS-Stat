@@ -3913,3 +3913,31 @@ o tym powiedzieć, żeby nie wyglądało na sprzeczność).
 
 **Brak współrzędnych nie jest już cichy** — wcześniej `flyTo` po prostu nic nie robiło, user
 klikał i nie wiedział dlaczego. Teraz toast z nazwą stacji. Dotyczy 11 z 416 transakcji 2026 (3%).
+
+## 2026-09-18 — mapa Paliwa: pinezki z dystrybutorem i tabela tankowań w popupie
+
+User wybrał z czterech propozycji (kółka · pinezka · cenówka · odznaka) **pinezkę z dystrybutorem**.
+Doprecyzował w trakcie — pierwszą wersję zrobiłem źle i cofnąłem:
+- **Wielkość zostaje wg LITRÓW**, jak przy kółkach („ilość litrów zostaje bez zmian"). Przez chwilę
+  skalowałem wg liczby tankowań — to była moja nadinterpretacja, cofnięte przed commitem.
+- Dochodzi tylko **krotność ×N** w etykiecie: `600 L ×5` przy etykietach „litry", `1,297 ×7` przy „€/L".
+
+**Pinezka**: SVG w kształcie kropli z białym dystrybutorem, kolor = karta, **szary = kilka kart na
+jednej stacji**. Szerokość 22–50 px z pierwiastka sumy litrów. Mniejsze rysowane NAD większymi
+(duża i tak wystaje spod małej; odwrotnie mała by znikła). Legenda: „Wielkość = litry · ×N = tankowań".
+
+**Klik w pinezkę → tabela tankowań** na tej stacji, najnowsze na górze:
+nagłówek (stacja, karta, produkt) · pasek sum (`7× tankowań · 411 L · 533,77 € · śr. 1,297 €/L`) ·
+kolumny **Data · Kto (rejestracja + kierowca) · Litry · Za ile (kwota netto + €/L)**.
+- **Kierowca z dnia tankowania** (`driverAt` po `driverHistory` from/to), nie obecny — przy zmianie
+  kierowcy stare tankowania zostają przy tym, kto wtedy jeździł.
+- **Rozmiar dobrany na żywo**: 340–400 px szerokości (przy 300 „Volodymyr Lukashuchuk" łamało się
+  na dwie linie), okno tabeli 260 px → **~6 tankowań widocznych**, reszta przewijana z przyklejonym
+  nagłówkiem. Górny margines autopanu 70 px — wcześniej tytuł stacji chował się pod przełącznikiem
+  „Etykiety" w rogu mapy.
+
+🐛 **Złapane przy weryfikacji: klik w listę nie otwierał popupu w widoku rocznym** (Gexa ×3 próby,
+za każdym razem nic). `m.once("moveend")` rejestrowany PO `flyTo` i brak zdarzenia, gdy mapa już
+stoi w tym miejscu. Teraz nasłuch przed lotem, zapasowe otwarcie po 1,1 s i dopasowanie pinezki
+po id transakcji, a gdy się nie znajdzie — po stacji. Sprawdzone: Gexa ×2 pod rząd + Krzywa —
+za każdym razem właściwa tabela (7 i 9 wierszy).
