@@ -3972,3 +3972,28 @@ w iCloud, potem pełny przebieg na żywo — wszystkie kroki zielone, manifest d
 ⚠️ **NIEZWERYFIKOWANE**: przebieg z launchd dziś o 22:00. Ręcznie z terminala rsync przechodził
 zawsze — nie wiem na pewno, czy nocą padał przez deadlock iCloud (wtedy próby pomogą), czy przez
 coś w kontekście launchd (uprawnienia). Jutrzejszy log to rozstrzygnie, bo teraz pokaże przyczynę.
+
+### cd. 18.09 — Faktury: FV z noreply@ ginęły na filtrze nadawcy (repo vbs-invoices, `f6e3638`)
+
+Zgłoszenie: FV Dominic `DLLEUR20260773` (4889/RS/07/2026, mail na radek@) nie weszła do Faktur.
+Przyczyna: filtr nadawców w `functions/lib/mailbox.js` odrzucał każdy `noreply@`/`no-reply@`
+PRZED Claude, a systemy fakturujące (woop.pro, routiertransport.ro, trux.to, fortnox, fakturownia)
+wysyłają FV właśnie z takich adresów. W logach (30 dni) jeszcze 5 takich FV.
+**Fix**: temat z invoice/faktura/factura/INV/FV/Rechnung albo `NNNN/RS/MM/RRRR` omija filtr nadawcy.
+Test na prawdziwych tematach z logów: 5 FV przechodzi, P24/hasła/HOGS/NegoMetal dalej odpadają.
+**Odzyskanie**: nowy callable `rescanBySubject` + panel „📥 Przeskanuj pominięty mail" w Dashboardzie
+(IMAP SUBJECT, bez lastUid, bez sierot CMR). User przeskanował → **6/6 w bazie, 13 811,50 €,
+zero dubli** (sprawdzone REST-em w bazie; Italienexpressen z 2 skrzynek i EUJOB ×2 maile → dedup OK).
+⚠️ Synergy 7440/S/FV/5/2026 (termin 21.07) i EUJOB FA/1605/2026 (16.08) po terminie — user sprawdza, czy zapłacone.
+
+### cd. 18.09 — strefa czasowa w CF: koniec sztywnego `+02:00` (commit `dd88496`, WDROŻONE)
+
+Punkt 5 z listy otwartych. Znaczniki `toISOString()` OK; problemem były 3× `+02:00` na sztywno —
+od 25.10 (czas zimowy) o godzinę źle: `scheduledHistorySync` (doba 23–23, zawsze 24 h),
+punktualność w `computeTripStats`/`finalizeTrip` (mail do klienta, ±60 min), `trackerData`
+(planowane godziny). Plus `importWWForVehicle` dobierał kierowcę po dacie UTC.
+Nowy `lokalnyCzas(data, "HH:MM")` w `functions/lib/czas.js` (offset dla konkretnej chwili).
+Test: lato bajt w bajt jak stare, zima +01:00, doba 25.10 = 25 h, 29.03 = 23 h.
+Deploy wszystkich 28 funkcji, `scheduledGpsPoll` na nowej wersji OK, 0 błędów w 10 min.
+⚠️ **NIEZWERYFIKOWANE na żywo**: efekt zimowy (dopiero od 25.10) i `trackerData`/`finalizeTrip`
+(nikt ich nie wywołał po deployu). Kontrola: 26.10 rano log `scheduledHistorySync OK … (2026-10-25)`.
