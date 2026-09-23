@@ -195,6 +195,8 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
   const [ratesOpen, setRatesOpen] = useState(false);
   const [savingRates, setSavingRates] = useState(false);
   const [ratesUpdatedAt, setRatesUpdatedAt] = useState(null); // data ostatniej aktualizacji cen (ISO) lub null = domyślne
+  const [auto, setAuto] = useState(null);            // stawki policzone z naszych danych (config.auto)
+  const [refreshingAuto, setRefreshingAuto] = useState(false);
   const [tollKeyInput, setTollKeyInput] = useState("");
   const [savingKey, setSavingKey] = useState(false);
 
@@ -209,10 +211,14 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
         const snap = await getDoc(doc(db, "config", "kalkulatorTras"));
         if (snap.exists()) {
           const d = snap.data();
+          // Warstwy, od najsłabszej: domyślne szacunki → ręczny snapshot cen (starszy)
+          // → `auto` z naszych tankowań i faktur → ręczne nadpisania pojedynczych krajów.
+          const a = d.auto || null;
+          setAuto(a);
           setRates({
-            fuelPrice: { ...DEFAULT_RATES.fuelPrice, ...(d.fuelPrice || {}) },
-            tollPerKm: { ...DEFAULT_RATES.tollPerKm, ...(d.tollPerKm || {}) },
-            tollPerKmBus: { ...DEFAULT_RATES.tollPerKmBus, ...(d.tollPerKmBus || {}) },
+            fuelPrice: { ...DEFAULT_RATES.fuelPrice, ...(d.fuelPrice || {}), ...(a?.fuelPrice || {}), ...(d.manualFuelPrice || {}) },
+            tollPerKm: { ...DEFAULT_RATES.tollPerKm, ...(d.tollPerKm || {}), ...(a?.tollPerKm || {}), ...(d.manualTollPerKm || {}) },
+            tollPerKmBus: { ...DEFAULT_RATES.tollPerKmBus, ...(d.tollPerKmBus || {}), ...(a?.tollPerKmBus || {}), ...(d.manualTollPerKmBus || {}) },
             defaultConsumption: d.defaultConsumption || DEFAULT_RATES.defaultConsumption,
             tankL: d.tankL || DEFAULT_RATES.tankL,
           });
@@ -403,13 +409,52 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
     }
   };
 
+  // Skąd wzięła się cena/stawka dla kraju — pokazywane w tabeli stawek.
+  const zrodloPaliwa = (cc) => {
+    const m = auto?.fuelMeta?.[cc];
+    if (m) return `nasze tankowania: ${m.litry} L w ${auto.okno || 3} mc`;
+    return "szacunek (brak naszych tankowań)";
+  };
+  const zrodloMyta = (cc) => {
+    const m = auto?.tollMeta?.[cc];
+    if (m) return `nasze faktury: ${m.eur} € / ${m.km} km`;
+    return "szacunek (brak naszych faktur)";
+  };
+
+  const odswiezAuto = async () => {
+    setRefreshingAuto(true);
+    try {
+      const call = httpsCallable(functions, "refreshKalkulatorRatesNow");
+      const r = (await call()).data;
+      const snap = await getDoc(doc(db, "config", "kalkulatorTras"));
+      const d = snap.exists() ? snap.data() : {};
+      const a = d.auto || null;
+      setAuto(a);
+      setRates((prev) => ({
+        ...prev,
+        fuelPrice: { ...DEFAULT_RATES.fuelPrice, ...(d.fuelPrice || {}), ...(a?.fuelPrice || {}), ...(d.manualFuelPrice || {}) },
+        tollPerKm: { ...DEFAULT_RATES.tollPerKm, ...(d.tollPerKm || {}), ...(a?.tollPerKm || {}), ...(d.manualTollPerKm || {}) },
+        tollPerKmBus: { ...DEFAULT_RATES.tollPerKmBus, ...(d.tollPerKmBus || {}), ...(a?.tollPerKmBus || {}), ...(d.manualTollPerKmBus || {}) },
+      }));
+      showToast(`✅ Przeliczone: paliwo ${Object.keys(r.fuelPrice || {}).length} krajów, myto ${Object.keys(r.tollPerKm || {}).length}`);
+    } catch (e) {
+      console.error("[kalkulator] odswiezAuto:", e);
+      showToast("❌ Nie udało się przeliczyć: " + (e?.message || e));
+    } finally { setRefreshingAuto(false); }
+  };
+
   const saveRates = async () => {
     setSavingRates(true);
     try {
       const now = new Date().toISOString();
+      // Zapisujemy WYŁĄCZNIE to, co user zmienił wobec stawek z naszych danych —
+      // inaczej pełna kopia zamroziłaby ceny i comiesięczne przeliczanie nic by nie dało.
+      const bazaF = { ...DEFAULT_RATES.fuelPrice, ...(auto?.fuelPrice || {}) };
+      const bazaT = { ...DEFAULT_RATES.tollPerKm, ...(auto?.tollPerKm || {}) };
+      const roz = (cur, baza) => Object.fromEntries(Object.entries(cur).filter(([k, v]) => Math.abs((Number(v) || 0) - (Number(baza[k]) || 0)) > 0.0005));
       await setDoc(doc(db, "config", "kalkulatorTras"), {
-        fuelPrice: rates.fuelPrice,
-        tollPerKm: rates.tollPerKm,
+        manualFuelPrice: roz(rates.fuelPrice, bazaF),
+        manualTollPerKm: roz(rates.tollPerKm, bazaT),
         defaultConsumption: rates.defaultConsumption,
         tankL: rates.tankL,
         vehicleType: VEHICLE_TYPE,
@@ -594,10 +639,12 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
               <p className="text-[11px] leading-relaxed text-gray-500">
                 Osobno dla każdego kraju: <b>km w kraju × spalanie ({result.cons} L/100) × cena diesla tego kraju</b>.<br />
                 Spalanie: {result.consBasis}.<br />
-                Ceny diesla: {ratesUpdatedAt
+                Ceny diesla: {auto?.fuelPrice
+                  ? <>średnia <b>z naszych tankowań</b> ({(auto.miesiace || []).slice().reverse().join(", ")}), netto po rabatach kart — {Object.keys(auto.fuelPrice).length} krajów. Kraje bez naszych tankowań: szacunek.</>
+                  : ratesUpdatedAt
                   ? <>stan na <b>{fmtDatePL(ratesUpdatedAt)}</b> (z tabeli stawek poniżej)</>
-                  : <>wartości <b>domyślne</b> (orientacyjne, stan lipiec 2026)</>}.
-                To jedna cena „bieżąca" na kraj — <b>nie</b> kurs z konkretnego dnia trasy. Aktualizowana ręcznie (Faza 2: auto-odświeżanie).
+                  : <>wartości <b>domyślne</b> (orientacyjne, stan lipiec 2026)</>}<br />
+                To jedna cena „bieżąca" na kraj — <b>nie</b> kurs z konkretnego dnia trasy.
               </p>
             </div>
             <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
@@ -633,7 +680,10 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
       {/* ── Edytor stawek ── */}
       <div className="mt-5 bg-white rounded-2xl border border-gray-100 p-5">
         <button onClick={() => setRatesOpen((o) => !o)} className="w-full flex items-center justify-between text-sm font-semibold text-gray-700">
-          <span>Stawki (ceny diesla €/L · myto €/km per kraj){ratesUpdatedAt ? <span className="ml-2 font-normal text-gray-400">· stan {fmtDatePL(ratesUpdatedAt)}</span> : <span className="ml-2 font-normal text-gray-400">· wartości domyślne</span>}</span>
+          <span>Stawki (ceny diesla €/L · myto €/km per kraj){auto?.policzoneAt
+            ? <span className="ml-2 font-normal text-emerald-600">· z naszych danych, {fmtDatePL(auto.policzoneAt)}</span>
+            : ratesUpdatedAt ? <span className="ml-2 font-normal text-gray-400">· stan {fmtDatePL(ratesUpdatedAt)}</span>
+            : <span className="ml-2 font-normal text-gray-400">· wartości domyślne</span>}</span>
           <span className="text-gray-400">{ratesOpen ? "▲" : "▼"}</span>
         </button>
         {ratesOpen && (
@@ -661,6 +711,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
                     <th className="text-left font-medium py-1.5">Kraj</th>
                     <th className="text-right font-medium">Diesel €/L</th>
                     <th className="text-right font-medium">Myto €/km (fallback)</th>
+                    <th className="text-left font-medium pl-3">Skąd</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -677,19 +728,33 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
                           onChange={(e) => setRates((r) => ({ ...r, tollPerKm: { ...r.tollPerKm, [cc]: parseFloat(e.target.value) || 0 } }))}
                           className="w-20 px-2 py-1 rounded border border-gray-200 text-right text-sm disabled:bg-gray-50 disabled:text-gray-400" />
                       </td>
+                      <td className="pl-3 text-[11px] text-gray-400 whitespace-nowrap">
+                        <span className={auto?.fuelMeta?.[cc] ? "text-emerald-600" : ""}>⛽ {zrodloPaliwa(cc)}</span>
+                        <span className="mx-1 text-gray-300">·</span>
+                        <span className={auto?.tollMeta?.[cc] ? "text-emerald-600" : ""}>🛣️ {zrodloMyta(cc)}</span>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
             {canEdit && (
-              <div className="mt-4 flex justify-end">
+              <div className="mt-4 flex justify-end gap-2">
+                <button onClick={odswiezAuto} disabled={refreshingAuto} title="Przelicz ceny diesla i myto z naszych tankowań i faktur (3 ostatnie miesiące)"
+                  className="px-4 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 text-sm disabled:opacity-50">
+                  {refreshingAuto ? "Przeliczam…" : "🔄 Przelicz z naszych danych"}
+                </button>
                 <button onClick={saveRates} disabled={savingRates} className="px-4 py-2 rounded-lg bg-gray-900 hover:bg-black text-white text-sm disabled:opacity-50">
                   {savingRates ? "Zapisuję…" : "Zapisz stawki"}
                 </button>
               </div>
             )}
-            <p className="text-[11px] text-gray-400 mt-3">Ceny i myto to wartości orientacyjne — dostrój je o realne koszty z raportów. Faza 2: auto-odświeżanie cen paliwa.</p>
+            <p className="text-[11px] text-gray-400 mt-3">
+              Na <b className="text-emerald-600">zielono</b> — policzone z naszych danych: cena diesla z tankowań kartami (netto, po rabatach),
+              myto z faktur NegoMetal i e-TOLL podzielonych przez kilometry w danym kraju. Odświeżane automatycznie 5. dnia miesiąca
+              {auto?.policzoneAt ? <> (ostatnio {fmtDatePL(auto.policzoneAt)})</> : null}. Reszta to szacunki — popraw ręcznie, a Twoja wartość
+              przebije wyliczoną. Myto z faktur jest lekko zawyżone, bo kilometry pochodzą z tras zleceń, bez pustych przebiegów.
+            </p>
           </div>
         )}
       </div>

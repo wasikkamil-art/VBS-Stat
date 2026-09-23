@@ -1299,6 +1299,46 @@ exports.backfillCountryKm = onCall(
 // CLEANUP GPS BREADCRUMBS — kasuje punkty starsze niż 7 dni
 // Raz dziennie o 2:30 CET. Chroni przed niekontrolowanym wzrostem storage.
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// STAWKI KALKULATORA TRAS — ceny paliwa i myto z WŁASNYCH danych floty
+// (3 ostatnie miesiące). Zapis do config/kalkulatorTras.auto — ręczne
+// nadpisania usera (pola fuelPrice/tollPerKm na górnym poziomie) zostają
+// nietknięte i mają pierwszeństwo we froncie.
+// ═══════════════════════════════════════════════════════════════
+async function zapiszStawkiKalkulatora(db, zrodlo) {
+  const { policzStawki } = require("./lib/kalkulatorStawki");
+  const auto = await policzStawki(db, dataLokalna().slice(0, 7), 3);
+  const krajowPaliwo = Object.keys(auto.fuelPrice).length;
+  const krajowMyto = Object.keys(auto.tollPerKm).length;
+  if (krajowPaliwo === 0 && krajowMyto === 0) {
+    console.warn("stawkiKalkulatora: zero krajów z danymi — nie nadpisuję configu");
+    return { ...auto, zapisane: false };
+  }
+  await db.doc("config/kalkulatorTras").set({ auto: { ...auto, zrodlo } }, { merge: true });
+  console.log(`stawkiKalkulatora (${zrodlo}): paliwo ${krajowPaliwo} krajów, myto ${krajowMyto} krajów, okno ${auto.miesiace.join(", ")}`);
+  return { ...auto, zapisane: true };
+}
+
+exports.refreshKalkulatorRates = onSchedule(
+  // 5. dnia miesiąca — po imporcie paliwa za poprzedni miesiąc (zamknięcie 5–10.)
+  { schedule: "0 6 5 * *", timeZone: TZ_PL, region: "europe-west1", timeoutSeconds: 300 },
+  async () => {
+    try { await zapiszStawkiKalkulatora(getFirestore(), "harmonogram"); }
+    catch (e) { console.error("refreshKalkulatorRates:", e.message); }
+  }
+);
+
+// Ręczne przeliczenie z panelu (przycisk w Kalkulatorze tras) — admin.
+exports.refreshKalkulatorRatesNow = onCall(
+  { region: "europe-west1", timeoutSeconds: 300 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musisz byc zalogowany.");
+    if (request.auth.token.role !== "admin") throw new HttpsError("permission-denied", "Tylko admin.");
+    const wynik = await zapiszStawkiKalkulatora(getFirestore(), `recznie:${request.auth.token.email || request.auth.uid}`);
+    return { success: true, ...wynik };
+  }
+);
+
 exports.cleanupBreadcrumbs = onSchedule(
   { schedule: "30 2 * * *", timeZone: "Europe/Warsaw", region: "europe-west1" },
   async () => {
