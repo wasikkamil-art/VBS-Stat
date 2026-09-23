@@ -997,6 +997,16 @@ exports.dailyBackup = onSchedule(
       await fleetFile.save(JSON.stringify(fleetData), { contentType: "application/json" });
       console.log(`✓ fleet backup: ${fleetCount} frachtów, ${vehCount} pojazdów → ${fleetFile.name}`);
 
+      // 1b. fleet/frachty_archiwum — frachty z zamkniętych lat (od 2026-09-23 poza fleet/data,
+      // bo dokument dobijał do limitu 1 MiB). Bez tego backup nie obejmowałby historii.
+      const archSnap = await db.doc("fleet/frachty_archiwum").get();
+      if (archSnap.exists) {
+        const archData = archSnap.data() || {};
+        const archFile = bucket.file(`backups/${ts}_fleet-frachty-archiwum.json`);
+        await archFile.save(JSON.stringify(archData), { contentType: "application/json" });
+        console.log(`✓ archiwum frachtów: ${(archData.fleetv2_frachty || []).length} frachtów → ${archFile.name}`);
+      }
+
       // 2. driverEvents — ostatnie 90 dni (krytyczne dla audytu trasy)
       const cutoff = new Date(Date.now() - 90 * 86400000).toISOString();
       const evSnap = await db.collection("driverEvents").where("ts", ">=", cutoff).get();

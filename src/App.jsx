@@ -158,6 +158,12 @@ const tsToMs = (ts) => {
 // Dane w jednym dokumencie fleet/data (merge strategy)
 
 const DATA_REF = () => doc(db, "fleet", "data");
+// ARCHIWUM FRACHTÓW (od 2026-09-23): zamknięte lata trzymamy w osobnym dokumencie,
+// bo `fleet/data` dobijał do limitu 1 MiB (83% przy przyroście ~63 KB/mc).
+// Ten sam klucz pola, inny dokument — dzięki temu kod czytający listę się nie zmienia.
+// Archiwum jest niezmienne w praktyce, więc czytamy je JEDNORAZOWO (getDoc, nie listener),
+// a zapis trafia tam tylko wtedy, gdy ktoś edytuje stary fracht.
+const ARCHIWUM_REF = () => doc(db, "fleet", "frachty_archiwum");
 
 async function dbGet(key) {
   try {
@@ -225,8 +231,18 @@ async function dbUpdateFracht(id, patch) {
     await runTransaction(db, async (tx) => {
       const snap = await tx.get(DATA_REF());
       const list = (snap.data() || {})[SK.frachty] || [];
-      tx.update(DATA_REF(), {
-        [SK.frachty]: list.map(f => f && f.id === id ? { ...f, ...patch } : f),
+      if (list.some(f => f && f.id === id)) {
+        tx.update(DATA_REF(), {
+          [SK.frachty]: list.map(f => f && f.id === id ? { ...f, ...patch } : f),
+        });
+        return;
+      }
+      // Fracht z zamkniętego roku — siedzi w archiwum.
+      const arch = await tx.get(ARCHIWUM_REF());
+      const stare = (arch.data() || {})[SK.frachty] || [];
+      if (!stare.some(f => f && f.id === id)) throw new Error(`Fracht ${id} nie znaleziony ani w bieżących, ani w archiwum`);
+      tx.update(ARCHIWUM_REF(), {
+        [SK.frachty]: stare.map(f => f && f.id === id ? { ...f, ...patch } : f),
       });
     });
     setTimeout(() => _pendingWrites.delete(SK.frachty), WRITE_COOLDOWN);
@@ -242,7 +258,14 @@ async function dbDeleteFracht(id) {
     await runTransaction(db, async (tx) => {
       const snap = await tx.get(DATA_REF());
       const list = (snap.data() || {})[SK.frachty] || [];
-      tx.update(DATA_REF(), { [SK.frachty]: list.filter(f => f && f.id !== id) });
+      if (list.some(f => f && f.id === id)) {
+        tx.update(DATA_REF(), { [SK.frachty]: list.filter(f => f && f.id !== id) });
+        return;
+      }
+      const arch = await tx.get(ARCHIWUM_REF());
+      const stare = (arch.data() || {})[SK.frachty] || [];
+      if (!stare.some(f => f && f.id === id)) return;   // już go nie ma — nic do roboty
+      tx.update(ARCHIWUM_REF(), { [SK.frachty]: stare.filter(f => f && f.id !== id) });
     });
     setTimeout(() => _pendingWrites.delete(SK.frachty), WRITE_COOLDOWN);
   } catch (e) {
@@ -1314,6 +1337,9 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   const [driverActivities, setDriverActivities] = useState([]);
   // Zlecenie „wysłane" do Kalkulatora tras (przycisk w oknie frachtu) — punkty, daty, pojazd.
   const [kalkPrefill, setKalkPrefill] = useState(null);
+  // Frachty z zamkniętych lat — osobny dokument, czytany raz na sesję (patrz ARCHIWUM_REF).
+  const frachtyArchiwumRef = useRef([]);
+  const frachtyArchiwumWczytaneRef = useRef(false);
   const [fuelEntries, setFuelEntries] = useState([]);
   const [driverDocs, setDriverDocs] = useState([]);
   const [pauzy, setPauzy] = useState([]);
@@ -1474,7 +1500,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
       if (!_pendingWrites.has(SK.docs))    setDocs(data[SK.docs] || []);
       if (!_pendingWrites.has(SK.imi))     setImiRecords(data[SK.imi] || []);
       if (!_pendingWrites.has(SK.rent))    setRentRecords(data[SK.rent] || []);
-      if (!_pendingWrites.has(SK.frachty)) setFrachtyList(data[SK.frachty] || []);
+      if (!_pendingWrites.has(SK.frachty)) setFrachtyList([...(data[SK.frachty] || []), ...frachtyArchiwumRef.current]);
 
       // 🛡️ Zapamiętaj ilości z snapshot — używane przez safeDbSet
       Object.values(SK).forEach(key => {
@@ -1486,6 +1512,25 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
       });
 
       setLoaded(true);
+
+      // Archiwum frachtów: jeden odczyt na sesję, dokładany do listy. Stare lata
+      // nie zmieniają się same, więc listener jest zbędny — a dokument `fleet/data`
+      // zostaje mały. Gdy archiwum nie istnieje (przed migracją), po prostu go nie ma.
+      if (!frachtyArchiwumWczytaneRef.current) {
+        frachtyArchiwumWczytaneRef.current = true;
+        getDoc(ARCHIWUM_REF())
+          .then((arch) => {
+            const stare = arch.exists() ? (arch.data()[SK.frachty] || []) : [];
+            if (!stare.length) return;
+            frachtyArchiwumRef.current = stare;
+            setFrachtyList((biezace) => {
+              const sa = new Set(biezace.map((f) => f && f.id));
+              return [...biezace, ...stare.filter((f) => f && !sa.has(f.id))];
+            });
+            console.log(`[archiwum] dołączono ${stare.length} frachtów z zamkniętych lat`);
+          })
+          .catch((e) => console.warn("[archiwum] nie udało się wczytać:", e?.message || e));
+      }
     }, (err) => {
       console.error(`[onSnapshot fleet/data] error (try ${retryCount + 1}/${MAX_RETRIES})`, err.code || "", err.message || err);
       // Auto-retry przy chwilowych disconnects (token refresh po wyloguj+zaloguj,

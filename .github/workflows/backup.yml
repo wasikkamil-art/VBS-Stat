@@ -72,6 +72,15 @@ jobs:
             fs.mkdirSync('backup-repo/backups', { recursive: true });
             fs.writeFileSync('backup-repo/backups/' + date + '.json', JSON.stringify(data, null, 2));
 
+            // Archiwum frachtów z zamknietych lat (fleet/frachty_archiwum) — od 2026-09-23
+            // mieszka poza fleet/data, wiec MUSI miec wlasna kopie.
+            const archSnap = await db.doc('fleet/frachty_archiwum').get();
+            const archData = archSnap.exists ? (archSnap.data() || {}) : {};
+            const archFrachty = (archData.fleetv2_frachty || []).length;
+            if (archFrachty > 0) {
+              fs.writeFileSync('backup-repo/backups/frachty_archiwum_' + date + '.json', JSON.stringify(archData, null, 2));
+            }
+
             // Backup kolekcji sprawy
             const sprawySnap = await db.collection('sprawy').get();
             const sprawyData = sprawySnap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -109,6 +118,7 @@ jobs:
               rent: (data.fleetv2_rent||[]).length,
               imi: (data.fleetv2_imi||[]).length,
               sprawy: sprawyData.length,
+              frachtyArchiwum: archFrachty,
               dddFiles: dddData.length,
               dddArchivedNew: dddCopied
             };
@@ -116,6 +126,10 @@ jobs:
 
             // === WALIDACJA — wykryj anomalie ===
             const alerts = [];
+            // Archiwum: raz zapisane nie moze zniknac ani schudnac (to zamkniete lata).
+            if (archSnap.exists && archFrachty < 400) {
+              alerts.push('frachty_archiwum: ' + archFrachty + ' frachtow (oczekiwane >=400)');
+            }
             for (const [field, minCount] of Object.entries(MIN_EXPECTED)) {
               const actual = (data[field] || []).length;
               if (actual < minCount) {
