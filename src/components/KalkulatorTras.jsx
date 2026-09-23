@@ -13,11 +13,14 @@
 //
 // Wydzielone jako osobny lazy chunk — NIE puchnie App.jsx (cel code-splitting).
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "../firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { logAction } from "../utils/logAction";
+import { punktyTrasyZFrachtu } from "../utils/orderFormatters";
+import { computeDriverCompliance } from "../utils/czasPracy";
+import { zaplanujPrzejazd, stanZCompliance, punktNaTrasie, zapasDoOkna } from "../utils/planerTrasy";
 
 // ── Stawki domyślne (EUR). Edytowalne w UI, zapisywane do config/kalkulatorTras.
 // Ceny diesla orientacyjne (lipiec 2026). Myto = efektywne €/km (blended
@@ -179,8 +182,16 @@ const fmtDatePL = (iso) => { try { return new Date(iso).toLocaleDateString("pl-P
 // Flota VBS = solówki 2-osiowe (Iveco 70C18 ~7,2t) — myto zawsze w tej klasie.
 const VEHICLE_TYPE = "2AxlesTruck";
 
+// 11 h — po tylu godzinach od teraz stan kierowcy z tachografu przestaje być wiążący
+// dla planu (zdąży odebrać odpoczynek dobowy).
+const REGULATION_DAILY_REST_MS = 11 * 3600 * 1000;
 
-export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate = null, canEdit = false, showToast = () => {}, currentUser = null }) {
+// „pon. 14:30" / „wt. 03:15" — plan czyta się po dniach tygodnia, nie po datach.
+const fmtKiedy = (ms) => new Date(ms).toLocaleString("pl-PL", { weekday: "short", hour: "2-digit", minute: "2-digit" });
+const fmtHm = (min) => `${Math.floor(min / 60)} h${min % 60 ? " " + Math.round(min % 60) + " min" : ""}`;
+
+
+export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverActivities = [], prefill = null, onPrefillUsed = () => {}, onZapiszPlan = null, eurRate = null, canEdit = false, showToast = () => {}, currentUser = null }) {
   const [waypoints, setWaypoints] = useState([]); // {id,label,lat,lon}
   const [addInput, setAddInput] = useState("");
   const [geocoding, setGeocoding] = useState(false);
@@ -195,6 +206,16 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
   const [ratesOpen, setRatesOpen] = useState(false);
   const [savingRates, setSavingRates] = useState(false);
   const [ratesUpdatedAt, setRatesUpdatedAt] = useState(null); // data ostatniej aktualizacji cen (ISO) lub null = domyślne
+  // ── Planer czasu: wyjazd, kierowca, okno rozładunku ──
+  const [startAt, setStartAt] = useState(() => {
+    const d = new Date(Date.now() + 3600000); d.setMinutes(0, 0, 0);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:00`;
+  });
+  const [driverEmail, setDriverEmail] = useState("");   // "" = kierowca wypoczęty
+  const [pozwolNa10h, setPozwolNa10h] = useState(true);
+  const [oknoData, setOknoData] = useState("");         // data rozładunku (opcjonalnie)
+  const [oknoGodz, setOknoGodz] = useState("");
   const [auto, setAuto] = useState(null);            // stawki policzone z naszych danych (config.auto)
   const [refreshingAuto, setRefreshingAuto] = useState(false);
   const [tollKeyInput, setTollKeyInput] = useState("");
@@ -230,6 +251,84 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
     })();
   }, []);
 
+  // ── Wejście z okna zlecenia: „🗺️ Zaplanuj trasę" ──
+  // Punkty z geo wchodzą od razu; adresy bez geo dociągamy geokoderem (1/s, limit Nominatim).
+  const [zFrachtu, setZFrachtu] = useState(null);
+  useEffect(() => {
+    if (!prefill?.fracht) return;
+    const f = prefill.fracht;
+    let anulowane = false;
+    (async () => {
+      setGeocoding(true);
+      const punkty = [];
+      for (const p of punktyTrasyZFrachtu(f)) {
+        if (p.lat != null && p.lon != null) {
+          punkty.push({ id: Math.random().toString(36).slice(2), label: p.label, lat: p.lat, lon: p.lon });
+        } else if (p.szukaj) {
+          const g = await geocode(p.szukaj);
+          if (g) punkty.push({ id: Math.random().toString(36).slice(2), label: p.label, lat: g.lat, lon: g.lon });
+        }
+      }
+      if (anulowane) return;
+      setGeocoding(false);
+      setWaypoints(punkty);
+      setResult(null);
+      if (f.vehicleId) onPickVehicle(f.vehicleId);
+      if (f.dataZaladunku) setStartAt(`${f.dataZaladunku}T${f.godzZaladunku || "06:00"}`);
+      // Okno = OSTATNI rozładunek (R1..R5), bo to on wyznacza termin dowozu.
+      let oData = f.dataRozladunku || "", oGodz = f.godzRozladunku || "";
+      for (let i = 5; i >= 2; i--) {
+        if (f[`dataRozladunku${i}`]) { oData = f[`dataRozladunku${i}`]; oGodz = f[`godzRozladunku${i}`] || ""; break; }
+      }
+      setOknoData(oData); setOknoGodz(oGodz);
+      const kierowca = (f.driverEmail || f.kierowcaEmail || "").trim();
+      if (kierowca) setDriverEmail(kierowca);
+      setZFrachtu({ id: f.id, nr: f.nrZlecenia || f.nrRef || f.id, punktow: punkty.length, pominiete: punktyTrasyZFrachtu(f).length - punkty.length });
+      showToast(punkty.length >= 2 ? `✅ Wczytano trasę ze zlecenia (${punkty.length} pkt) — kliknij „Oblicz"` : "⚠️ Zlecenie ma za mało punktów z adresem");
+      onPrefillUsed();
+    })();
+    return () => { anulowane = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill?.ts]);
+
+  // ── Kierowcy widoczni w danych czasu pracy (ostatnie tygodnie) ──
+  const kierowcy = useMemo(() => {
+    const set = new Map();
+    for (const a of driverActivities) if (a?.driverEmail) set.set(a.driverEmail, (set.get(a.driverEmail) || 0) + 1);
+    return [...set.keys()].sort();
+  }, [driverActivities]);
+
+  // ── Plan przejazdu: pauzy 45 min i odpoczynki wg 561/2006, od stanu kierowcy ──
+  const plan = useMemo(() => {
+    if (!result?.distanceKm || !result?.durationH) return null;
+    const startMs = new Date(startAt).getTime();
+    if (!isFinite(startMs)) return null;
+    let stan = null, stanOpis = "kierowca wypoczęty (bez stanu z tachografu)";
+    // Stan z tachografu ma sens tylko dla wyjazdu „zaraz". Przy wyjeździe za dobę
+    // kierowca i tak odbierze odpoczynek, który wyzeruje liczniki — udawanie,
+    // że zmęczenie sprzed tygodnia go ogranicza, dałoby fałszywy plan.
+    const stanSwiezy = new Date(startAt).getTime() - Date.now() < REGULATION_DAILY_REST_MS;
+    if (driverEmail && !stanSwiezy) {
+      stanOpis = "wyjazd za ponad 11 h — liczę jak dla wypoczętego (do tego czasu kierowca odbierze odpoczynek)";
+    } else if (driverEmail) {
+      const segs = driverActivities.filter((a) => a.driverEmail === driverEmail);
+      if (segs.length) {
+        const c = computeDriverCompliance(segs, null, new Date());
+        stan = stanZCompliance(c);
+        stanOpis = `stan z tachografu/GPS: dziś przejechane ${(c.daily.drive / 60).toFixed(1)} h, ciągła jazda ${(c.continuousDrive / 60).toFixed(1)} h`;
+      } else {
+        stanOpis = "brak danych czasu pracy dla tego kierowcy — liczę jak dla wypoczętego";
+      }
+    }
+    const p = zaplanujPrzejazd({
+      distanceKm: result.distanceKm,
+      drivingMin: result.durationH * 60,
+      startMs, stan, pozwolNa10h,
+    });
+    const zapas = zapasDoOkna(p.etaMs, oknoData, oknoGodz);
+    return { ...p, stanOpis, zapas };
+  }, [result, startAt, driverEmail, driverActivities, pozwolNa10h, oknoData, oknoGodz]);
+
   // ── Wybór pojazdu → średnie spalanie z danych operacyjnych. ──
   const onPickVehicle = (id) => {
     setVehicleId(id);
@@ -263,11 +362,25 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
     waypoints.forEach((w, i) => {
       L.marker([w.lat, w.lon]).addTo(group).bindTooltip(`${i + 1}. ${w.label}`, { direction: "top" });
     });
+    // Pauzy 45 min i odpoczynki dobowe — tam, gdzie wypadają na trasie.
+    for (const o of plan?.odcinki || []) {
+      if (o.typ !== "pauza" && o.typ !== "odpoczynek") continue;
+      const poz = punktNaTrasie(result.geometry, result.distanceKm, o.kmOd);
+      if (!poz) continue;
+      const pauza = o.typ === "pauza";
+      L.circleMarker([poz.lat, poz.lon], {
+        radius: pauza ? 7 : 9, color: "#fff", weight: 2,
+        fillColor: pauza ? "#f59e0b" : "#7c3aed", fillOpacity: 0.95,
+      }).addTo(group).bindTooltip(
+        `${pauza ? "⏸️ pauza 45 min" : "🛌 odpoczynek 11 h"}<br>${fmtKiedy(o.odMs)} · ok. ${o.kmOd} km`,
+        { direction: "top" }
+      );
+    }
     group.addTo(map);
     layerRef.current = group;
     try { map.fitBounds(L.polyline(result.geometry).getBounds(), { padding: [30, 30] }); } catch { /* pusto */ }
     setTimeout(() => map.invalidateSize(), 100);
-  }, [result, waypoints]);
+  }, [result, waypoints, plan]);
 
   const addWaypoint = async () => {
     const q = addInput.trim();
@@ -443,6 +556,43 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
     } finally { setRefreshingAuto(false); }
   };
 
+  const [zapisujePlan, setZapisujePlan] = useState(false);
+  const [zapisanyPlan, setZapisanyPlan] = useState(false);
+  const zapiszPlan = async () => {
+    if (!zFrachtu?.id || !plan || !result) return;
+    setZapisujePlan(true);
+    try {
+      await onZapiszPlan(zFrachtu.id, {
+        zapisanyAt: new Date().toISOString(),
+        zapisanyBy: currentUser?.email || null,
+        wyjazdAt: new Date(startAt).toISOString(),
+        etaAt: new Date(plan.etaMs).toISOString(),
+        kierowca: driverEmail || null,
+        vehicleId,
+        km: Math.round(result.distanceKm),
+        jazdaMin: Math.round(plan.jazdaMin),
+        przerwyMin: plan.przerwyMin,
+        odpoczynkiMin: plan.odpoczynkiMin,
+        spalanie: result.cons,
+        litry: Math.round(result.rows.reduce((a, r) => a + r.liters, 0)),
+        kosztPaliwa: Math.round(result.fuelTotal * 100) / 100,
+        kosztMyta: Math.round(result.tollTotal * 100) / 100,
+        kosztRazem: Math.round(result.grand * 100) / 100,
+        kmPerKraj: Object.fromEntries(result.rows.filter(r => r.cc !== "??").map(r => [r.cc, Math.round(r.km)])),
+        // Pauzy i odpoczynki z kilometrem — po trasie sprawdzimy, czy wypadły tam, gdzie miały.
+        postoje: plan.odcinki.filter(o => o.typ === "pauza" || o.typ === "odpoczynek")
+          .map(o => ({ typ: o.typ, odAt: new Date(o.odMs).toISOString(), minut: Math.round(o.minut), km: o.kmOd })),
+        zrodloStawek: auto?.policzoneAt || null,
+        zrodloMyta: result.tollSource || null,
+      });
+      setZapisanyPlan(true);
+      showToast("✅ Plan zapisany przy zleceniu");
+    } catch (e) {
+      console.error("[kalkulator] zapiszPlan:", e);
+      showToast("❌ Nie udało się zapisać planu: " + (e?.message || e));
+    } finally { setZapisujePlan(false); }
+  };
+
   const saveRates = async () => {
     setSavingRates(true);
     try {
@@ -498,6 +648,12 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
         {/* ── Panel wejścia ── */}
         <div className="bg-white rounded-2xl border border-gray-100 p-5">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">Trasa</h3>
+          {zFrachtu && (
+            <div className="mb-3 text-xs px-3 py-2 rounded-lg bg-teal-50 text-teal-800 border border-teal-100">
+              Ze zlecenia <b>{zFrachtu.nr}</b> — {zFrachtu.punktow} pkt trasy
+              {zFrachtu.pominiete > 0 && <>, {zFrachtu.pominiete} bez adresu (pominięte)</>}
+            </div>
+          )}
 
           <div className="space-y-2 mb-3">
             {waypoints.map((w, i) => (
@@ -534,6 +690,35 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
             <label className="text-xs text-gray-500">
               Spalanie L/100
               <input type="number" step="0.1" value={consumption} onChange={(e) => { setConsumption(e.target.value); setConsBasis("wpisane ręcznie"); }} className="mt-1 w-full px-2 py-2 rounded-lg border border-gray-200 text-sm text-gray-700" />
+            </label>
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            <h3 className="text-sm font-semibold text-gray-700 mb-3">Plan czasu (tachograf)</h3>
+            <label className="block text-xs text-gray-400">Wyjazd</label>
+            <input type="datetime-local" value={startAt} onChange={(e) => setStartAt(e.target.value)}
+              className="mt-1 w-full px-2 py-2 rounded-lg border border-gray-200 text-sm text-gray-700" />
+            <label className="block text-xs text-gray-400 mt-2">Kierowca</label>
+            <select value={driverEmail} onChange={(e) => setDriverEmail(e.target.value)}
+              className="mt-1 w-full px-2 py-2 rounded-lg border border-gray-200 text-sm text-gray-700">
+              <option value="">— wypoczęty (bez stanu z tachografu) —</option>
+              {kierowcy.map((k) => <option key={k} value={k}>{k}</option>)}
+            </select>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-xs text-gray-400">Rozładunek do (opcjonalnie)</label>
+                <input type="date" value={oknoData} onChange={(e) => setOknoData(e.target.value)}
+                  className="mt-1 w-full px-2 py-2 rounded-lg border border-gray-200 text-sm text-gray-700" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400">godz.</label>
+                <input type="time" value={oknoGodz} onChange={(e) => setOknoGodz(e.target.value)}
+                  className="mt-1 w-full px-2 py-2 rounded-lg border border-gray-200 text-sm text-gray-700" />
+              </div>
+            </div>
+            <label className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+              <input type="checkbox" checked={pozwolNa10h} onChange={(e) => setPozwolNa10h(e.target.checked)} />
+              wolno wydłużyć dobę do 10 h jazdy (max 2× w tygodniu)
             </label>
           </div>
 
@@ -631,6 +816,65 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], eurRate
             </table>
           </div>
           {result.hasUnknown && <p className="text-[11px] text-amber-500 mt-2">⚠️ Część trasy bez rozpoznanego kraju — wyceniona średnią ceną paliwa, bez myta.</p>}
+
+          {/* ── Plan przejazdu wg tachografu ── */}
+          {plan && (
+            <div className="mt-4 rounded-xl border border-gray-100 overflow-hidden">
+              <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-sm font-semibold text-gray-800">🕐 Plan przejazdu</div>
+                <div className="text-xs text-gray-500">
+                  wyjazd <b>{fmtKiedy(new Date(startAt).getTime())}</b> · dojazd <b className="text-gray-800">{fmtKiedy(plan.etaMs)}</b>
+                  {plan.dob > 0 && <> · {plan.dob === 1 ? "1 nocleg" : `${plan.dob} noclegi`}</>}
+                </div>
+              </div>
+
+              {plan.zapas != null && (
+                <div className={`px-4 py-2 text-sm ${plan.zapas >= 0 ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"}`}>
+                  {plan.zapas >= 0
+                    ? <>✅ Zdąży na okno rozładunku — <b>zapas {fmtHm(plan.zapas)}</b></>
+                    : <>⚠️ Nie zdąży — <b>spóźnienie {fmtHm(-plan.zapas)}</b>. Wyjazd trzeba przesunąć wcześniej albo przesunąć okno.</>}
+                </div>
+              )}
+
+              <div className="px-4 py-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center border-b border-gray-100">
+                <div><div className="text-[11px] text-gray-400">Jazda</div><div className="text-sm font-semibold text-gray-800">{fmtHm(plan.jazdaMin)}</div></div>
+                <div><div className="text-[11px] text-gray-400">Pauzy 45 min</div><div className="text-sm font-semibold text-gray-800">{plan.przerwyMin ? fmtHm(plan.przerwyMin) : "—"}</div></div>
+                <div><div className="text-[11px] text-gray-400">Odpoczynki</div><div className="text-sm font-semibold text-gray-800">{plan.odpoczynkiMin ? fmtHm(plan.odpoczynkiMin) : "—"}</div></div>
+                <div><div className="text-[11px] text-gray-400">Od wyjazdu do dojazdu</div><div className="text-sm font-semibold text-gray-800">{fmtHm(Math.round((plan.etaMs - new Date(startAt).getTime()) / 60000))}</div></div>
+              </div>
+
+              <div className="max-h-64 overflow-y-auto divide-y divide-gray-50">
+                {plan.odcinki.map((o, i) => (
+                  <div key={i} className="px-4 py-2 flex items-center gap-3 text-sm">
+                    <span className="w-28 shrink-0 text-xs text-gray-400">{fmtKiedy(o.odMs)}</span>
+                    <span className="w-6 text-center">{o.typ === "jazda" ? "🚚" : o.typ === "pauza" ? "⏸️" : o.typ === "odpoczynek" ? "🛌" : "📦"}</span>
+                    <span className="flex-1 text-gray-700">
+                      {o.typ === "jazda" ? <>jazda {fmtHm(Math.round(o.minut))} <span className="text-gray-400">· km {o.kmOd}–{o.kmDo}</span></>
+                        : o.typ === "pauza" ? <>pauza 45 min <span className="text-gray-400">· ok. {o.kmOd} km · {o.powod}</span></>
+                        : o.typ === "odpoczynek" ? <>odpoczynek {fmtHm(Math.round(o.minut))} <span className="text-gray-400">· ok. {o.kmOd} km · {o.powod}</span></>
+                        : <>{o.powod} {fmtHm(Math.round(o.minut))}</>}
+                    </span>
+                    <span className="text-xs text-gray-400 shrink-0">do {fmtKiedy(o.doMs)}</span>
+                  </div>
+                ))}
+              </div>
+
+              {zFrachtu?.id && onZapiszPlan && (
+                <div className="px-4 py-2 border-t border-gray-100 flex items-center justify-between gap-2 flex-wrap">
+                  <span className="text-[11px] text-gray-500">Zapisz plan przy zleceniu {zFrachtu.nr} — po trasie porównamy go z wykonaniem.</span>
+                  <button onClick={zapiszPlan} disabled={zapisujePlan}
+                    className="px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-xs font-medium disabled:opacity-50">
+                    {zapisujePlan ? "Zapisuję…" : zapisanyPlan ? "✅ Zapisany" : "💾 Zapisz plan do zlecenia"}
+                  </button>
+                </div>
+              )}
+              <div className="px-4 py-2 bg-gray-50 border-t border-gray-100 text-[11px] text-gray-500">
+                {plan.stanOpis}. Pauzy i odpoczynki wg 561/2006 (4 h 30 min jazdy → 45 min, doba {pozwolNa10h ? "do 10 h" : "9 h"} → 11 h odpoczynku).
+                Czas jazdy z routingu samochodowego — dla ciężarówki będzie nieco dłuższy.
+                {plan.ostrzezenia.map((w, i) => <div key={i} className="mt-1 text-amber-700">⚠️ {w}</div>)}
+              </div>
+            </div>
+          )}
 
           {/* ── Podstawa wyliczeń (na czym opiera się szacunek) ── */}
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">

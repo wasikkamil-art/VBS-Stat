@@ -208,3 +208,24 @@ export function formatOrderForWhatsapp(fracht) {
     delivery: deliveryGeo ? { ...deliveryGeo, name: "Rozładunek", address: addrRoz || null } : null,
   };
 }
+
+// ── punktyTrasyZFrachtu ──
+// Punkty trasy do Kalkulatora tras: załadunki Z1/Z2 + rozładunki R1..R5, w kolejności.
+// `geo` (lat,lon) wygrywa nad adresem; bez geo zostaje tekst do geokodowania.
+export function punktyTrasyZFrachtu(f) {
+  if (!f) return [];
+  const out = [];
+  const dodaj = (label, adres, kod, miasto, geo) => {
+    const g = parseGeoString(geo);
+    const tekst = [adres, kod, miasto].filter(Boolean).join(", ");
+    if (!g && !tekst) return;
+    out.push({ label: `${label}: ${tekst || `${g.lat}, ${g.lng}`}`, lat: g?.lat ?? null, lon: g?.lng ?? null, szukaj: tekst });
+  };
+  dodaj("Załadunek", f.zaladunekAdres, f.zaladunekKodPocztowy, f.zaladunekMiasto, f.zaladunekGeo);
+  dodaj("Załadunek 2", f.zaladunekAdres2, f.zaladunekKodPocztowy2, f.zaladunekMiasto2, f.zaladunekGeo2);
+  for (let i = 1; i <= 5; i++) {
+    const sfx = i === 1 ? "" : String(i);
+    dodaj(`Rozładunek${sfx ? " " + sfx : ""}`, f[`rozladunekAdres${sfx}`], f[`dokodPocztowy${sfx}`], f[`dokodMiasto${sfx}`], f[`rozladunekGeo${sfx}`]);
+  }
+  return out;
+}

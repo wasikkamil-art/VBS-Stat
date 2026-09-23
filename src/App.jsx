@@ -1312,6 +1312,8 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   const [operacyjne, setOperacyjne] = useState([]);
   const [driverEvents, setDriverEvents] = useState([]);
   const [driverActivities, setDriverActivities] = useState([]);
+  // Zlecenie „wysłane" do Kalkulatora tras (przycisk w oknie frachtu) — punkty, daty, pojazd.
+  const [kalkPrefill, setKalkPrefill] = useState(null);
   const [fuelEntries, setFuelEntries] = useState([]);
   const [driverDocs, setDriverDocs] = useState([]);
   const [pauzy, setPauzy] = useState([]);
@@ -4147,6 +4149,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
           {tab === "frachty" && canSeeTab("frachty") && (
             <FrachtyTab
+              onPlanRoute={(fracht) => { setKalkPrefill({ fracht, ts: Date.now() }); setTab("kalkulator"); }}
               frachtyList={frachtyList}
               vehicles={vehicles}
               driverEvents={driverEvents}
@@ -4206,6 +4209,16 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               <KalkulatorTras
                 vehicles={vehicles}
                 operacyjne={operacyjne}
+                driverActivities={driverActivities}
+                prefill={kalkPrefill}
+                onPrefillUsed={() => setKalkPrefill(null)}
+                onZapiszPlan={async (frachtId, planTrasy) => {
+                  // Snapshot planu ląduje przy zleceniu — to podstawa późniejszego
+                  // porównania „plan kontra wykonanie" (Etap 2).
+                  setFrachtyList(p => p.map(r => r.id === frachtId ? { ...r, planTrasy } : r));
+                  await dbUpdateFracht(frachtId, { planTrasy });
+                  logAction("update", "frachty", { id: frachtId, planTrasy: true });
+                }}
                 eurRate={eurRate}
                 canEdit={canEdit}
                 showToast={showToast}
@@ -16352,7 +16365,7 @@ function FrachtTollCell({ fracht, onUpdate }) {
   );
 }
 
-function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = [], onAdd, onDelete, onUpdate, onBulkAdd, canEdit = false, currentUser = null, appUsers = [], showToast = () => {} }) {
+function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = [], onAdd, onDelete, onUpdate, onBulkAdd, canEdit = false, currentUser = null, appUsers = [], onPlanRoute = null, showToast = () => {} }) {
   // Index driverEvents by frachtId for quick lookup
   const eventsByFracht = useMemo(() => {
     const map = {};
@@ -17132,6 +17145,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
             driverEvents={driverEvents}
             fuelEntries={fuelEntries}
             defaultVehicleId={selectedVehicle}
+            onPlanRoute={onPlanRoute ? (fr) => { setShowForm(false); setEditId(null); setPrefillRecord(null); onPlanRoute(fr); } : null}
             appUsers={appUsers}
             currentUser={currentUser}
             showToast={showToast}

@@ -22,7 +22,7 @@ import ZlecenieUploadBtn from "./ZlecenieUploadBtn";
 const CopyOrderPreviewModal = lazy(() => import("./CopyOrderPreviewModal"));
 const WhatsappSendPreviewModal = lazy(() => import("./WhatsappSendPreviewModal"));
 
-export default function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], onSave, onPatch = null, onClose, onAddReturn = null, defaultVehicleId="", appUsers = [], currentUser = null, showToast = () => {} }) {
+export default function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], onSave, onPatch = null, onClose, onAddReturn = null, onPlanRoute = null, defaultVehicleId="", appUsers = [], currentUser = null, showToast = () => {} }) {
   // ── pomocnik: rozbij "PL 44-100 Gliwice" → ["PL 44-100", "Gliwice"] ──
   function splitKM(s) {
     if (!s?.trim()) return ['',''];
@@ -595,6 +595,14 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
           )}
           <div className="flex justify-end gap-2 flex-wrap">
             <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-100">Anuluj</button>
+            {typeof onPlanRoute === "function" && (
+              <button onClick={() => onPlanRoute({ ...record, ...f })}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-2"
+                style={{ background: "#0d9488" }}
+                title="Otwórz Kalkulator tras z punktami, datami i pojazdem tego zlecenia — koszt, czas i pauzy wg tachografu">
+                🗺️ Zaplanuj trasę
+              </button>
+            )}
             <button onClick={() => setShowCopyPreview(true)}
               className="px-4 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-2"
               style={{background: "#6366f1"}}
