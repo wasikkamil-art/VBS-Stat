@@ -4014,3 +4014,21 @@ maj +94,75 · cze +82,18 · lip +207,39 · sie −33,47.
 **Total_26**: 14 komórek przez Sheets API z asercją stanu przed zapisem i backupem
 (`backup_total26_andamur_*.json`): ON → Paliwo, AdBlue → „inne" (tylko składnik AdBlue w formułach
 H58/I58), maj całość w Paliwie (tak jak stara korekta z 10.08). Notatki komórek dopisane.
+
+## 2026-09-23 — `bucketFor` w generatorach raportów: koniec z sześcioma kopiami
+
+Punkt 7 z listy długu. `make_dashboard_lipiec/sierpien.js` i `raport_dyspozytorzy_*.js` (gitignored)
+miały własne kopie `bucketFor`; żadna nie znała „ARUŚ" (Arek), więc taki fracht wypadał z podziału.
+Teraz ładują funkcję z `src/utils/dyspozytorzy.js` przez `await import()` w async IIFE (skrypty są
+CommonJS, util ESM) z asercją, że `bucketFor` to funkcja. Sześć plików, żadnej zmiany w `src/`.
+
+**Skala w danych**: w 2026 jest **jeden** taki fracht — „ARUŚ :D", kwiecień. Raporty za lipiec
+i sierpień były nietknięte, kwietniowy miał to policzone ręcznie (przypis w stopce `make_dashboard.js`).
+**Weryfikacja**: stara i nowa wersja skryptu sierpniowego dają PDF identyczny co do treści na tych
+samych danych; `bucketFor` stary vs wspólny na 25 realnych wartościach pola `dyspozytor` różni się
+wyłącznie na wariantach „ARUŚ/Aruś/arus".
+
+⚠️ **Przy okazji**: wydany 15.09 `Dashboard_dyspozytorzy_SIERPIEN_2026.pdf` jest już nieaktualny —
+w bazie doszły **2 frachty za sierpień** (26 → 28, 39 520 → 41 370 €, oba bez dyspozytora, czyli
+liczone do AGA; udział ARO 77,0% → 73,6%). PDF w repo zostawiony w wersji wysłanej — regeneracja
+czeka na decyzję usera.
