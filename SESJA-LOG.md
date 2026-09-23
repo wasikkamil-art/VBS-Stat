@@ -4060,3 +4060,37 @@ i reverse-geocode przeszły w podglądzie.
 ⚠️ Myto z faktur jest lekko zawyżone (km z tras zleceń, bez pustych przebiegów) — widać to w stopce
 tabeli. Od października km mają iść z `countryKmDaily` (CAN) i wtedy warto przeliczyć.
 ⏭️ Następne z tego wątku: plan jazdy wg tachografu w tej samej zakładce (opcja A1).
+
+### cd. 23.09 — Planer trasy Etap 1: czas, pauzy tacho i wejście ze zlecenia (commit `75b56c6`, PROD)
+
+Pomysł usera: dyspozytor wgrywa zlecenie → dostaje mapę z trasą, kosztem, czasem i miejscami pauz,
+a po kursie porównanie z wykonaniem. Zakres ustalony: **cały Etap 1**, widzą **admin i dyspozytor**,
+ocena po trasie **bez punktowania kierowcy** (lista odchyleń).
+
+`src/utils/planerTrasy.js` (czysty moduł, testowalny node'em): `zaplanujPrzejazd` rozkłada trasę na
+jazdę / pauzy 45 min / odpoczynki 11 h wg 561/2006, startując od stanu kierowcy z
+`computeDriverCompliance` (tachograf+GPS) albo od wypoczętego. `punktNaTrasie` daje pinezki,
+`zapasDoOkna` liczy zapas do okna rozładunku.
+
+Decyzje projektowe (świadome, opisane w kodzie i UI):
+- **stan kierowcy stosujemy tylko dla wyjazdu w ciągu 11 h** — dalej i tak odbierze odpoczynek,
+  inaczej plan byłby fałszywie ciasny,
+- **załadunek/rozładunek = „inna praca", NIE zeruje licznika 4 h 30 min** (ostrożniej),
+- odpoczynek tygodniowy tylko jako ostrzeżenie (trasy >5 dób planuje się ręcznie).
+
+W UI: wejścia (wyjazd, kierowca, okno rozładunku, zgoda na 10 h), oś czasu z kilometrami, KPI
+(jazda / pauzy / odpoczynki / łącznie), werdykt „zapas 24 h 11 min" vs „spóźnienie", pinezki na mapie
+(pomarańcz = pauza, fiolet = nocleg). Przycisk **🗺️ Zaplanuj trasę** w `FrachtyModal` → App podstawia
+punkty Z1/Z2+R1..R5 (`punktyTrasyZFrachtu` w `orderFormatters`, geo albo geokod adresu), pojazd, datę
+wyjazdu i okno OSTATNIEGO rozładunku. **💾 Zapisz plan do zlecenia** → `fracht.planTrasy`
+(km, litry, koszty, ETA, pauzy z kilometrem, źródło stawek) = podstawa Etapu 2.
+
+**Zweryfikowane na żywo** (podgląd 5193, prawdziwe dane): zlecenie T/43/9/2026/JKLA Holzhausen AT →
+Chartres FR — 1134 km, 440 €, 2 pauzy + nocleg po 1002 km, dojazd czw. 08:48, zapas 24 h.
+Rdzeń przetestowany osobno w 3 wariantach (doba 9 h/10 h, kierowca po 6 h jazdy) — sumy zgodne
+z zegarem, jazda ciągła nigdy >4 h 30 min. Po pushu sprawdzone na produkcji: chunki
+`KalkulatorTras-*` i `FrachtyModal-*` **bajt w bajt** jak lokalny build.
+⚠️ **NIEZWERYFIKOWANE**: przycisk w prawdziwym oknie zlecenia i zapis `planTrasy` do bazy
+(podgląd używa atrapy) — user przeklika.
+⏭️ Etap 2: porównanie planu z wykonaniem (DDD, `kmStart/kmEnd`, zdarzenia kursu, tankowania),
+zamrożenie śladu GPS przy `finalizeTrip` (breadcrumbs żyją 7 dni). Etap 3: kalibracja na własnych trasach.
