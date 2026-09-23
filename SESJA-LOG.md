@@ -4118,3 +4118,13 @@ Generator `make_dashboard_porownanie_v2.js` (YoY 2025) czyta oba dokumenty.
 
 **Krok 3 — ZAPLANOWANY NA PAŹDZIERNIK**: frachty do własnej kolekcji `frachty/{id}`. To jedyne
 trwałe rozwiązanie (dziś każde wejście do apki ściąga cały dokument) — patrz [[project_fleet_data_limit]].
+
+🐛 **cd. — archiwum nie doczytało się w sesji otwartej w trakcie migracji** (commit `cca1c4c`, prod):
+user zobaczył 247 wpisów zamiast 730. Przyczyna: przy wczytaniu strony archiwum jeszcze nie istniało,
+odczyt wrócił pusty i ustawił flagę „sprawdzone", a listener chwilę później zmniejszył listę
+(bo `fleet/data` stracił zamknięte lata). Dane były całe — potwierdzone w bazie (247 + 483 = 730,
+kwoty per auto zgodne ze zrzutem sprzed migracji). Fix: flaga dopiero po UDANYM odczycie, więc pusta
+albo nieudana próba ponawia się przy następnym snapshocie (odporność także na chwilowy błąd sieci).
+Po odświeżeniu user potwierdził komplet.
+⚠️ **Do sprawdzenia jutro rano**: czy nocne backupy (CF `dailyBackup` + GitHub Actions) zapisały
+`fleet-frachty-archiwum.json` / `frachty_archiwum_<data>.json` — pierwszy przebieg po zmianie.
