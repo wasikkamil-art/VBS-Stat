@@ -219,7 +219,11 @@ export function punktyTrasyZFrachtu(f) {
     const g = parseGeoString(geo);
     const tekst = [adres, kod, miasto].filter(Boolean).join(", ");
     if (!g && !tekst) return;
-    out.push({ label: `${label}: ${tekst || `${g.lat}, ${g.lng}`}`, lat: g?.lat ?? null, lon: g?.lng ?? null, szukaj: tekst });
+    out.push({
+      label: `${label}: ${tekst || `${g.lat}, ${g.lng}`}`,
+      lat: g?.lat ?? null, lon: g?.lng ?? null,
+      szukaj: tekst, adres, kod, miasto,
+    });
   };
   dodaj("Załadunek", f.zaladunekAdres, f.zaladunekKodPocztowy, f.zaladunekMiasto, f.zaladunekGeo);
   dodaj("Załadunek 2", f.zaladunekAdres2, f.zaladunekKodPocztowy2, f.zaladunekMiasto2, f.zaladunekGeo2);

@@ -74,6 +74,26 @@ const flag = (cc) =>
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── Geokod adresu → współrzędne (Nominatim/OSM, darmowy). ──
+// Adres ze zlecenia bywa zbyt szczegółowy dla Nominatimu („Frazione La Scheggia 46"),
+// więc schodzimy po kolei: pełny adres → kod + miasto → samo miasto. Prefiks kraju
+// („IT 52031") rozbijamy na kod kraju i kod pocztowy, bo tego Nominatim nie rozumie.
+async function geocodeZFallbackiem(adres, kod, miasto) {
+  const kodM = String(kod || "").match(/^([A-Z]{2})[\s-]?(.*)$/i);
+  const kraj = kodM ? kodM[1].toUpperCase() : "";
+  const kodPocztowy = kodM ? kodM[2].trim() : String(kod || "").trim();
+  const proby = [
+    [adres, kodPocztowy, miasto, kraj].filter(Boolean).join(", "),
+    [kodPocztowy, miasto, kraj].filter(Boolean).join(", "),
+    [miasto, kraj].filter(Boolean).join(", "),
+  ].filter((x, i, a) => x && a.indexOf(x) === i);
+  for (const q of proby) {
+    const g = await geocode(q);
+    if (g) return { ...g, uzyte: q, dokladny: q === proby[0] };
+    await new Promise((r) => setTimeout(r, 1100));   // limit Nominatimu: 1 zapytanie/s
+  }
+  return null;
+}
+
 async function geocode(q) {
   const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=0&q=${encodeURIComponent(q)}`;
   try {
@@ -261,13 +281,20 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
     (async () => {
       setGeocoding(true);
       const punkty = [];
+      const przyblizone = [];
       for (const p of punktyTrasyZFrachtu(f)) {
         if (p.lat != null && p.lon != null) {
           punkty.push({ id: Math.random().toString(36).slice(2), label: p.label, lat: p.lat, lon: p.lon });
-        } else if (p.szukaj) {
-          const g = await geocode(p.szukaj);
-          if (g) punkty.push({ id: Math.random().toString(36).slice(2), label: p.label, lat: g.lat, lon: g.lon });
+          continue;
         }
+        const g = await geocodeZFallbackiem(p.adres, p.kod, p.miasto);
+        if (!g) continue;
+        if (!g.dokladny) przyblizone.push(p.label);
+        punkty.push({
+          id: Math.random().toString(36).slice(2),
+          label: g.dokladny ? p.label : `${p.label} (≈ ${g.uzyte})`,
+          lat: g.lat, lon: g.lon,
+        });
       }
       if (anulowane) return;
       setGeocoding(false);
@@ -281,9 +308,21 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
         if (f[`dataRozladunku${i}`]) { oData = f[`dataRozladunku${i}`]; oGodz = f[`godzRozladunku${i}`] || ""; break; }
       }
       setOknoData(oData); setOknoGodz(oGodz);
-      const kierowca = (f.driverEmail || f.kierowcaEmail || "").trim();
+      // Kierowcy nie ma w zleceniu — bierzemy go z historii pojazdu na dzień załadunku.
+      let kierowca = (f.driverEmail || f.kierowcaEmail || "").trim();
+      if (!kierowca && f.vehicleId) {
+        const veh = vehicles.find((v) => v.id === f.vehicleId);
+        const dzien = f.dataZaladunku || f.dataZlecenia || "";
+        const h = (veh?.driverHistory || []).find((x) => x.email && (x.from || "0000-00-00") <= dzien && (!x.to || x.to >= dzien))
+          || (veh?.driverHistory || []).filter((x) => x.email && !x.to).pop();
+        if (h?.email) kierowca = h.email;
+      }
       if (kierowca) setDriverEmail(kierowca);
-      setZFrachtu({ id: f.id, nr: f.nrZlecenia || f.nrRef || f.id, punktow: punkty.length, pominiete: punktyTrasyZFrachtu(f).length - punkty.length });
+      setZFrachtu({
+        id: f.id, nr: f.nrZlecenia || f.nrRef || f.id, punktow: punkty.length,
+        pominiete: punktyTrasyZFrachtu(f).length - punkty.length,
+        przyblizone, kierowca: kierowca || null,
+      });
       showToast(punkty.length >= 2 ? `✅ Wczytano trasę ze zlecenia (${punkty.length} pkt) — kliknij „Oblicz"` : "⚠️ Zlecenie ma za mało punktów z adresem");
       onPrefillUsed();
     })();
@@ -651,7 +690,13 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
           {zFrachtu && (
             <div className="mb-3 text-xs px-3 py-2 rounded-lg bg-teal-50 text-teal-800 border border-teal-100">
               Ze zlecenia <b>{zFrachtu.nr}</b> — {zFrachtu.punktow} pkt trasy
+              {zFrachtu.kierowca && <>, kierowca <b>{zFrachtu.kierowca}</b></>}
               {zFrachtu.pominiete > 0 && <>, {zFrachtu.pominiete} bez adresu (pominięte)</>}
+              {zFrachtu.przyblizone?.length > 0 && (
+                <div className="mt-1 text-amber-700">
+                  ⚠️ Adres nieznaleziony co do numeru — punkt ustawiony na miasto: {zFrachtu.przyblizone.join(", ")}. Kilometry mogą się różnić o kilka.
+                </div>
+              )}
             </div>
           )}
 
