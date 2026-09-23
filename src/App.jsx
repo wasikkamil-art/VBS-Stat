@@ -1339,7 +1339,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   const [kalkPrefill, setKalkPrefill] = useState(null);
   // Frachty z zamkniętych lat — osobny dokument, czytany raz na sesję (patrz ARCHIWUM_REF).
   const frachtyArchiwumRef = useRef([]);
-  const frachtyArchiwumWczytaneRef = useRef(false);
+  const frachtyArchiwumLadujeRef = useRef(false);   // blokada równoległych prób odczytu
   const [fuelEntries, setFuelEntries] = useState([]);
   const [driverDocs, setDriverDocs] = useState([]);
   const [pauzy, setPauzy] = useState([]);
@@ -1513,15 +1513,18 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
       setLoaded(true);
 
-      // Archiwum frachtów: jeden odczyt na sesję, dokładany do listy. Stare lata
-      // nie zmieniają się same, więc listener jest zbędny — a dokument `fleet/data`
-      // zostaje mały. Gdy archiwum nie istnieje (przed migracją), po prostu go nie ma.
-      if (!frachtyArchiwumWczytaneRef.current) {
-        frachtyArchiwumWczytaneRef.current = true;
+      // Archiwum frachtów: dokładane do listy, dokument `fleet/data` zostaje mały.
+      // Stare lata się nie zmieniają, więc listener jest zbędny — wystarczy getDoc.
+      // Flagę „mam" ustawiamy DOPIERO po udanym odczycie: pusta albo nieudana próba
+      // ma się ponowić przy następnym snapshocie. Inaczej sesja otwarta w chwili
+      // migracji (albo chwilowy błąd sieci) zostawałaby bez historii aż do F5
+      // — dokładnie to zdarzyło się 23.09.2026 przy przenosinach archiwum.
+      if (!frachtyArchiwumRef.current.length && !frachtyArchiwumLadujeRef.current) {
+        frachtyArchiwumLadujeRef.current = true;
         getDoc(ARCHIWUM_REF())
           .then((arch) => {
             const stare = arch.exists() ? (arch.data()[SK.frachty] || []) : [];
-            if (!stare.length) return;
+            if (!stare.length) return;                      // brak archiwum → spróbujemy ponownie
             frachtyArchiwumRef.current = stare;
             setFrachtyList((biezace) => {
               const sa = new Set(biezace.map((f) => f && f.id));
@@ -1529,7 +1532,8 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             });
             console.log(`[archiwum] dołączono ${stare.length} frachtów z zamkniętych lat`);
           })
-          .catch((e) => console.warn("[archiwum] nie udało się wczytać:", e?.message || e));
+          .catch((e) => console.warn("[archiwum] nie udało się wczytać:", e?.message || e))
+          .finally(() => { frachtyArchiwumLadujeRef.current = false; });
       }
     }, (err) => {
       console.error(`[onSnapshot fleet/data] error (try ${retryCount + 1}/${MAX_RETRIES})`, err.code || "", err.message || err);
