@@ -4094,3 +4094,27 @@ z zegarem, jazda ciągła nigdy >4 h 30 min. Po pushu sprawdzone na produkcji: c
 (podgląd używa atrapy) — user przeklika.
 ⏭️ Etap 2: porównanie planu z wykonaniem (DDD, `kmStart/kmEnd`, zdarzenia kursu, tankowania),
 zamrożenie śladu GPS przy `finalizeTrip` (breadcrumbs żyją 7 dni). Etap 3: kalibracja na własnych trasach.
+
+### cd. 23.09 — `fleet/data` odchudzony: archiwum frachtów (commit `0cf1c97`, migracja WYKONANA)
+
+⚠️ **Znalezione przy okazji Etapu 2**: dokument był na **83,2% limitu 1 MiB** przy przyroście
+**63 KB/mc** (lipiec 75 KB, sierpień 67 KB) → **~2,7 miesiąca do twardej ściany**, nie 6–9 jak
+mówiła stara notatka. Po przekroczeniu Firestore odrzuca zapis i przestają zapisywać się frachty,
+koszty i pojazdy naraz. Przyczyna przyspieszenia: fracht 2026 waży **1497 B** wobec **338 B** z 2025
+(`uwagi` 159 B/fracht + `urlZlecenie` 125 B — długie linki Storage + pola multistopu).
+
+**Krok 1 (zrobiony)**: frachty sprzed 2026 → `fleet/frachty_archiwum`. Aplikacja czyta archiwum
+**raz na sesję** (`getDoc`, nie listener — zamknięte lata się nie zmieniają) i dokłada do
+`frachtyList`, więc Rentowność/Analizy/rankingi/FV widzą pełną historię bez zmian w ich kodzie.
+`dbUpdateFracht`/`dbDeleteFracht` kierują zapis do właściwego dokumentu po ID.
+**Wynik migracji**: 730 → 247 w `fleet/data` (**83,2% → 67,6%, wolne 332 KB ≈ 5 mc**), 483 w archiwum,
+suma i kwoty **bajt w bajt jak przed** (730 frachtów / 760 799 €, per auto zgodne ze zrzutem usera),
+zero duplikatów. Backup przed migracją: `backup_frachty_przed_archiwizacja_1790168844226.json`.
+
+⚠️ **Backupy rozszerzone o nowy dokument** (bez tego 483 frachty byłyby bez kopii): CF `dailyBackup`
+zapisuje `fleet-frachty-archiwum.json`, GitHub Actions `frachty_archiwum_<data>.json` + alert przy
+spadku poniżej 400. **Do sprawdzenia przy najbliższym nocnym przebiegu.**
+Generator `make_dashboard_porownanie_v2.js` (YoY 2025) czyta oba dokumenty.
+
+**Krok 3 — ZAPLANOWANY NA PAŹDZIERNIK**: frachty do własnej kolekcji `frachty/{id}`. To jedyne
+trwałe rozwiązanie (dziś każde wejście do apki ściąga cały dokument) — patrz [[project_fleet_data_limit]].
