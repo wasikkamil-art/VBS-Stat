@@ -4213,11 +4213,13 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 prefill={kalkPrefill}
                 onPrefillUsed={() => setKalkPrefill(null)}
                 onZapiszPlan={async (frachtId, planTrasy) => {
-                  // Snapshot planu ląduje przy zleceniu — to podstawa późniejszego
-                  // porównania „plan kontra wykonanie" (Etap 2).
-                  setFrachtyList(p => p.map(r => r.id === frachtId ? { ...r, planTrasy } : r));
-                  await dbUpdateFracht(frachtId, { planTrasy });
-                  logAction("update", "frachty", { id: frachtId, planTrasy: true });
+                  // Plan idzie do OSOBNEJ kolekcji `planyTras` — `fleet/data` jest na 83%
+                  // limitu 1 MiB, a snapshot waży ~0,8 KB przy każdym zleceniu.
+                  // Przy frachcie zostaje sam znacznik (data), żeby listy wiedziały, że plan jest.
+                  await setDoc(doc(db, "planyTras", frachtId), { ...planTrasy, frachtId }, { merge: true });
+                  setFrachtyList(p => p.map(r => r.id === frachtId ? { ...r, planAt: planTrasy.zapisanyAt } : r));
+                  await dbUpdateFracht(frachtId, { planAt: planTrasy.zapisanyAt });
+                  logAction("update", "planyTras", { id: frachtId });
                 }}
                 eurRate={eurRate}
                 canEdit={canEdit}

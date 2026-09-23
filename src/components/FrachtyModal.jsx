@@ -16,6 +16,7 @@ import { safeHref } from "../utils/safeHref";
 import { isFrachtRozladowany } from "../utils/frachtStatus";
 import { logAction } from "../utils/logAction";
 import TripSummaryPanel from "./TripSummaryPanel";
+import RozliczenieTrasyPanel from "./RozliczenieTrasyPanel";
 import ZlecenieUploadBtn from "./ZlecenieUploadBtn";
 
 // Lazy sub-modale — pobierane dopiero gdy admin klika konkretny przycisk wewnątrz modala
@@ -563,6 +564,11 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
             const vehForSummary = vehicles.find(vv => vv.id === (record.vehicleId || f.vehicleId));
             return <TripSummaryPanel fracht={record} vehicle={vehForSummary} driverEvents={driverEvents} fuelEntries={fuelEntries} variant="full" />;
           })()}
+
+          {/* PLAN KONTRA WYKONANIE (Etap 2 planera) */}
+          {record?.id && (record.planAt || isFrachtRozladowany(record, driverEvents.filter(e => e.frachtId === record.id))) && (
+            <RozliczenieTrasyPanel frachtId={record.id} canEdit={typeof onPlanRoute === "function"} showToast={showToast} />
+          )}
 
           {/* ZLECENIE PDF */}
           <div className="pt-2 border-t border-gray-100">

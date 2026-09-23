@@ -1300,6 +1300,40 @@ exports.backfillCountryKm = onCall(
 // Raz dziennie o 2:30 CET. Chroni przed niekontrolowanym wzrostem storage.
 // ═══════════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════
+// ROZLICZENIE TRASY — „plan kontra wykonanie" (Etap 2 planera).
+// Ślad GPS żyje 7 dni, więc rozliczenie robimy przy ZAMYKANIU kursu
+// (finalizeTrip) i zamrażamy w `realizacjeTras/{frachtId}`.
+// ═══════════════════════════════════════════════════════════════
+async function zapiszRozliczenieTrasy(db, fracht, events, zrodlo) {
+  const { rozliczTrase } = require("./lib/rozliczenieTrasy");
+  const planSnap = await db.doc(`planyTras/${fracht.id}`).get();
+  const plan = planSnap.exists ? planSnap.data() : null;
+  const r = await rozliczTrase(db, fracht, plan, events);
+  await db.doc(`realizacjeTras/${fracht.id}`).set({ ...r, zrodlo }, { merge: true });
+  console.log(`rozliczenieTrasy ${fracht.id} (${zrodlo}): km ${r.fakt.km}, odchyleń ${r.odchylenia.length}, punktów GPS ${r.punktowGps}${r.braki.length ? ", braki: " + r.braki.join("; ") : ""}`);
+  return r;
+}
+
+// Ręczne przeliczenie z panelu (przycisk przy zleceniu).
+exports.rozliczTraseNow = onCall(
+  { region: "europe-west1", timeoutSeconds: 300 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musisz byc zalogowany.");
+    const rola = request.auth.token.role;
+    if (rola !== "admin" && rola !== "dyspozytor") throw new HttpsError("permission-denied", "Tylko admin albo dyspozytor.");
+    const { frachtId } = request.data || {};
+    if (!frachtId || typeof frachtId !== "string") throw new HttpsError("invalid-argument", "Brak frachtId");
+    const db = getFirestore();
+    const fleetSnap = await db.doc("fleet/data").get();
+    const fracht = ((fleetSnap.data() || {}).fleetv2_frachty || []).find(f => f && f.id === frachtId);
+    if (!fracht) throw new HttpsError("not-found", "Fracht nie znaleziony");
+    const events = (await db.collection("driverEvents").where("frachtId", "==", frachtId).get()).docs.map(d => d.data());
+    const r = await zapiszRozliczenieTrasy(db, fracht, events, `recznie:${request.auth.token.email || request.auth.uid}`);
+    return { success: true, ...r };
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════
 // STAWKI KALKULATORA TRAS — ceny paliwa i myto z WŁASNYCH danych floty
 // (3 ostatnie miesiące). Zapis do config/kalkulatorTras.auto — ręczne
 // nadpisania usera (pola fuelPrice/tollPerKm na górnym poziomie) zostają
@@ -3824,6 +3858,14 @@ exports.finalizeTrip = onCall(
     const vehicle = vehicles.find(v => v && v.id === fracht.vehicleId);
     const stats = computeTripStats(fracht, events);
     const nowIso = new Date().toISOString();
+
+    // Rozliczenie „plan kontra wykonanie" — TERAZ, bo ślad GPS znika po 7 dniach.
+    // Best-effort: błąd rozliczenia nie może wywalić zamykania kursu i maila do klienta.
+    try {
+      await zapiszRozliczenieTrasy(db, fracht, events, `finalizeTrip:${source}`);
+    } catch (e) {
+      console.error(`[finalizeTrip] rozliczenie trasy nie powiodło się (${frachtId}):`, e.message);
+    }
 
     // ════════════════════════════════════════════════════════════════════════
     // ROUND-TRIP detection — czy fracht jest częścią kółka (linkedFrachtId)?

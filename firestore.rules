@@ -110,6 +110,27 @@ service cloud.firestore {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // PLANY TRAS — snapshot planu przejazdu z Kalkulatora (Etap 1 planera).
+    // Osobna kolekcja, NIE pole w `fleet/data` — dokument jest na 83% limitu
+    // 1 MiB, a plan waży ~0,8 KB i doszedłby przy KAŻDYM zleceniu.
+    // ═══════════════════════════════════════════════════════════════
+    match /planyTras/{frachtId} {
+      allow read: if canRead();
+      allow create, update: if canEdit();
+      allow delete: if isAdmin();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // ROZLICZENIA TRAS — „plan kontra wykonanie" liczone przez Cloud Function
+    // (ślad GPS zamrażany przy zamknięciu kursu, bo breadcrumbs żyją 7 dni).
+    // Front tylko czyta.
+    // ═══════════════════════════════════════════════════════════════
+    match /realizacjeTras/{frachtId} {
+      allow read: if canRead();
+      allow write: if false;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // OPERACYJNE — dane operacyjne
     // ═══════════════════════════════════════════════════════════════
     match /operacyjne/{docId} {
