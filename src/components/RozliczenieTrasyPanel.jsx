@@ -53,7 +53,7 @@ export default function RozliczenieTrasyPanel({ frachtId, canEdit = false, showT
       L.circleMarker([p.lat, p.lng], {
         radius: p.minut >= 180 ? 9 : 6, color: "#fff", weight: 2,
         fillColor: p.minut >= 180 ? "#7c3aed" : "#f59e0b", fillOpacity: 0.95,
-      }).addTo(grupa).bindTooltip(`postój ${p.minut} min · ${fmtCzas(new Date(p.odMs).toISOString())}`, { direction: "top" });
+      }).addTo(grupa).bindTooltip(`postój ${fmtHm(p.minut)} · ${fmtCzas(new Date(p.odMs).toISOString())}`, { direction: "top" });
     }
     try { map.fitBounds(linia.getBounds(), { padding: [25, 25] }); } catch { /* pusto */ }
     setTimeout(() => map.invalidateSize(), 100);
