@@ -4032,3 +4032,31 @@ wyłącznie na wariantach „ARUŚ/Aruś/arus".
 w bazie doszły **2 frachty za sierpień** (26 → 28, 39 520 → 41 370 €, oba bez dyspozytora, czyli
 liczone do AGA; udział ARO 77,0% → 73,6%). PDF w repo zostawiony w wersji wysłanej — regeneracja
 czeka na decyzję usera.
+
+### cd. 23.09 — Kalkulator tras liczy z NASZYCH kosztów (commit `8bd11da`, CF wdrożone)
+
+Pomysł usera po obejrzeniu tachofreight.com: skoro wiemy, ile realnie płacimy za paliwo i drogi,
+kalkulator ma liczyć z tego, a nie z wpisanych ręcznie szacunków. Okno **3 miesiące**, **bus v4 osobno**.
+
+Rozjazd był spory — snapshot z czerwca vs realia: **DE 1,51 → 1,814 €/L**, **FR 1,63 → 1,826**,
+**ES 1,23 → 1,355**, myto **DE 0,13 → 0,217 €/km** (prawie 2× zaniżone), FR 0,08 → 0,040.
+Spalanie już wcześniej szło z `operacyjne` (30 L/100 to tylko fallback).
+
+`functions/lib/kalkulatorStawki.js`: paliwo = Σ netEUR / Σ litry per kraj z `fuelTransactions`
+(tylko diesel, próg 150 L), myto = (NegoMetal + e-TOLL dla PL) / km z `tollAnalysis` (próg 200 km).
+Bus: zwolniony z myta towarowego, zostaje mu polski e-TOLL (0,17 €/km). **Kraj bez faktur NIE dostaje
+stawki 0** (CH rozlicza LSVA poza NegoMetalem) — zostaje na domyślnej.
+CF `refreshKalkulatorRates` (5. dnia mc, po zamknięciu miesiąca) + `refreshKalkulatorRatesNow`
+(przycisk admina) → `config/kalkulatorTras.auto`. Warstwy: domyślne → stary snapshot → nasze dane →
+ręczne nadpisania, przy czym **zapis z UI trzyma już tylko RÓŻNICE** (`manualFuelPrice`), inaczej
+pełna kopia zamroziłaby ceny i comiesięczne przeliczanie byłoby martwe.
+
+**Zweryfikowane na żywo** w nowym podglądzie bez logowania (`podglad/kalkulator`, port 5193,
+gitignored): trasa Kielce → Walencja 2700 km liczy się z naszymi stawkami, kontrola ręczna zgodna
+(FR 987 km × 14,2 L/100 × 1,826 = 255,9 €; myto DE 455 × 0,217 = 98,7 €). Job harmonogramu odpalony
+raz ręcznie — `config.auto` w bazie, paliwo 7 krajów, myto 7 krajów.
+✅ **Przy okazji zamknięte pytanie z Fazy 1: Nominatim DZIAŁA z przeglądarki** (CORS OK) — geokod
+i reverse-geocode przeszły w podglądzie.
+⚠️ Myto z faktur jest lekko zawyżone (km z tras zleceń, bez pustych przebiegów) — widać to w stopce
+tabeli. Od października km mają iść z `countryKmDaily` (CAN) i wtedy warto przeliczyć.
+⏭️ Następne z tego wątku: plan jazdy wg tachografu w tej samej zakładce (opcja A1).
