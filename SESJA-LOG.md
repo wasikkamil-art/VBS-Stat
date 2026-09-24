@@ -4128,3 +4128,34 @@ albo nieudana próba ponawia się przy następnym snapshocie (odporność także
 Po odświeżeniu user potwierdził komplet.
 ⚠️ **Do sprawdzenia jutro rano**: czy nocne backupy (CF `dailyBackup` + GitHub Actions) zapisały
 `fleet-frachty-archiwum.json` / `frachty_archiwum_<data>.json` — pierwszy przebieg po zmianie.
+
+## 2026-09-24 — KROK 3: frachty we własnej kolekcji (commit `306d8fd`, migracja WYKONANA)
+
+Koniec tablicy `fleet/data.fleetv2_frachty`. Frachty mieszkają w kolekcji `frachty/{id}`.
+
+**Dlaczego teraz, nie w październiku**: user poprosił od razu po kroku 1. Poza limitem 1 MiB
+drugi powód był równie ważny — każde wejście do apki ściągało cały dokument (~700 KB), a zmiana
+jednego frachtu przesyłała wszystkie 730.
+
+**Jak, żeby nie było okna bez danych**: kod obsługuje OBA źródła. Dopóki kolekcja pusta → stara
+ścieżka (tablice + archiwum). Listener kolekcji przejmuje listę, gdy zobaczy dokumenty, i wtedy
+`_frachtyWKolekcji` przełącza też zapisy. Front: `setDoc`/`deleteDoc` + `writeBatch` po 400 przy
+imporcie (zamiast `runTransaction` na całej tablicy). Functions: nowy `lib/frachty.js`
+(`pobierzFrachty`/`pobierzFracht`/`zapiszFracht`) w `sendFleetStatusEmail`, `trackerData`,
+`finalizeTrip` (odczyt + 2 zapisy), `rozliczTraseNow`. Reguły: `frachty/{id}` jak dla tablicy.
+
+**Backupy rozszerzone ZANIM dane się przeniosły**: CF `frachty-kolekcja.json`, GitHub Actions
+`frachty_<data>.json` + alert <200 dokumentów; kontrola `MIN_EXPECTED.fleetv2_frachty` pomijana,
+gdy kolekcja ma dane (pusta tablica to teraz stan docelowy, nie awaria).
+
+**Migracja dwuetapowa** (`migrate_frachty_kolekcja.mjs`): `--write` kopiuje przy nietkniętych
+tablicach, `--sprzataj` usuwa tablicę i dokument archiwum dopiero po sprawdzeniu kompletu.
+User wykonał oba etapy.
+
+**Wynik**: kolekcja **730 dokumentów**, `fleet/data` **692 KB → 331 KB (67,6% → 32,3%)**,
+wolne **693 KB**. Kontrola rekord po rekordzie wobec kopii z 23.09: **zero braków**, jedyna różnica
+to fracht `12/09/2026/DK` z ceną 2300 → 3000 € — zmiana zrobiona przez usera w międzyczasie,
+czyli **dowód, że zapis przez kolekcję działa**.
+
+⚠️ **Do sprawdzenia jutro rano**: pierwszy nocny backup po zmianie (czy jest `frachty_*.json`
+i czy alert o pustej tablicy nie odpalił fałszywie).
