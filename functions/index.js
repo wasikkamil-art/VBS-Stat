@@ -19,6 +19,7 @@ const { getMessaging }        = require("firebase-admin/messaging");
 const { getStorage }          = require("firebase-admin/storage");
 const crypto                  = require("crypto");
 const { TZ_PL, lokalnyCzas, lokalnaPolnoc, nastepnyDzien, dataLokalna } = require("./lib/czas");
+const { pobierzFrachty, pobierzFracht, zapiszFracht } = require("./lib/frachty");
 
 // Inicjalizacja Firebase Admin
 initializeApp();
@@ -528,7 +529,7 @@ async function sendFleetStatusEmail() {
   }
   const fleetData = fleetSnap.data();
   const vehicles = fleetData.fleetv2_vehicles || [];
-  const frachtyList = fleetData.fleetv2_frachty || [];
+  const frachtyList = await pobierzFrachty(db, fleetData);
 
   // 4. Pobierz pauzy
   const pauzySnap = await db.collection("pauzy").get();
@@ -997,6 +998,16 @@ exports.dailyBackup = onSchedule(
       await fleetFile.save(JSON.stringify(fleetData), { contentType: "application/json" });
       console.log(`✓ fleet backup: ${fleetCount} frachtów, ${vehCount} pojazdów → ${fleetFile.name}`);
 
+      // 1a. frachty — od 2026-09-24 własna kolekcja (`frachty/{id}`). Backup MUSI ją objąć,
+      // bo po sprzątnięciu tablicy `fleet/data` nie będzie już zawierać frachtów.
+      const frSnap = await db.collection("frachty").get();
+      if (!frSnap.empty) {
+        const frDane = frSnap.docs.map(d => ({ ...d.data(), id: d.id }));
+        const frFile = bucket.file(`backups/${ts}_frachty-kolekcja.json`);
+        await frFile.save(JSON.stringify(frDane), { contentType: "application/json" });
+        console.log(`✓ frachty (kolekcja): ${frDane.length} dokumentów → ${frFile.name}`);
+      }
+
       // 1b. fleet/frachty_archiwum — frachty z zamkniętych lat (od 2026-09-23 poza fleet/data,
       // bo dokument dobijał do limitu 1 MiB). Bez tego backup nie obejmowałby historii.
       const archSnap = await db.doc("fleet/frachty_archiwum").get();
@@ -1334,8 +1345,7 @@ exports.rozliczTraseNow = onCall(
     const { frachtId } = request.data || {};
     if (!frachtId || typeof frachtId !== "string") throw new HttpsError("invalid-argument", "Brak frachtId");
     const db = getFirestore();
-    const fleetSnap = await db.doc("fleet/data").get();
-    const fracht = ((fleetSnap.data() || {}).fleetv2_frachty || []).find(f => f && f.id === frachtId);
+    const fracht = await pobierzFracht(db, frachtId);
     if (!fracht) throw new HttpsError("not-found", "Fracht nie znaleziony");
     const events = (await db.collection("driverEvents").where("frachtId", "==", frachtId).get()).docs.map(d => d.data());
     const r = await zapiszRozliczenieTrasy(db, fracht, events, `recznie:${request.auth.token.email || request.auth.uid}`);
@@ -2827,11 +2837,11 @@ exports.trackerData = onRequest(
 
       const db = getFirestore();
 
-      // 1. Dane fleet — frachty są array w fleet/data.fleetv2_frachty
+      // 1. Dane fleet — pojazdy z fleet/data, frachty z kolekcji `frachty`
       const fleetSnap = await db.doc("fleet/data").get();
       const fleetData = fleetSnap.data() || {};
-      const frachtyList = fleetData.fleetv2_frachty || [];
       const vehicles = fleetData.fleetv2_vehicles || [];
+      const frachtyList = await pobierzFrachty(db, fleetData);
 
       const fracht = frachtyList.find(f => f && f.trackerToken === token);
       if (!fracht) return res.status(404).json({ error: "not_found" });
@@ -3842,7 +3852,7 @@ exports.finalizeTrip = onCall(
     if (!fleetSnap.exists) throw new HttpsError("not-found", "Brak fleet/data");
 
     const fleetData = fleetSnap.data() || {};
-    const frachtyList = fleetData.fleetv2_frachty || [];
+    const frachtyList = await pobierzFrachty(db, fleetData);
     const fracht = frachtyList.find(f => f && f.id === frachtId);
     if (!fracht) throw new HttpsError("not-found", "Fracht nie znaleziony");
 
@@ -3910,12 +3920,7 @@ exports.finalizeTrip = onCall(
       // Auto trigger waiting: nadal trackerOff aktualnego, NIE wysyłamy email
       if (!partnerRozladowano && source === "auto") {
         console.log(`[finalizeTrip] Round-trip — partner ${linkedId} not unloaded, waiting (source=auto): ${frachtId}`);
-        const newFrachtyList = frachtyList.map(f =>
-          f && f.id === frachtId
-            ? { ...f, trackerEnabled: false, tripFinalizedAt: f.tripFinalizedAt || nowIso }
-            : f
-        );
-        await fleetRef.update({ fleetv2_frachty: newFrachtyList });
+        await zapiszFracht(db, frachtId, { trackerEnabled: false, tripFinalizedAt: fracht.tripFinalizedAt || nowIso });
         await db.collection("emailLogs").add({
           sentAt: nowIso, type: "trip_summary_waiting", frachtId, source,
           status: "waiting_partner", linkedFrachtId: linkedId,
@@ -3926,20 +3931,16 @@ exports.finalizeTrip = onCall(
 
     const isRoundTripFinal = !!(linkedFracht && partnerRozladowano);
 
-    // Helper — write fleet/data. Plus przy round-trip success: synchronizuje
-    // tripEmailSentAt/tripEmailRecipient na PARTNERA też (idempotency block dla obu).
+    // Helper — zapis frachtu (kolekcja `frachty`, przejściowo tablica w fleet/data).
+    // Przy round-trip success synchronizuje tripEmailSentAt/tripEmailRecipient
+    // także na PARTNERA (idempotency block dla obu etapów kółka).
     const updateFracht = async (extraPatch = {}, syncPartner = false) => {
-      const newFrachtyList = frachtyList.map(f => {
-        if (!f) return f;
-        if (f.id === frachtId) {
-          return { ...f, trackerEnabled: false, tripFinalizedAt: f.tripFinalizedAt || nowIso, ...extraPatch };
-        }
-        if (syncPartner && linkedId && f.id === linkedId) {
-          return { ...f, ...extraPatch };
-        }
-        return f;
+      await zapiszFracht(db, frachtId, {
+        trackerEnabled: false,
+        tripFinalizedAt: fracht.tripFinalizedAt || nowIso,
+        ...extraPatch,
       });
-      await fleetRef.update({ fleetv2_frachty: newFrachtyList });
+      if (syncPartner && linkedId) await zapiszFracht(db, linkedId, extraPatch);
     };
 
     const recipientEmail = (fracht.zleceniodawcaEmail || "").trim();

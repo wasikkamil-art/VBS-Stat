@@ -165,6 +165,15 @@ const DATA_REF = () => doc(db, "fleet", "data");
 // a zapis trafia tam tylko wtedy, gdy ktoś edytuje stary fracht.
 const ARCHIWUM_REF = () => doc(db, "fleet", "frachty_archiwum");
 
+// KROK 3 (2026-09-24): frachty mieszkają we WŁASNEJ kolekcji `frachty/{id}`.
+// Powód: tablica w `fleet/data` dobijała do limitu 1 MiB, a każde wejście do apki
+// ściągało cały dokument (~700 KB) i każda zmiana jednego frachtu przesyłała całość.
+// Przez czas migracji kod obsługuje OBA źródła: dopóki kolekcja jest pusta,
+// działa stara ścieżka (tablice), więc kolejność „deploy → migracja" jest bezpieczna.
+const FRACHTY_COL = () => collection(db, "frachty");
+const FRACHT_REF = (id) => doc(db, "frachty", id);
+let _frachtyWKolekcji = false;                  // ustawiane przez listener kolekcji
+
 async function dbGet(key) {
   try {
     const snap = await getDoc(DATA_REF());
@@ -211,6 +220,10 @@ async function dbSet(key, value) {
 // write na fleet/data. Firestore odrzuca write jeśli ktoś inny zmienił dokument
 // w trakcie transakcji (i transakcja retry). Race condition niemożliwe.
 async function dbAddFracht(newFracht) {
+  if (_frachtyWKolekcji) {
+    await setDoc(FRACHT_REF(newFracht.id), newFracht);
+    return;
+  }
   _pendingWrites.add(SK.frachty);
   try {
     await runTransaction(db, async (tx) => {
@@ -226,6 +239,11 @@ async function dbAddFracht(newFracht) {
 }
 
 async function dbUpdateFracht(id, patch) {
+  if (_frachtyWKolekcji) {
+    // merge — patch bywa częściowy (status, kmStart/kmEnd, planAt…)
+    await setDoc(FRACHT_REF(id), patch, { merge: true });
+    return;
+  }
   _pendingWrites.add(SK.frachty);
   try {
     await runTransaction(db, async (tx) => {
@@ -253,6 +271,10 @@ async function dbUpdateFracht(id, patch) {
 }
 
 async function dbDeleteFracht(id) {
+  if (_frachtyWKolekcji) {
+    await deleteDoc(FRACHT_REF(id));
+    return;
+  }
   _pendingWrites.add(SK.frachty);
   try {
     await runTransaction(db, async (tx) => {
@@ -275,6 +297,15 @@ async function dbDeleteFracht(id) {
 }
 
 async function dbBulkAddFrachty(newFrachty) {
+  if (_frachtyWKolekcji) {
+    // writeBatch ma limit 500 operacji — import z Excela bywa większy.
+    for (let i = 0; i < newFrachty.length; i += 400) {
+      const batch = writeBatch(db);
+      for (const f of newFrachty.slice(i, i + 400)) batch.set(FRACHT_REF(f.id), f);
+      await batch.commit();
+    }
+    return;
+  }
   _pendingWrites.add(SK.frachty);
   try {
     await runTransaction(db, async (tx) => {
@@ -1427,6 +1458,26 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     </div>
   ) : null;
 
+  // ── FRACHTY z własnej kolekcji (KROK 3) ──
+  // Dopóki kolekcja jest pusta, nie ruszamy niczego — listę podaje stara ścieżka
+  // (tablice w fleet/data + archiwum). Gdy migracja wypełni kolekcję, listener
+  // przejmuje listę i od tego momentu zapisy też idą do kolekcji (_frachtyWKolekcji).
+  useEffect(() => {
+    if (!user) return;
+    const unsub = onSnapshot(FRACHTY_COL(), (snap) => {
+      if (snap.empty) {
+        if (_frachtyWKolekcji) console.warn("[frachty] kolekcja nagle pusta — zostawiam poprzednią listę");
+        return;
+      }
+      const lista = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
+      const pierwszyRaz = !_frachtyWKolekcji;
+      _frachtyWKolekcji = true;
+      setFrachtyList(lista);
+      if (pierwszyRaz) console.log(`[frachty] źródło = kolekcja (${lista.length} dokumentów)`);
+    }, (err) => console.error("[frachty] onSnapshot kolekcji:", err.code || "", err.message || err));
+    return () => unsub();
+  }, [user]);
+
   // ── LOAD — real-time onSnapshot ──
   useEffect(() => {
     let currentUnsub = null;
@@ -1500,7 +1551,11 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
       if (!_pendingWrites.has(SK.docs))    setDocs(data[SK.docs] || []);
       if (!_pendingWrites.has(SK.imi))     setImiRecords(data[SK.imi] || []);
       if (!_pendingWrites.has(SK.rent))    setRentRecords(data[SK.rent] || []);
-      if (!_pendingWrites.has(SK.frachty)) setFrachtyList([...(data[SK.frachty] || []), ...frachtyArchiwumRef.current]);
+      // Gdy frachty są już w kolekcji, tablice w fleet/data są tylko reliktem do
+      // posprzątania — NIE wolno im nadpisać listy z listenera kolekcji.
+      if (!_frachtyWKolekcji && !_pendingWrites.has(SK.frachty)) {
+        setFrachtyList([...(data[SK.frachty] || []), ...frachtyArchiwumRef.current]);
+      }
 
       // 🛡️ Zapamiętaj ilości z snapshot — używane przez safeDbSet
       Object.values(SK).forEach(key => {
@@ -1519,7 +1574,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
       // ma się ponowić przy następnym snapshocie. Inaczej sesja otwarta w chwili
       // migracji (albo chwilowy błąd sieci) zostawałaby bez historii aż do F5
       // — dokładnie to zdarzyło się 23.09.2026 przy przenosinach archiwum.
-      if (!frachtyArchiwumRef.current.length && !frachtyArchiwumLadujeRef.current) {
+      if (!_frachtyWKolekcji && !frachtyArchiwumRef.current.length && !frachtyArchiwumLadujeRef.current) {
         frachtyArchiwumLadujeRef.current = true;
         getDoc(ARCHIWUM_REF())
           .then((arch) => {

@@ -110,6 +110,19 @@ service cloud.firestore {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // FRACHTY — od 2026-09-24 własna kolekcja (wcześniej tablica w `fleet/data`,
+    // która dobijała do limitu 1 MiB). Uprawnienia jak dotąd dla tablicy:
+    // czyta każdy zalogowany, pisze admin i dyspozytor, kasuje admin.
+    // Kierowcy nadal NIE piszą bezpośrednio — ich zmiany idą przez Cloud Functions
+    // (Admin SDK omija reguły), tak samo jak przy tablicy.
+    // ═══════════════════════════════════════════════════════════════
+    match /frachty/{frachtId} {
+      allow read: if canRead();
+      allow create, update: if canEdit();
+      allow delete: if isAdmin();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // PLANY TRAS — snapshot planu przejazdu z Kalkulatora (Etap 1 planera).
     // Osobna kolekcja, NIE pole w `fleet/data` — dokument jest na 83% limitu
     // 1 MiB, a plan waży ~0,8 KB i doszedłby przy KAŻDYM zleceniu.
