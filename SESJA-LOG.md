@@ -4340,3 +4340,21 @@ i zdublowała różnicę (asercja długości tablicy, która to wcześniej chron
 bo tablic nie ma, ale do sprzątnięcia tym samym ruchem co przy frachtach.
 ⚠️ **Narzędzia cykliczne są gitignored** — poprawki żyją TYLKO na dysku MacBooka. `src/utils/
 daneRaportow.mjs` jest w repo, ale skrypty, które go wołają, już nie.
+
+### cd.4 — sprzątnięcie martwej ścieżki costs/imi
+
+Po potwierdzonej migracji poszły fallbacki: flagi `_kosztyWKolekcji`/`_imiWKolekcji` (mapa
+`PRZENIESIONE` jest teraz stała, bo docs/rent nadal są tablicami), gałęzie w listenerze
+`fleet/data`, warunki `if (_kosztyWKolekcji)` przy każdej mutacji, `SEED_COSTS` oraz
+**writeback całej tablicy kosztów** — ostatni taki useEffect w pliku. Warningi 175 → 174.
+
+⚠️ **Świadoma zmiana zachowania, nie przeoczenie**: usunięta gałąź `fleet/data` zawierała
+**normalizację kategorii przy odczycie** (`myto`/`nego`/`etoll` → `oplaty`, `naprawa` → `serwis`,
+nota z „nego" → `oplaty`). Listener kolekcji jej nie miał, więc formalnie wypadła już przy
+migracji. **Sprawdzone w bazie: dotyczyłaby 0 rekordów** — dane są znormalizowane u źródła
+(kategorie: inne 152, oplaty 119, telefon 117, ocpd 106, serwis 103, paliwo 93, wyplata 92,
+leasing 84, zus 80, polisa 50, slickshift 50, uruchomienie 49, hotele 45, imi 34, mandaty 11;
+zero `myto`/`nego`/`etoll`/`naprawa`).
+**Nie przywracam jej celowo**: łatanie przy odczycie znaczy, że w bazie zostaje zła wartość,
+a UI pokazuje dobrą — czyli skrypty raportowe (które czytają kolekcję wprost) widziałyby co
+innego niż aplikacja. Lepiej, żeby ewentualny regres był widoczny w obu miejscach naraz.

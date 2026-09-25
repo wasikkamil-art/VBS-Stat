@@ -175,16 +175,11 @@ const COSTS_COL = () => collection(db, "costs");
 const COST_REF = (id) => doc(db, "costs", id);
 const IMI_COL = () => collection(db, "imi");
 const IMI_REF = (id) => doc(db, "imi", id);
-let _kosztyWKolekcji = false;
-let _imiWKolekcji = false;
-
-// Tablice w fleet/data, które przeniosły się do kolekcji — używane przez generyczne
-// helpery dbAddToArrayField/dbDeleteFromArrayField/dbUpdateInArrayField, żeby wołający
-// (np. ImiTab) nie musiał wiedzieć, gdzie dane fizycznie leżą.
-const PRZENIESIONE = () => ({
-  ...(_kosztyWKolekcji ? { fleetv2_costs: COST_REF } : {}),
-  ...(_imiWKolekcji ? { fleetv2_imi: IMI_REF } : {}),
-});
+// Klucze, które KIEDYŚ były tablicami w `fleet/data`, a dziś są kolekcjami. Generyczne
+// helpery (dbAddToArrayField/dbDeleteFromArrayField/dbUpdateInArrayField) kierują po tej
+// mapie, dzięki czemu wołający (np. ImiTab) nie musi wiedzieć, gdzie dane fizycznie leżą.
+// Zostaje jako mapa, a nie sztywny kod, bo docs/rent nadal są tablicami.
+const PRZENIESIONE = { fleetv2_costs: COST_REF, fleetv2_imi: IMI_REF };
 
 async function dbGet(key) {
   try {
@@ -254,9 +249,9 @@ async function dbBulkAddFrachty(newFrachty) {
 // ═══════════════════════════════════════════════════════════════════════════
 // ZAPISY KOSZTÓW — dokument na koszt (od 2026-09-25)
 // ═══════════════════════════════════════════════════════════════════════════
-// Dopóki kolekcja pusta, zapis robi stary useEffect [costs] → safeDbSet(SK.costs).
-// Gdy kolekcja przejmie listę, ten writeback się wyłącza (patrz useEffect niżej),
-// a każda mutacja pisze swój dokument — koniec przesyłania 1185 pozycji przy zmianie jednej.
+// Każda mutacja pisze swój dokument — koniec przesyłania 1185 pozycji przy zmianie jednej.
+// Writeback całej tablicy (useEffect [costs] → safeDbSet) został USUNIĘTY 25.09.2026 razem
+// z tablicą: to ten sam mechanizm, przez który w kwietniu zginęło 10 frachtów.
 async function dbAddKoszt(koszt) {
   await setDoc(COST_REF(koszt.id), koszt);
 }
@@ -305,7 +300,7 @@ async function dbUpdateVehicleField(vehicleId, patch) {
 // Shrink-protection (2026-05-13): rzuć error gdy delete usunie > 1 element
 // lub gdy id nie istniał (defensive — chroni przed bug w callerze / race condition).
 async function dbDeleteFromArrayField(fieldKey, id) {
-  const ref = PRZENIESIONE()[fieldKey];
+  const ref = PRZENIESIONE[fieldKey];
   if (ref) { await deleteDoc(ref(id)); return; }
   let prev, next;
   await runTransaction(db, async (tx) => {
@@ -327,7 +322,7 @@ async function dbDeleteFromArrayField(fieldKey, id) {
 // Atomic add do array field w fleet/data (imi, docs, rent, costs).
 // Shrink-protection: dodanie zawsze powiększa o 1, więc next.length === prev.length + 1.
 async function dbAddToArrayField(fieldKey, item) {
-  const ref = PRZENIESIONE()[fieldKey];
+  const ref = PRZENIESIONE[fieldKey];
   if (ref) {
     if (!item || !item.id) throw new Error(`dbAddToArrayField(${fieldKey}): item.id wymagane`);
     await setDoc(ref(item.id), item);
@@ -365,7 +360,7 @@ async function dbAddToArrayFieldVerified(fieldKey, item, { maxRetries = 2, verif
       // Dla pola przeniesionego do kolekcji czytanie tablicy w fleet/data dawałoby
       // pewną porażkę weryfikacji mimo udanego zapisu (tablica jest wtedy pusta).
       await new Promise(r => setTimeout(r, verifyDelayMs));
-      const ref = PRZENIESIONE()[fieldKey];
+      const ref = PRZENIESIONE[fieldKey];
       let found;
       if (ref) {
         found = (await getDoc(ref(item.id))).exists();
@@ -392,7 +387,7 @@ async function dbAddToArrayFieldVerified(fieldKey, item, { maxRetries = 2, verif
 // Shrink-protection: update NIGDY nie zmienia długości (map zachowuje liczbę).
 // Plus: jeśli id nie istniał, no-op (nie commit) — chroni przed bug w callerze.
 async function dbUpdateInArrayField(fieldKey, id, patch) {
-  const ref = PRZENIESIONE()[fieldKey];
+  const ref = PRZENIESIONE[fieldKey];
   if (ref) { await setDoc(ref(id), patch, { merge: true }); return; }
   let prev, next;
   await runTransaction(db, async (tx) => {
@@ -494,8 +489,9 @@ async function dbAddVehicle(vehicle) {
 // Wywołanie fire-and-forget (nie blokuje UI, nie rzuca błędów).
 // logAction wydzielone do src/utils/logAction.js (2026-04-28 #5c krok 2).
 
-// Klucze tablic w dokumencie `fleet/data`. Frachtów tu NIE MA od 24.09.2026 —
-// mieszkają w kolekcji `frachty/{id}` (patrz FRACHTY_COL).
+// Klucze danych floty. Tablicami w `fleet/data` są już TYLKO: vehicles, categories, docs, rent.
+// `costs` i `imi` to od 25.09.2026 kolekcje (a frachty od 24.09) — ich klucze zostają, bo służą
+// jako identyfikator w mapie PRZENIESIONE i w wywołaniach typu dbAddToArrayField(SK.imi, …).
 const SK = { vehicles: "fleetv2_vehicles", costs: "fleetv2_costs", categories: "fleetv2_categories", docs: "fleetv2_docs", imi: "fleetv2_imi", rent: "fleetv2_rent" };
 
 // ─── SEED DATA ─────────────────────────────────────────────────────────────────
@@ -553,16 +549,9 @@ const SEED_CATEGORIES = [
   { id: "inne",          label: "Inne",                color: "#94a3b8", icon: "📋" },
 ];
 
-const SEED_COSTS = [
-  { id: "c1", vehicleId: "v1", category: "paliwo",        amountPLN: 3200, amountEUR: null, currency: "PLN", date: "2026-02-05", note: "Tankowanie DE+PL", liters: 480 },
-  { id: "c2", vehicleId: "v2", category: "leasing",       amountPLN: 2800, amountEUR: null, currency: "PLN", date: "2026-02-01", note: "Rata lutowa" },
-  { id: "c3", vehicleId: "v3", category: "naprawa",       amountPLN: 1450, amountEUR: null, currency: "PLN", date: "2026-02-12", note: "Wymiana sprzęgła" },
-  { id: "c4", vehicleId: "v1", category: "paliwo",        amountPLN: 3100, amountEUR: null, currency: "PLN", date: "2026-03-03", note: "Tankowanie NL", liters: 460 },
-  { id: "c5", vehicleId: "v3", category: "leasing",       amountPLN: 3400, amountEUR: null, currency: "PLN", date: "2026-03-01", note: "Rata marcowa" },
-  { id: "c6", vehicleId: "v2", category: "ubezpieczenie", amountPLN: 620,  amountEUR: null, currency: "PLN", date: "2026-03-08", note: "OC marzec" },
-  { id: "c7", vehicleId: "v1", category: "naprawa",       amountPLN: 880,  amountEUR: null, currency: "PLN", date: "2026-03-07", note: "Przegląd + olej" },
-];
-
+// SEED_COSTS usunięte 25.09.2026: demonstracyjne koszty były fallbackiem dla pustej tablicy
+// w `fleet/data`. Tablicy nie ma (koszty w kolekcji `costs`), a seed w roli fallbacku byłby
+// niebezpieczny — writeback zapisałby go do bazy jako prawdziwe dane.
 // ─── HELPERS ───────────────────────────────────────────────────────────────────
 function uid() { return Math.random().toString(36).slice(2, 10); }
 function fmtPLN(n) { return Number(n).toLocaleString("pl-PL", { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + " zł"; }
@@ -1467,10 +1456,10 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     // To dokładnie ten rodzaj kosztu Firestore, który ucięliśmy kierowcom w lipcu (−94,7%).
     if (isKierowca) return;
     const zrodla = [
-      { col: COSTS_COL, set: setCosts, nazwa: "koszty", flaga: (v) => { _kosztyWKolekcji = v; } },
-      { col: IMI_COL, set: setImiRecords, nazwa: "imi", flaga: (v) => { _imiWKolekcji = v; } },
+      { col: COSTS_COL, set: setCosts, nazwa: "koszty" },
+      { col: IMI_COL, set: setImiRecords, nazwa: "imi" },
     ];
-    const unsubs = zrodla.map(({ col, set, nazwa, flaga }) => {
+    const unsubs = zrodla.map(({ col, set, nazwa }) => {
       let mam = false;
       return onSnapshot(col(), (snap) => {
         if (snap.empty) {
@@ -1478,9 +1467,8 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
           return;
         }
         const lista = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
-        if (!mam) console.log(`[${nazwa}] źródło = kolekcja (${lista.length} dokumentów)`);
+        if (!mam) console.log(`[${nazwa}] kolekcja: ${lista.length} dokumentów`);
         mam = true;
-        flaga(true);
         set(lista);
       }, (err) => console.error(`[${nazwa}] onSnapshot kolekcji:`, err.code || "", err.message || err));
     });
@@ -1523,24 +1511,6 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
         setVehicles(migrated);
       }
 
-      // ⚠️ Po sprzątnięciu tablicy `data[SK.costs]` znika. Bez warunku na jej OBECNOŚĆ
-      // fallback podstawiłby demonstracyjne SEED_COSTS, a writeback niżej zapisałby ten
-      // seed z powrotem do `fleet/data` — czyli odtworzył tablicę, którą właśnie usunęliśmy,
-      // w dodatku ze śmieciami. Brak tablicy = listę poda listener kolekcji.
-      if (!_kosztyWKolekcji && !_pendingWrites.has(SK.costs) && Array.isArray(data[SK.costs])) {
-        const rawCosts = data[SK.costs].length ? data[SK.costs] : SEED_COSTS;
-        const patchedCosts = rawCosts.map(cost => {
-          const n = (cost.note || "").toLowerCase();
-          if (n.includes("nego") || n.includes("negometal")) return { ...cost, category: "oplaty" };
-          if (cost.category === "myto") return { ...cost, category: "oplaty" };
-          if (cost.category === "nego") return { ...cost, category: "oplaty" };
-          if (cost.category === "etoll") return { ...cost, category: "oplaty" };
-          if (cost.category === "naprawa") return { ...cost, category: "serwis" };
-          return cost;
-        });
-        setCosts(patchedCosts);
-      }
-
       if (!_pendingWrites.has(SK.categories)) {
         const loadedCats = data[SK.categories] || SEED_CATEGORIES;
         const REQUIRED_CATS = [
@@ -1562,8 +1532,6 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
       }
 
       if (!_pendingWrites.has(SK.docs))    setDocs(data[SK.docs] || []);
-      // jak wyżej: brak tablicy po sprzątnięciu ≠ „zero wpisów IMI"
-      if (!_imiWKolekcji && !_pendingWrites.has(SK.imi) && Array.isArray(data[SK.imi])) setImiRecords(data[SK.imi]);
       if (!_pendingWrites.has(SK.rent))    setRentRecords(data[SK.rent] || []);
 
       // 🛡️ Zapamiętaj ilości z snapshot — używane przez safeDbSet
@@ -1856,11 +1824,10 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   // Teraz każda mutacja przechodzi przez atomic helpers (dbAddVehicle, dbUpdateVehicleField,
   // dbAssignDriverToVehicle, dbUnassignDriverFromVehicle). Race condition niemożliwe.
   // useEffect(() => { if (loaded && vehicles.length > 0) safeDbSet(SK.vehicles, vehicles); },       [vehicles, loaded]);
-  // Writeback CAŁEJ tablicy kosztów — ostatni taki w tym pliku. Po przejściu na kolekcję
-  // musi zamilknąć: inaczej odtwarzałby tablicę w `fleet/data`, którą właśnie sprzątamy,
-  // i wracałby problem, przez który zginęło 10 frachtów w kwietniu (stale state nadpisuje
-  // świeże zmiany z innej karty). W trybie kolekcji zapisuje każda mutacja z osobna.
-  useEffect(() => { if (loaded && !_kosztyWKolekcji && costs.length > 0) safeDbSet(SK.costs, costs); }, [costs, loaded]);
+  // USUNIĘTY 25.09.2026 wraz z przenosinami kosztów do kolekcji: writeback CAŁEJ tablicy
+  // `useEffect([costs]) → safeDbSet(SK.costs)`. Był ostatnim takim w tym pliku — dokładnie ten
+  // mechanizm (stale state nadpisuje świeże zmiany z innej karty) kosztował 10 frachtów
+  // w kwietniu. Dziś zapisuje każda mutacja z osobna: dbAddKoszt / dbZapiszKoszt / dbUsunKoszt.
   useEffect(() => { if (loaded && categories.length > 0) safeDbSet(SK.categories, categories); }, [categories, loaded]);
   // FIX 2026-05-07 (faza 2): USUNIĘTY useEffect [docs, loaded] → safeDbSet.
   // onSave/onDelete/onEdit dokumentów używają atomic helpers (dbAddToArrayField,
@@ -1916,10 +1883,8 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     const costId = uid();
     const rekord = { ...entry, id: costId };
     setCosts((p) => [...p, rekord]);
-    if (_kosztyWKolekcji) {
-      try { await dbAddKoszt(rekord); }
-      catch (e) { console.error("addCost", e); showToast(`⚠️ Nie zapisano kosztu: ${e?.message || e}`); }
-    }
+    try { await dbAddKoszt(rekord); }
+    catch (e) { console.error("addCost", e); showToast(`⚠️ Nie zapisano kosztu: ${e?.message || e}`); }
     logAction("add", "costs", { id: costId, vehicleId: entry.vehicleId, category: entry.category, amount: entry.amount, currency: entry.currency });
     setShowAddCost(false);
     // Serwis bez kwoty → utwórz sprawę automatycznie
@@ -2395,12 +2360,10 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
     // Remove ALL existing costs for imported vehicles+months, then add new ones
     const doWymiany = (c) => IMPORT_VIDS.includes(c.vehicleId) && IMPORT_MONTHS.some(m => (c.date || "").startsWith(m));
-    if (_kosztyWKolekcji) {
-      // W trybie kolekcji „podmień" znaczy: skasuj konkretne dokumenty i dopisz nowe.
-      // Liczymy ID do usunięcia z aktualnego stanu PRZED setCosts, żeby nie zgadywać.
-      const usun = costs.filter(doWymiany).map(c => c.id);
-      dbBulkKoszty({ usun, dodaj: newCosts }).catch(e => { console.error("importAllCosts", e); showToast(`⚠️ Import niezapisany: ${e?.message || e}`); });
-    }
+    // „Podmień" znaczy: skasuj konkretne dokumenty i dopisz nowe. ID do usunięcia liczymy
+    // z aktualnego stanu PRZED setCosts, żeby nie zgadywać.
+    const usun = costs.filter(doWymiany).map(c => c.id);
+    dbBulkKoszty({ usun, dodaj: newCosts }).catch(e => { console.error("importAllCosts", e); showToast(`⚠️ Import niezapisany: ${e?.message || e}`); });
     setCosts(p => [...p.filter(c => !doWymiany(c)), ...newCosts]);
 
     // Also update rentRecords for all 3 months
@@ -2444,14 +2407,13 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   // zapisuje do bazy. Zostawione byłyby przyciskiem-pułapką: „zrobiłem migrację", a w bazie cisza.
 
   const deleteCost   = (id)    => {
-    markIntentionalDelete(SK.costs);
     setCosts((p) => p.filter((c) => c.id !== id));
-    if (_kosztyWKolekcji) dbUsunKoszt(id).catch(e => { console.error("deleteCost", e); showToast(`⚠️ Nie usunięto z bazy: ${e?.message || e}`); });
+    dbUsunKoszt(id).catch(e => { console.error("deleteCost", e); showToast(`⚠️ Nie usunięto z bazy: ${e?.message || e}`); });
     logAction("delete", "costs", { id }); showToast("Usunięto wpis");
   };
   const updateCost   = (updated) => {
     setCosts((p) => p.map((c) => c.id === updated.id ? updated : c));
-    if (_kosztyWKolekcji) dbZapiszKoszt(updated.id, updated).catch(e => { console.error("updateCost", e); showToast(`⚠️ Nie zapisano zmiany: ${e?.message || e}`); });
+    dbZapiszKoszt(updated.id, updated).catch(e => { console.error("updateCost", e); showToast(`⚠️ Nie zapisano zmiany: ${e?.message || e}`); });
     logAction("update", "costs", { id: updated.id, vehicleId: updated.vehicleId }); showToast("✅ Koszt zaktualizowany"); setEditCostId(null);
   };
   // Sync assignedDriver from driverHistory — aktywny kierowca (bez daty 'to')
@@ -3477,7 +3439,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                   onImport={(rows) => {
                     const withIds = rows.map(r => ({ ...r, id: uid() }));
                     setCosts(p => [...p, ...withIds]);
-                    if (_kosztyWKolekcji) dbBulkKoszty({ dodaj: withIds }).catch(e => { console.error("import kosztów", e); showToast(`⚠️ Import niezapisany: ${e?.message || e}`); });
+                    dbBulkKoszty({ dodaj: withIds }).catch(e => { console.error("import kosztów", e); showToast(`⚠️ Import niezapisany: ${e?.message || e}`); });
                     showToast(`✅ Zaimportowano ${withIds.length} kosztów`);
                     setShowCostsImport(false);
                   }}
