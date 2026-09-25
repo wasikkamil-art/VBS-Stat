@@ -4289,3 +4289,54 @@ a przed sprzątaniem komplet ID **i zgodność kwot co do grosza** (niezależne 
 zachowuje się jak dotąd (wszystkie nowe gałęzie są za flagami, które podnosi dopiero niepusty
 snapshot). Przełączenie źródła, zapisy do kolekcji i widok Koszty/IMI/Rentowność/Analizy
 **sprawdzimy po etapie 1 migracji**, którą odpala user.
+
+### cd.3 — migracja WYKONANA + naprawa narzędzi raportowych
+
+**Etap 1 i 2 wykonane przez usera.** Potwierdzenie z konsoli przed sprzątaniem:
+`[koszty] źródło = kolekcja (1185)` i `[imi] źródło = kolekcja (120)` — bez tego nie ruszaliśmy
+tablic, bo zrzut ekranu z Rejestru kosztów niczego nie rozstrzygał (tablica i kolekcja miały
+identyczną treść, więc obie dawały ten sam ekran).
+
+**Kontrola po migracji, niezależna od skryptu:**
+- `fleet/data`: **330,8 KB → 42,1 KB (32,3% → 4,1%)**, `fleetv2_costs` i `fleetv2_imi` **nieobecne**;
+  reszta nietknięta (vehicles 6, categories 19, rent 87, docs 7, records 72).
+- kolekcje: **costs 1185 / 611 917,47 EUR / 5 700 PLN**, **imi 120**, zero rekordów bez ID.
+- **kopia lokalna vs kolekcja rekord po rekordzie**: brakuje 0, różni się treścią 0.
+- sucha próba walidacji z `backup.yml` na żywych danych: **status OK, zero fałszywych alarmów**.
+
+🚨 **Znalezione przy okazji — generatory raportów były zepsute od 24.09.** Wczorajszy wpis
+wymieniał „generatory dashboardów, importy" w zakresie migracji frachtów, ale w kodzie tego nie było:
+**wszystkie** czytały `fleet/data → fleetv2_frachty`, czyli od doby **pustą tablicę**. Raporty
+wyszłyby z samymi zerami i **nie zgłosiłyby żadnego błędu**. Skala: comiesięczny raport dyspozytorów,
+analityka kierowców, rankingi, porównania YoY, myto.
+
+Dodatkowo `reconcile_andamur.mjs` (zadanie na 5–10.10) czytał tablicę kosztów i pisał do niej
+`tx.update(dref, { fleetv2_costs: na })` — po migracji **odtworzyłby pole w `fleet/data`** i po
+cichu nie skorygował niczego.
+
+**Naprawa: jedno miejsce zamiast dziesięciu.** Nowy **śledzony** moduł `src/utils/daneRaportow.mjs`
+(`pobierzFrachty`/`pobierzKoszty`/`pobierzImi`/`pobierzPojazdy`) — **rzuca wyjątkiem zamiast zwrócić
+pustą listę** (progi 400/900/100), bo cichy raport z zerami jest gorszy niż zatrzymanie. Podpięte
+w 11 narzędziach cyklicznych: `make_dashboard_{kierowcy,rankingi,porownanie,porownanie_v2,myto,
+lipiec,sierpien}.js`, `raport_dyspozytorzy_{kwiecien,maj,kw_maj,lipiec}.js`, `diagnose_dedup.mjs`,
+`reconcile_andamur.mjs`. Poprawione też stopki PDF (mówiły „fleet/data → fleetv2_frachty").
+
+W `reconcile_andamur.mjs` zapis przeszedł z transakcji na tablicy na **transakcję per dokument
+z asercją kwoty sprzed korekty** — bez niej korekta doszłaby do wartości zmienionej w międzyczasie
+i zdublowała różnicę (asercja długości tablicy, która to wcześniej chroniła, przestała istnieć).
+
+**Zweryfikowane uruchomieniem, nie samą składnią:**
+- `make_dashboard_porownanie_v2.js` liczy **czerwiec 18 fr. / 27 311 € / koszty 24 564,70 / zysk
+  2 746,30 / marża 10,06%** i **lipiec 31 fr. / 44 870 € / koszty 30 011,72 / zysk 14 858,28 /
+  33,11%** — **co do grosza** jak moje niezależne przeliczenie wprost z kolekcji;
+- `make_dashboard_sierpien.js` (wzorzec na wrzesień): sierpień **28 fr. / 41 370 €**, zgodnie
+  z korektą odnotowaną 23.09;
+- `raport_dyspozytorzy_lipiec.js`: 31 frachtów, ARO 15 / Aga 11;
+- `make_dashboard_{rankingi,kierowcy}.js`: PDF-y wygenerowane z realnymi liczbami;
+- `reconcile_andamur.mjs` na sucho: maj–sierpień Δ 0,00 (już zrekoncyliowane 18.09), czyli czyta
+  komplet — gdyby kolekcja była pusta, próg 900 by go zatrzymał.
+
+⚠️ **Zostaje martwa ścieżka tablicowa w `App.jsx`** (fallbacki dla costs/imi) — dziś bezczynna,
+bo tablic nie ma, ale do sprzątnięcia tym samym ruchem co przy frachtach.
+⚠️ **Narzędzia cykliczne są gitignored** — poprawki żyją TYLKO na dysku MacBooka. `src/utils/
+daneRaportow.mjs` jest w repo, ale skrypty, które go wołają, już nie.
