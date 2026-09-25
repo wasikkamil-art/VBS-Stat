@@ -136,6 +136,39 @@ if [ -d "$SOURCE_REPO" ]; then
     fi
 fi
 
+# === Backup atrap podglądowych (podglad/ — bez zrzutów danych) ===
+# `podglad/*` to harnessy Vite, którymi oglądamy widoki BEZ logowania (Paliwo, Analizy,
+# Kalkulator, Rozliczenie). Są gitignored, a niosą nietrywialną wiedzę: atrapy
+# `firebase/firestore`, konfiguracje portów i symulację ról.
+# `dane.json` POMIJAMY — to regenerowalne zrzuty z Firestore (do ~1 MB każdy), które
+# i tak mają kopię w backupach bazy; kopiowanie ich tu tylko puchłoby bez zysku.
+DEST_PODGLAD="$DEST_BASE/podglad"
+if [ -d "$SOURCE_REPO/podglad" ]; then
+    $DRY_RUN mkdir -p "$DEST_PODGLAD"
+    if [ -n "$DRY_RUN" ]; then
+        PG_COUNT=$(find "$SOURCE_REPO/podglad" -type f ! -name "dane.json" | wc -l | xargs)
+        echo "[DRY] rsync $PG_COUNT plików podglądu (bez dane.json) → $DEST_PODGLAD/"
+    else
+        PG_OK=0
+        for ATTEMPT in 1 2 3; do
+            RSYNC_ERR=$(rsync -a --update --exclude="dane.json" --exclude="node_modules" \
+                "$SOURCE_REPO/podglad/" "$DEST_PODGLAD/" 2>&1)
+            RC=$?
+            if [ "$RC" -eq 0 ] || [ "$RC" -eq 24 ]; then PG_OK=1; break; fi
+            echo "⚠️  rsync podglądu: kod $RC (próba $ATTEMPT/3): $(echo "$RSYNC_ERR" | tail -2 | tr '\n' ' ')"
+            sleep 5
+        done
+        if [ "$PG_OK" -eq 0 ]; then
+            echo "❌ Podgląd NIE zsynchronizowany po 3 próbach"
+            ERRORS=$((ERRORS + 1))
+            FAILED_STEPS="$FAILED_STEPS podglad"
+        fi
+        PG_N=$(find "$DEST_PODGLAD" -type f 2>/dev/null | wc -l | xargs)
+        PG_S=$(du -sh "$DEST_PODGLAD" 2>/dev/null | awk '{print $1}')
+        echo "✅ Podgląd: $DEST_PODGLAD/ ($PG_N plików, $PG_S) — bez dane.json"
+    fi
+fi
+
 # === Backup .env.local (1 kopia, overwrite) ===
 # iCloud Drive ma znanego buga "Resource deadlock avoided" przy cp do plików
 # które są w trakcie sync. Workaround: rm -f destination + retry 3x z sleep.

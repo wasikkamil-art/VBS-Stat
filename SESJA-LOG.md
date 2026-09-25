@@ -4415,5 +4415,12 @@ to może być świadome ograniczenie, a zmiana uprawnień to decyzja właścicie
 ℹ️ **Roli `podglad` nie ma dziś żadnego konta** — sprawdzona tylko teoretycznie, przez
 `DEFAULT_TABS_BY_ROLE`.
 
-⚠️ Podgląd jest w `podglad/` (gitignored) i **nie obejmuje go backup `tools/`**, który kopiuje
-tylko katalog główny. Kod atrapy jest tani do odtworzenia, `dane.json` (1 MB) regenerowalny.
+✅ **Domknięte**: backup obejmuje teraz także `podglad/` (`FleetStat-backup/podglad/`, rolling,
+**bez `dane.json`** — zrzuty są regenerowalne i mają kopię w backupach bazy, więc tylko puchłyby).
+Sprawdzone: 26 plików / 744 KB, wszystkie cztery harnessy (role, paliwo, kalkulator, rozliczenie),
+zero `dane.json`, kluczowe pliki bajt w bajt.
+
+ℹ️ **Uprawnienia Arka są CELOWE** — potwierdzone przez usera: „ja nadaję role". Zapisane w pamięci
+(`project_zakladka_analizy`), żeby przyszła sesja nie zgłaszała tego jako błędu ani nie dopisywała
+zakładek. Reguła ogólna: rozjazd „jawna lista vs domyślne roli" raportować, ale nigdy nie zmieniać
+samodzielnie.
