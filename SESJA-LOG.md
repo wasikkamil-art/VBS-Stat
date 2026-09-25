@@ -4181,3 +4181,57 @@ Kalkulator płaci tylko za PTV — ~80 zapytań/mc, darmowy próg (w logach: 17�
 Zidentyfikowane oszczędności (cache promptu ~⅓, limit stron, dedup załączników) — **user: „nie robimy
 nic, mam budżet"**. Szczegóły i decyzja w pamięci: `reference_koszt_anthropic`.
 ⚠️ Konsola Claude u usera pokazuje TYLKO zużycie aplikacji (Claude Code idzie z subskrypcji).
+
+## 2026-09-25 cd. — sprzątanie po migracji frachtów + porządek w pamięci
+
+**Punkt 4 z listy długu: martwa ścieżka tablicowa USUNIĘTA.** Po przenosinach frachtów do kolekcji
+kod obsługiwał jeszcze OBA źródła (przełącznik `_frachtyWKolekcji`, archiwum, transakcje na tablicy)
+— stan potrzebny w dobie migracji, dziś tylko ryzyko: gdyby listener kolekcji kiedyś padł, aplikacja
+po cichu wróciłaby do ścieżki, która nie ma danych. **−255 linii, +75.**
+
+- `src/App.jsx`: `dbAddFracht`/`dbUpdateFracht`/`dbDeleteFracht`/`dbBulkAddFrachty` to dziś po jednej
+  operacji na dokumencie zamiast `runTransaction` na tablicy; zniknęły `ARCHIWUM_REF`,
+  `frachtyArchiwumRef`, doczytywanie archiwum w listenerze `fleet/data` i klucz `SK.frachty`.
+- `functions/lib/frachty.js`: 69 → 37 linii, bez fallbacku na tablicę i archiwum; wywołania
+  `pobierzFrachty(db, fleetData)` → `pobierzFrachty(db)`.
+- `src/components/DriverPanel.jsx`: dwa komentarze mówiące, że frachty są w tablicy.
+- `firestore.rules`: tylko komentarz (83% → 32%), **bez zmiany zachowania, więc BEZ deployu reguł**.
+  Asercje `notEmptyIfPresent('fleetv2_frachty')` / `noBigShrink(...)` ZOSTAWIONE — są dziś no-opem
+  (pola nie ma), kosztują zero i chronią, gdyby ktoś kiedyś zapisał tam tablicę.
+
+**Backupy — przy okazji uszczelnione** (to była realna dziura, nie kosmetyka): i CF `dailyBackup`,
+i GitHub Actions zapisywały kopię frachtów **warunkowo** (`if (frDane.length)`), więc pusty odczyt
+kolekcji dawał brak pliku i CISZĘ. Teraz zapis jest bezwarunkowy, a 0 dokumentów podnosi alarm.
+W Actions wypadł też `MIN_EXPECTED.fleetv2_frachty` (pilnował tablicy, która nie istnieje) i cała
+obsługa `fleet/frachty_archiwum`; `backupLog` zamiast `fleetCount` zapisuje `frachtyCount` z kolekcji.
+
+**Zweryfikowane na żywo (nie samym buildem):**
+- `functions/lib/frachty.js` odpalony przeciw produkcyjnej bazie: `pobierzFrachty` = **730 szt.,
+  761 499,00 €** — co do grosza jak przed uproszczeniem; `pobierzFracht` po ID zwraca rekord
+  identyczny z tym z listy; dla nieistniejącego ID `null`, a `zapiszFracht` **false i zero zapisów**.
+- Sucha próba walidacji z `backup.yml` na żywych danych: status OK, **zero fałszywych alarmów**
+  (frachty 730, pojazdy 6, koszty 1185, kategorie 19, rent 87), a przy pustej kolekcji alarm ODPALA.
+- **Deployed CF sprawdzona na żywo**: `trackerData` z prawdziwym tokenem zwraca **HTTP 403
+  `{"error":"disabled"}`**, a z wymyślonym **404 `{"error":"not_found"}`**. To rozstrzygający test,
+  nie kosmetyczny: żeby odpowiedzieć „disabled", funkcja musi NAJPIERW znaleźć fracht po tokenie
+  przez uproszczone `pobierzFrachty(db)` — gdyby odczyt kolekcji był zepsuty, dostalibyśmy 404.
+  (Wszystkie 6 trackerów jest wyłączonych, więc nic się przy okazji nie włączyło.)
+- `npm run lint` 0 errors (186 warnings, bez zmian), `npm run build` zielony.
+- Kontrola stanu bazy na starcie sesji: kolekcja 730, `fleetv2_frachty` **0 elementów**,
+  `fleet/frachty_archiwum` **nie istnieje** — czyli usunięty kod naprawdę nie miał czego czytać.
+
+⚠️ **NIEZWERYFIKOWANE**: front za loginem. Nie klikałem dodania/edycji/usunięcia frachtu ani importu
+zbiorczego w prawdziwej aplikacji — to samo ograniczenie co zawsze. Ryzyko niskie (ścieżka kolekcyjna
+jest ta sama, która działa na produkcji od 24.09; usunięto tylko nieaktywne odgałęzienie), ale
+**pierwsze dodanie i pierwsza edycja frachtu po deployu są warte sprawdzenia**.
+
+**Pamięć Claude — indeks przekroczył limit i gubił wpisy.** `MEMORY.md` miał 26,3 KB przy progu
+24,4 KB, przez co przy starcie sesji **ostatni wpis (opłaty drogowe) nie wczytał się w ogóle**.
+Indeks przepisany: **26,3 → 10,2 KB**, 56 wpisów pogrupowanych w sekcje, treść została w plikach
+tematycznych (sprawdzone, że nic nie ginie — każdy skrócony fakt ma pokrycie w pliku docelowym).
+Przy okazji naprawione **stale fakty**, które wprowadzałyby w błąd następną sesję:
+`feedback_raport_dyspozytorow_miesieczny` i `feedback_google_sheet_total26_fill` wskazywały jako
+źródło tablicę `fleetv2_frachty` — **skrypt raportu czytałby dziś pustkę**; dopisane, że źródłem jest
+kolekcja. Zaktualizowane też `project_planer_tras` (Etap 2 zrobiony, ale `planyTras`/`realizacjeTras`
+mają po 0 dokumentów), `project_kalkulator_tras` (Faza 2 zrobiona, CORS Nominatim potwierdzony),
+`reference_fleetdata_zapisy` i `project_fleet_data_limit`.

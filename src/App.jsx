@@ -158,21 +158,14 @@ const tsToMs = (ts) => {
 // Dane w jednym dokumencie fleet/data (merge strategy)
 
 const DATA_REF = () => doc(db, "fleet", "data");
-// ARCHIWUM FRACHTÓW (od 2026-09-23): zamknięte lata trzymamy w osobnym dokumencie,
-// bo `fleet/data` dobijał do limitu 1 MiB (83% przy przyroście ~63 KB/mc).
-// Ten sam klucz pola, inny dokument — dzięki temu kod czytający listę się nie zmienia.
-// Archiwum jest niezmienne w praktyce, więc czytamy je JEDNORAZOWO (getDoc, nie listener),
-// a zapis trafia tam tylko wtedy, gdy ktoś edytuje stary fracht.
-const ARCHIWUM_REF = () => doc(db, "fleet", "frachty_archiwum");
 
-// KROK 3 (2026-09-24): frachty mieszkają we WŁASNEJ kolekcji `frachty/{id}`.
-// Powód: tablica w `fleet/data` dobijała do limitu 1 MiB, a każde wejście do apki
-// ściągało cały dokument (~700 KB) i każda zmiana jednego frachtu przesyłała całość.
-// Przez czas migracji kod obsługuje OBA źródła: dopóki kolekcja jest pusta,
-// działa stara ścieżka (tablice), więc kolejność „deploy → migracja" jest bezpieczna.
+// FRACHTY: własna kolekcja `frachty/{id}` (KROK 3, 2026-09-24, migracja wykonana).
+// Wcześniej była tablica `fleet/data.fleetv2_frachty` + dokument `fleet/frachty_archiwum`
+// na zamknięte lata — oba USUNIĘTE z bazy, razem z obsługującym je kodem (25.09.2026).
+// Powód przenosin: dokument dobijał do limitu 1 MiB, każde wejście do apki ściągało
+// całe ~700 KB, a zmiana jednego frachtu przesyłała wszystkie 730.
 const FRACHTY_COL = () => collection(db, "frachty");
 const FRACHT_REF = (id) => doc(db, "frachty", id);
-let _frachtyWKolekcji = false;                  // ustawiane przez listener kolekcji
 
 async function dbGet(key) {
   try {
@@ -210,113 +203,32 @@ async function dbSet(key, value) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ATOMIC FRACHTY OPERATIONS — runTransaction żeby uniknąć array race condition
+// ZAPISY FRACHTÓW — dokument na fracht, bez read-modify-write
 // ═══════════════════════════════════════════════════════════════════════════
-// PRZED 2026-04-30: useEffect writebackował CAŁĄ tablicę fleetv2_frachty przy
-// każdej zmianie state. Multi-tab race condition: stary klient nadpisywał świeże
-// dodania innych klientów (10 frachtów zaginęło 27-30.04).
-//
-// FIX: każda mutacja przechodzi przez runTransaction, który atomic read-modify-
-// write na fleet/data. Firestore odrzuca write jeśli ktoś inny zmienił dokument
-// w trakcie transakcji (i transakcja retry). Race condition niemożliwe.
+// Historia problemu: do 2026-04-30 useEffect writebackował CAŁĄ tablicę przy każdej
+// zmianie state i multi-tab race gubił rekordy (10 frachtów zaginęło 27-30.04).
+// Ratunkiem był runTransaction na `fleet/data`. Od przenosin do kolekcji (24.09.2026)
+// problem znika u źródła: każdy fracht to osobny dokument, więc zapis dotyka tylko jego
+// i nie ma czego nadpisać.
 async function dbAddFracht(newFracht) {
-  if (_frachtyWKolekcji) {
-    await setDoc(FRACHT_REF(newFracht.id), newFracht);
-    return;
-  }
-  _pendingWrites.add(SK.frachty);
-  try {
-    await runTransaction(db, async (tx) => {
-      const snap = await tx.get(DATA_REF());
-      const list = (snap.data() || {})[SK.frachty] || [];
-      tx.update(DATA_REF(), { [SK.frachty]: [newFracht, ...list] });
-    });
-    setTimeout(() => _pendingWrites.delete(SK.frachty), WRITE_COOLDOWN);
-  } catch (e) {
-    _pendingWrites.delete(SK.frachty);
-    throw e;
-  }
+  await setDoc(FRACHT_REF(newFracht.id), newFracht);
 }
 
 async function dbUpdateFracht(id, patch) {
-  if (_frachtyWKolekcji) {
-    // merge — patch bywa częściowy (status, kmStart/kmEnd, planAt…)
-    await setDoc(FRACHT_REF(id), patch, { merge: true });
-    return;
-  }
-  _pendingWrites.add(SK.frachty);
-  try {
-    await runTransaction(db, async (tx) => {
-      const snap = await tx.get(DATA_REF());
-      const list = (snap.data() || {})[SK.frachty] || [];
-      if (list.some(f => f && f.id === id)) {
-        tx.update(DATA_REF(), {
-          [SK.frachty]: list.map(f => f && f.id === id ? { ...f, ...patch } : f),
-        });
-        return;
-      }
-      // Fracht z zamkniętego roku — siedzi w archiwum.
-      const arch = await tx.get(ARCHIWUM_REF());
-      const stare = (arch.data() || {})[SK.frachty] || [];
-      if (!stare.some(f => f && f.id === id)) throw new Error(`Fracht ${id} nie znaleziony ani w bieżących, ani w archiwum`);
-      tx.update(ARCHIWUM_REF(), {
-        [SK.frachty]: stare.map(f => f && f.id === id ? { ...f, ...patch } : f),
-      });
-    });
-    setTimeout(() => _pendingWrites.delete(SK.frachty), WRITE_COOLDOWN);
-  } catch (e) {
-    _pendingWrites.delete(SK.frachty);
-    throw e;
-  }
+  // merge — patch bywa częściowy (status, kmStart/kmEnd, planAt…)
+  await setDoc(FRACHT_REF(id), patch, { merge: true });
 }
 
 async function dbDeleteFracht(id) {
-  if (_frachtyWKolekcji) {
-    await deleteDoc(FRACHT_REF(id));
-    return;
-  }
-  _pendingWrites.add(SK.frachty);
-  try {
-    await runTransaction(db, async (tx) => {
-      const snap = await tx.get(DATA_REF());
-      const list = (snap.data() || {})[SK.frachty] || [];
-      if (list.some(f => f && f.id === id)) {
-        tx.update(DATA_REF(), { [SK.frachty]: list.filter(f => f && f.id !== id) });
-        return;
-      }
-      const arch = await tx.get(ARCHIWUM_REF());
-      const stare = (arch.data() || {})[SK.frachty] || [];
-      if (!stare.some(f => f && f.id === id)) return;   // już go nie ma — nic do roboty
-      tx.update(ARCHIWUM_REF(), { [SK.frachty]: stare.filter(f => f && f.id !== id) });
-    });
-    setTimeout(() => _pendingWrites.delete(SK.frachty), WRITE_COOLDOWN);
-  } catch (e) {
-    _pendingWrites.delete(SK.frachty);
-    throw e;
-  }
+  await deleteDoc(FRACHT_REF(id));
 }
 
 async function dbBulkAddFrachty(newFrachty) {
-  if (_frachtyWKolekcji) {
-    // writeBatch ma limit 500 operacji — import z Excela bywa większy.
-    for (let i = 0; i < newFrachty.length; i += 400) {
-      const batch = writeBatch(db);
-      for (const f of newFrachty.slice(i, i + 400)) batch.set(FRACHT_REF(f.id), f);
-      await batch.commit();
-    }
-    return;
-  }
-  _pendingWrites.add(SK.frachty);
-  try {
-    await runTransaction(db, async (tx) => {
-      const snap = await tx.get(DATA_REF());
-      const list = (snap.data() || {})[SK.frachty] || [];
-      tx.update(DATA_REF(), { [SK.frachty]: [...list, ...newFrachty] });
-    });
-    setTimeout(() => _pendingWrites.delete(SK.frachty), WRITE_COOLDOWN);
-  } catch (e) {
-    _pendingWrites.delete(SK.frachty);
-    throw e;
+  // writeBatch ma limit 500 operacji — import z Excela bywa większy.
+  for (let i = 0; i < newFrachty.length; i += 400) {
+    const batch = writeBatch(db);
+    for (const f of newFrachty.slice(i, i + 400)) batch.set(FRACHT_REF(f.id), f);
+    await batch.commit();
   }
 }
 
@@ -515,7 +427,9 @@ async function dbAddVehicle(vehicle) {
 // Wywołanie fire-and-forget (nie blokuje UI, nie rzuca błędów).
 // logAction wydzielone do src/utils/logAction.js (2026-04-28 #5c krok 2).
 
-const SK = { vehicles: "fleetv2_vehicles", costs: "fleetv2_costs", categories: "fleetv2_categories", docs: "fleetv2_docs", imi: "fleetv2_imi", rent: "fleetv2_rent", frachty: "fleetv2_frachty" };
+// Klucze tablic w dokumencie `fleet/data`. Frachtów tu NIE MA od 24.09.2026 —
+// mieszkają w kolekcji `frachty/{id}` (patrz FRACHTY_COL).
+const SK = { vehicles: "fleetv2_vehicles", costs: "fleetv2_costs", categories: "fleetv2_categories", docs: "fleetv2_docs", imi: "fleetv2_imi", rent: "fleetv2_rent" };
 
 // ─── SEED DATA ─────────────────────────────────────────────────────────────────
 const SEED_VEHICLES = [
@@ -1368,9 +1282,6 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   const [driverActivities, setDriverActivities] = useState([]);
   // Zlecenie „wysłane" do Kalkulatora tras (przycisk w oknie frachtu) — punkty, daty, pojazd.
   const [kalkPrefill, setKalkPrefill] = useState(null);
-  // Frachty z zamkniętych lat — osobny dokument, czytany raz na sesję (patrz ARCHIWUM_REF).
-  const frachtyArchiwumRef = useRef([]);
-  const frachtyArchiwumLadujeRef = useRef(false);   // blokada równoległych prób odczytu
   const [fuelEntries, setFuelEntries] = useState([]);
   const [driverDocs, setDriverDocs] = useState([]);
   const [pauzy, setPauzy] = useState([]);
@@ -1458,22 +1369,22 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     </div>
   ) : null;
 
-  // ── FRACHTY z własnej kolekcji (KROK 3) ──
-  // Dopóki kolekcja jest pusta, nie ruszamy niczego — listę podaje stara ścieżka
-  // (tablice w fleet/data + archiwum). Gdy migracja wypełni kolekcję, listener
-  // przejmuje listę i od tego momentu zapisy też idą do kolekcji (_frachtyWKolekcji).
+  // ── FRACHTY z kolekcji `frachty/{id}` — jedyne źródło listy ──
+  // Pusty snapshot traktujemy jako podejrzany i ZOSTAWIAMY poprzednią listę: przy 730
+  // dokumentach „zero" to prędzej chwilowy błąd uprawnień niż prawda o bazie, a wyczyszczenie
+  // listy pociągnęłoby za sobą puste raporty i Rentowność (por. incydent z archiwum 23.09).
   useEffect(() => {
     if (!user) return;
+    let mam = false;
     const unsub = onSnapshot(FRACHTY_COL(), (snap) => {
       if (snap.empty) {
-        if (_frachtyWKolekcji) console.warn("[frachty] kolekcja nagle pusta — zostawiam poprzednią listę");
+        if (mam) console.warn("[frachty] kolekcja nagle pusta — zostawiam poprzednią listę");
         return;
       }
       const lista = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
-      const pierwszyRaz = !_frachtyWKolekcji;
-      _frachtyWKolekcji = true;
+      if (!mam) console.log(`[frachty] kolekcja: ${lista.length} dokumentów`);
+      mam = true;
       setFrachtyList(lista);
-      if (pierwszyRaz) console.log(`[frachty] źródło = kolekcja (${lista.length} dokumentów)`);
     }, (err) => console.error("[frachty] onSnapshot kolekcji:", err.code || "", err.message || err));
     return () => unsub();
   }, [user]);
@@ -1551,11 +1462,6 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
       if (!_pendingWrites.has(SK.docs))    setDocs(data[SK.docs] || []);
       if (!_pendingWrites.has(SK.imi))     setImiRecords(data[SK.imi] || []);
       if (!_pendingWrites.has(SK.rent))    setRentRecords(data[SK.rent] || []);
-      // Gdy frachty są już w kolekcji, tablice w fleet/data są tylko reliktem do
-      // posprzątania — NIE wolno im nadpisać listy z listenera kolekcji.
-      if (!_frachtyWKolekcji && !_pendingWrites.has(SK.frachty)) {
-        setFrachtyList([...(data[SK.frachty] || []), ...frachtyArchiwumRef.current]);
-      }
 
       // 🛡️ Zapamiętaj ilości z snapshot — używane przez safeDbSet
       Object.values(SK).forEach(key => {
@@ -1567,29 +1473,6 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
       });
 
       setLoaded(true);
-
-      // Archiwum frachtów: dokładane do listy, dokument `fleet/data` zostaje mały.
-      // Stare lata się nie zmieniają, więc listener jest zbędny — wystarczy getDoc.
-      // Flagę „mam" ustawiamy DOPIERO po udanym odczycie: pusta albo nieudana próba
-      // ma się ponowić przy następnym snapshocie. Inaczej sesja otwarta w chwili
-      // migracji (albo chwilowy błąd sieci) zostawałaby bez historii aż do F5
-      // — dokładnie to zdarzyło się 23.09.2026 przy przenosinach archiwum.
-      if (!_frachtyWKolekcji && !frachtyArchiwumRef.current.length && !frachtyArchiwumLadujeRef.current) {
-        frachtyArchiwumLadujeRef.current = true;
-        getDoc(ARCHIWUM_REF())
-          .then((arch) => {
-            const stare = arch.exists() ? (arch.data()[SK.frachty] || []) : [];
-            if (!stare.length) return;                      // brak archiwum → spróbujemy ponownie
-            frachtyArchiwumRef.current = stare;
-            setFrachtyList((biezace) => {
-              const sa = new Set(biezace.map((f) => f && f.id));
-              return [...biezace, ...stare.filter((f) => f && !sa.has(f.id))];
-            });
-            console.log(`[archiwum] dołączono ${stare.length} frachtów z zamkniętych lat`);
-          })
-          .catch((e) => console.warn("[archiwum] nie udało się wczytać:", e?.message || e))
-          .finally(() => { frachtyArchiwumLadujeRef.current = false; });
-      }
     }, (err) => {
       console.error(`[onSnapshot fleet/data] error (try ${retryCount + 1}/${MAX_RETRIES})`, err.code || "", err.message || err);
       // Auto-retry przy chwilowych disconnects (token refresh po wyloguj+zaloguj,
@@ -1881,10 +1764,6 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   // Wcześniej cichy writeback mógł cofać delete (28 IMI zniknęło-wróciło 2026-05-06 wieczór).
   // useEffect(() => { if (loaded && imiRecords.length > 0) safeDbSet(SK.imi, imiRecords); },        [imiRecords, loaded]);
   useEffect(() => { if (loaded && rentRecords.length > 0) safeDbSet(SK.rent, rentRecords); },     [rentRecords, loaded]);
-  // FIX 2026-04-30: USUNIĘTY useEffect który writebackował całą tablicę frachtyList do Firestore.
-  // Powodował race condition multi-tab — 10 frachtów zaginęło 27-30.04. Teraz każda mutacja
-  // przechodzi przez dbAddFracht/dbUpdateFracht/dbDeleteFracht/dbBulkAddFrachty (runTransaction).
-  // useEffect(() => { if (loaded && frachtyList.length > 0) safeDbSet(SK.frachty, frachtyList); }, [frachtyList, loaded]);
 
 
   // ── CSS INJECTION ──

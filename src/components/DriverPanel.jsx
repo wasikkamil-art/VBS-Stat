@@ -437,7 +437,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
     // Jeśli wartość się nie zmieniła — nie rób nic
     if (Number(fracht[field]) === num) return;
     try {
-      // Frachty są w tablicy fleet/data.fleetv2_frachty — zapisuj przez setFrachtyList
+      // Zapis frachtu idzie przez rodzica (onUpdateFracht → dbUpdateFracht → kolekcja `frachty`)
       onUpdateFracht(fracht.id, { [field]: num });
       logAction(`manual_${field}`, "frachty", { frachtId: fracht.id, km: num });
       showToast("✅ Zapisano stan licznika");
@@ -513,7 +513,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
           // Nie nadpisuj ręcznie wpisanej wartości (kierowca mógł już skorygować)
           if (fracht[kmField] && Math.abs(Number(fracht[kmField]) - km) < 5) return;
           try {
-            // Frachty w tablicy fleet/data.fleetv2_frachty — zapisuj przez setFrachtyList parent
+            // Zapis frachtu idzie przez rodzica (onUpdateFracht → dbUpdateFracht → kolekcja `frachty`)
             onUpdateFracht(fracht.id, { [kmField]: km });
             logAction(`can_${kmField}`, "frachty", { frachtId: fracht.id, km });
           } catch (e) {

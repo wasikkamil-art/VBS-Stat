@@ -124,8 +124,9 @@ service cloud.firestore {
 
     // ═══════════════════════════════════════════════════════════════
     // PLANY TRAS — snapshot planu przejazdu z Kalkulatora (Etap 1 planera).
-    // Osobna kolekcja, NIE pole w `fleet/data` — dokument jest na 83% limitu
-    // 1 MiB, a plan waży ~0,8 KB i doszedłby przy KAŻDYM zleceniu.
+    // Osobna kolekcja, NIE pole w `fleet/data`: plan waży ~0,8 KB i doszedłby przy
+    // KAŻDYM zleceniu, a dokument był wtedy na 83% limitu 1 MiB (dziś 32% — frachty
+    // wyprowadzone do kolekcji — ale zasada „nowe dane nie idą do fleet/data" zostaje).
     // ═══════════════════════════════════════════════════════════════
     match /planyTras/{frachtId} {
       allow read: if canRead();

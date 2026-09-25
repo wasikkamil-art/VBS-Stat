@@ -529,7 +529,7 @@ async function sendFleetStatusEmail() {
   }
   const fleetData = fleetSnap.data();
   const vehicles = fleetData.fleetv2_vehicles || [];
-  const frachtyList = await pobierzFrachty(db, fleetData);
+  const frachtyList = await pobierzFrachty(db);
 
   // 4. Pobierz pauzy
   const pauzySnap = await db.collection("pauzy").get();
@@ -989,33 +989,26 @@ exports.dailyBackup = onSchedule(
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
 
     try {
-      // 1. fleet/data — głowny dokument (pojazdy, frachty, koszty, kategorie, docs, imi, rent)
+      // 1. fleet/data — pojazdy, koszty, kategorie, docs, imi, rent (frachtów tu NIE MA od 24.09.2026)
       const fleetSnap = await db.doc("fleet/data").get();
       const fleetData = fleetSnap.data() || {};
-      const fleetCount = (fleetData.fleetv2_frachty || []).length;
       const vehCount = (fleetData.fleetv2_vehicles || []).length;
+      const costCount = (fleetData.fleetv2_costs || []).length;
       const fleetFile = bucket.file(`backups/${ts}_fleet-data.json`);
       await fleetFile.save(JSON.stringify(fleetData), { contentType: "application/json" });
-      console.log(`✓ fleet backup: ${fleetCount} frachtów, ${vehCount} pojazdów → ${fleetFile.name}`);
+      console.log(`✓ fleet backup: ${vehCount} pojazdów, ${costCount} kosztów → ${fleetFile.name}`);
 
-      // 1a. frachty — od 2026-09-24 własna kolekcja (`frachty/{id}`). Backup MUSI ją objąć,
-      // bo po sprzątnięciu tablicy `fleet/data` nie będzie już zawierać frachtów.
+      // 1a. frachty — kolekcja `frachty/{id}`, JEDYNE źródło od 24.09.2026 (tablica i dokument
+      // archiwum usunięte). Zapisujemy BEZWARUNKOWO: pusty odczyt to nie jest „nic do backupu",
+      // tylko najgorszy możliwy stan i musi być głośny, a nie cicho pominięty.
       const frSnap = await db.collection("frachty").get();
-      if (!frSnap.empty) {
-        const frDane = frSnap.docs.map(d => ({ ...d.data(), id: d.id }));
-        const frFile = bucket.file(`backups/${ts}_frachty-kolekcja.json`);
-        await frFile.save(JSON.stringify(frDane), { contentType: "application/json" });
+      const frDane = frSnap.docs.map(d => ({ ...d.data(), id: d.id }));
+      const frFile = bucket.file(`backups/${ts}_frachty-kolekcja.json`);
+      await frFile.save(JSON.stringify(frDane), { contentType: "application/json" });
+      if (frDane.length < 200) {
+        console.error(`🚨 frachty: tylko ${frDane.length} dokumentów w kolekcji (oczekiwane >200) — SPRAWDŹ BAZĘ`);
+      } else {
         console.log(`✓ frachty (kolekcja): ${frDane.length} dokumentów → ${frFile.name}`);
-      }
-
-      // 1b. fleet/frachty_archiwum — frachty z zamkniętych lat (od 2026-09-23 poza fleet/data,
-      // bo dokument dobijał do limitu 1 MiB). Bez tego backup nie obejmowałby historii.
-      const archSnap = await db.doc("fleet/frachty_archiwum").get();
-      if (archSnap.exists) {
-        const archData = archSnap.data() || {};
-        const archFile = bucket.file(`backups/${ts}_fleet-frachty-archiwum.json`);
-        await archFile.save(JSON.stringify(archData), { contentType: "application/json" });
-        console.log(`✓ archiwum frachtów: ${(archData.fleetv2_frachty || []).length} frachtów → ${archFile.name}`);
       }
 
       // 2. driverEvents — ostatnie 90 dni (krytyczne dla audytu trasy)
@@ -1050,8 +1043,9 @@ exports.dailyBackup = onSchedule(
       // 5. Audit trail — zapisz w Firestore meta o backup (do monitoring)
       await db.collection("backupLog").add({
         ts: new Date().toISOString(),
-        fleetCount,
+        frachtyCount: frDane.length,   // od 24.09.2026 z kolekcji, nie z tablicy w fleet/data
         vehCount,
+        costCount,
         eventsCount: events.length,
         auditCount: audit.length,
         cleanedOldBackups: deleted,
@@ -2841,7 +2835,7 @@ exports.trackerData = onRequest(
       const fleetSnap = await db.doc("fleet/data").get();
       const fleetData = fleetSnap.data() || {};
       const vehicles = fleetData.fleetv2_vehicles || [];
-      const frachtyList = await pobierzFrachty(db, fleetData);
+      const frachtyList = await pobierzFrachty(db);
 
       const fracht = frachtyList.find(f => f && f.trackerToken === token);
       if (!fracht) return res.status(404).json({ error: "not_found" });
@@ -3852,7 +3846,7 @@ exports.finalizeTrip = onCall(
     if (!fleetSnap.exists) throw new HttpsError("not-found", "Brak fleet/data");
 
     const fleetData = fleetSnap.data() || {};
-    const frachtyList = await pobierzFrachty(db, fleetData);
+    const frachtyList = await pobierzFrachty(db);
     const fracht = frachtyList.find(f => f && f.id === frachtId);
     if (!fracht) throw new HttpsError("not-found", "Fracht nie znaleziony");
 

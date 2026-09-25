@@ -61,7 +61,6 @@ jobs:
             fleetv2_vehicles: 4,
             fleetv2_costs: 100,
             fleetv2_categories: 10,
-            fleetv2_frachty: 50,
             fleetv2_rent: 10
           };
 
@@ -72,21 +71,12 @@ jobs:
             fs.mkdirSync('backup-repo/backups', { recursive: true });
             fs.writeFileSync('backup-repo/backups/' + date + '.json', JSON.stringify(data, null, 2));
 
-            // Frachty — od 2026-09-24 wlasna kolekcja `frachty` (wczesniej tablica w fleet/data).
+            // Frachty — kolekcja `frachty`, JEDYNE zrodlo od 2026-09-24 (tablica w fleet/data
+            // i dokument fleet/frachty_archiwum usuniete). Zapis BEZWARUNKOWY: pusty odczyt to
+            // nie jest "nic do backupu", tylko awaria — ma zostac w kopii i podniesc alarm.
             const frSnap = await db.collection('frachty').get();
             const frDane = frSnap.docs.map(d => ({ ...d.data(), id: d.id }));
-            if (frDane.length) {
-              fs.writeFileSync('backup-repo/backups/frachty_' + date + '.json', JSON.stringify(frDane, null, 2));
-            }
-
-            // Archiwum frachtów z zamknietych lat (fleet/frachty_archiwum) — od 2026-09-23
-            // mieszka poza fleet/data, wiec MUSI miec wlasna kopie.
-            const archSnap = await db.doc('fleet/frachty_archiwum').get();
-            const archData = archSnap.exists ? (archSnap.data() || {}) : {};
-            const archFrachty = (archData.fleetv2_frachty || []).length;
-            if (archFrachty > 0) {
-              fs.writeFileSync('backup-repo/backups/frachty_archiwum_' + date + '.json', JSON.stringify(archData, null, 2));
-            }
+            fs.writeFileSync('backup-repo/backups/frachty_' + date + '.json', JSON.stringify(frDane, null, 2));
 
             // Backup kolekcji sprawy
             const sprawySnap = await db.collection('sprawy').get();
@@ -121,11 +111,9 @@ jobs:
               vehicles: (data.fleetv2_vehicles||[]).length,
               costs: (data.fleetv2_costs||[]).length,
               categories: (data.fleetv2_categories||[]).length,
-              frachty: (data.fleetv2_frachty||[]).length,
               rent: (data.fleetv2_rent||[]).length,
               imi: (data.fleetv2_imi||[]).length,
               sprawy: sprawyData.length,
-              frachtyArchiwum: archFrachty,
               frachtyKolekcja: frDane.length,
               dddFiles: dddData.length,
               dddArchivedNew: dddCopied
@@ -134,18 +122,12 @@ jobs:
 
             // === WALIDACJA — wykryj anomalie ===
             const alerts = [];
-            // Po migracji tablica w fleet/data bywa pusta — wtedy minimum pilnujemy na kolekcji.
-            if (frDane.length > 0 && frDane.length < 200) {
+            // Frachty: kolekcja jest jedynym zrodlem, wiec 0 dokumentow to tez alert
+            // (bez dolnego warunku pusty odczyt przeszedlby cicho).
+            if (frDane.length < 200) {
               alerts.push('kolekcja frachty: ' + frDane.length + ' dokumentow (oczekiwane >=200)');
             }
-            // Archiwum: raz zapisane nie moze zniknac ani schudnac (to zamkniete lata).
-            if (archSnap.exists && archFrachty < 400) {
-              alerts.push('frachty_archiwum: ' + archFrachty + ' frachtow (oczekiwane >=400)');
-            }
             for (const [field, minCount] of Object.entries(MIN_EXPECTED)) {
-              // Frachty zyja w kolekcji — pusta tablica w fleet/data to stan docelowy,
-              // nie awaria. Pilnuje jej wtedy warunek na kolekcji powyzej.
-              if (field === 'fleetv2_frachty' && frDane.length > 0) continue;
               const actual = (data[field] || []).length;
               if (actual < minCount) {
                 alerts.push(field + ': ' + actual + ' (min: ' + minCount + ')');
