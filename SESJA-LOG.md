@@ -4235,3 +4235,57 @@ Przy okazji naprawione **stale fakty**, które wprowadzałyby w błąd następn�
 kolekcja. Zaktualizowane też `project_planer_tras` (Etap 2 zrobiony, ale `planyTras`/`realizacjeTras`
 mają po 0 dokumentów), `project_kalkulator_tras` (Faza 2 zrobiona, CORS Nominatim potwierdzony),
 `reference_fleetdata_zapisy` i `project_fleet_data_limit`.
+
+## 2026-09-25 cd.2 — punkt 8: koszty i IMI do własnych kolekcji (kod gotowy, migracja czeka)
+
+Ostatnie dwie duże tablice w `fleet/data`: **koszty 154,1 KB (1185 poz.)** i **IMI 134,5 KB
+(120 poz.)** — razem 87% tego, co dokument jeszcze waży (330,8 KB = 32,3% limitu). Po migracji
+zostanie ~42 KB, a zmiana jednego kosztu przestanie przesyłać wszystkie 1185 pozycji.
+
+**Kolejność jak przy frachtach — najpierw siatka, potem skok:**
+1. **Reguły WDROŻONE**: `costs/{id}` i `imi/{id}` — czyta każdy zalogowany (Rentowność i Analizy
+   liczą z kosztów też dla roli `podglad`), pisze `canEdit` (admin + dyspozytor), czyli dokładnie ci,
+   którym UI pokazuje przyciski. Sprawdzone na żywo: odczyt bez logowania → `PERMISSION_DENIED`.
+2. **Backupy WDROŻONE ZANIM cokolwiek się ruszyło**: CF `dailyBackup` zapisuje
+   `…_costs-kolekcja.json` i `…_imi-kolekcja.json`, GitHub Actions `costs_<data>.json` /
+   `imi_<data>.json`, progi alertu 900 i 100. **Pusta kolekcja NIE alarmuje** (to stan sprzed
+   migracji, pilnuje wtedy `MIN_EXPECTED` na tablicy) — alarm odzywa się, gdy kolekcja raz miała
+   dane i schudła. `backupLog` dostał `kosztyCount`/`imiCount`.
+3. **Kod na DWA źródła** (dopóki kolekcja pusta, wszystko działa po staremu).
+
+**Co w kodzie:**
+- listenery `costs`/`imi` obok frachtowego; pusty snapshot NIE czyści listy;
+- **kierowca NIE subskrybuje** żadnej z nich — nie ma tych zakładek, a `DriverPanel` nie dostaje
+  tych list w propsach. Bez tego warunku kierowcy ściągaliby 1185 dokumentów kosztów, czyli wracałby
+  koszt Firestore ucięty im w lipcu (−94,7%);
+- generyczne `dbAddToArrayField`/`dbDeleteFromArrayField`/`dbUpdateInArrayField` routują do kolekcji
+  przez mapę `PRZENIESIONE()` — dzięki temu **IMI nie wymagało ŻADNEJ zmiany w miejscu wywołania**;
+- koszty dostały własne helpery (`dbAddKoszt`/`dbZapiszKoszt`/`dbUsunKoszt`/`dbBulkKoszty`) podpięte
+  w `addCost`, `deleteCost`, `updateCost`, imporcie z Excela i „📊 Import 2026";
+- **writeback CAŁEJ tablicy kosztów milknie w trybie kolekcji** — inaczej odtwarzałby tablicę, którą
+  właśnie sprzątamy, i wracałby mechanizm, przez który zginęło 10 frachtów w kwietniu.
+
+🐛 **Pułapka znaleziona przy pisaniu, nie po wdrożeniu**: po sprzątnięciu tablicy
+`data[SK.costs]` znika, a stary kod miał `|| SEED_COSTS` — podstawiłby dane demonstracyjne,
+które writeback zapisałby z powrotem do `fleet/data`. Fallback wymaga teraz, żeby tablica
+**istniała**; jej brak znaczy „listę poda kolekcja". To samo dla IMI (`|| []` kasowało listę).
+🐛 **Druga**: `dbAddToArrayFieldVerified` czytał potwierdzenie zapisu zawsze z tablicy w `fleet/data`
+— dla pola przeniesionego do kolekcji weryfikacja zawsze by padała mimo udanego zapisu. Teraz czyta
+to samo miejsce, w które poszedł zapis. Dziś używa go tylko `SK.docs`, więc był to nabity pistolet
+na przyszłość, nie działający bug.
+
+**Usunięte trzy martwe narzędzia** (`importFromRent`, `fix2025Frachty`, `migrate2025ToFirestore`) —
+bez żadnego wywołania w UI, potwierdzone ESLintem. Podmieniały hurtem całe tablice przez
+`setCosts`/`setFrachtyList`, czyli mechanizmem, który po przenosinach nic już nie zapisuje do bazy:
+zostawione byłyby przyciskiem-pułapką („zrobiłem migrację", a w bazie cisza). Warningów 186 → 175.
+
+**Skrypt migracyjny `migrate_koszty_imi.mjs`** (gitignored jak poprzednie) — dwa etapy, domyślnie
+na sucho. Asercje: każdy rekord ma ID, zero duplikatów ID (w kolekcji zlałyby się w jeden dokument),
+a przed sprzątaniem komplet ID **i zgodność kwot co do grosza** (niezależne przeliczenie
+`amountEUR`/`amountPLN`, nie sama liczba rekordów). Próba na sucho przeszła:
+**1185 kosztów / 611 917,47 EUR / 5 700 PLN** i **120 IMI**, bez rekordów bez ID i bez duplikatów.
+
+⚠️ **NIEZWERYFIKOWANE**: nic jeszcze nie jest przeniesione — kolekcje są puste, a kod w tym stanie
+zachowuje się jak dotąd (wszystkie nowe gałęzie są za flagami, które podnosi dopiero niepusty
+snapshot). Przełączenie źródła, zapisy do kolekcji i widok Koszty/IMI/Rentowność/Analizy
+**sprawdzimy po etapie 1 migracji**, którą odpala user.

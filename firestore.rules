@@ -123,6 +123,29 @@ service cloud.firestore {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // KOSZTY — od 2026-09-25 własna kolekcja (wcześniej tablica `fleetv2_costs`
+    // w `fleet/data`; 1185 pozycji = ~190 KB i rosło). Uprawnienia jak dla tablicy:
+    // czyta każdy zalogowany (Rentowność/Analizy liczą z kosztów także dla podglądu),
+    // dodaje/edytuje/kasuje admin i dyspozytor — dokładnie ci, którym UI pokazuje
+    // przyciski (canEdit). Kierowcy nie mają zakładki Koszty.
+    // ═══════════════════════════════════════════════════════════════
+    match /costs/{costId} {
+      allow read: if canRead();
+      allow create, update, delete: if canEdit();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // IMI — delegowanie kierowców. Od 2026-09-25 własna kolekcja (wcześniej
+    // tablica `fleetv2_imi`; 120 wpisów = ~151 KB, najcięższe rekordy w dokumencie).
+    // Rola `podglad` MA zakładkę IMI, więc odczyt dla każdego zalogowanego;
+    // zapis tylko canEdit.
+    // ═══════════════════════════════════════════════════════════════
+    match /imi/{imiId} {
+      allow read: if canRead();
+      allow create, update, delete: if canEdit();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // PLANY TRAS — snapshot planu przejazdu z Kalkulatora (Etap 1 planera).
     // Osobna kolekcja, NIE pole w `fleet/data`: plan waży ~0,8 KB i doszedłby przy
     // KAŻDYM zleceniu, a dokument był wtedy na 83% limitu 1 MiB (dziś 32% — frachty

@@ -78,6 +78,18 @@ jobs:
             const frDane = frSnap.docs.map(d => ({ ...d.data(), id: d.id }));
             fs.writeFileSync('backup-repo/backups/frachty_' + date + '.json', JSON.stringify(frDane, null, 2));
 
+            // Koszty i IMI — wlasne kolekcje od 2026-09-25 (wczesniej tablice w fleet/data).
+            // Kopia wchodzi PRZED migracja, zeby dane nie spedzily nocy bez backupu.
+            // Pusta kolekcja = dane wciaz w tablicy (kopia w pliku glownym) -> bez alarmu.
+            const licznikiKolekcji = {};
+            for (const nazwa of ['costs', 'imi']) {
+              const s = await db.collection(nazwa).get();
+              licznikiKolekcji[nazwa] = s.size;
+              if (s.empty) continue;
+              const dane = s.docs.map(d => ({ ...d.data(), id: d.id }));
+              fs.writeFileSync('backup-repo/backups/' + nazwa + '_' + date + '.json', JSON.stringify(dane, null, 2));
+            }
+
             // Backup kolekcji sprawy
             const sprawySnap = await db.collection('sprawy').get();
             const sprawyData = sprawySnap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -115,6 +127,8 @@ jobs:
               imi: (data.fleetv2_imi||[]).length,
               sprawy: sprawyData.length,
               frachtyKolekcja: frDane.length,
+              kosztyKolekcja: licznikiKolekcji.costs,
+              imiKolekcja: licznikiKolekcji.imi,
               dddFiles: dddData.length,
               dddArchivedNew: dddCopied
             };
@@ -127,7 +141,19 @@ jobs:
             if (frDane.length < 200) {
               alerts.push('kolekcja frachty: ' + frDane.length + ' dokumentow (oczekiwane >=200)');
             }
+            // Koszty/IMI: alarm dopiero gdy kolekcja RAZ miala dane i schudla. Pusta = stan
+            // sprzed migracji, pilnuja jej wtedy MIN_EXPECTED na tablicach w fleet/data.
+            for (const [nazwa, prog] of [['costs', 900], ['imi', 100]]) {
+              const n = licznikiKolekcji[nazwa];
+              if (n > 0 && n < prog) {
+                alerts.push('kolekcja ' + nazwa + ': ' + n + ' dokumentow (oczekiwane >=' + prog + ')');
+              }
+            }
             for (const [field, minCount] of Object.entries(MIN_EXPECTED)) {
+              // Po przenosinach do kolekcji pusta tablica to stan docelowy, nie awaria —
+              // minimum pilnuje wtedy warunek na kolekcji powyzej.
+              if (field === 'fleetv2_costs' && licznikiKolekcji.costs > 0) continue;
+              if (field === 'fleetv2_imi' && licznikiKolekcji.imi > 0) continue;
               const actual = (data[field] || []).length;
               if (actual < minCount) {
                 alerts.push(field + ': ' + actual + ' (min: ' + minCount + ')');

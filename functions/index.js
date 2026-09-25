@@ -1011,6 +1011,26 @@ exports.dailyBackup = onSchedule(
         console.log(`✓ frachty (kolekcja): ${frDane.length} dokumentów → ${frFile.name}`);
       }
 
+      // 1b. koszty i IMI — własne kolekcje od 2026-09-25 (wcześniej tablice w fleet/data).
+      // Backup wchodzi PRZED migracją, żeby dane nie spędziły ani jednej nocy bez kopii.
+      // Progi to minimum z chwili przenosin (1185 kosztów, 120 IMI) z zapasem w dół.
+      // Dopóki kolekcja jest pusta, danych pilnuje tablica w fleet/data (kopia wyżej),
+      // więc alarm odzywa się dopiero, gdy kolekcja RAZ miała dane.
+      const licznikiKolekcji = {};
+      for (const [nazwa, prog] of [["costs", 900], ["imi", 100]]) {
+        const snap = await db.collection(nazwa).get();
+        licznikiKolekcji[nazwa] = snap.size;
+        if (snap.empty) { console.log(`· ${nazwa}: kolekcja pusta — dane wciąż w fleet/data`); continue; }
+        const dane = snap.docs.map(d => ({ ...d.data(), id: d.id }));
+        const plik = bucket.file(`backups/${ts}_${nazwa}-kolekcja.json`);
+        await plik.save(JSON.stringify(dane), { contentType: "application/json" });
+        if (dane.length < prog) {
+          console.error(`🚨 ${nazwa}: tylko ${dane.length} dokumentów (oczekiwane >${prog}) — SPRAWDŹ BAZĘ`);
+        } else {
+          console.log(`✓ ${nazwa} (kolekcja): ${dane.length} dokumentów → ${plik.name}`);
+        }
+      }
+
       // 2. driverEvents — ostatnie 90 dni (krytyczne dla audytu trasy)
       const cutoff = new Date(Date.now() - 90 * 86400000).toISOString();
       const evSnap = await db.collection("driverEvents").where("ts", ">=", cutoff).get();
@@ -1044,6 +1064,8 @@ exports.dailyBackup = onSchedule(
       await db.collection("backupLog").add({
         ts: new Date().toISOString(),
         frachtyCount: frDane.length,   // od 24.09.2026 z kolekcji, nie z tablicy w fleet/data
+        kosztyCount: licznikiKolekcji.costs,   // 0 = jeszcze w tablicy fleet/data
+        imiCount: licznikiKolekcji.imi,
         vehCount,
         costCount,
         eventsCount: events.length,
