@@ -78,6 +78,11 @@ mockup_*.html
 # Andamur reconcile — narzędzia i backupy jednorazowe (2026-08-10)
 correction_apply.js
 sheet_correction.py
+# Generatory raportów i importery paliwa (2026-09-25) — były nieignorowane, więc `git add -A`
+# w katalogu głównym wciągnąłby je do repo wbrew konwencji z CLAUDE.md.
+# Kopię mają w iCloud przez scripts/backup-claude-memory.sh.
+raport_dyspozytorzy_*
+paliwo_*
 reconcile_andamur.mjs
 andamur_faktury/
 backup_andamur_*.json

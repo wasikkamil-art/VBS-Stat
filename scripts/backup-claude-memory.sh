@@ -1,6 +1,6 @@
 #!/bin/bash
 # backup-claude-memory.sh
-# Codzienny backup memory Claude + .env.local do iCloud Drive.
+# Codzienny backup memory Claude + .env.local + narzędzi roboczych do iCloud Drive.
 # Memory + credentials są LOKALNE (folder *.nosync wykluczony z iCloud) — bez tego skryptu
 # utrata MacBooka = utrata preferencji + recovery procedures + Firebase/Anthropic keys.
 #
@@ -20,6 +20,7 @@ FAILED_STEPS=""   # nazwy kroków, które padły — do podsumowania (zamiast zg
 # === Konfiguracja ===
 SOURCE_MEMORY="$HOME/.claude/projects/-Users-kamilwasik-Desktop-VBS-Stat-nosync/memory"
 SOURCE_ENV="$HOME/Desktop/VBS-Stat.nosync/.env.local"
+SOURCE_REPO="$HOME/Desktop/VBS-Stat.nosync"
 ICLOUD_BASE="$HOME/Library/Mobile Documents/com~apple~CloudDocs"
 DEST_BASE="$ICLOUD_BASE/FleetStat-backup"
 DATE=$(date +%Y-%m-%d)
@@ -90,6 +91,48 @@ if [ -d "$SOURCE_TRANSCRIPTS" ]; then
         TC_COUNT=$(find "$DEST_TRANSCRIPTS" -maxdepth 1 -name "*.jsonl" 2>/dev/null | wc -l | xargs)
         TC_SIZE=$(du -sh "$DEST_TRANSCRIPTS" 2>/dev/null | awk '{print $1}')
         echo "✅ Transkrypty: $DEST_TRANSCRIPTS/ ($TC_COUNT plików, $TC_SIZE) — rolling, bez retention"
+    fi
+fi
+
+# === Backup narzędzi roboczych (.js/.mjs/.py w katalogu głównym repo) ===
+# Skrypty cykliczne — generatory raportów (make_dashboard_*, raport_dyspozytorzy_*),
+# rekoncyliacja paliwa (reconcile_andamur.mjs), narzędzia importu i migracji — są
+# GITIGNORED zgodnie z konwencją z CLAUDE.md, więc `git push` ich NIE zabezpiecza.
+# Do 2026-09-25 nie obejmował ich żaden backup: utrata MacBooka = odtwarzanie od zera
+# comiesięcznego workflow raportowego. Łącznie ~1,7 MB plików tekstowych.
+#
+# Rolling, BEZ --delete i bez retencji: skrypt skasowany lokalnie ma zostać w kopii.
+# Pliki konfiguracyjne (vite/tailwind/eslint/postcss/playwright) pomijamy — są w repo.
+DEST_TOOLS="$DEST_BASE/tools"
+if [ -d "$SOURCE_REPO" ]; then
+    $DRY_RUN mkdir -p "$DEST_TOOLS"
+    if [ -n "$DRY_RUN" ]; then
+        TOOL_COUNT=$(find "$SOURCE_REPO" -maxdepth 1 \( -name "*.js" -o -name "*.mjs" -o -name "*.py" \) \
+            ! -name "*.config.js" ! -name "*.config.mjs" | wc -l | xargs)
+        echo "[DRY] rsync $TOOL_COUNT narzędzi → $DEST_TOOLS/"
+    else
+        # Ten sam wzorzec co przy transkryptach: iCloud potrafi rzucić
+        # „Resource deadlock avoided" na pliku w trakcie synchronizacji. Kod 24 = plik
+        # zniknął w trakcie (np. sprzątnięta jednorazówka) — to nie jest błąd backupu.
+        TOOLS_OK=0
+        for ATTEMPT in 1 2 3; do
+            RSYNC_ERR=$(rsync -a --update \
+                --include="*.js" --include="*.mjs" --include="*.py" \
+                --exclude="*.config.js" --exclude="*.config.mjs" --exclude="*" \
+                "$SOURCE_REPO/" "$DEST_TOOLS/" 2>&1)
+            RC=$?
+            if [ "$RC" -eq 0 ] || [ "$RC" -eq 24 ]; then TOOLS_OK=1; break; fi
+            echo "⚠️  rsync narzędzi: kod $RC (próba $ATTEMPT/3): $(echo "$RSYNC_ERR" | tail -2 | tr '\n' ' ')"
+            sleep 5
+        done
+        if [ "$TOOLS_OK" -eq 0 ]; then
+            echo "❌ Narzędzia NIE zsynchronizowane po 3 próbach"
+            ERRORS=$((ERRORS + 1))
+            FAILED_STEPS="$FAILED_STEPS narzędzia"
+        fi
+        TL_COUNT=$(find "$DEST_TOOLS" -maxdepth 1 -type f 2>/dev/null | wc -l | xargs)
+        TL_SIZE=$(du -sh "$DEST_TOOLS" 2>/dev/null | awk '{print $1}')
+        echo "✅ Narzędzia: $DEST_TOOLS/ ($TL_COUNT plików, $TL_SIZE) — rolling, bez retention"
     fi
 fi
 

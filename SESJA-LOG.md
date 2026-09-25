@@ -4358,3 +4358,26 @@ zero `myto`/`nego`/`etoll`/`naprawa`).
 **Nie przywracam jej celowo**: łatanie przy odczycie znaczy, że w bazie zostaje zła wartość,
 a UI pokazuje dobrą — czyli skrypty raportowe (które czytają kolekcję wprost) widziałyby co
 innego niż aplikacja. Lepiej, żeby ewentualny regres był widoczny w obu miejscach naraz.
+
+### cd.5 — backup narzędzi roboczych (opcja A) + domknięcie dziury w `.gitignore`
+
+Skrypty cykliczne są gitignored zgodnie z konwencją, więc `git push` ich nie zabezpieczał —
+a dziś właśnie one dostały komplet poprawek po migracji. `scripts/backup-claude-memory.sh`
+kopiuje teraz `.js/.mjs/.py` z katalogu głównego repo do `FleetStat-backup/tools/`
+(rolling rsync, **bez `--delete` i bez retencji** — skrypt skasowany lokalnie zostaje w kopii;
+ten sam wzorzec 3 prób co przy transkryptach, bo iCloud rzuca „Resource deadlock avoided").
+
+**Pierwszy przebieg sprawdzony od razu, zgodnie z regułą po incydencie z 17.09**:
+354 pliki / 1,8 MB w `tools/`, a kluczowe skrypty są **bajt w bajt** jak lokalne i zawierają
+dzisiejsze poprawki (`reconcile_andamur.mjs`, `make_dashboard_sierpien.js`,
+`raport_dyspozytorzy_lipiec.js`, `diagnose_dedup.mjs`, `make_dashboard_porownanie_v2.js` —
+każdy z odwołaniem do `daneRaportow`). Podfoldery nie wjechały (kopiujemy tylko root),
+pliki `.json`/`.env` też nie.
+
+🐛 **Przy okazji domknięta dziura**: `raport_dyspozytorzy_*` i `paliwo_*` **nie były w `.gitignore`**
+— tylko nieśledzone. Zwykłe `git add -A` w katalogu głównym wciągnęłoby 7 skryptów do repo wbrew
+konwencji z CLAUDE.md. Wzorce dopisane.
+
+ℹ️ **Świadomie POZA kopią**: `serviceAccountKey.json` i inne `*-adminsdk*.json`. To klucze admina
+do Firestore — odtwarzalne jednym kliknięciem w konsoli Firebase, a trzymanie ich w iCloud
+powiększałoby powierzchnię ataku bez realnego zysku. `.env.local` zostaje w kopii jak dotąd.
