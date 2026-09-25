@@ -4381,3 +4381,39 @@ konwencji z CLAUDE.md. Wzorce dopisane.
 ℹ️ **Świadomie POZA kopią**: `serviceAccountKey.json` i inne `*-adminsdk*.json`. To klucze admina
 do Firestore — odtwarzalne jednym kliknięciem w konsoli Firebase, a trzymanie ich w iCloud
 powiększałoby powierzchnię ataku bez realnego zysku. `.env.local` zostaje w kopii jak dotąd.
+
+### cd.6 — Paliwo i Analizy przeklikane na rolach (podgląd bez logowania, port 5195)
+
+Za login nie wchodzę (nie wpisuję haseł), więc powstał `podglad/role/` w tym samym wzorcu co
+`podglad/paliwo|kalkulator|rozliczenie`: prawdziwy zrzut z Firestore (730 frachtów, 1185 kosztów,
+416 tankowań, 93 operacyjne, 2 analizy myta), atrapa `firebase/firestore` z zapisem wyłączonym,
+przełącznik ról. **Konta i ich `allowedTabs` czytane WPROST z kolekcji `users`**, nie z mojego
+opisu — inaczej podgląd pokazywałby moje wyobrażenie o uprawnieniach zamiast stanu bazy.
+
+**Sprawdzone 4 warianty × 2 zakładki, wszystkie na świeżych danych po migracji:**
+
+| Rola / konto | Paliwo | Analizy |
+|---|---|---|
+| admin (deoen, vbs.trans, wasik.kamil) | pełna, z importem kart | 3 odnogi + ranking kosztów |
+| dyspozytor — agnieszka, wioletta | pełna, z importem kart | 2 odnogi, **bez** „Dyspozytorzy", bez rankingu kosztów |
+| dyspozytor — **arek** | **NIEWIDOCZNA** | 2 odnogi |
+| podgląd (brak konta) | NIEWIDOCZNA | **tylko** rankingi kierowców |
+
+Podział odnóg zgodny z decyzją z 16.09; brak „Rankingu kosztów" poza adminem zgodny z opisem
+zakładki Ranking. **Liczby zgadzają się z niezależnymi przeliczeniami**: sierpień 28 frachtów /
+41 370 € / ARO 73,6% (jak w korekcie z 23.09 i jak z generatora PDF), opłaty drogowe +45,8% i
+DE 0,221 €/km (jak w analizie sierpnia). Konsola na świeżej karcie: **zero błędów**.
+
+🚨 **Znalezione przy okazji — rozjazd uprawnień, wymaga decyzji usera:**
+- **arek@vbstransport.com (dyspozytor)** ma jawne `allowedTabs` (12 poz.) BEZ `paliwo`,
+  `kalkulator` i `rent` — rola domyślnie dałaby mu wszystkie trzy;
+- **wioletta.vbs@gmail.com (dyspozytor)** — jawna lista (15 poz.) bez `kalkulator`.
+
+To dokładnie pułapka opisana przy zakładce Analizy: **jawna lista NADPISUJE domyślne uprawnienia
+roli**, więc zakładka dodana później nie dociera do kont, które mają własną listę. Nie ruszam —
+to może być świadome ograniczenie, a zmiana uprawnień to decyzja właściciela, nie moja.
+ℹ️ **Roli `podglad` nie ma dziś żadnego konta** — sprawdzona tylko teoretycznie, przez
+`DEFAULT_TABS_BY_ROLE`.
+
+⚠️ Podgląd jest w `podglad/` (gitignored) i **nie obejmuje go backup `tools/`**, który kopiuje
+tylko katalog główny. Kod atrapy jest tani do odtworzenia, `dane.json` (1 MB) regenerowalny.
