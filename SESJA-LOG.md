@@ -4159,3 +4159,25 @@ czyli **dowód, że zapis przez kolekcję działa**.
 
 ⚠️ **Do sprawdzenia jutro rano**: pierwszy nocny backup po zmianie (czy jest `frachty_*.json`
 i czy alert o pustej tablicy nie odpalił fałszywie).
+
+## 2026-09-25 — kontrola backupu po przenosinach + skąd naprawdę bierze się koszt Anthropic
+
+**Backup po KROKU 3 — obie warstwy OK** (pierwszy nocny przebieg po przeniesieniu frachtów do kolekcji):
+- CF `dailyBackup` 01:00 → `…_frachty-kolekcja.json`, **730 dokumentów**;
+- GitHub Actions 00:22 → `frachty_2026-09-25.json` (779 KB), przebieg zielony.
+**Kontrola ZAWARTOŚCI, nie statusu**: kopia ze Storage 730 = baza 730, zero brakujących ID,
+suma kwot 761 499 € w kopii i w bazie. `fleet/data` w kopii GitHuba **1086 KB → 532 KB**.
+✅ **Alarmy nie odpaliły fałszywie** — to było główne ryzyko: w podsumowaniu jest `"frachty": 0`
+(tablica, stan docelowy) obok `"frachtyKolekcja": 730`, przebieg bez anomalii. Wyjątek dopisany
+24.09 w `MIN_EXPECTED` zadziałał.
+
+**Koszt Anthropic — user zgłosił „kalkulator tras ciągnie z konta".** Sprawdzone i OBALONE:
+- `KalkulatorTras.jsx` nie ma ŻADNEGO odwołania do Claude (liczy OSRM + PTV + nasze stawki),
+- test na żywo: user liczył trasę 14:14 i 14:16, w oknie 14:14–14:26 **zero wywołań AI**, saldo bez zmian,
+- spadek, który widział wcześniej, to skaner faktur — np. 24.09 g. 14:08 **jeden załącznik = 48 361
+  tokenów wejścia** (przy średniej 5–6 tys.).
+**Pomiar z logów (30 dni)**: Haiku 307 wywołań / 2,07 mln tok + Sonnet 258 / 1,52 mln tok ≈ **8,90 $**.
+Kalkulator płaci tylko za PTV — ~80 zapytań/mc, darmowy próg (w logach: 17·8·35·6·8·6 dziennie).
+Zidentyfikowane oszczędności (cache promptu ~⅓, limit stron, dedup załączników) — **user: „nie robimy
+nic, mam budżet"**. Szczegóły i decyzja w pamięci: `reference_koszt_anthropic`.
+⚠️ Konsola Claude u usera pokazuje TYLKO zużycie aplikacji (Claude Code idzie z subskrypcji).
