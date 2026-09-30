@@ -4737,3 +4737,38 @@ rekordzie oraz regresyjnie — frachty z jednym zleceniem bez żadnej zmiany.
 **kilometry** (podjazd, ładowne — puste, więc €/km, rentowność i rankingi nie policzą tej trasy)
 oraz **dyspozytor** (puste — dashboard dyspozytorów wrzuci fracht do kubełka AGA).
 Godziny załadunku i rozładunku też są puste.
+
+## 2026-09-30 — ZAMKNIĘCIE SESJI: `zlecenia[]` od zera do działającego zlecenia
+
+Jeden wątek przez całą sesję: **jeden wyjazd rozliczany dwoma zleceniami**. Od modelu danych,
+przez UI i autouzupełnianie z PDF, po ochronę kwot przed kierowcą. Na produkcji **10 commitów**:
+`0b6eee7` (model + UI) · `bedfacf` (ładunek per punkt w kopii dla kierowcy) · `c3d7b8e` (kwota
+zlecenia 1) · `7b7dbf9` (linki do obu PDF) · `c9d8e28` (kasowanie zlecenia) · `97a6e16` + `26cc686`
+(widoczność nieudanego zapisu) · `cf7c8e0` (placeholdery + ostrzeżenie) · `cf0c63a` (autouzupełnianie)
+· `b68fce6` (filtr kwot) · `6bd68d6` (sumowanie ładunku).
+
+**Stan końcowy potwierdzony w bazie** (`fyoloffm`): dwa zlecenia zgodne z PDF-ami co do liczby,
+`cenaEur` 2000 = suma, R2 założony automatycznie z drugiego dokumentu, każde zlecenie przypięte
+do swojego punktu, oba PDF-y podpięte, kopia dla kierowcy z podziałem ładunku i bez kwot.
+
+### Sześć błędów po drodze — trzy moje z tej sesji, trzy zastane
+1. **mój** — kwota zlecenia 1 nie miała edytowalnego pola przy dwóch zleceniach → fracht nie dawał
+   się zapisać (warunek `i > 0` zamiast `wieleZlecen`);
+2. **mój** — fix widoczności zapisu trafił do handlera `FVTab` zamiast `FrachtyTab`;
+3. **mój** — placeholdery `3` i `1063` to realne wartości z tego zlecenia, więc puste pola wyglądały
+   na wypełnione i user uznał błędny ekran za poprawny;
+4. **zastany** — listy linkowały tylko `urlZlecenie` (pierwsze zlecenie), drugi PDF nieosiągalny;
+5. **zastany** — `delete wynik.zlecenia` przy `setDoc(merge:true)` nigdy nie kasowało pola w bazie;
+6. **zastany** — nieudany zapis frachtu zostawiał optymistyczną zmianę w UI, więc wyglądał jak udany.
+
+### Czego NIE zweryfikowano
+- **Przyczyna źródłowa nieudanego zapisu z 30.09 przed 10:30** pozostaje nieznana. Payload był
+  poprawny (92 pola, zero `undefined`), ostrzeżenie o adresach nie mogło się odpalić, walidacje
+  przechodziły, service worker wykluczony. Po fiksach `97a6e16`/`26cc686` kolejny nieudany zapis
+  sam się ujawni (toast z kodem + cofnięcie zmian) — **do obserwacji przy następnej edycji**.
+- Kasowanie drugiego zlecenia (`c9d8e28`) sprawdzone tylko testem jednostkowym, nie klikaniem.
+- Ostrzeżenie o brakujących palet/wagi/rozładunku (`cf7c8e0`) — nie oglądane w prawdziwym oknie.
+
+### Do uzupełnienia w `fyoloffm` (parser tego nie ma skąd wziąć)
+kilometry (podjazd, ładowne) · dyspozytor · godziny załadunku i rozładunku.
+Bez km trasa nie wejdzie do €/km, rentowności ani rankingów; bez dyspozytora wpadnie do kubełka AGA.
