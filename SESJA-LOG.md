@@ -4578,3 +4578,27 @@ a baza dalej trzymała dwa, z sumą liczoną ze starej tablicy. Teraz zapisujemy
 która jest równoważna brakowi (`zleceniaFrachtu` i `maWieleZlecen` sprawdzają długość, nie obecność).
 Test: 9/9 asercji — kasowanie wraca do kwoty pojedynczego zlecenia, km nietknięte, dwa zlecenia
 nadal zapisują się normalnie.
+
+### cd. 30.09 — user edytował na PRODUKCJI, a zapis nie doszedł
+
+User potwierdził: edycja szła na `fleetstat.pl`, nie w podglądzie. Czyli moja poprzednia hipoteza
+była błędna, a problem jest realny.
+
+**Co wykluczyłem konkretnym sprawdzeniem:**
+- **Service worker** — `sw.js` (cache `fleetstat-v6`) trzyma hashowane pliki cache-first, ale są
+  one NIEZMIENNE (hash w nazwie), a `index.html` idzie network-first. Nowy deploy = nowe hashe.
+  Nie ten trop.
+- **Payload odrzucony przez Firestore** — odtworzyłem dokładny obiekt zapisu na realnym rekordzie
+  `do9fv40d` z poprawkami, których user chciał dokonać, i przeskanowałem rekurencyjnie:
+  **92 pola, zero `undefined`, zero `NaN`, zero funkcji, 3,5 KB**. Firestore przyjąłby to bez oporu.
+
+🐛 **Znalezione i naprawione: nieudany zapis frachtu WYGLĄDAŁ jak udany.**
+`onUpdate` robiło optymistyczne `setFrachtyList`, a w `catch` tylko pokazywało toast — **bez cofania
+zmian w UI**. Efekt: po nieudanym zapisie lista pokazywała nowe wartości, modal się zamykał,
+wszystko wyglądało normalnie, a baza miała stare dane aż do odświeżenia strony. Dokładnie ta sama
+klasa błędu co cichy `catch` w `dbSet` z września. Teraz błąd **cofa optymistyczną zmianę**,
+loguje kod i treść do konsoli oraz pokazuje toast „NIE ZAPISANO (kod) … — zmiany cofnięte".
+
+⚠️ **Przyczyna źródłowa nadal nieznana.** Wiadomo tylko, że payload jest poprawny, a zapis nie
+dotarł. Następna próba usera na produkcji powinna to rozstrzygnąć: albo pojawi się czerwony toast
+z kodem błędu (wtedy mamy sprawcę), albo zapis przejdzie i problem był jednorazowy.

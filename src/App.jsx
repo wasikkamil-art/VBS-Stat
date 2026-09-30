@@ -4102,9 +4102,19 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               frachtyList={frachtyList}
               vehicles={vehicles}
               onUpdate={async (id, data) => {
-                setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r)); // optimistic
-                try { await dbUpdateFracht(id, data); }
-                catch (e) { showToast("❌ Nie udało się zapisać: " + (e?.message || "")); }
+                // Optymistyczna aktualizacja listy — ale przy błędzie MUSI się cofnąć.
+                // Wcześniej zostawała, więc nieudany zapis wyglądał dokładnie jak udany:
+                // user widział swoje zmiany, a baza ich nie miała aż do odświeżenia strony
+                // (zgłoszone 30.09.2026 — poprawka frachtu „nie doszła" bez żadnego sygnału).
+                const przed = frachtyList.find(r => r.id === id);
+                setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r));
+                try {
+                  await dbUpdateFracht(id, data);
+                } catch (e) {
+                  if (przed) setFrachtyList(p => p.map(r => r.id === id ? przed : r));  // cofnij
+                  console.error("[fracht] zapis nieudany", id, e?.code || "", e?.message || e, data);
+                  showToast(`❌ NIE ZAPISANO${e?.code ? ` (${e.code})` : ""}: ${e?.message || "nieznany błąd"} — zmiany cofnięte`);
+                }
               }}
             />
           )}
