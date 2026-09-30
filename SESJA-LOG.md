@@ -4558,3 +4558,23 @@ jeden link), dla `do9fv40d` dwa linki do dwóch RÓŻNYCH plików.
   zlecenie [2] ma numer 003428/2026, ale kwotę 1150 EUR i ładunek 2 pal / 700 kg.
   Wg PDF-ów: **003427 = 1150 EUR, 3 pal, 1063 kg** (Senozan), **003428 = 850 EUR, 2 pal, 700 kg**
   (Saint Sorlin). Czyli w [2] numer i ładunek są z 003428, a kwota z 003427.
+
+### cd. 30.09 — poprawka usera NIE dotarła do bazy + cichy bug przy kasowaniu zlecenia
+
+User napisał „poprawiłem, sprawdź w bazie". **Dane są niezmienione.** `auditLog` pokazuje, że
+ostatni zapis `do9fv40d` to **2026-09-30T10:30:53Z**, czyli pierwotna edycja — po niej ani jednego
+update'u. Ciąg „Sorlin" nie występuje w ŻADNYM z 732 frachtów, więc R2 nie został zapisany nigdzie.
+
+Najbardziej prawdopodobna przyczyna: edycja znów szła w **podglądzie `podglad/zlecenia` (port 5196)**,
+gdzie zapis jest wyłączony z założenia, a okno wygląda identycznie jak w aplikacji. To druga taka
+pomyłka tego dnia i **mój błąd w prowadzeniu** — zostawiłem ten podgląd uruchomiony i sam go w trakcie
+sesji przeładowywałem. **Serwer podglądu zatrzymany**, żeby nie dało się go pomylić z produkcją.
+
+🐛 **Przy okazji znaleziony i naprawiony cichy bug — niezależny od powyższego.**
+`zapiszZlecenia` przy zejściu do jednego zlecenia robiło `delete wynik.zlecenia`, a zapis frachtu
+idzie przez `setDoc(..., { merge: true })`. **Przy merge brak klucza znaczy „nie ruszaj", nie „usuń"** —
+więc skasowanie drugiego zlecenia nigdy by nie dotarło do Firestore: UI pokazywałby jedno zlecenie,
+a baza dalej trzymała dwa, z sumą liczoną ze starej tablicy. Teraz zapisujemy **pustą tablicę**,
+która jest równoważna brakowi (`zleceniaFrachtu` i `maWieleZlecen` sprawdzają długość, nie obecność).
+Test: 9/9 asercji — kasowanie wraca do kwoty pojedynczego zlecenia, km nietknięte, dwa zlecenia
+nadal zapisują się normalnie.

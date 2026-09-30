@@ -89,7 +89,12 @@ export function zapiszZlecenia(f, lista) {
   const wynik = { ...f };
   if (czyste.length <= 1) {
     const z = czyste[0] || zleceniaFrachtu(f)[0];
-    delete wynik.zlecenia;
+    // ⚠️ NIE `delete wynik.zlecenia` — zapis frachtu idzie przez `setDoc(..., { merge: true })`,
+    // a przy merge brak klucza znaczy „nie ruszaj", nie „usuń". Skasowanie drugiego zlecenia
+    // nigdy by więc nie dotarło do bazy: UI pokazywałby jedno, a Firestore trzymał dwa.
+    // Pusta tablica jest tu równoważna brakowi — `zleceniaFrachtu` i `maWieleZlecen`
+    // sprawdzają długość, nie samą obecność pola.
+    wynik.zlecenia = [];
     wynik.nrZlecenia = z.nr || "";
     wynik.nrRef = z.ref || "";
     wynik.cenaEur = z.cenaEur || "";
