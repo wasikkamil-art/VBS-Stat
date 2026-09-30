@@ -125,6 +125,60 @@ export function bezWartownikow(parsed) {
   return out;
 }
 
+/**
+ * Przycięcie jednej wartości z parsera: twarda spacja → zwykła, ciągi spacji i tabów
+ * do jednej spacji, brzegi precz. **Znak nowej linii zostaje nietknięty.**
+ *
+ * ⚠️ `\n` jest w niektórych polach NOŚNIKIEM STRUKTURY, nie śmieciem:
+ *  • `towarPalety` to lista pozycji, jedna na linię („2× 240x120x240\n1× 120x120xH240");
+ *  • `rozladunekAdres` bywa ręcznie wpisanym zestawem adresów („1. …\n2. …"), a ostrzeżenie
+ *    o tym (`hasMulti` w FrachtyModal.jsx) wymaga `2. ` NA POCZĄTKU LINII — zwinięcie `\n`
+ *    do spacji wyłączyłoby tę walidację.
+ * Dlatego zwijamy `[^\S\n]` (białe znaki POZA nową linią), nie `\s`.
+ *
+ * Twarda spacja (U+00A0) jest osobnym powodem, żeby to robić na wejściu: wygląda identycznie
+ * jak spacja, więc nikt jej nie zauważy przy przeglądaniu formularza, a w zapytaniu do
+ * geokodera i w porównaniu ciągów zachowuje się inaczej. W bazie były cztery takie wartości.
+ */
+export function przytnijWartosc(v) {
+  if (typeof v !== "string") return v;
+  return v
+    .replace(/\u00A0/g, " ")
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/[^\S\n]*\n[^\S\n]*/g, "\n")
+    .trim();
+}
+
+/**
+ * Przycina WSZYSTKIE tekstowe pola wyniku parsera.
+ *
+ * Celowo bez listy pól: nie ma pola zlecenia, w którym spacja na brzegu albo twarda spacja
+ * byłaby pożądana, a whitelista rozjechałaby się przy pierwszym nowym polu dopisanym
+ * do promptu. Pola nietekstowe (liczby, null) przechodzą bez zmian.
+ *
+ * PO CO: parser nie przycinał niczego, więc śmieci z PDF-a lądowały w bazie i zostawały
+ * tam na zawsze. Stan na 30.09.2026: 43 pola adresowe w 32 frachtach plus `klient "CRAFTER "`
+ * (przy istniejącym gdzie indziej `"CRAFTER"` — czyli jeden klient rozbity w raportach
+ * na dwa), `nrZlecenia "012825/S/PRE/TL11/2026 "` i `dyspozytor "Aga "`.
+ */
+export function przytnijWartosci(parsed) {
+  if (!parsed || typeof parsed !== "object") return parsed;
+  const out = { ...parsed };
+  for (const k of Object.keys(out)) out[k] = przytnijWartosc(out[k]);
+  return out;
+}
+
+/**
+ * Jedyne wejście dla wyniku parsera zlecenia: najpierw przycięcie, potem wycięcie wartowników.
+ *
+ * Kolejność jest tu nieprzypadkowa — po przycięciu `„ WG CMR "` staje się `„WG CMR"`,
+ * więc wartownik wpada w dopasowanie bez polegania na tym, że wzorce same robią `trim()`.
+ * Wołane w `ZlecenieUploadBtn`, przez który przechodzą wszystkie cztery ścieżki wgrywania.
+ */
+export function oczyscParsowaneZlecenie(parsed) {
+  return bezWartownikow(przytnijWartosci(parsed));
+}
+
 export function parseGeoString(geo) {
   if (!geo || typeof geo !== "string") return null;
   const [latStr, lngStr] = geo.split(",").map(s => s.trim());

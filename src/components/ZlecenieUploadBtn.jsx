@@ -5,7 +5,7 @@
 import { useState, useRef } from "react";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { storage, callClaude } from "../firebase";
-import { bezWartownikow } from "../utils/orderFormatters.js";
+import { oczyscParsowaneZlecenie } from "../utils/orderFormatters.js";
 
 export default function ZlecenieUploadBtn({ frachtId, onUploaded, label = "+ Dodaj zlecenie", fullWidth = false }) {
   // onUploaded(url, parsedData) — parsedData = { nrZlecenia, nrRef, zaladunekAdres, ... }
@@ -107,11 +107,12 @@ NIE podawaj warunków płatności, NIP, danych spedytora ani warunków umowy.` }
         const data = await resp.json();
         const text = data.content?.find(b => b.type === "text")?.text || "{}";
         const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
-        // Wartowników („wg cmr", „jak wyżej", „-") tniemy TUTAJ, a nie u wołających:
-        // ten komponent jest jedynym przejściem dla wszystkich czterech ścieżek wgrywania
-        // (modal: zlecenie 1 i kolejne, lista FrachtyTab, lista FVTab), więc żadna nie może
-        // o filtrze zapomnieć. Prompt też o to prosi, ale prompt to prośba, nie gwarancja.
-        onUploaded(url, bezWartownikow(parsed));
+        // Przycięcie spacji i wycięcie wartowników („wg cmr", „jak wyżej", „-") robimy TUTAJ,
+        // a nie u wołających: ten komponent jest jedynym przejściem dla wszystkich czterech
+        // ścieżek wgrywania (modal: zlecenie 1 i kolejne, lista FrachtyTab, lista FVTab),
+        // więc żadna nie może o tym zapomnieć. Prompt też o to prosi, ale prompt to prośba,
+        // nie gwarancja — ta sama zasada co przy `bezKwot` na wyjściu.
+        onUploaded(url, oczyscParsowaneZlecenie(parsed));
       } catch (e) {
         // AI nie odczytało (błąd API/parsowania) — plik jest już w Storage,
         // formularz zostaje pusty do ręcznego uzupełnienia. Logujemy zamiast cicho połykać.
