@@ -4772,3 +4772,72 @@ do swojego punktu, oba PDF-y podpięte, kopia dla kierowcy z podziałem ładunku
 ### Do uzupełnienia w `fyoloffm` (parser tego nie ma skąd wziąć)
 kilometry (podjazd, ładowne) · dyspozytor · godziny załadunku i rozładunku.
 Bez km trasa nie wejdzie do €/km, rentowności ani rankingów; bez dyspozytora wpadnie do kubełka AGA.
+
+## 2026-09-30 cd.2 — „wg cmr" udawało nazwę odbiorcy + parser nie przycinał spacji
+
+Punkt wyjścia: w `fyoloffm` R1 nie miało nazwy odbiorcy, a R2 miało („GPS trans"). Postawiłem
+hipotezę „trzeba dorzucić pole do promptu parsera" i **była błędna** — sprawdzenie PDF-ów
+ją wywróciło.
+
+**Prompt od dawna ma `rozladunekFirma`.** W zleceniu 003427/2026 blok „3. Rozładunek" zawiera
+dosłownie `wg cmr` / `wg cmr` / `FR 71260 Senozan`, a w 003428/2026 `wg cmr` / `GPS trans`.
+Nazwy odbiorcy **nie ma w dokumencie** — jest na CMR. Model zwrócił `null` poprawnie. To samo
+w PDF-ach `m5ja15cl` (Basten Logistik: „Według CMR" w czterech wierszach rozładunku)
+i `4t5mjwu4` (GREEN TRANSPORTS). Brak `rozladunekFirma` dla R1 ma 578 z 696 frachtów (83%) —
+`fyoloffm` jest normą, nie anomalią.
+
+🐛 **Realny problem obok**: model raz zwraca `null`, a raz przepisuje wartownika jako daną.
+Na 732 frachtach zdarzyło się to **5 razy w 3 rekordach**. Taki ciąg jedzie do kopii dla
+kierowcy i do geokodowania, gdzie udaje adres, którego nie ma.
+
+**`bezWartownikow()`** (commit `0f66329`) — filtr na WEJŚCIU, wołany w `ZlecenieUploadBtn`,
+czyli w **jedynym przejściu dla czterech ścieżek** wgrywania PDF-a (modal: zlecenie 1 i kolejne,
+lista FrachtyTab, lista FVTab). Żaden wołający nie może zapomnieć. Prompt też o to prosi,
+ale prompt to prośba, filtr to gwarancja — zasada z `bezKwot`.
+
+⚠️ **Dwa poziomy, bo pierwsza wersja filtra kasowała poprawne dane.** `None` trafiło na listę
+wartowników, a `IT 10060 None` to **realna gmina w Piemoncie** (fracht `83crn2cd`, Via Pinerolo 21).
+Filtr zepsułby geokodowanie trasy. Teraz w nazwie firmy i ulicy wycinamy też skrótowce
+(`n/a`, `TBC`, `j.w.`, `xxx`), a w mieście i kodzie **tylko jednoznaczne frazy**.
+
+**Przycinanie spacji** (commit `5ce2ef1`) — parser nie przycinał niczego, więc śmieci z PDF-a
+zostawały w bazie na zawsze: **61 wartości w 43 frachtach**. Nie tylko adresy — `klient "CRAFTER "`
+przy istniejącym gdzie indziej `"CRAFTER"` (jeden klient rozbity w raportach na dwa),
+`nrZlecenia "012825/S/PRE/TL11/2026 "`, `dyspozytor "Aga "` i **cztery wartości z twardą spacją
+U+00A0**, która wygląda identycznie jak spacja, a w porównaniu ciągów zachowuje się inaczej.
+`przytnijWartosci()` idzie po WSZYSTKICH polach tekstowych — bez whitelisty, bo ta rozjechałaby
+się przy pierwszym nowym polu w prompcie.
+
+⚠️ **Druga własna regresja złapana realnymi danymi**: pierwsza reguła zwijała `\n` do spacji.
+`towarPalety` trzyma pozycje po jednej na linię, a `rozladunekAdres` bywa zestawem adresów
+(`1. …\n2. …`), którego ostrzeżenie `hasMulti` (`FrachtyModal.jsx:834`) szuka jako `2. `
+**NA POCZĄTKU LINII**. Zwinięcie `\n` wyłączyłoby tę walidację dla `5zgvv3bv` — czyli
+porządkowanie spacji zepsułoby działającą bramkę. Zwijamy `[^\S\n]`, nie `\s`.
+
+🐛 Przy okazji: do źródła wkleił się **literalny bajt NBSP** w regexie (`.replace(/ /g,…)`).
+Działał, ale niewidocznie — ESLint go złapał, zamienione na jawny ` `.
+
+**Zweryfikowane**: `bezWartownikow` 77/77 asercji; `przytnijWartosci` 29/29; regresja na
+732 frachtach — filtr wartowników wycina dokładnie 5 wartości (wszystkie prawdziwe, zero
+fałszywych alarmów), przycinanie rusza 61 i **w żadnej nie zmienia treści ani liczby linii**.
+Lint 0 errors, build zielony. **Deploy potwierdzony SHA**: produkcja i lokalny build to ten sam
+`index-BvS-yM6I.js`, `6f1e0d1c039173…`.
+
+⚠️ **NIEZWERYFIKOWANE**: realne wgranie PDF-a end-to-end — parser idzie przez `/api/claude`
+za tokenem Firebase, nie odpalę go lokalnie. Zmiana w **prompcie** jest więc niesprawdzona
+w praktyce; oba filtry są sprawdzone na prawdziwych danych. Nie klikane w oknie zlecenia.
+
+**Decyzje usera**: 5 wartowników w `m5ja15cl` i `4t5mjwu4` **zostaje** (trasy zamknięte,
+rozładowane — sprzątanie miałoby niską wartość). Spacje sprzątamy skryptem
+`fix_spacje_adresy.mjs` (gitignored, odpala user): podgląd domyślnie, `--apply` zapisuje,
+backup JSON, każde pole w osobnej transakcji z asercją wartości sprzed zmiany, samotest
+reguły 9/9, a reguła jest **importowana z kodu produkcyjnego**, nie przepisana — dwie kopie
+rozjechałyby się przy pierwszej poprawce.
+
+⚠️ **Czego skrypt NIE naprawia** — pola zepsute merytorycznie: `"DE 63538  DE 76456"`
+(dwa kody w jednym polu), `"DEDE 70237"`, `"BE 8460/DE 66763"`, `"ES  Getafe"` (bez kodu),
+`"AT4300  Valentin;"`. Po przycięciu nadal będą zepsute.
+
+ℹ️ **Osobny, większy temat do decyzji**: 26 klientów jest pisanych na więcej niż jeden sposób
+(różnica w wielkości liter: `Abacus`/`ABACUS`, `Done`/`DONE`/`done`, `Zipmend GmbH`/`zipmend GmbH`).
+To rozszczepia grupowanie w raportach mocniej niż spacje i przycinanie tego NIE rusza.
