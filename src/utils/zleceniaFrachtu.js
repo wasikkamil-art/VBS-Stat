@@ -17,7 +17,25 @@
 
 /** Pusty rekord zlecenia — jedno miejsce na kształt, żeby formularz i zapis się nie rozjechały. */
 export function pusteZlecenie() {
-  return { nr: "", ref: "", cenaEur: "", nrFV: "", dataWyslania: "", terminPlatnosci: "", urlZlecenie: "", rozladunek: "" };
+  // `palety` i `waga` są per zlecenie, bo przy dwóch dropach kierowca musi wiedzieć,
+  // ile zostawić w KTÓRYM punkcie — sam numer zlecenia nic mu nie mówi.
+  return { nr: "", ref: "", cenaEur: "", nrFV: "", dataWyslania: "", terminPlatnosci: "",
+           urlZlecenie: "", rozladunek: "", palety: "", waga: "" };
+}
+
+/**
+ * Zlecenia przypisane do danego punktu rozładunku (R1 = 1, R2 = 2, …).
+ * Zwraca pustą listę, gdy nikt nic nie przypisał — wołający ma wtedy nic nie dopisywać,
+ * zamiast zgadywać, że wszystko jedzie do pierwszego punktu.
+ */
+export function zleceniaDlaRozladunku(f, nr) {
+  if (!Array.isArray(f?.zlecenia) || f.zlecenia.length < 2) return [];
+  return f.zlecenia.filter((z) => String(z?.rozladunek || "") === String(nr));
+}
+
+/** „3 pal · 1063 kg" — skrót ładunku zlecenia; pusty string, gdy nic nie wiadomo. */
+export function opisLadunkuZlecenia(z) {
+  return [z?.palety ? `${z.palety} pal` : "", z?.waga ? `${z.waga} kg` : ""].filter(Boolean).join(" · ");
 }
 
 /**

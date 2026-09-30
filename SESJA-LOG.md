@@ -4471,3 +4471,32 @@ składem („003427/2026 · 1150 EUR + 003428/2026 · 850 EUR") i odesłaniem do
 ⚠️ **NIEZWERYFIKOWANE**: zapis do Firestore z prawdziwej aplikacji i wygląd list/tabel dla frachtu
 z dwoma zleceniami (kolumna „Nr FV" pokaże sklejone numery). Pole `rozladunek` jest **zapisywane,
 ale jeszcze nigdzie nie pokazywane** — świadomie, to materiał na następny krok (kierowca i CMR).
+
+### cd. 30.09 — ładunek per punkt rozładunku w kopii dla kierowcy
+
+⚠️ **Najpierw sprostowanie stanu**: user napisał „wpisałem oba zlecenia, działa", ale w bazie
+**nie ma ani jednego frachtu z tablicą `zlecenia[]`** i żadnego z załadunkiem 30.09 w Strykowie.
+Najprawdopodobniej klikane było w podglądzie `podglad/zlecenia` (port 5196), gdzie **zapis jest
+wyłączony z założenia** i okno wygląda identycznie. Zapis do Firestore pozostaje NIESPRAWDZONY.
+
+**Obawa „czy dobrze zaczyta rozładunki" — sprawdzona i bezpodstawna.** Puściłem
+`formatOrderForDriverCopy` na **28 realnych frachtach z więcej niż jednym rozładunkiem**:
+w każdym liczba punktów `R` w kopii zgadza się z liczbą stopów. Adresy, daty, godziny, GPS
+i telefony zaczytują się poprawnie — ten kod działał już wcześniej.
+
+**Czego naprawdę brakowało**: informacji, ILE zostawić w którym punkcie. Sam numer zlecenia
+kierowcy nic nie mówi (kopia celowo go nie zawiera). Dlatego zlecenie dostało **`palety` i `waga`**,
+a kopia dla kierowcy dopisuje pod właściwym `R`: `⬇ Zostawić: 3 pal · 1063 kg`.
+Przypisanie bierze się z pola „Dotyczy rozładunku"; **bez wskazania nic się nie dopisuje** —
+zgadywanie, że wszystko jedzie do pierwszego punktu, byłoby gorsze niż brak informacji.
+
+**Zweryfikowane:**
+- **regresja na 731 realnych frachtach**: zero wyjątków, zero dopisków „Zostawić" (żaden nie ma
+  jeszcze tablicy zleceń), zero rozjazdów liczby punktów R na 28 frachtach multistop;
+- realny przypadek CAMION: R1 Senozan → `3 pal · 1063 kg`, R2 Saint Sorlin → `2 pal · 700 kg`,
+  **bez numerów zleceń i bez cen** w treści dla kierowcy;
+- zlecenia bez wskazanego rozładunku → brak dopisku.
+
+🐛 **Przy okazji**: `orderFormatters.js` dostał import z rozszerzeniem `.js`. Vite rozwiązuje import
+bez niego, ale ten moduł ładują też skrypty node (raporty, testy) — a node ESM nie zgaduje
+i wywalał się z `ERR_MODULE_NOT_FOUND`.

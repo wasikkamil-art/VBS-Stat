@@ -615,14 +615,19 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
                   </div>
                 )}
 
-                {/* Przypisanie do punktu rozładunku — sensowne dopiero przy kilku zleceniach */}
+                {/* Przypisanie do punktu rozładunku + ładunek — sensowne dopiero przy kilku zleceniach.
+                    Palety i waga idą do KOPII DLA KIEROWCY jako „Zostawić: 3 pal · 1063 kg" pod właściwym R. */}
                 {wieleZlecen && (
-                  <div className="mb-2">
-                    <label className={lbl}>Dotyczy rozładunku</label>
-                    <select value={z.rozladunek||""} onChange={e => setZl(i,"rozladunek",e.target.value)} className={inp}>
-                      <option value="">— nie wskazano —</option>
-                      {przystanki.map(s => <option key={s.i} value={String(s.i)}>R{s.i} · {s.krotki || s.addr}</option>)}
-                    </select>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2">
+                    <div className="col-span-2">
+                      <label className={lbl}>Dotyczy rozładunku</label>
+                      <select value={z.rozladunek||""} onChange={e => setZl(i,"rozladunek",e.target.value)} className={inp}>
+                        <option value="">— nie wskazano —</option>
+                        {przystanki.map(s => <option key={s.i} value={String(s.i)}>R{s.i} · {s.krotki || s.addr}</option>)}
+                      </select>
+                    </div>
+                    <div><label className={lbl}>Palety</label><input type="number" placeholder="3" value={z.palety||""} onChange={e => setZl(i,"palety",e.target.value)} className={inp} /></div>
+                    <div><label className={lbl}>Waga (kg)</label><input type="number" placeholder="1063" value={z.waga||""} onChange={e => setZl(i,"waga",e.target.value)} className={inp} /></div>
                   </div>
                 )}
 

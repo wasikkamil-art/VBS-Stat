@@ -9,6 +9,10 @@
 // ── parseGeoString ──
 // "50.123, 19.456" → { lat: 50.123, lng: 19.456 } | null
 // Format Atlas/widziszwszystko: string "lat,lng" (z opcjonalnymi spacjami).
+// Rozszerzenie `.js` jest tu WYMAGANE: Vite rozwiąże import bez niego, ale ten moduł
+// bywa ładowany też wprost przez node (skrypty raportowe i testy), a node ESM nie zgaduje.
+import { zleceniaDlaRozladunku, opisLadunkuZlecenia } from "./zleceniaFrachtu.js";
+
 export function parseGeoString(geo) {
   if (!geo || typeof geo !== "string") return null;
   const [latStr, lngStr] = geo.split(",").map(s => s.trim());
@@ -120,13 +124,19 @@ export function formatOrderForDriverCopy(fracht /* , vehicles = [] */) {
 
   if (rozPunkty.length > 0) {
     lines.push("📦 ROZŁADUNEK");
-    rozPunkty.forEach(p => {
+    rozPunkty.forEach((p, i) => {
       const firmaSuffix = p.firma ? ` — ${p.firma}` : "";
       lines.push(`📦 ${p.idx} — ${fmtD(p.data)} ${fmtT(p.godz)}${firmaSuffix}`);
       if (p.addr) lines.push(`   ${p.addr}`);
       const g = parseGeoString(p.geo);
       if (g) lines.push(`   GPS: ${g.lat.toFixed(6)}, ${g.lng.toFixed(6)}`);
       if (p.tel) lines.push(`   Tel: ${p.tel}`);
+      // Przy kilku zleceniach na jeden wyjazd dopisujemy, ILE zostawić w tym punkcie.
+      // Numeru zlecenia kierowcy nie podajemy (kopia celowo go nie zawiera) — liczy się ładunek.
+      zleceniaDlaRozladunku(fracht, i + 1).forEach(z => {
+        const opis = opisLadunkuZlecenia(z);
+        if (opis) lines.push(`   ⬇ Zostawić: ${opis}`);
+      });
       lines.push("");
     });
   }
