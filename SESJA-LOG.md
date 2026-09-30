@@ -4841,3 +4841,44 @@ rozjechałyby się przy pierwszej poprawce.
 ℹ️ **Osobny, większy temat do decyzji**: 26 klientów jest pisanych na więcej niż jeden sposób
 (różnica w wielkości liter: `Abacus`/`ABACUS`, `Done`/`DONE`/`done`, `Zipmend GmbH`/`zipmend GmbH`).
 To rozszczepia grupowanie w raportach mocniej niż spacje i przycinanie tego NIE rusza.
+
+### cd.3 30.09 — druga strona tego samego problemu: wklejanie ręczne
+
+Podgląd skryptu porządkowego ujawnił pola, których moje wcześniejsze skany nie widziały, bo
+używały whitelisty: **`skad`** (2×, twarda spacja), `zaladunekKod2` (2×), `zaladunekKod3`.
+Sprawdzenie, skąd się wzięły, obaliło moje własne założenie.
+
+⚠️ **`skad` NIE jest polem parsera** — nie ma go w prompcie. To pole starsze (523 niepuste
+wartości), fallback w listach (`… || r.skad`) i element formularza ręcznego. Czyli twarde spacje
+w `56154d31.skad` i `t0lrmat8.skad` wzięły się z **wklejenia przez człowieka**, a commit `5ce2ef1`
+(przycinanie na wejściu parsera) by ich NIE zatrzymał. Zamknąłem jedną stronę problemu i napisałem
+„to wróci" tylko o parserze — wracało z dwóch.
+
+**A. Zakres wartowników rozszerzony** (`bezWartownikow`): **załadunek też jest multi-stop** —
+`zaladunekKod2/3` są w bazie, w tabelach i w `pickBest` dla geo, a filtr obejmował tylko
+pojedynczy załadunek. Dziś prompt nie ma pól Z2/Z3, więc luka była UŚPIONA: gdyby ktoś je dodał,
+wartownik przeszedłby bez filtra i bez śladu — dokładnie ta drift whitelisty, której uniknąłem
+przy przycinaniu. Dodane sufiksy 2–5 po stronie załadunku oraz starsze `skad` (jako pole miejsca,
+czyli węższy poziom wzorców — `None` i `TBC` tam zostają).
+
+**B. Przycinanie w warstwie ZAPISU** — `przytnijGleboko` w `dbAddFracht`, `dbUpdateFracht`
+i `dbBulkAddFrachty`, czyli w trzech funkcjach, przez które przechodzi każdy zapis frachtu.
+Głębokie, bo w rekordzie są tablice i obiekty (`zlecenia[]`, `emailContent`, `tollEstimatePer`,
+`trackerShow`). **Wszystko, co nie jest stringiem, zwykłym obiektem ani tablicą, przechodzi przez
+referencję** — gdyby w patchu pojawił się kiedyś `serverTimestamp()`, `Date` albo `GeoPoint`,
+głęboki obchód nie ma prawa go rozłożyć. Sprawdzone: dziś w kolekcji są tylko string, number,
+boolean, zwykły obiekt i tablica (żadnego Timestampa).
+
+**Zweryfikowane**: 34/34 asercji (sufiksy załadunku, `skad`, gmina `None` i `TBC` w polu miejsca
+kontra skrótowiec w polu nazwy, `zlecenia[]` przycięte w głąb, `Date` i obiekt klasy przez
+referencję, idempotencja). Regresja: **732 realne frachty przepuszczone przez warstwę zapisu** —
+zapis zmieniłby 43 dokumenty i 61 pól tekstowych, a **treść, zestaw kluczy, typy, liczba linii
+i długości tablic zostają identyczne w każdym** (0 podejrzanych). Wartownicy po rozszerzeniu
+zakresu łapią nadal dokładnie te same 5 wartości — rozszerzenie nie dodało fałszywych alarmów.
+Lint 0 errors, build zielony.
+
+🐛 Przy okazji, dwa razy ta sama pułapka z niewidocznym znakiem: **literalny bajt NBSP wkleił się
+do źródła** (raz w regexie produkcyjnym — złapał ESLint, raz w moim teście). A flaga „treść
+zmieniona" na `ad05zxcv` okazała się błędem w **teście**, nie w kodzie: w JSON tabulator jest
+escape'em (`\t` = dwa znaki), więc `/\s/` go nie łapie i porównanie „bez białych znaków" widziało
+różnicę tam, gdzie jej nie było.

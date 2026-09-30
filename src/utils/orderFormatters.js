@@ -52,14 +52,23 @@ export function bezKwot(tekst) {
  * ponad wszelką wątpliwość.
  */
 const POLA_NAZWOWE = (() => {
-  const out = ["zaladunekFirma", "zaladunekAdres", "zleceniodawcaFirma", "zleceniodawcaOsoba"];
-  for (const s of ["", "2", "3", "4", "5"]) out.push(`rozladunekFirma${s}`, `rozladunekAdres${s}`);
+  const out = ["zleceniodawcaFirma", "zleceniodawcaOsoba"];
+  // Załadunek TEŻ jest multi-stop (Z1..Z3 są w bazie i w `pickBest` dla geo), więc sufiksy
+  // muszą być po obu stronach trasy. Prompt parsera ma dziś tylko jeden załadunek — ale gdy
+  // ktoś doda Z2, wartownik przeszedłby tu bez filtra i bez śladu.
+  for (const s of ["", "2", "3", "4", "5"])
+    out.push(`rozladunekFirma${s}`, `rozladunekAdres${s}`, `zaladunekFirma${s}`, `zaladunekAdres${s}`);
   return out;
 })();
 
 const POLA_MIEJSCA = (() => {
-  const out = ["zaladunekKod", "zaladunekMiasto", "zaladunekKodPocztowy"];
-  for (const s of ["", "2", "3", "4", "5"]) out.push(`dokod${s}`, `dokodMiasto${s}`, `dokodPocztowy${s}`);
+  // `skad` to pole STARSZE od `zaladunekKod*`, ale wciąż żywe — 523 niepuste wartości
+  // i fallback w listach (`… || r.skad`). Pomijanie go zostawiłoby dziurę w najczęściej
+  // wypełnionym polu kierunkowym.
+  const out = ["skad"];
+  for (const s of ["", "2", "3", "4", "5"])
+    out.push(`dokod${s}`, `dokodMiasto${s}`, `dokodPocztowy${s}`,
+             `zaladunekKod${s}`, `zaladunekMiasto${s}`, `zaladunekKodPocztowy${s}`);
   return out;
 })();
 
@@ -177,6 +186,38 @@ export function przytnijWartosci(parsed) {
  */
 export function oczyscParsowaneZlecenie(parsed) {
   return bezWartownikow(przytnijWartosci(parsed));
+}
+
+/** Czy to zwykły obiekt danych, a nie Date, Timestamp, GeoPoint czy sentinel Firestore. */
+const zwyklyObiekt = (v) => {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+};
+
+/**
+ * Przycięcie w GŁĄB — dla warstwy zapisu frachtu, gdzie w rekordzie siedzą też tablice
+ * i obiekty (`zlecenia[]`, `emailContent`, `tollEstimatePer`, `trackerShow`).
+ *
+ * PO CO OSOBNO OD PARSERA: przycinanie na wejściu parsera nie chroni przed **wklejeniem
+ * przez człowieka**, a to realne źródło — pole `skad` (523 niepuste wartości) nie występuje
+ * w prompcie parsera w ogóle, a i tak trafiły do niego twarde spacje U+00A0 w dwóch
+ * frachtach. Formularz jest drugą, niezałataną stroną tego samego problemu.
+ *
+ * Wszystko, co nie jest stringiem, zwykłym obiektem ani tablicą, przechodzi PRZEZ REFERENCJĘ
+ * i nietknięte — gdyby kiedyś w patchu pojawił się `serverTimestamp()`, `Date` albo `GeoPoint`,
+ * głęboki obchód nie ma prawa go rozłożyć na części. Dziś w kolekcji `frachty` są tylko
+ * string, number, boolean, zwykły obiekt i tablica, ale to się może zmienić bez ostrzeżenia.
+ */
+export function przytnijGleboko(v) {
+  if (typeof v === "string") return przytnijWartosc(v);
+  if (Array.isArray(v)) return v.map(przytnijGleboko);
+  if (zwyklyObiekt(v)) {
+    const out = {};
+    for (const k of Object.keys(v)) out[k] = przytnijGleboko(v[k]);
+    return out;
+  }
+  return v;
 }
 
 export function parseGeoString(geo) {

@@ -3,7 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 // v2025.03.31 — YoY Scorecard rebuild
 
 // Helpery formatowania zlecenia (wydzielone z monolitu 2026-04-28, TODO #5c)
-import { parseGeoString, formatOrderForDriverCopy, allDokody } from "./utils/orderFormatters";
+import { parseGeoString, formatOrderForDriverCopy, allDokody, przytnijGleboko } from "./utils/orderFormatters";
 // Helpery statusu frachtu (single source of truth, wydzielone 2026-04-28 #5c krok 2)
 import { computeFrachtStatus, isFrachtRozladowany, isStaleUnfinished, hasZaladunekActive, getMaxRouteIndex } from "./utils/frachtStatus";
 // Role — wspólna definicja z Cloud Functions (patrz src/utils/roles.js)
@@ -225,13 +225,19 @@ async function dbSet(key, value) {
 // Ratunkiem był runTransaction na `fleet/data`. Od przenosin do kolekcji (24.09.2026)
 // problem znika u źródła: każdy fracht to osobny dokument, więc zapis dotyka tylko jego
 // i nie ma czego nadpisać.
+// Każdy zapis frachtu przechodzi przez `przytnijGleboko`: spacje na brzegach, podwójne
+// spacje i twarde spacje U+00A0 nie mają po co wchodzić do bazy. Filtr na wejściu parsera
+// (`oczyscParsowaneZlecenie`) nie wystarczał, bo dyspozytor wkleja dane RĘCZNIE — twarde
+// spacje trafiły do pola `skad`, którego parser nawet nie wypełnia. Znak nowej linii
+// jest zachowywany (patrz `przytnijWartosc`), bo w `uwagi`, `towarPalety`
+// i `rozladunekAdres` jest nośnikiem struktury.
 async function dbAddFracht(newFracht) {
-  await setDoc(FRACHT_REF(newFracht.id), newFracht);
+  await setDoc(FRACHT_REF(newFracht.id), przytnijGleboko(newFracht));
 }
 
 async function dbUpdateFracht(id, patch) {
   // merge — patch bywa częściowy (status, kmStart/kmEnd, planAt…)
-  await setDoc(FRACHT_REF(id), patch, { merge: true });
+  await setDoc(FRACHT_REF(id), przytnijGleboko(patch), { merge: true });
 }
 
 async function dbDeleteFracht(id) {
@@ -242,7 +248,7 @@ async function dbBulkAddFrachty(newFrachty) {
   // writeBatch ma limit 500 operacji — import z Excela bywa większy.
   for (let i = 0; i < newFrachty.length; i += 400) {
     const batch = writeBatch(db);
-    for (const f of newFrachty.slice(i, i + 400)) batch.set(FRACHT_REF(f.id), f);
+    for (const f of newFrachty.slice(i, i + 400)) batch.set(FRACHT_REF(f.id), przytnijGleboko(f));
     await batch.commit();
   }
 }
