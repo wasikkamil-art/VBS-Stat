@@ -18,6 +18,8 @@ import { logAction } from "../utils/logAction";
 import TripSummaryPanel from "./TripSummaryPanel";
 import RozliczenieTrasyPanel from "./RozliczenieTrasyPanel";
 import ZlecenieUploadBtn from "./ZlecenieUploadBtn";
+import { zleceniaFrachtu, zapiszZlecenia, sumaZlecen, pusteZlecenie } from "../utils/zleceniaFrachtu";
+import { unloadStops } from "../utils/orderFormatters";
 
 // Lazy sub-modale — pobierane dopiero gdy admin klika konkretny przycisk wewnątrz modala
 const CopyOrderPreviewModal = lazy(() => import("./CopyOrderPreviewModal"));
@@ -92,8 +94,20 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
     n.kmWszystkie = pod+lad>0 ? String(pod+lad) : "";
     return n;
   });
-  const eurKmLad = f.kmLadowne && f.cenaEur ? (parseFloat(f.cenaEur)/parseInt(f.kmLadowne)).toFixed(2) : null;
-  const eurKmWsz = f.kmWszystkie && f.cenaEur ? (parseFloat(f.cenaEur)/parseInt(f.kmWszystkie)).toFixed(2) : null;
+  // ── ZLECENIA ──
+  // Jeden wyjazd bywa rozliczany dwoma zleceniami (dwa numery, dwie kwoty, jeden przejazd).
+  // Lista jest tu JEDYNYM źródłem prawdy dla numeru, kwoty, FV i PDF-a; płaskie pola frachtu
+  // wypełnia dopiero `zapiszZlecenia` przy zapisie. Dzięki temu nie ma dwóch stanów do pilnowania.
+  const [zlecenia, setZlecenia] = useState(() => zleceniaFrachtu(record));
+  const setZl = (i, k, v) => setZlecenia(prev => prev.map((z, idx) => idx === i ? { ...z, [k]: v } : z));
+  const dodajZlecenie = () => setZlecenia(prev => [...prev, pusteZlecenie()]);
+  const usunZlecenie = (i) => setZlecenia(prev => (prev.length <= 1 ? prev : prev.filter((_, idx) => idx !== i)));
+  const wieleZlecen = zlecenia.length > 1;
+  const sumaEur = sumaZlecen(zlecenia);
+  const przystanki = unloadStops(f);
+
+  const eurKmLad = f.kmLadowne && sumaEur ? (sumaEur/parseInt(f.kmLadowne)).toFixed(2) : null;
+  const eurKmWsz = f.kmWszystkie && sumaEur ? (sumaEur/parseInt(f.kmWszystkie)).toFixed(2) : null;
   const [geoPickerFor, setGeoPickerFor] = useState(null); // "z1"|"z2"|"r1"|"r2"|"r3"|"r4"|"r5"
   const [showWhatsappPreview, setShowWhatsappPreview] = useState(false);
   const [showCopyPreview, setShowCopyPreview] = useState(false);
@@ -272,7 +286,7 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
   const canSendWhatsapp = !!(record?.id && waDriver?.whatsappNumber);
 
   const onUploadedParsed = (url, parsed) => {
-    set("urlZlecenie", url);
+    setZl(0, "urlZlecenie", url);
     if (!parsed) return;
     Object.entries(parsed).forEach(([k, v]) => {
       if (v == null || v === "") return;
@@ -481,8 +495,8 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
           <div className="text-xs font-bold text-gray-600 uppercase tracking-widest pt-2">Towar i uwagi</div>
           <div style={{border:"1px solid #e5e7eb",borderRadius:12,padding:"14px",background:"#fafafa"}}>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <div><label className={lbl}>Nr zlecenia</label><input placeholder="ZL/2026/001" value={f.nrZlecenia||""} onChange={e => set("nrZlecenia",e.target.value)} className={inp} /></div>
-              <div><label className={lbl}>Nr referencyjny</label><input placeholder="ESTE-0097" value={f.nrRef||""} onChange={e => set("nrRef",e.target.value)} className={inp} /></div>
+              <div><label className={lbl}>Nr zlecenia{wieleZlecen && <span className="text-blue-600"> (1 z {zlecenia.length})</span>}</label><input placeholder="ZL/2026/001" value={zlecenia[0]?.nr||""} onChange={e => setZl(0,"nr",e.target.value)} className={inp} /></div>
+              <div><label className={lbl}>Nr referencyjny</label><input placeholder="ESTE-0097" value={zlecenia[0]?.ref||""} onChange={e => setZl(0,"ref",e.target.value)} className={inp} /></div>
               <div><label className={lbl}>Towar (opis)</label><input placeholder="Palety, kartony..." value={f.towarOpis||""} onChange={e => set("towarOpis",e.target.value)} className={inp} /></div>
               <div><label className={lbl}>Ilość palet/szt</label><input placeholder="4" value={f.towarIloscPalet||""} onChange={e => set("towarIloscPalet",e.target.value)} className={inp} /></div>
             </div>
@@ -546,16 +560,20 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
               <div><label className={lbl}>Dyspozytor</label><input placeholder="imię dyspozytora" value={f.dyspozytor||""} onChange={e => set("dyspozytor",e.target.value)} className={inp} /></div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
-              <div><label className={lbl}>Cena EUR</label><input type="number" placeholder="0.00" value={f.cenaEur||""} onChange={e => set("cenaEur",e.target.value)} className={inp} /></div>
+              <div><label className={lbl}>{wieleZlecen ? `Cena EUR (suma ${zlecenia.length} zleceń)` : "Cena EUR"}</label>
+                {wieleZlecen
+                  ? <input readOnly value={sumaEur.toFixed(2)} className={inp+" bg-blue-50 text-blue-800 font-semibold"} title="Suma kwot ze zleceń — edytuj w sekcji Zlecenia transportowe" />
+                  : <input type="number" placeholder="0.00" value={zlecenia[0]?.cenaEur||""} onChange={e => setZl(0,"cenaEur",e.target.value)} className={inp} />}
+              </div>
               <div><label className={lbl}>KM podjazd</label><input type="number" placeholder="0" value={f.kmPodjazd||""} onChange={e => set("kmPodjazd",e.target.value)} className={inp} /></div>
               <div><label className={lbl}>KM ładowne</label><input type="number" placeholder="0" value={f.kmLadowne||""} onChange={e => set("kmLadowne",e.target.value)} className={inp} /></div>
               <div><label className={lbl}>KM wszystkie (auto)</label><input readOnly value={f.kmWszystkie||""} className={inp+" bg-gray-50 text-gray-400"} /></div>
             </div>
             {(eurKmLad||eurKmWsz) && <div className="flex gap-4 text-sm mt-2">{eurKmLad && <span className="px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 font-semibold">EUR/km lad: {eurKmLad}</span>}{eurKmWsz && <span className="px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 font-semibold">EUR/km wsz: {eurKmWsz}</span>}</div>}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3">
-              <div><label className={lbl}>Nr FV</label><input placeholder="F/01/2026" value={f.nrFV||""} onChange={e => set("nrFV",e.target.value)} className={inp} /></div>
-              <div><label className={lbl}>Data wysłania FV</label><input type="date" value={f.dataWyslania||""} onChange={e => set("dataWyslania",e.target.value)} className={inp} /></div>
-              <div><label className={lbl}>Termin płatności</label><input type="date" value={f.terminPlatnosci||""} onChange={e => set("terminPlatnosci",e.target.value)} className={inp} /></div>
+              <div><label className={lbl}>Nr FV{wieleZlecen && <span className="text-blue-600"> (zlec. 1)</span>}</label><input placeholder="F/01/2026" value={zlecenia[0]?.nrFV||""} onChange={e => setZl(0,"nrFV",e.target.value)} className={inp} /></div>
+              <div><label className={lbl}>Data wysłania FV</label><input type="date" value={zlecenia[0]?.dataWyslania||""} onChange={e => setZl(0,"dataWyslania",e.target.value)} className={inp} /></div>
+              <div><label className={lbl}>Termin płatności</label><input type="date" value={zlecenia[0]?.terminPlatnosci||""} onChange={e => setZl(0,"terminPlatnosci",e.target.value)} className={inp} /></div>
             </div>
           </div>
 
@@ -570,21 +588,64 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
             <RozliczenieTrasyPanel frachtId={record.id} canEdit={typeof onPlanRoute === "function"} showToast={showToast} />
           )}
 
-          {/* ZLECENIE PDF */}
+          {/* ZLECENIA TRANSPORTOWE — jeden wyjazd może być rozliczany kilkoma zleceniami */}
           <div className="pt-2 border-t border-gray-100">
-            <label className={lbl}>📋 Zlecenie transportowe</label>
-            {f.urlZlecenie ? (
-              <div className="flex items-center gap-3 p-3 rounded-xl bg-blue-50 border border-blue-100">
-                <span className="text-2xl">📋</span>
-                <div className="flex-1">
-                  <div className="text-sm font-semibold text-blue-800">Zlecenie wgrane</div>
-                  <a href={safeHref(f.urlZlecenie)} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">Otwórz dokument →</a>
+            <div className="flex items-center justify-between mb-2">
+              <label className={lbl}>📋 {wieleZlecen ? `Zlecenia transportowe (${zlecenia.length})` : "Zlecenie transportowe"}</label>
+              {wieleZlecen && <span className="text-xs font-semibold text-blue-700 bg-blue-50 px-2 py-1 rounded-lg">RAZEM {sumaEur.toFixed(2)} EUR</span>}
+            </div>
+
+            {zlecenia.map((z, i) => (
+              <div key={i} className="mb-2 p-3 rounded-xl border" style={{ borderColor: i === 0 ? "#dbeafe" : "#e5e7eb", background: i === 0 ? "#eff6ff" : "#fafafa" }}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">Zlecenie {i + 1}</span>
+                  {i > 0 && (
+                    <button type="button" onClick={() => usunZlecenie(i)} className="text-xs text-red-400 hover:text-red-600 px-2 py-0.5 rounded-lg hover:bg-red-50" title="Usuń to zlecenie">✕ usuń</button>
+                  )}
                 </div>
-                <ZlecenieUploadBtn frachtId={record?.id || "new"} onUploaded={onUploadedParsed} label="Zastąp" />
-                <button type="button" onClick={() => set("urlZlecenie","")} className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50" title="Usuń zlecenie">✕</button>
+
+                {/* Zlecenie 1 ma numer i kwotę w sekcjach wyżej — tutaj tylko dla kolejnych,
+                    żeby nie dublować pól i nie tworzyć dwóch miejsc na tę samą wartość. */}
+                {i > 0 && (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2">
+                    <div><label className={lbl}>Nr zlecenia</label><input placeholder="003428/2026" value={z.nr||""} onChange={e => setZl(i,"nr",e.target.value)} className={inp} /></div>
+                    <div><label className={lbl}>Cena EUR</label><input type="number" placeholder="0.00" value={z.cenaEur||""} onChange={e => setZl(i,"cenaEur",e.target.value)} className={inp} /></div>
+                    <div><label className={lbl}>Nr FV</label><input placeholder="F/02/2026" value={z.nrFV||""} onChange={e => setZl(i,"nrFV",e.target.value)} className={inp} /></div>
+                    <div><label className={lbl}>Termin płatności</label><input type="date" value={z.terminPlatnosci||""} onChange={e => setZl(i,"terminPlatnosci",e.target.value)} className={inp} /></div>
+                  </div>
+                )}
+
+                {/* Przypisanie do punktu rozładunku — sensowne dopiero przy kilku zleceniach */}
+                {wieleZlecen && (
+                  <div className="mb-2">
+                    <label className={lbl}>Dotyczy rozładunku</label>
+                    <select value={z.rozladunek||""} onChange={e => setZl(i,"rozladunek",e.target.value)} className={inp}>
+                      <option value="">— nie wskazano —</option>
+                      {przystanki.map(s => <option key={s.i} value={String(s.i)}>R{s.i} · {s.krotki || s.addr}</option>)}
+                    </select>
+                  </div>
+                )}
+
+                {z.urlZlecenie ? (
+                  <div className="flex items-center gap-3">
+                    <span className="text-xl">📄</span>
+                    <a href={safeHref(z.urlZlecenie)} target="_blank" rel="noopener noreferrer" className="flex-1 text-xs text-blue-600 hover:underline">Otwórz dokument →</a>
+                    <ZlecenieUploadBtn frachtId={record?.id || "new"} onUploaded={i === 0 ? onUploadedParsed : (url) => setZl(i,"urlZlecenie",url)} label="Zastąp" />
+                    <button type="button" onClick={() => setZl(i,"urlZlecenie","")} className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50" title="Usuń plik">✕</button>
+                  </div>
+                ) : (
+                  <ZlecenieUploadBtn frachtId={record?.id || "new"} onUploaded={i === 0 ? onUploadedParsed : (url) => setZl(i,"urlZlecenie",url)} label="📎 Wgraj zlecenie (PDF / JPG)" fullWidth />
+                )}
               </div>
-            ) : (
-              <ZlecenieUploadBtn frachtId={record?.id || "new"} onUploaded={onUploadedParsed} label="📎 Wgraj zlecenie (PDF / JPG)" fullWidth />
+            ))}
+
+            <button type="button" onClick={dodajZlecenie} className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 pl-1">
+              ＋ dodaj kolejne zlecenie do tego wyjazdu
+            </button>
+            {wieleZlecen && (
+              <div className="text-xs text-gray-500 mt-2">
+                To jeden fracht i jeden przejazd — kilometry liczą się raz, a w raportach widnieje suma {sumaEur.toFixed(2)} EUR.
+              </div>
             )}
           </div>
         </div>
@@ -659,7 +720,7 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
             })()}
             <button onClick={() => {
               if(!f.vehicleId){alert("Wybierz pojazd");return;}
-              if(!f.cenaEur){alert("Wpisz cenę EUR");return;}
+              if(!sumaEur){alert("Wpisz cenę EUR");return;}
               // Heurystyka: adres zawierający enumerację "1. ... 2. ..." prawdopodobnie skleja
               // wiele punktów rozładunku w jedno pole — powinny być rozdzielone na R1/R2/...
               const hasMulti = (addr) => addr && /(^|\n)\s*1\.\s/.test(addr) && /(^|\n)\s*2\.\s/.test(addr);
@@ -675,7 +736,7 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
                 const ok = confirm(`Uwaga: pole(a) ${multistopFields.join(", ")} wygląda jakby zawierało wiele adresów ("1. ... 2. ..."). Powinieneś rozdzielić je na osobne punkty (R1, R2, ...).\n\nZapisać mimo to?`);
                 if (!ok) return;
               }
-              onSave(f);
+              onSave(zapiszZlecenia(f, zlecenia));
             }} className="px-5 py-2 rounded-lg text-sm font-semibold text-white" style={{background:"#111827"}}>{record ? "Zapisz zmiany" : "Dodaj fracht"}</button>
           </div>
         </div>

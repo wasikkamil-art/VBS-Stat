@@ -4424,3 +4424,50 @@ zero `dane.json`, kluczowe pliki bajt w bajt.
 (`project_zakladka_analizy`), żeby przyszła sesja nie zgłaszała tego jako błędu ani nie dopisywała
 zakładek. Reguła ogólna: rozjazd „jawna lista vs domyślne roli" raportować, ale nigdy nie zmieniać
 samodzielnie.
+
+## 2026-09-30 — jeden wyjazd, dwa zlecenia (`zlecenia[]` we frachcie)
+
+Realny przypadek od usera: CAMION LOGISTICS wystawił **dwa zlecenia na jeden przejazd** —
+003427/2026 (1150 €, rozładunek FR 71260 Senozan) i 003428/2026 (850 €, FR 01150 Saint Sorlin),
+przy **wspólnym załadunku** w Strykowie 30.09. Multistop R1..R5 obsługiwał już dwa rozładunki,
+ale pola `nrZlecenia`, `nrRef`, `cenaEur`, `urlZlecenie` i `nrFV` były POJEDYNCZE — drugie
+zlecenie nie miało gdzie wejść.
+
+**Decyzja usera: to JEDEN fracht, nie dwa.** „Kasa jest jedna za to, ale dwa rozładunki i dwa
+zlecenia." Rozbicie na dwa frachty policzyłoby te same kilometry dwa razy i zepsuło €/km oraz
+rentowność — w podglądzie widać różnicę: €/km z sumy **0,833** wobec **0,479** przy jednym zleceniu.
+
+**`src/utils/zleceniaFrachtu.js`** (nowy, śledzony) — jedno miejsce, które wie, że fracht może mieć
+kilka zleceń. `zleceniaFrachtu()` normalizuje odczyt (tablica albo stare płaskie pola),
+`zapiszZlecenia()` składa zapis.
+
+⚠️ **Zgodność wstecz była tu najważniejsza.** Fracht z jednym zleceniem **NIE dostaje tablicy** —
+zostaje na płaskich polach, dokładnie jak 730 istniejących rekordów. Tablica pojawia się dopiero
+przy drugim zleceniu, a płaskie pola są wtedy utrzymywane jako **lustro**: `cenaEur` = SUMA,
+`nrZlecenia` = numery sklejone „ + ". Dzięki temu Rentowność, Analizy, generatory raportów, tracker
+i e-maile czytające `fracht.cenaEur` działają **bez jednej linijki zmiany**.
+
+**UI**: sekcja „📋 Zlecenia transportowe" na dole okna zlecenia — lista zleceń, każde z numerem,
+kwotą, nr FV, terminem, własnym PDF-em i **wskazaniem, którego rozładunku dotyczy** (lista R1..R5
+budowana z realnych przystanków frachtu). Przy ≥2 zleceniach „Cena EUR" w Danych biurowych
+przechodzi w tryb tylko-do-odczytu z sumą. Pola zlecenia 1 zostały tam, gdzie były.
+
+🐛 **Dziura znaleziona przy okazji i załatana**: osobny `FVEditModal` zapisywał `cenaEur` i
+`nrZlecenia` WPROST. Na frachcie z dwoma zleceniami nadpisałby sumę kwotą jednego z nich i po cichu
+zaniżył obrót w raportach. Teraz przy wielu zleceniach oba pola są tylko do odczytu, z wypisanym
+składem („003427/2026 · 1150 EUR + 003428/2026 · 850 EUR") i odesłaniem do okna zlecenia.
+
+**Zweryfikowane:**
+- moduł `zleceniaFrachtu`: **19/19 asercji** (stary fracht bez tablicy, realny przypadek 1150+850,
+  powrót do jednego zlecenia kasuje tablicę, przecinek dziesiętny, śmieci, zaokrąglenie do grosza);
+- **klikane na żywo** w nowym podglądzie bez logowania `podglad/zlecenia` (port 5196, dane z obu
+  realnych PDF-ów): dodanie drugiego zlecenia → „RAZEM 2000.00 EUR" i to samo w Danych biurowych,
+  €/km ładowne **0,73 → 1,27**, lista rozładunków w selektorze zaciągnięta z frachtu
+  („R1 · FR 71260 Senozan", „R2 · FR 01150 Saint Sorlin"), payload do zapisu zawiera tablicę
+  dwóch zleceń, `cenaEur: "2000"`, a **`kmWszystkie`, `kmPodjazd`, `kmLadowne`, `dokod`, `dokod2`
+  i `nrFV` zlecenia 1 pozostają nietknięte**;
+- lint 0 errors, build zielony.
+
+⚠️ **NIEZWERYFIKOWANE**: zapis do Firestore z prawdziwej aplikacji i wygląd list/tabel dla frachtu
+z dwoma zleceniami (kolumna „Nr FV" pokaże sklejone numery). Pole `rozladunek` jest **zapisywane,
+ale jeszcze nigdzie nie pokazywane** — świadomie, to materiał na następny krok (kierowca i CMR).

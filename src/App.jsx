@@ -17283,6 +17283,11 @@ function FrachtyImportModal({ vehicles, onImport, onClose }) {
 
 // ─── FV EDIT MODAL ───────────────────────────────────────────────────────────
 function FVEditModal({ record, onSave, onClose }) {
+  // Fracht rozliczany kilkoma zleceniami ma `cenaEur` i `nrZlecenia` WYLICZONE
+  // (suma kwot i sklejone numery — patrz src/utils/zleceniaFrachtu.js). Edycja ich tutaj
+  // nadpisałaby sumę kwotą jednego zlecenia i po cichu zaniżyła obrót w raportach,
+  // dlatego przy wielu zleceniach te dwa pola są tylko do odczytu.
+  const wieleZlecen = Array.isArray(record?.zlecenia) && record.zlecenia.length > 1;
   const [f, setF] = useState({
     nrFV:            record?.nrFV            || "",
     klient:          record?.klient          || "",
@@ -17310,10 +17315,24 @@ function FVEditModal({ record, onSave, onClose }) {
         <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div><label className={lbl}>Nr FV</label><input placeholder="F/01/2026" value={f.nrFV} onChange={e => set("nrFV", e.target.value)} className={inp} /></div>
-            <div><label className={lbl}>Nr zlecenia</label><input placeholder="auto z AI" value={f.nrZlecenia} onChange={e => set("nrZlecenia", e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>Nr zlecenia</label>
+              {wieleZlecen
+                ? <input readOnly value={f.nrZlecenia} className={inp + " bg-blue-50 text-blue-800"} title="Numery ze zleceń — edytuj w oknie zlecenia" />
+                : <input placeholder="auto z AI" value={f.nrZlecenia} onChange={e => set("nrZlecenia", e.target.value)} className={inp} />}
+            </div>
           </div>
+          {wieleZlecen && (
+            <div className="text-xs px-3 py-2 rounded-lg bg-blue-50 text-blue-800 border border-blue-100">
+              Ten fracht jest rozliczany <b>{record.zlecenia.length} zleceniami</b> ({record.zlecenia.map(z => `${z.nr || "?"} · ${z.cenaEur || 0} EUR`).join(" + ")}).
+              Kwota i numery są sumą — zmieniaj je w oknie zlecenia.
+            </div>
+          )}
           <div><label className={lbl}>Klient</label><input placeholder="nazwa klienta" value={f.klient} onChange={e => set("klient", e.target.value)} className={inp} /></div>
-          <div><label className={lbl}>Cena EUR</label><input type="number" placeholder="0.00" value={f.cenaEur} onChange={e => set("cenaEur", e.target.value)} className={inp} /></div>
+          <div><label className={lbl}>{wieleZlecen ? "Cena EUR (suma zleceń)" : "Cena EUR"}</label>
+            {wieleZlecen
+              ? <input readOnly value={f.cenaEur} className={inp + " bg-blue-50 text-blue-800 font-semibold"} title="Suma kwot ze zleceń — edytuj w oknie zlecenia" />
+              : <input type="number" placeholder="0.00" value={f.cenaEur} onChange={e => set("cenaEur", e.target.value)} className={inp} />}
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className={lbl}>Data wysłania FV</label><input type="date" value={f.dataWyslania} onChange={e => set("dataWyslania", e.target.value)} className={inp} /></div>
             <div><label className={lbl}>Termin płatności</label><input type="date" value={f.terminPlatnosci} onChange={e => set("terminPlatnosci", e.target.value)} className={inp} /></div>
