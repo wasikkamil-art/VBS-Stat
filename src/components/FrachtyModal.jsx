@@ -285,24 +285,91 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
   const dispatcherName = (currentUser?.displayName || currentUser?.name || (currentUser?.email || "").split("@")[0] || "Dyspozytor");
   const canSendWhatsapp = !!(record?.id && waDriver?.whatsappNumber);
 
-  // Wgranie PDF-a KOLEJNEGO zlecenia. Uzupełniamy tylko pola tego zlecenia — adresów i dat
-  // frachtu celowo NIE ruszamy, bo trasa jest już wpisana i nadpisanie zepsułoby punkty R.
-  // Kwoty nie da się zaczytać: parser ma wprost zakazane wyciąganie cen ze zlecenia.
+  // Wgranie PDF-a KOLEJNEGO zlecenia — ma zrobić za dyspozytora tyle, ile się da:
+  // wypełnić numer, kwotę, palety i wagę TEGO zlecenia, a jego punkt rozładunku
+  // dopisać do trasy jako kolejny wolny R i od razu przypiąć.
+  //
+  // Zasady, których pilnujemy:
+  //  • nigdy nie NADPISUJEMY tego, co dyspozytor już wpisał — uzupełniamy wyłącznie puste pola;
+  //  • adresów już istniejących punktów NIE ruszamy (trasa bywa poprawiana ręcznie);
+  //  • gdy rozładunek z PDF-a już jest na trasie, tylko się do niego przypinamy, bez duplikatu.
   const wgrajKolejne = (i, url, parsed) => {
+    const p = parsed || {};
+    const tekst = (v) => (v == null || v === "" ? "" : String(v));
+
+    // Adres rozładunku z TEGO zlecenia (w jego własnym PDF jest pierwszym rozładunkiem)
+    const nowyKod = [tekst(p.dokodPocztowy), tekst(p.dokodMiasto)].filter(Boolean).join(" ").trim();
+    const porownaj = (s) => s.toLowerCase().replace(/\s+/g, " ").trim();
+
+    let docelowy = "";
+    const patch = {};
+    if (nowyKod) {
+      const istniejacy = przystanki.find(s => porownaj(s.krotki || s.addr) === porownaj(nowyKod));
+      if (istniejacy) {
+        docelowy = String(istniejacy.i);                       // ten punkt już jest na trasie
+      } else {
+        // pierwszy wolny slot R1..R5 (sufiks: R1 = "", R2 = "2", …)
+        const wolny = [1, 2, 3, 4, 5].find(n => {
+          const s = n === 1 ? "" : String(n);
+          return !tekst(f[`dokod${s}`]) && !tekst(f[`rozladunekAdres${s}`]);
+        });
+        if (wolny) {
+          const s = wolny === 1 ? "" : String(wolny);
+          patch[`dokodPocztowy${s}`] = tekst(p.dokodPocztowy);
+          patch[`dokodMiasto${s}`] = tekst(p.dokodMiasto);
+          patch[`dokod${s}`] = nowyKod;
+          patch[`rozladunekAdres${s}`] = tekst(p.rozladunekAdres);
+          patch[`rozladunekFirma${s}`] = tekst(p.rozladunekFirma);
+          patch[`rozladunekTelefon${s}`] = tekst(p.rozladunekTelefon);
+          patch[`dataRozladunku${s}`] = tekst(p.dataRozladunku);
+          patch[`godzRozladunku${s}`] = tekst(p.godzRozladunku);
+          docelowy = String(wolny);
+        }
+      }
+    }
+    if (Object.keys(patch).length) {
+      setF(prev => ({ ...prev, ...patch }));
+      // Sekcje R2..R5 są domyślnie zwinięte — bez rozwinięcia dyspozytor nie zobaczyłby
+      // punktu, który właśnie powstał, ani nie mógłby go poprawić. Rozwijamy kaskadowo,
+      // bo R{n} ma sens tylko wtedy, gdy widać poprzednie.
+      const setters = { 2: setShowR2, 3: setShowR3, 4: setShowR4, 5: setShowR5 };
+      const n = Number(docelowy);
+      for (let j = 2; j <= n; j++) setters[j]?.(true);
+    }
+
     setZlecenia(prev => prev.map((z, idx) => idx !== i ? z : {
       ...z,
       urlZlecenie: url,
-      nr: z.nr || parsed?.nrZlecenia || "",
-      palety: z.palety || (parsed?.towarIloscPalet != null ? String(parsed.towarIloscPalet) : ""),
-      waga: z.waga || (parsed?.wagaLadunku != null ? String(parsed.wagaLadunku) : ""),
+      nr: z.nr || tekst(p.nrZlecenia),
+      ref: z.ref || tekst(p.nrRef),
+      cenaEur: z.cenaEur || tekst(p.cenaEur),
+      palety: z.palety || tekst(p.towarIloscPalet),
+      waga: z.waga || tekst(p.wagaLadunku),
+      rozladunek: z.rozladunek || docelowy,
     }));
+
+    if (docelowy) showToast(`📄 Zlecenie ${i + 1}: rozładunek przypisany do R${docelowy}`);
   };
 
   const onUploadedParsed = (url, parsed) => {
     setZl(0, "urlZlecenie", url);
     if (!parsed) return;
+    // Karta zlecenia 1 dostaje swoje własne dane (kwota, ładunek) i przypięcie do R1.
+    // Bez tego dyspozytor musiał je przepisywać ręcznie, mimo że parser już je odczytał.
+    // Uzupełniamy wyłącznie PUSTE pola — to, co wpisał człowiek, jest wiążące.
+    const tekst = (v) => (v == null || v === "" ? "" : String(v));
+    setZlecenia(prev => prev.map((z, idx) => idx !== 0 ? z : {
+      ...z,
+      nr: z.nr || tekst(parsed.nrZlecenia),
+      ref: z.ref || tekst(parsed.nrRef),
+      cenaEur: z.cenaEur || tekst(parsed.cenaEur),
+      palety: z.palety || tekst(parsed.towarIloscPalet),
+      waga: z.waga || tekst(parsed.wagaLadunku),
+      rozladunek: z.rozladunek || "1",
+    }));
     Object.entries(parsed).forEach(([k, v]) => {
       if (v == null || v === "") return;
+      if (k === "cenaEur") return;     // kwota żyje w karcie zlecenia, nie w polu frachtu
       const sv = String(v);
       if (k === "zaladunekKod" && !f.zaladunekKodPocztowy) {
         const [kp, km] = splitKM(sv); set("zaladunekKodPocztowy", kp); set("zaladunekMiasto", km);

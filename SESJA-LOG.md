@@ -4644,3 +4644,39 @@ zostawić w tym punkcie").
 
 Wg PDF-ów ma być: 003427 = 1150 € / 3 pal / 1063 kg → R1 Senozan;
 003428 = 850 € / 2 pal / 700 kg → R2 Saint Sorlin. Suma 2000 € jest poprawna niezależnie od tego.
+
+### cd. 30.09 — mniej pracy dyspozytora: zlecenie zaczytuje się samo
+
+Prośba usera: „a nie możemy zrobić tak, że zaczyta to ze zlecenia i samo wpisze, chcę ograniczyć
+udział dyspozytora". Zrobione — wgranie PDF-a wypełnia teraz kartę zlecenia i **dopisuje punkt
+rozładunku do trasy**.
+
+**Decyzja, która dotknęła istniejącego świadomego wyboru**: parser zleceń miał w prompcie
+`NIE podawaj cen frachtu`. Sprawdziłem, skąd to się wzięło — zakaz dotyczy WYŁĄCZNIE parsera zleceń
+(parser faktur `extractWithAI` czyta `cenaEur` normalnie), a jego sensem było niedopuszczenie cen
+do treści dla kierowcy (`uwagi` mają osobne „BEZ cen"). Zdjąłem zakaz dla samego pola kwoty:
+schemat dostał `cenaEur`, a prompt wprost mówi „kwotę podaj WYŁĄCZNIE w polu cenaEur, NIE umieszczaj
+cen w uwagi — te trafiają do kierowcy". Zakaz warunków płatności, NIP i danych spedytora zostaje.
+Kopia dla kierowcy pozostaje bez cen — sprawdzone wcześniej testem.
+
+**Co się teraz dzieje po wgraniu PDF-a kolejnego zlecenia:**
+1. wypełniają się numer, referencja, **kwota**, palety i waga TEGO zlecenia;
+2. jego rozładunek trafia do **pierwszego wolnego slotu R1..R5** (adres, firma, telefon, data, godzina);
+3. zlecenie zostaje **automatycznie przypięte** do tego punktu, a sekcja R{n} sama się rozwija
+   (bez tego punkt powstawał w stanie, ale był niewidoczny — złapane przy przeglądzie własnego kodu);
+4. leci toast „Zlecenie 2: rozładunek przypisany do R2".
+
+Zlecenie 1 dostało to samo: jego karta zaczytuje kwotę i ładunek ze swojego PDF-a i przypina się do R1.
+
+**Zasady, których pilnuje kod**: nigdy nie nadpisujemy tego, co wpisał człowiek (uzupełniamy tylko
+puste pola); adresy istniejących punktów zostają nietknięte; jeśli rozładunek z PDF-a już jest na
+trasie, zlecenie tylko się do niego przypina — bez duplikatu.
+
+**Zweryfikowane — 9/9 asercji** na logice przypisania z realnymi danymi: drugi PDF (Saint Sorlin)
+przy istniejącym R1 Senozan ląduje w R2 z przepisaną datą; ten sam adres co R1 przypina się do R1
+bez tworzenia punktu; różnice w spacjach i wielkości liter nie robią duplikatu; brak adresu = brak
+przypisania; komplet 5 slotów nie jest nadpisywany; pusty fracht dostaje R1.
+
+⚠️ **NIEZWERYFIKOWANE**: czy model faktycznie zwróci `cenaEur` z tych PDF-ów. Kwota jest w nich
+jawnie („4. Fracht (NETTO): 1 150.00 EUR"), ale wywołania parsera nie odpalę — idzie przez
+`/api/claude` za tokenem Firebase. Sprawdzi się przy pierwszym realnym wgraniu.

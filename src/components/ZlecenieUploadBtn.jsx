@@ -91,10 +91,12 @@ Odpowiedz TYLKO w formacie JSON (bez markdown):
   "towarPalety": "wymiary towaru, każda pozycja w nowej linii (np. 2× 240x120x240\\n1× 120x120xH240) lub null",
   "wagaLadunku": "waga w kg (sama cyfra) lub null",
   "zaladunekTyp": "typ załadunku (bok, tył, góra) lub null",
+  "cenaEur": "kwota frachtu NETTO w EUR, sama liczba bez waluty (np. 1150) lub null",
   "uwagi": "uwagi operacyjne istotne dla kierowcy (BEZ cen, BEZ warunków płatności) lub null"
 }
 Rozładunków może być od 1 do 5 — wypełnij DOKŁADNIE tyle, ile jest w zleceniu, w kolejności trasy (pierwszy rozładunek = pola bez cyfry, kolejne = 2/3/4/5). Nieużyte komplety rozładunków zostaw jako null. NIE zwijaj kilku rozładunków w jeden.
-NIE podawaj cen frachtu, warunków płatności, NIP, danych spedytora ani warunków umowy.` }
+Kwotę frachtu podaj WYŁĄCZNIE w polu "cenaEur". NIE umieszczaj cen w "uwagi" — te trafiają do kierowcy.
+NIE podawaj warunków płatności, NIP, danych spedytora ani warunków umowy.` }
           ]
         }]
       };
