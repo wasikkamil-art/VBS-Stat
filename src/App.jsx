@@ -4041,12 +4041,21 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 }
               }}
               onUpdate={async (id, data) => {
-                setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r)); // optimistic
+                // Optymistyczna aktualizacja listy — ale przy błędzie MUSI się cofnąć.
+                // Wcześniej zostawała, więc nieudany zapis wyglądał dokładnie jak udany:
+                // lista pokazywała nowe wartości, modal się zamykał, a baza miała stare dane
+                // aż do odświeżenia strony (zgłoszone 30.09.2026).
+                // UWAGA: `logAction` leci DOPIERO po udanym zapisie — brak wpisu w auditLog
+                // oznacza więc, że zapis nie doszedł, a nie że nikt nic nie robił.
+                const przed = frachtyList.find(r => r.id === id);
+                setFrachtyList(p => p.map(r => r.id === id ? { ...r, ...data } : r));
                 try {
                   await dbUpdateFracht(id, data);
                   logAction("update", "frachty", { id });
                 } catch (e) {
-                  showToast("❌ Nie udało się zapisać: " + (e?.message || ""));
+                  if (przed) setFrachtyList(p => p.map(r => r.id === id ? przed : r));  // cofnij
+                  console.error("[fracht] zapis nieudany", id, e?.code || "", e?.message || e, data);
+                  showToast(`❌ NIE ZAPISANO${e?.code ? ` (${e.code})` : ""}: ${e?.message || "nieznany błąd"} — zmiany cofnięte`);
                 }
               }}
               onBulkAdd={async (rows) => {

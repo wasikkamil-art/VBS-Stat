@@ -4602,3 +4602,21 @@ loguje kod i treść do konsoli oraz pokazuje toast „NIE ZAPISANO (kod) … �
 ⚠️ **Przyczyna źródłowa nadal nieznana.** Wiadomo tylko, że payload jest poprawny, a zapis nie
 dotarł. Następna próba usera na produkcji powinna to rozstrzygnąć: albo pojawi się czerwony toast
 z kodem błędu (wtedy mamy sprawcę), albo zapis przejdzie i problem był jednorazowy.
+
+### cd. 30.09 — ostrzeżenie o adresach WYKLUCZONE + poprawiłem nie ten handler
+
+User nie pamiętał, czy przy zapisie wyskakiwało okienko „1. … 2. …". **Sprawdzone z danych,
+nie z pamięci**: heurystyka `hasMulti` wymaga w adresie ciągu `1. ` ORAZ `2. ` na początku linii.
+W rekordzie `do9fv40d` jedyny wypełniony adres to `"Smolice 1e"` (Z1), reszta pusta —
+**ostrzeżenie nie mogło się pojawić**. Obie walidacje też przechodzą: pojazd `v5` wybrany,
+suma kwot 2000. Czyli żadna bramka w oknie zlecenia zapisu nie blokowała.
+
+🐛 **Mój błąd z poprzedniego kroku: fix widoczności trafił do ZŁEGO handlera.**
+W App.jsx są dwa `onUpdate` operujące na frachtach — jeden dla `FVTab` (linia ~4104), drugi dla
+`FrachtyTab` (~4043). Poprawiłem ten pierwszy, a edycja zlecenia idzie przez drugi, który dalej
+miał cichy `catch` bez cofania. Teraz oba mają cofanie optymistycznej zmiany i głośny komunikat.
+
+**Wniosek diagnostyczny, który z tego wynika**: w handlerze `FrachtyTab` `logAction("update")`
+wykonuje się **DOPIERO po udanym** `dbUpdateFracht`. Brak wpisu w `auditLog` po 10:30:53 znaczy
+więc, że zapis albo nie wystartował, albo rzucił wyjątkiem — a nie że user nic nie klikał.
+Po wdrożeniu tej poprawki następna próba rozstrzygnie, który wariant.
