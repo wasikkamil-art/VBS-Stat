@@ -4710,3 +4710,30 @@ treść traci **7 wpisów** i w każdym jest to prawdziwa kwota (`5000€`, `100
 `200 000,00 EUR`, `45€`, `88€`, `4000 pln`). Pozostałe zmiany to wyłącznie przycięcie końcowej
 interpunkcji. Nietknięte zostają `15 minut`, `3,5 t`, `24 h`, `120x115cm`, numery telefonów,
 a także słowa `zlecenie`/`zlecenia` (lookahead chroni przed cięciem po „zl").
+
+## 2026-09-30 cd. — autouzupełnianie ZADZIAŁAŁO na realnym zleceniu
+
+User usunął pomieszany rekord i założył fracht od nowa, wgrywając oba PDF-y. **Wynik w bazie
+(`fyoloffm`) zgadza się z dokumentami co do liczby** — i potwierdza to, czego wcześniej nie dało
+się sprawdzić lokalnie:
+
+- **model ODCZYTAŁ kwoty z PDF-ów** (1150 i 850 EUR) — to była jedyna niezweryfikowana część
+  po zdjęciu zakazu cen z promptu parsera;
+- **R2 powstał automatycznie**: `FR 01150 Saint Sorlin`, firma „GPS trans", data 02.10 — wpisane
+  z drugiego PDF-a, bez udziału dyspozytora;
+- oba zlecenia mają **własny numer, kwotę, palety, wagę i przypisany punkt rozładunku**:
+  003427/2026 → 1150 € / 3 pal / 1063 kg / R1; 003428/2026 → 850 € / 2 pal / 700 kg / R2;
+- `cenaEur` = 2000 = suma; kopia dla kierowcy pokazuje `⬇ Zostawić` pod właściwymi punktami;
+- uwagi zaczytane z PDF-a są **bez kwot** (parser trzymał się instrukcji, a filtr `bezKwot` i tak
+  stoi na wyjściu).
+
+🐛 **Znalezione przy weryfikacji: sekcja TOWAR pokazywała ładunek JEDNEGO zlecenia jako całość.**
+`towarIloscPalet` i `wagaLadunku` frachtu parser wypełnia z PIERWSZEGO PDF-a, więc kierowca widział
+`3 × Kable, Waga: 1063 kg`, podczas gdy w aucie jedzie **5 palet i 1763 kg**. Przy kilku zleceniach
+kopia sumuje teraz ładunek ze zleceń i pisze `Waga: 1763 kg (razem)`. Zweryfikowane na realnym
+rekordzie oraz regresyjnie — frachty z jednym zleceniem bez żadnej zmiany.
+
+⚠️ **Do uzupełnienia przez usera w tym frachcie** (parser tego nie zaczytał, bo nie ma tego w PDF):
+**kilometry** (podjazd, ładowne — puste, więc €/km, rentowność i rankingi nie policzą tej trasy)
+oraz **dyspozytor** (puste — dashboard dyspozytorów wrzuci fracht do kubełka AGA).
+Godziny załadunku i rozładunku też są puste.

@@ -11,7 +11,7 @@
 // Format Atlas/widziszwszystko: string "lat,lng" (z opcjonalnymi spacjami).
 // Rozszerzenie `.js` jest tu WYMAGANE: Vite rozwiąże import bez niego, ale ten moduł
 // bywa ładowany też wprost przez node (skrypty raportowe i testy), a node ESM nie zgaduje.
-import { zleceniaDlaRozladunku, opisLadunkuZlecenia } from "./zleceniaFrachtu.js";
+import { zleceniaDlaRozladunku, opisLadunkuZlecenia, zleceniaFrachtu } from "./zleceniaFrachtu.js";
 
 /**
  * Usuwa kwoty z tekstu, który zobaczy KIEROWCA.
@@ -169,12 +169,23 @@ export function formatOrderForDriverCopy(fracht /* , vehicles = [] */) {
   }
 
   // TOWAR
+  // Przy kilku zleceniach pola `towarIloscPalet` i `wagaLadunku` frachtu pochodzą z PIERWSZEGO
+  // zlecenia (tak je wypełnia parser), więc pokazywałyby kierowcy część ładunku jako całość —
+  // np. 1063 kg, gdy w aucie jedzie 1763 kg. Gdy zlecenia niosą własne liczby, sumujemy je.
+  const lista = zleceniaFrachtu(fracht);
+  const wielo = Array.isArray(fracht?.zlecenia) && fracht.zlecenia.length > 1;
+  const suma = (pole) => lista.reduce((s, z) => s + (parseFloat(String(z?.[pole] ?? "").replace(",", ".")) || 0), 0);
+  const sumaPalet = wielo ? suma("palety") : 0;
+  const sumaWagi = wielo ? suma("waga") : 0;
+
   const towarLines = [];
-  if (fracht.towarIloscPalet || fracht.towarOpis) {
-    towarLines.push([fracht.towarIloscPalet, fracht.towarOpis].filter(Boolean).join(" × ") || fracht.towarOpis || `${fracht.towarIloscPalet} sztuk`);
+  const ilosc = sumaPalet || fracht.towarIloscPalet;
+  if (ilosc || fracht.towarOpis) {
+    towarLines.push([ilosc, fracht.towarOpis].filter(Boolean).join(" × ") || fracht.towarOpis || `${ilosc} sztuk`);
   }
-  if (fracht.towarPalety) towarLines.push(`Palety: ${fracht.towarPalety}`);
-  if (fracht.wagaLadunku) towarLines.push(`Waga: ${fracht.wagaLadunku} kg`);
+  if (fracht.towarPalety && !wielo) towarLines.push(`Palety: ${fracht.towarPalety}`);
+  const waga = sumaWagi || fracht.wagaLadunku;
+  if (waga) towarLines.push(`Waga: ${waga} kg${wielo && sumaWagi ? " (razem)" : ""}`);
   if (fracht.zaladunekTyp) towarLines.push(`Załadunek: ${fracht.zaladunekTyp}`);
   if (towarLines.length) {
     lines.push("🧰 TOWAR");
