@@ -652,8 +652,18 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
                         {przystanki.map(s => <option key={s.i} value={String(s.i)}>R{s.i} · {s.krotki || s.addr}</option>)}
                       </select>
                     </div>
-                    <div><label className={lbl}>Palety</label><input type="number" placeholder="3" value={z.palety||""} onChange={e => setZl(i,"palety",e.target.value)} className={inp} /></div>
-                    <div><label className={lbl}>Waga (kg)</label><input type="number" placeholder="1063" value={z.waga||""} onChange={e => setZl(i,"waga",e.target.value)} className={inp} /></div>
+                    {/* Podpowiedzi SŁOWNE, nie liczbowe. Wcześniej stało tu „3" i „1063" — czyli
+                        realne wartości z tego zlecenia — i puste pole wyglądało na wypełnione. */}
+                    <div><label className={lbl}>Palety</label><input type="number" placeholder="ilość" value={z.palety||""} onChange={e => setZl(i,"palety",e.target.value)} className={inp} /></div>
+                    <div><label className={lbl}>Waga (kg)</label><input type="number" placeholder="kg" value={z.waga||""} onChange={e => setZl(i,"waga",e.target.value)} className={inp} /></div>
+                  </div>
+                )}
+
+                {/* Bez tych trzech rzeczy kopia dla kierowcy nie pokaże, co zostawić w którym punkcie */}
+                {wieleZlecen && (!z.rozladunek || !z.palety || !z.waga) && (
+                  <div className="text-xs mb-2 px-2 py-1.5 rounded-lg bg-amber-50 text-amber-800 border border-amber-200">
+                    ⚠️ Uzupełnij {[!z.rozladunek && "punkt rozładunku", !z.palety && "palety", !z.waga && "wagę"].filter(Boolean).join(", ")} —
+                    bez tego kierowca nie zobaczy w kopii zlecenia, ile zostawić w tym punkcie.
                   </div>
                 )}
 

@@ -4620,3 +4620,27 @@ miał cichy `catch` bez cofania. Teraz oba mają cofanie optymistycznej zmiany i
 wykonuje się **DOPIERO po udanym** `dbUpdateFracht`. Brak wpisu w `auditLog` po 10:30:53 znaczy
 więc, że zapis albo nie wystartował, albo rzucił wyjątkiem — a nie że user nic nie klikał.
 Po wdrożeniu tej poprawki następna próba rozstrzygnie, który wariant.
+
+### cd. 30.09 — user uznał ekran za poprawny, a to były placeholdery
+
+User przysłał zrzut okna zlecenia ze słowami „wygląda że jest dobrze". **W bazie nic się nie
+zmieniło** — `auditLog` nadal pokazuje tylko `add` 10:28:39 i `update` 10:30:53, `dokod2` puste.
+Zrzut odwzorowywał stan bazy 1:1, tyle że **czytany jako wypełniony**.
+
+🐛 **Pułapka, którą sam zbudowałem**: pola „Palety" i „Waga" w karcie zlecenia miały placeholdery
+**`3` i `1063`** — czyli DOKŁADNIE prawdziwe wartości z tego zlecenia. Puste pole wyglądało więc
+na wypełnione poprawną liczbą. To samo dotyczyło pustego „Nr zlecenia 1". Zamienione na podpowiedzi
+słowne (`ilość`, `kg`), których nie da się pomylić z danymi.
+
+➕ **Dodane ostrzeżenie, które złapałoby ten przypadek od razu**: gdy fracht ma kilka zleceń,
+a któreś nie ma wskazanego punktu rozładunku, palet albo wagi, w jego karcie pojawia się żółty pasek
+z wypisaniem BRAKUJĄCYCH pozycji i wyjaśnieniem konsekwencji („kierowca nie zobaczy w kopii, ile
+zostawić w tym punkcie").
+
+**Stan faktyczny rekordu `do9fv40d` (niezmieniony od 10:30):**
+- `R2` nie istnieje (`dokod2` puste) — w selektorze jest tylko „R1 · FR 71260 Senozan";
+- zlecenie [1]: **brak numeru**, 850 EUR, R1, brak palet i wagi;
+- zlecenie [2]: 003428/2026, **1150 EUR**, **rozładunek niewskazany**, 2 pal, 700 kg.
+
+Wg PDF-ów ma być: 003427 = 1150 € / 3 pal / 1063 kg → R1 Senozan;
+003428 = 850 € / 2 pal / 700 kg → R2 Saint Sorlin. Suma 2000 € jest poprawna niezależnie od tego.
