@@ -285,6 +285,19 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
   const dispatcherName = (currentUser?.displayName || currentUser?.name || (currentUser?.email || "").split("@")[0] || "Dyspozytor");
   const canSendWhatsapp = !!(record?.id && waDriver?.whatsappNumber);
 
+  // Wgranie PDF-a KOLEJNEGO zlecenia. Uzupełniamy tylko pola tego zlecenia — adresów i dat
+  // frachtu celowo NIE ruszamy, bo trasa jest już wpisana i nadpisanie zepsułoby punkty R.
+  // Kwoty nie da się zaczytać: parser ma wprost zakazane wyciąganie cen ze zlecenia.
+  const wgrajKolejne = (i, url, parsed) => {
+    setZlecenia(prev => prev.map((z, idx) => idx !== i ? z : {
+      ...z,
+      urlZlecenie: url,
+      nr: z.nr || parsed?.nrZlecenia || "",
+      palety: z.palety || (parsed?.towarIloscPalet != null ? String(parsed.towarIloscPalet) : ""),
+      waga: z.waga || (parsed?.wagaLadunku != null ? String(parsed.wagaLadunku) : ""),
+    }));
+  };
+
   const onUploadedParsed = (url, parsed) => {
     setZl(0, "urlZlecenie", url);
     if (!parsed) return;
@@ -495,7 +508,13 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
           <div className="text-xs font-bold text-gray-600 uppercase tracking-widest pt-2">Towar i uwagi</div>
           <div style={{border:"1px solid #e5e7eb",borderRadius:12,padding:"14px",background:"#fafafa"}}>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <div><label className={lbl}>Nr zlecenia{wieleZlecen && <span className="text-blue-600"> (1 z {zlecenia.length})</span>}</label><input placeholder="ZL/2026/001" value={zlecenia[0]?.nr||""} onChange={e => setZl(0,"nr",e.target.value)} className={inp} /></div>
+              {/* Przy kilku zleceniach numery edytuje się w sekcji „Zlecenia transportowe" — tutaj
+                  tylko podgląd, żeby nie było DWÓCH pól na tę samą wartość (mylące przy wpisywaniu). */}
+              <div><label className={lbl}>Nr zlecenia{wieleZlecen && <span className="text-blue-600"> ({zlecenia.length})</span>}</label>
+                {wieleZlecen
+                  ? <input readOnly value={zlecenia.map(z => z.nr).filter(Boolean).join(" + ")} className={inp+" bg-blue-50 text-blue-800"} title="Numery edytujesz w sekcji Zlecenia transportowe" />
+                  : <input placeholder="ZL/2026/001" value={zlecenia[0]?.nr||""} onChange={e => setZl(0,"nr",e.target.value)} className={inp} />}
+              </div>
               <div><label className={lbl}>Nr referencyjny</label><input placeholder="ESTE-0097" value={zlecenia[0]?.ref||""} onChange={e => setZl(0,"ref",e.target.value)} className={inp} /></div>
               <div><label className={lbl}>Towar (opis)</label><input placeholder="Palety, kartony..." value={f.towarOpis||""} onChange={e => set("towarOpis",e.target.value)} className={inp} /></div>
               <div><label className={lbl}>Ilość palet/szt</label><input placeholder="4" value={f.towarIloscPalet||""} onChange={e => set("towarIloscPalet",e.target.value)} className={inp} /></div>
@@ -571,9 +590,13 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
             </div>
             {(eurKmLad||eurKmWsz) && <div className="flex gap-4 text-sm mt-2">{eurKmLad && <span className="px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 font-semibold">EUR/km lad: {eurKmLad}</span>}{eurKmWsz && <span className="px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 font-semibold">EUR/km wsz: {eurKmWsz}</span>}</div>}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3">
-              <div><label className={lbl}>Nr FV{wieleZlecen && <span className="text-blue-600"> (zlec. 1)</span>}</label><input placeholder="F/01/2026" value={zlecenia[0]?.nrFV||""} onChange={e => setZl(0,"nrFV",e.target.value)} className={inp} /></div>
+              <div><label className={lbl}>Nr FV{wieleZlecen && <span className="text-blue-600"> ({zlecenia.length})</span>}</label>
+                {wieleZlecen
+                  ? <input readOnly value={zlecenia.map(z => z.nrFV).filter(Boolean).join(" + ")} className={inp+" bg-blue-50 text-blue-800"} title="Numery FV edytujesz przy poszczególnych zleceniach" />
+                  : <input placeholder="F/01/2026" value={zlecenia[0]?.nrFV||""} onChange={e => setZl(0,"nrFV",e.target.value)} className={inp} />}
+              </div>
               <div><label className={lbl}>Data wysłania FV</label><input type="date" value={zlecenia[0]?.dataWyslania||""} onChange={e => setZl(0,"dataWyslania",e.target.value)} className={inp} /></div>
-              <div><label className={lbl}>Termin płatności</label><input type="date" value={zlecenia[0]?.terminPlatnosci||""} onChange={e => setZl(0,"terminPlatnosci",e.target.value)} className={inp} /></div>
+              <div><label className={lbl}>Termin płatności{wieleZlecen && <span className="text-blue-600"> (zlec. 1)</span>}</label><input type="date" value={zlecenia[0]?.terminPlatnosci||""} onChange={e => setZl(0,"terminPlatnosci",e.target.value)} className={inp} /></div>
             </div>
           </div>
 
@@ -604,13 +627,16 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
                   )}
                 </div>
 
-                {/* Zlecenie 1 ma numer i kwotę w sekcjach wyżej — tutaj tylko dla kolejnych,
-                    żeby nie dublować pól i nie tworzyć dwóch miejsc na tę samą wartość. */}
-                {i > 0 && (
+                {/* Przy JEDNYM zleceniu numer i kwota siedzą w sekcjach wyżej (Towar + Dane biurowe)
+                    i tutaj ich nie powtarzamy. Gdy zleceń jest więcej, „Cena EUR" w Danych biurowych
+                    staje się sumą tylko do odczytu — więc KAŻDE zlecenie, łącznie z pierwszym, musi mieć
+                    swoją kwotę tutaj. Bez tego kwoty pierwszego zlecenia nie dało się w ogóle wpisać
+                    i fracht nie przechodził walidacji (zgłoszone 30.09.2026). */}
+                {wieleZlecen && (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2">
-                    <div><label className={lbl}>Nr zlecenia</label><input placeholder="003428/2026" value={z.nr||""} onChange={e => setZl(i,"nr",e.target.value)} className={inp} /></div>
+                    <div><label className={lbl}>Nr zlecenia {i + 1}</label><input placeholder={`numer zlecenia ${i + 1}`} value={z.nr||""} onChange={e => setZl(i,"nr",e.target.value)} className={inp} /></div>
                     <div><label className={lbl}>Cena EUR</label><input type="number" placeholder="0.00" value={z.cenaEur||""} onChange={e => setZl(i,"cenaEur",e.target.value)} className={inp} /></div>
-                    <div><label className={lbl}>Nr FV</label><input placeholder="F/02/2026" value={z.nrFV||""} onChange={e => setZl(i,"nrFV",e.target.value)} className={inp} /></div>
+                    <div><label className={lbl}>Nr FV</label><input placeholder={`faktura ${i + 1}`} value={z.nrFV||""} onChange={e => setZl(i,"nrFV",e.target.value)} className={inp} /></div>
                     <div><label className={lbl}>Termin płatności</label><input type="date" value={z.terminPlatnosci||""} onChange={e => setZl(i,"terminPlatnosci",e.target.value)} className={inp} /></div>
                   </div>
                 )}
@@ -635,11 +661,11 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
                   <div className="flex items-center gap-3">
                     <span className="text-xl">📄</span>
                     <a href={safeHref(z.urlZlecenie)} target="_blank" rel="noopener noreferrer" className="flex-1 text-xs text-blue-600 hover:underline">Otwórz dokument →</a>
-                    <ZlecenieUploadBtn frachtId={record?.id || "new"} onUploaded={i === 0 ? onUploadedParsed : (url) => setZl(i,"urlZlecenie",url)} label="Zastąp" />
+                    <ZlecenieUploadBtn frachtId={record?.id || "new"} onUploaded={i === 0 ? onUploadedParsed : (url, parsed) => wgrajKolejne(i, url, parsed)} label="Zastąp" />
                     <button type="button" onClick={() => setZl(i,"urlZlecenie","")} className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50" title="Usuń plik">✕</button>
                   </div>
                 ) : (
-                  <ZlecenieUploadBtn frachtId={record?.id || "new"} onUploaded={i === 0 ? onUploadedParsed : (url) => setZl(i,"urlZlecenie",url)} label="📎 Wgraj zlecenie (PDF / JPG)" fullWidth />
+                  <ZlecenieUploadBtn frachtId={record?.id || "new"} onUploaded={i === 0 ? onUploadedParsed : (url, parsed) => wgrajKolejne(i, url, parsed)} label="📎 Wgraj zlecenie (PDF / JPG)" fullWidth />
                 )}
               </div>
             ))}

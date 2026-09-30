@@ -4500,3 +4500,37 @@ zgadywanie, że wszystko jedzie do pierwszego punktu, byłoby gorsze niż brak i
 🐛 **Przy okazji**: `orderFormatters.js` dostał import z rozszerzeniem `.js`. Vite rozwiązuje import
 bez niego, ale ten moduł ładują też skrypty node (raporty, testy) — a node ESM nie zgaduje
 i wywalał się z `ERR_MODULE_NOT_FOUND`.
+
+### 🐛 cd. 30.09 — BUG: kwoty pierwszego zlecenia nie dało się wpisać
+
+**Zgłoszenie usera**: „mam dwa zlecenia ale nie zaczytuje kwoty a nie da jej się wpisać ręcznie
+i dlatego nie mogę zapisać frachtu". **Mój błąd, wprowadzony tego samego dnia.**
+
+Przyczyna: pola per zlecenie renderowałem warunkiem `i > 0` („zlecenie 1 ma kwotę w Danych
+biurowych"), a jednocześnie „Cena EUR" w Danych biurowych przechodzi w **sumę tylko do odczytu**,
+gdy zleceń jest więcej niż jedno. Efekt: po dodaniu drugiego zlecenia kwota pierwszego **nie miała
+ani jednego edytowalnego pola**, `sumaEur` zostawała zerem i walidacja „Wpisz cenę EUR" blokowała
+zapis. Fracht nie dawał się zapisać w ogóle.
+
+Fix: warunek `i > 0` → `wieleZlecen`. Przy wielu zleceniach KAŻDE, łącznie z pierwszym, ma własną
+kwotę w swojej karcie; Dane biurowe pokazują sumę.
+
+ℹ️ **„Nie zaczytuje kwoty" to NIE jest błąd — tak jest zaprojektowane.** Parser AI ma w prompcie
+wprost: „NIE podawaj cen frachtu, warunków płatności, NIP, danych spedytora ani warunków umowy".
+Kwota zawsze była wpisywana ręcznie. Przy okazji uzupełnione: wgranie PDF-a **kolejnego** zlecenia
+ignorowało dane z AI (brało sam URL) — teraz uzupełnia numer zlecenia, palety i wagę tego zlecenia,
+a adresów i dat frachtu celowo NIE rusza, bo trasa jest już wpisana.
+
+🐛 **Druga wada, znaleziona własnym testem**: po poprawce numer zlecenia 1 miał DWA edytowalne pola
+(w „Towar i uwagi" i w karcie zlecenia). Mój skrypt testowy trafił w niewłaściwe i nadpisał numer —
+czyli dokładnie to, co zrobiłby user. Teraz przy wielu zleceniach pola „Nr zlecenia" i „Nr FV"
+w sekcjach zbiorczych są **tylko do odczytu** (pokazują sklejone numery), a edycja jest wyłącznie
+w karcie zlecenia. Placeholdery numerowane per pozycja zamiast sztywnego „003428/2026".
+
+**Zweryfikowane na odtworzonym scenariuszu** (atrapa z PUSTĄ kwotą, tak jak po zaczytaniu PDF):
+dwa edytowalne pola ceny i dwa pola numeru, suma 2000.00, pola zbiorcze read-only
+(„003427/2026 + 003428/2026"), zapis przechodzi — `cenaEur: "2000"`, kwoty `1150` i `850`,
+numery na właściwych pozycjach, `kmWszystkie` 1700 nietknięte.
+
+⚠️ Przy okazji: `node_modules/.vite` trzeba było wyczyścić — Vite zapamiętał nieudane
+pre-bundlowanie `firebase/functions` sprzed uzupełnienia atrapy i podglądu nie dało się otworzyć.
