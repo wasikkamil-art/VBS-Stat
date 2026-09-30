@@ -40,6 +40,91 @@ export function bezKwot(tekst) {
     .trim();
 }
 
+/**
+ * Pola parsera zlecenia, w których dopuszczamy WYŁĄCZNIE prawdziwe nazwy i adresy.
+ * `uwagi` i `towarOpis` celowo NIE są tu wymienione — tam „wg CMR" jest sensowną
+ * informacją dla kierowcy, a nie wartownikiem do wycięcia.
+ *
+ * Podział na nazwy i miejsca nie jest kosmetyczny. Nazwa własna miejscowości bywa
+ * nie do odróżnienia od skrótowca: `IT 10060 None` to realna gmina None w Piemoncie
+ * (fracht `83crn2cd`, Via Pinerolo 21), a nie „brak danych". Kod pocztowy i miasto
+ * karmią geokodowanie i planer trasy, więc kasujemy tam tylko to, co jest wartownikiem
+ * ponad wszelką wątpliwość.
+ */
+const POLA_NAZWOWE = (() => {
+  const out = ["zaladunekFirma", "zaladunekAdres", "zleceniodawcaFirma", "zleceniodawcaOsoba"];
+  for (const s of ["", "2", "3", "4", "5"]) out.push(`rozladunekFirma${s}`, `rozladunekAdres${s}`);
+  return out;
+})();
+
+const POLA_MIEJSCA = (() => {
+  const out = ["zaladunekKod", "zaladunekMiasto", "zaladunekKodPocztowy"];
+  for (const s of ["", "2", "3", "4", "5"]) out.push(`dokod${s}`, `dokodMiasto${s}`, `dokodPocztowy${s}`);
+  return out;
+})();
+
+/**
+ * Wartownicy jednoznaczni — całe frazy, które nie są ani nazwą, ani adresem w żadnym języku,
+ * jakim posługują się nasi zleceniodawcy. Wycinane we WSZYSTKICH polach adresowych.
+ *
+ * Dopasowanie do CAŁEJ wartości po przycięciu: adres „Rue X, wg cmr" zostaje nietknięty,
+ * bo część realna w nim jest; samo „wg cmr" nie jest adresem w ogóle.
+ */
+const WARTOWNICY_PEWNI = [
+  /^(?:wg|wedlug|według|zgodnie\s+z)\.?\s*(?:cmr|zlecenia|zlecenie|listu)$/i,
+  /^jak\s+(?:wyzej|wyżej|powyzej|powyżej)$/i,
+  /^do\s+ustalenia$/i,
+  /^(?:brak|nieznany|nieznane|niepodany|niepodane)$/i,
+  /^(?:null|undefined)$/i,
+  /^[-–—_.*\s]+$/,
+  /^\?+$/,
+];
+
+/**
+ * Skrótowce, które w polu NAZWY znaczą „nie wiem", ale w nazwie miejscowości mogłyby
+ * być prawdziwe. Stąd węższy zakres — patrz komentarz przy `POLA_MIEJSCA`.
+ * Świadomie NIE ma tu `none`: to realna nazwa gminy (fracht `83crn2cd`).
+ */
+const WARTOWNICY_SKROTOWCE = [
+  /^n\/?a$/i,
+  /^(?:tbc|tba|tbd)$/i,
+  /^j\.?\s*w\.?$/i,
+  /^x{2,}$/i,
+];
+
+/**
+ * Czyści wynik parsera zlecenia z wartowników w polach nazw i adresów.
+ *
+ * PO CO: „3. Rozładunek" w zleceniu CAMION LOGISTICS 003427/2026 zawiera dosłownie
+ * `wg cmr` w miejscu nazwy odbiorcy i ulicy — spedytor nie podaje odbiorcy, bo ten
+ * jest na CMR. Model czasem zwraca `null` (poprawnie), a czasem przepisuje wartownika
+ * jako daną: sprawdzone na 732 frachtach, zdarzyło się to 5 razy w 3 rekordach
+ * (`m5ja15cl` ma „Według CMR"/„WG CMR" w czterech polach firmy, `4t5mjwu4` w jednym).
+ * Taki ciąg jedzie dalej do kopii dla kierowcy i do geokodowania trasy, gdzie udaje
+ * adres, którego nie ma.
+ *
+ * Filtr stoi na WEJŚCIU, w jednym miejscu (`ZlecenieUploadBtn`), więc obowiązuje wszystkie
+ * cztery ścieżki wgrywania PDF-a. Prompt też o to prosi, ale prompt to prośba, nie gwarancja
+ * — ta sama zasada co przy `bezKwot` na wyjściu.
+ *
+ * Puste pole jest tu CELEM, nie stratą: dyspozytor widzi lukę i ją wypełnia, zamiast
+ * dostać wartownika wyglądającego jak dana.
+ */
+export function bezWartownikow(parsed) {
+  if (!parsed || typeof parsed !== "object") return parsed;
+  const out = { ...parsed };
+  const czysc = (pola, wzorce) => {
+    for (const k of pola) {
+      const v = out[k];
+      if (typeof v !== "string") continue;
+      if (wzorce.some((r) => r.test(v.trim()))) out[k] = null;
+    }
+  };
+  czysc(POLA_NAZWOWE, [...WARTOWNICY_PEWNI, ...WARTOWNICY_SKROTOWCE]);
+  czysc(POLA_MIEJSCA, WARTOWNICY_PEWNI);
+  return out;
+}
+
 export function parseGeoString(geo) {
   if (!geo || typeof geo !== "string") return null;
   const [latStr, lngStr] = geo.split(",").map(s => s.trim());

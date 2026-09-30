@@ -5,6 +5,7 @@
 import { useState, useRef } from "react";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { storage, callClaude } from "../firebase";
+import { bezWartownikow } from "../utils/orderFormatters.js";
 
 export default function ZlecenieUploadBtn({ frachtId, onUploaded, label = "+ Dodaj zlecenie", fullWidth = false }) {
   // onUploaded(url, parsedData) — parsedData = { nrZlecenia, nrRef, zaladunekAdres, ... }
@@ -94,6 +95,7 @@ Odpowiedz TYLKO w formacie JSON (bez markdown):
   "cenaEur": "kwota frachtu NETTO w EUR, sama liczba bez waluty (np. 1150) lub null",
   "uwagi": "uwagi operacyjne istotne dla kierowcy (BEZ cen, BEZ warunków płatności) lub null"
 }
+Gdy w miejscu nazwy firmy, ulicy, miasta lub kodu widzisz adnotację zamiast danych (np. "wg cmr", "wg zlecenia", "jak wyżej", "do ustalenia", "brak", "-"), zwróć dla tego pola null. To NIE jest nazwa ani adres. Nie zgaduj i nie przepisuj takiej adnotacji.
 Rozładunków może być od 1 do 5 — wypełnij DOKŁADNIE tyle, ile jest w zleceniu, w kolejności trasy (pierwszy rozładunek = pola bez cyfry, kolejne = 2/3/4/5). Nieużyte komplety rozładunków zostaw jako null. NIE zwijaj kilku rozładunków w jeden.
 Kwotę frachtu podaj WYŁĄCZNIE w polu "cenaEur". NIE umieszczaj cen w "uwagi" — te trafiają do kierowcy.
 NIE podawaj warunków płatności, NIP, danych spedytora ani warunków umowy.` }
@@ -105,7 +107,11 @@ NIE podawaj warunków płatności, NIP, danych spedytora ani warunków umowy.` }
         const data = await resp.json();
         const text = data.content?.find(b => b.type === "text")?.text || "{}";
         const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
-        onUploaded(url, parsed);
+        // Wartowników („wg cmr", „jak wyżej", „-") tniemy TUTAJ, a nie u wołających:
+        // ten komponent jest jedynym przejściem dla wszystkich czterech ścieżek wgrywania
+        // (modal: zlecenie 1 i kolejne, lista FrachtyTab, lista FVTab), więc żadna nie może
+        // o filtrze zapomnieć. Prompt też o to prosi, ale prompt to prośba, nie gwarancja.
+        onUploaded(url, bezWartownikow(parsed));
       } catch (e) {
         // AI nie odczytało (błąd API/parsowania) — plik jest już w Storage,
         // formularz zostaje pusty do ręcznego uzupełnienia. Logujemy zamiast cicho połykać.
