@@ -4680,3 +4680,33 @@ przypisania; komplet 5 slotów nie jest nadpisywany; pusty fracht dostaje R1.
 ⚠️ **NIEZWERYFIKOWANE**: czy model faktycznie zwróci `cenaEur` z tych PDF-ów. Kwota jest w nich
 jawnie („4. Fracht (NETTO): 1 150.00 EUR"), ale wywołania parsera nie odpalę — idzie przez
 `/api/claude` za tokenem Firebase. Sprawdzi się przy pierwszym realnym wgraniu.
+
+### cd. 30.09 — czy kierowca zobaczy cenę frachtu? Sprawdzone i uszczelnione
+
+Pytanie usera po wdrożeniu zaczytywania kwot. **Odpowiedź: nie** — ale jedna szczelina istniała
+i została zamknięta.
+
+**Sprawdzone testem na frachcie z cenami w KAŻDYM polu** (`cenaEur`, `zlecenia[].cenaEur`,
+`zlecenia[].nrFV`): kopia dla kierowcy i WhatsApp są **czyste** — zero kwot, walut, numerów FV.
+`DriverPanel` nie renderuje `cenaEur` w ogóle (0 wystąpień w pliku). Pola kwotowe po prostu nie
+mają ścieżki do kierowcy.
+
+🔓 **Szczelina: pole `uwagi`.** Trafia do kierowcy w kopii, WhatsAppie i panelu. Prompt parsera
+zabrania wstawiania tam cen, ale **prompt to prośba, nie gwarancja** — a od dziś model czyta kwotę
+frachtu, więc szansa, że wspomni ją przy okazji w uwagach, wzrosła. Test potwierdził ryzyko:
+kwota wpisana w uwagi przechodziła do kierowcy w całości.
+
+**Zamknięte przez `bezKwot()`** w `orderFormatters.js` — filtr na WYJŚCIU, niezależny od tego, co
+zwróci model albo co ktoś wklei ręcznie. Wycina kwoty z walutą (`1150 EUR`, `2 000,00 €`, `850 PLN`,
+`500 zł`) oraz wzorce `fracht/stawka/cena/kwota/wartość <liczba>`. Zastosowany w kopii dla kierowcy,
+w WhatsAppie i w `DriverPanel`.
+
+🐛 Przy pisaniu testu wyszedł błąd w regexie: `\b` **nie działa po „ł"** — w JS bez flagi `u`
+granica słowa liczy tylko `[A-Za-z0-9_]`, więc `500 zł` nie było łapane. Zamienione na lookahead
+na literę.
+
+**Zweryfikowane, że filtr nie psuje treści operacyjnej** — na **207 realnych uwagach z bazy**
+treść traci **7 wpisów** i w każdym jest to prawdziwa kwota (`5000€`, `100 zł`, `1400 euro`,
+`200 000,00 EUR`, `45€`, `88€`, `4000 pln`). Pozostałe zmiany to wyłącznie przycięcie końcowej
+interpunkcji. Nietknięte zostają `15 minut`, `3,5 t`, `24 h`, `120x115cm`, numery telefonów,
+a także słowa `zlecenie`/`zlecenia` (lookahead chroni przed cięciem po „zl").

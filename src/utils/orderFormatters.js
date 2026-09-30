@@ -13,6 +13,33 @@
 // bywa ładowany też wprost przez node (skrypty raportowe i testy), a node ESM nie zgaduje.
 import { zleceniaDlaRozladunku, opisLadunkuZlecenia } from "./zleceniaFrachtu.js";
 
+/**
+ * Usuwa kwoty z tekstu, który zobaczy KIEROWCA.
+ *
+ * Prompt parsera zabrania wstawiania cen do `uwagi`, ale prompt to prośba, nie gwarancja —
+ * a od 30.09.2026 model czyta kwotę frachtu, więc szansa, że przy okazji wspomni ją w uwagach,
+ * wzrosła. Kierowca nie ma widzieć stawki: to informacja handlowa między spedycją a firmą.
+ * Dlatego tniemy ją tutaj, na wyjściu, niezależnie od tego, co zwrócił model albo co ktoś wkleił.
+ *
+ * Celowo wąskie wzorce — „15 minut", „3,5 t" czy „24 h" mają zostać nietknięte.
+ */
+export function bezKwot(tekst) {
+  if (!tekst) return "";
+  return String(tekst)
+    // 1150 EUR / 1 150,00 € / 2000 PLN / 500 zł
+    // `\b` nie działa po „ł" — w JS bez flagi `u` granica słowa liczy tylko [A-Za-z0-9_],
+    // więc „500 zł" nie było łapane. Dla polskich wariantów używamy lookaheadu na literę.
+    .replace(/\d[\d\s.,]*\s*(?:EUR\b|EURO\b|€|PLN\b|zł(?![a-ząćęłńóśźż])|zl\b)/gi, "")
+    // fracht/stawka/cena/kwota/wartość 1150 (bez waluty)
+    .replace(/\b(?:fracht|stawka|cena|kwota|wartość|wartosc|frachtu)\s*[:=]?\s*\d[\d\s.,]*/gi, "")
+    // osierocone spójniki i interpunkcja po wycięciu
+    .replace(/\s*,\s*,/g, ",")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.;])/g, "$1")
+    .replace(/^[\s,;.-]+|[\s,;.-]+$/g, "")
+    .trim();
+}
+
 export function parseGeoString(geo) {
   if (!geo || typeof geo !== "string") return null;
   const [latStr, lngStr] = geo.split(",").map(s => s.trim());
@@ -155,9 +182,10 @@ export function formatOrderForDriverCopy(fracht /* , vehicles = [] */) {
     lines.push("");
   }
 
-  if (fracht.uwagi) {
+  const uwagiCzyste = bezKwot(fracht.uwagi);
+  if (uwagiCzyste) {
     lines.push("📋 UWAGI");
-    lines.push(`   ${fracht.uwagi}`);
+    lines.push(`   ${uwagiCzyste}`);
     lines.push("");
   }
 
@@ -210,7 +238,8 @@ export function formatOrderForWhatsapp(fracht) {
   if (towarParts.length) lines.push(`📦 ${towarParts.join(", ")}`);
   if (fracht.zaladunekTyp) lines.push(`Załadunek: ${fracht.zaladunekTyp}`);
   if (fracht.wagaLadunku) lines.push(`Waga: ${fracht.wagaLadunku} kg`);
-  if (fracht.uwagi) { lines.push(""); lines.push(`ℹ️ ${fracht.uwagi}`); }
+  const uwagiWa = bezKwot(fracht.uwagi);
+  if (uwagiWa) { lines.push(""); lines.push(`ℹ️ ${uwagiWa}`); }
 
   return {
     body: lines.join("\n").trim(),

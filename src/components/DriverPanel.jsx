@@ -21,7 +21,7 @@ import {
   fmtHM, fmtTimeShort,
   computeDriverCompliance, computeDriverPlan,
 } from "../utils/czasPracy";
-import { allDokody } from "../utils/orderFormatters";
+import { allDokody, bezKwot } from "../utils/orderFormatters";
 import TripSummaryPanel from "./TripSummaryPanel";
 
 function DriverCzasPracyDashboard({ user, vehicle, driverActivities = [], showToast }) {
@@ -917,7 +917,9 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
           {f.uwagi && (
             <div style={{background: "#fffbeb", borderRadius: 12, border: "1px solid #fde68a", padding: "12px 16px", marginBottom: 16}}>
               <div style={{fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 4}}>Uwagi</div>
-              <div style={{fontSize: 13, color: "#78350f"}}>{f.uwagi}</div>
+              {/* Uwagi przechodzą przez `bezKwot` — kierowca nie ma widzieć stawki frachtu,
+                  nawet gdy parser albo dyspozytor wpisze ją do treści uwag. */}
+              <div style={{fontSize: 13, color: "#78350f"}}>{bezKwot(f.uwagi)}</div>
             </div>
           )}
 
