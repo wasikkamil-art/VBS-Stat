@@ -16,6 +16,7 @@ import { safeHref } from "./utils/safeHref";
 // ZlecenieUploadBtn — przycisk uploadu PDF zlecenia (wydzielone 2026-04-29 #5c krok 6)
 // Używane w 3 miejscach (FVTab, FrachtyTab, FrachtyModal). Nie lazy — używane stale.
 import ZlecenieUploadBtn from "./components/ZlecenieUploadBtn";
+import ZlecenieLinki from "./components/ZlecenieLinki";
 // Trip stats helpers (wydzielone 2026-04-28 #5c krok 2 — wspólne admin + DriverPanel)
 import { computeTripStats, fmtTripDuration } from "./utils/tripStats";
 // TripSummaryPanel (wydzielone 2026-04-28 #5c krok 2 — shared między admin a kierowca)
@@ -16004,9 +16005,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                   <td className="px-3 py-2.5 whitespace-nowrap text-right">
                     <div className="flex items-center gap-1 justify-end">
                       {r.urlZlecenie
-                        ? <a href={safeHref(r.urlZlecenie)} target="_blank" rel="noopener noreferrer"
-                            className="text-xs px-2 py-1 rounded-lg font-medium transition-all hover:bg-blue-100"
-                            style={{background:"#f0fdf4", color:"#15803d"}}>📄 Otwórz</a>
+                        ? <ZlecenieLinki fracht={r} />
                         : <ZlecenieUploadBtn frachtId={r.id}
                             onUploaded={(url, parsed) => { const p = parsed || {}; const existing = frachtyList.find(x => x.id === r.id) || {}; const onlyNew = Object.fromEntries(Object.entries(p).filter(([k,v]) => v != null && v !== "" && !existing[k])); onUpdate(r.id, { urlZlecenie: url, ...onlyNew }); }} />
                       }
@@ -16547,10 +16546,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                 <div className="text-xs text-gray-400">{r.dyspozytor || "—"} · {r.nrFV || "brak FV"}</div>
                 <div className="flex gap-1 flex-wrap">
                   {r.trackerToken && <TrackerPill fracht={r} onUpdate={onUpdate} />}
-                  {r.urlZlecenie && (
-                    <a href={safeHref(r.urlZlecenie)} target="_blank" rel="noopener noreferrer"
-                      className="h-8 px-2 rounded-lg flex items-center justify-center bg-blue-50 text-blue-600 text-xs font-semibold hover:bg-blue-100">📄 Zlecenie</a>
-                  )}
+                  {r.urlZlecenie && <ZlecenieLinki fracht={r} label="📄 Zlecenie" compact />}
                   {r.urlFV && (
                     <a href={safeHref(r.urlFV)} target="_blank" rel="noopener noreferrer"
                       className="h-8 px-2 rounded-lg flex items-center justify-center bg-green-50 text-green-600 text-xs font-semibold hover:bg-green-100">🧾 FV</a>
@@ -16685,9 +16681,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                   <td className="px-1.5 py-1.5 whitespace-nowrap text-right">
                     <div className="flex gap-1 justify-end items-center">
                       {r.urlZlecenie
-                        ? <a href={safeHref(r.urlZlecenie)} target="_blank" rel="noopener noreferrer"
-                            className="text-xs px-2 py-1 rounded-lg font-medium transition-all hover:bg-blue-100"
-                            style={{background:"#f0fdf4", color:"#15803d"}}>📄 Otwórz</a>
+                        ? <ZlecenieLinki fracht={r} />
                         : <ZlecenieUploadBtn frachtId={r.id}
                             onUploaded={(url, parsed) => { const p = parsed || {}; const existing = frachtyList.find(x => x.id === r.id) || {}; const onlyNew = Object.fromEntries(Object.entries(p).filter(([k,v]) => v != null && v !== "" && !existing[k])); onUpdate(r.id, { urlZlecenie: url, ...onlyNew }); }} />
                       }

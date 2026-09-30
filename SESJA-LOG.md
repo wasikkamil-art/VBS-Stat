@@ -4534,3 +4534,27 @@ numery na właściwych pozycjach, `kmWszystkie` 1700 nietknięte.
 
 ⚠️ Przy okazji: `node_modules/.vite` trzeba było wyczyścić — Vite zapamiętał nieudane
 pre-bundlowanie `firebase/functions` sprzed uzupełnienia atrapy i podglądu nie dało się otworzyć.
+
+### cd. 30.09 — „Otwórz" pokazywał tylko pierwsze zlecenie + stan zapisanego frachtu
+
+**Zapis do Firestore POTWIERDZONY** — pierwszy fracht z tablicą `zlecenia[]`: `do9fv40d`,
+CAMION LOGISTICS, `cenaEur=2000`, suma kwot zgodna z polem, dwa różne PDF-y w Storage.
+Ten element łańcucha nie był dotąd sprawdzony na żywych danych.
+
+🐛 **Zgłoszenie usera**: „jak klikam otwórz to wyskakuje tylko pierwsze zlecenie". Przyczyna:
+**trzy miejsca** w listach frachtów linkowały wprost `r.urlZlecenie`, czyli LUSTRO pierwszego
+zlecenia. Drugi dokument był z listy nieosiągalny — dało się go otworzyć wyłącznie z wnętrza okna
+zlecenia. Nowy komponent `src/components/ZlecenieLinki.jsx`: przy jednym zleceniu wygląda i działa
+jak dotąd (jeden przycisk), przy kilku renderuje po przycisku na dokument („📄 1", „📄 2")
+z numerem zlecenia i kwotą w tooltipie. Numerujemy POZYCJĄ, nie numerem zlecenia, bo ten bywa pusty.
+
+**Zweryfikowane na 143 frachtach z PDF-em**: zero regresji dla jednozleceniowych (każdy dokładnie
+jeden link), dla `do9fv40d` dwa linki do dwóch RÓŻNYCH plików.
+
+⚠️ **Dane w zapisanym frachcie wyglądają na pomieszane — do poprawy przez usera, nie ruszam:**
+- **R2 nie istnieje** (`dokod2` puste) — drugi rozładunek Saint Sorlin nie został wpisany, więc
+  zlecenie 2 nie ma czego wskazać w „Dotyczy rozładunku" i kopia dla kierowcy nie pokaże podziału;
+- **kwoty i ładunek nie pasują do numerów**: zlecenie [1] nie ma numeru i ma 850 EUR bez palet,
+  zlecenie [2] ma numer 003428/2026, ale kwotę 1150 EUR i ładunek 2 pal / 700 kg.
+  Wg PDF-ów: **003427 = 1150 EUR, 3 pal, 1063 kg** (Senozan), **003428 = 850 EUR, 2 pal, 700 kg**
+  (Saint Sorlin). Czyli w [2] numer i ładunek są z 003428, a kwota z 003427.
