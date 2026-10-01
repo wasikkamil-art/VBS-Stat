@@ -4949,3 +4949,18 @@ kod QR dla grafika (z minimalnym rozmiarem w mm i testem na wydruku) · lista ro
 (user: „bardzo prosto, tylko to co mają giełdy, bez VIN") · wiadomość testowa na
 `kontakt@freetruck.pl` po propagacji · **auto-odnawianie domen** — największe ryzyko dla
 kalendarza krążącego 12 miesięcy.
+
+## 2026-10-01 — dzień poza FleetStatem: kalendarz 2027 i fundament FreeTrucka
+
+W tym repo **zero zmian** — wpis jest po to, żeby kolejna sesja FleetStata wiedziała, gdzie
+podziała się ta doba, i nie szukała tu śladów.
+
+**Kalendarz VBS 2027** — user wkleił pełne dossier z innej sesji („cowork"). Projekt jest gotowy
+graficznie (14 kart 291×110 mm, 5 wersji językowych, hasła zatwierdzone), pliki `DRUK` i `CMYK`
+leżą w `~/Desktop/Kalendarz /Projekt 2027/`. Nowy harmonogram z rozmowy z drukarnią: **wysyłka do
+klientów najpóźniej 10.12, pliki w drukarni do 1.12, druk tydzień**. Kod QR z kalendarza prowadzi
+na `freetruck.pl`. Szczegóły: pamięć `project_kalendarz_vbs_2027`.
+
+**FreeTruck** (`~/Desktop/freetruck.nosync`, repo `wasikkamil-art/freetruck`) — zbudowany fundament:
+model danych, reguły Firestore, dwie Cloud Functions, projekt Firebase założony od zera.
+Commity `2a312c9` i `993ec8c`, wypchnięte. Pełny opis: pamięć `project_freetruck`.
