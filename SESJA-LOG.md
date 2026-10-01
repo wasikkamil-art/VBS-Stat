@@ -4882,3 +4882,70 @@ do źródła** (raz w regexie produkcyjnym — złapał ESLint, raz w moim teśc
 zmieniona" na `ad05zxcv` okazała się błędem w **teście**, nie w kodzie: w JSON tabulator jest
 escape'em (`\t` = dwa znaki), więc `/\s/` go nie łapie i porównanie „bez białych znaków" widziało
 różnicę tam, gdzie jej nie było.
+
+## 2026-10-01 — FreeTruck: od pomysłu do działającej domeny w jedno popołudnie
+
+Nowy projekt, osobny od FleetStata: **giełda wolnych aut pod QR-kodem z kalendarzy VBS**.
+To konkretna realizacja TODO #3 („giełda wolnych pojazdów"), które od 27.04 czekało na sesję
+projektową. Repo: `wasikkamil-art/freetruck`, katalog `~/Desktop/freetruck.nosync`.
+
+### Model — decyzja usera, lepsza niż którykolwiek z moich wariantów
+
+**Spedytor jest brokerem w środku; kontakt do przewoźnika NIGDY nie wychodzi do klienta.**
+Przewoźnik zakłada konto sam i widzi tylko swoje auta. Spedytor widzi cały worek, dorzuca auta
+i akceptuje nowe wpisy z poczekalni. Klient wchodzi z QR **bez konta** i widzi worek
+**anonimowo** — typ auta, ładowność, lokalizacja, dostępność, zero nazw i telefonów.
+Gdyby widział nazwę przewoźnika, znalazłby go w KRS i ominął spedytora — cały model przestaje
+działać. Przy okazji znika większość problemu RODO.
+
+⚠️ **Wygasanie wpisów ustaliłem jako warunek sensu całości** — wpis ma datę dostępności i sam
+wypada z worka. Giełda bez wygasania umiera w dwa tygodnie: klient dwa razy dzwoni po auto,
+które pojechało, i przestaje wierzyć liście.
+
+### Co stoi na produkcji
+
+**https://freetruck.pl** — zaślepka, jeden statyczny plik, zero zależności, mobile-first,
+oba motywy. Świadomie **bez formularza zapisu na powiadomienia**: zbieranie maili to
+przetwarzanie danych osobowych, a polityki prywatności nie ma. Zamiast tego `mailto`.
+
+Domeny kupione w home.pl (`freetruck.pl` + `.eu` + Poczta Standard 5, 11,05 zł). Kanoniczny
+adres to `.pl`; `www.freetruck.pl`, `freetruck.eu` i `www.freetruck.eu` robią 308 na niego.
+Projekt Vercel założony z CLI, **auto-deploy z pusha potwierdzony dowodem** (produkcja serwuje
+nagłówki z `vercel.json`, którego nie wdrażałem ręcznie).
+
+### Trzy błędy złapane weryfikacją, nie przeglądem kodu
+
+1. **`/:path*` nie dopasowuje samego korzenia.** `www.freetruck.pl/cokolwiek` przekierowywało,
+   ale `www.freetruck.pl/` serwowało treść wprost — czyli dokładnie ten adres, który człowiek
+   wpisuje z ręki, jako jedyny omijał regułę. Działa `/(.*)` z `$1`.
+2. **Pierwszy test przekierowań dał fałszywie dobry wynik** przez cache brzegowy
+   (`x-vercel-cache: HIT` sprzed wdrożenia). Sprawdzać na ścieżce, której nikt nie odwiedzał.
+3. **`height:100%` na obrazku w kontenerze siatki** nie rozwiązało się do wysokości rodzica
+   i logo wskoczyło w rozmiar własny (1037×436), rozwalając stronę. Zmierzone po poprawce:
+   logo 62×26, dokument 375 px, zero przewijania w poziomie.
+
+### Logo — dwie rundy
+
+Pierwsza wersja (Gemini): JPEG z wtopionym gradientowym tłem, metaliczne litery. Tło wyciąłem
+keyowaniem po jasności ORAZ nasyceniu naraz — samo „usuń biel" zrobiłoby złotą ciężarówkę
+półprzezroczystą. Druga wersja (GPT, po moim prompcie): płaskie wypełnienia i **prawdziwy kanał
+alfa**, więc bez keyowania i bez artefaktów JPEG.
+
+**Oba obejścia zostały mimo lepszej grafiki**: poniżej ~48 px znak zlewa się w plamę (favikona
+jest narysowanym płaskim monogramem), a na ciemnym tle granat traci kontrast (kafelek
+w nagłówku jest jasny w obu motywach).
+
+🐛 Dwa razy wkleił się **literalny bajt NBSP do źródła** — raz w regexie produkcyjnym (złapał
+ESLint), raz w moim teście. Ironiczne przy module do wycinania niewidocznych znaków.
+
+### Poczta — pułapka, która kosztowała trzy podejścia
+Szczegóły w pamięci `project_freetruck`: usługę trzeba najpierw **przypisać do domeny**
+(inaczej lista domen przy „Nowa skrzynka" jest pusta), a na ekranie przypisania **wybrać
+„Rekord A nie zostanie utworzony"** — druga opcja nadpisuje rekordy A i kładzie stronę.
+DKIM wyłożył się za pierwszym razem i przerwał zapis MX oraz SPF; ponowienie ustawiło wszystko.
+
+### Otwarte
+kod QR dla grafika (z minimalnym rozmiarem w mm i testem na wydruku) · lista rodzajów aut
+(user: „bardzo prosto, tylko to co mają giełdy, bez VIN") · wiadomość testowa na
+`kontakt@freetruck.pl` po propagacji · **auto-odnawianie domen** — największe ryzyko dla
+kalendarza krążącego 12 miesięcy.
