@@ -4964,3 +4964,50 @@ na `freetruck.pl`. Szczegóły: pamięć `project_kalendarz_vbs_2027`.
 **FreeTruck** (`~/Desktop/freetruck.nosync`, repo `wasikkamil-art/freetruck`) — zbudowany fundament:
 model danych, reguły Firestore, dwie Cloud Functions, projekt Firebase założony od zera.
 Commity `2a312c9` i `993ec8c`, wypchnięte. Pełny opis: pamięć `project_freetruck`.
+
+## 2026-10-05 — FreeTruck: panel spedycji i geokodowanie (w tym repo zero zmian)
+
+Wpis kronikarski — praca była w `~/Desktop/freetruck.nosync`, commity `ae014ee` i `a2754c7`.
+Decyzje usera: budujemy **najpierw panel spedycji** (VBS samo wypełnia worek, żeby mapa miała
+co pokazać od pierwszego skanu QR), promień okręgu **zostaje 20 km**.
+
+**Trzy błędy, wszystkie wyszły przy budowaniu, żaden przy czytaniu kodu.**
+
+⚠️ **Auto potrafiło stać poza własnym okręgiem** — do 8 km za krawędzią. Komórka siatki miała
+bok 2r przy okręgu o promieniu r, więc jej róg leżał 1,41 r od środka. Dla giełdy to kosztowny
+błąd: klient jedzie pod okrąg, auta tam nie ma, i drugi raz nie zadzwoni. Bok to teraz **r√2**.
+Najciekawsze jest, **dlaczego test tego nie złapał**: sprawdzał dwa konkretne miasta (Mediolan,
+Helsinki), które przypadkiem padały blisko środka swojej komórki. Zamieniłem przykłady na
+**niezmiennik** — 50 000 losowych punktów Europy — i błąd wyszedł w pierwszym przebiegu.
+Ta sama lekcja co przy wartownikach frachtów: przykład potwierdza sam siebie.
+
+⚠️ **Etykieta obszaru nie dałaby się w ogóle zapisać.** Projekcja czytała `zgl.etykietaObszaru`,
+a reguły dopuszczają wyłącznie wypisaną listę pól — tego pola na niej nie ma. Każdy zapis
+z podpisem byłby odrzucony i **cały worek pokazywałby gołe okręgi bez nazw**. Wyszło dopiero
+przy pisaniu formularza, czyli gdy pierwszy raz trzeba było naprawdę ten dokument złożyć.
+
+⚠️ `autoMoje()` sprawdzane przy `create`, ale **nie przy `update`** — przewoźnik mógł dostać
+akceptację na swoje auto, a potem podmienić `autoId` na cudze.
+
+**Geokodowanie** (CF `geokoduj`, Nominatim/OSM, 1 instancja przez limit 1 zapytania na sekundę,
+cache 30 dni). Etykieta powstaje **wyłącznie z białej listy pól administracyjnych** i nie schodzi
+poniżej poziomu miasta — wieś jest mniejsza niż okrąg, więc podpis zawężałby bardziej niż sam
+okrąg. Sprawdzone na żywym geokoderze: **„Via Mecenate 90, Milano" → „Milan"**.
+
+🚩 Przy okazji doszło zabezpieczenie, którego nie było w planie: **`oczyscEtykiete` na drodze do
+worka**. Etykieta to jedyne pole worka z dowolnym tekstem, a przewoźnik **ma motyw**, żeby wpisać
+tam swój telefon — omija wtedy spedytora i łowi klienta bezpośrednio, czyli rozbraja cały model.
+„Milan, tel 600100200" jest odrzucane. Test na prawdziwych nazwach złapał mój własny zbyt ostry
+wzorzec: **'s-Hertogenbosch** zaczyna się apostrofem.
+
+**Front**: Vite z **dwoma osobnymi wejściami**, nie SPA z routerem. Na `index.html` prowadzi kod QR
+i otwiera ją człowiek w kabinie — zostaje przy **6,3 kB bez ani jednego `<script>`**, panel to
+osobne 243 kB gzip. Build przypięty w `vercel.json`, bo projekt powstał jako strona statyczna
+bez builda i `/spedycja` dałoby 404.
+
+**Zweryfikowane na produkcji**: panel się rysuje, zero błędów w konsoli, `geokoduj` odpowiada
+z europe-west1, strona publiczna po przebudowie bez zmian (logo 62×26, zasoby 200, brak
+przewijania w poziomie). Testy czystej logiki: 62 zdane.
+**NIEZWERYFIKOWANE**: ekrany po zalogowaniu — `nadajRole` dopuszcza tylko adres usera, więc
+Claude nie ma jak tam wejść. Reguły nadal nieprzetestowane na emulatorze (wymaga Javy).
+Baza dalej pusta — żaden prawdziwy dokument nie przeszedł ścieżki publikacji.
