@@ -5011,3 +5011,21 @@ przewijania w poziomie). Testy czystej logiki: 62 zdane.
 **NIEZWERYFIKOWANE**: ekrany po zalogowaniu — `nadajRole` dopuszcza tylko adres usera, więc
 Claude nie ma jak tam wejść. Reguły nadal nieprzetestowane na emulatorze (wymaga Javy).
 Baza dalej pusta — żaden prawdziwy dokument nie przeszedł ścieżki publikacji.
+
+### 05.10 cd. — reguły FreeTrucka przetestowane (45 asercji) i poprawione
+
+User zainstalował Javę, więc domknąłem dług z 1.10. `npm run test:reguly` — **45 asercji,
+0 oblanych za pierwszym przebiegiem**: klient z ulicy nie dochodzi do zgłoszeń ani rejestracji,
+przewoźnik nie opublikuje się z pominięciem spedytora, nie podmieni `autoId` na cudze (osobno
+create i update), nie wpuści się sam statusem „aktywny", a do worka nie zapisze **nawet spedytor**.
+
+⚠️ **Kompilacja reguł przy deployu to nie jest test** — mówi tylko, że składnia się zgadza.
+Pomyliłem te dwie rzeczy we wpisie z 1.10.
+
+🐛 Najciekawsze wyszło z logu emulatora, nie z wyniku testów: **reguły odmawiały przez błąd
+wykonania, nie przez `false`**. `request.auth.token.rola` dla konta bez claimu rzuca
+„Property rola is undefined”, a odmowa wychodziła poprawna wyłącznie dlatego, że Firestore
+liczy `błąd || prawda` jako przejście. Poprawność z trójwartościowej logiki zamiast
+z konstrukcji — plus błąd w logach przy KAŻDYM żądaniu przewoźnika, w którym utonąłby
+prawdziwy problem. Teraz `token.get('rola', '')` i `exists()` przed `get()`.
+Zmierzone po poprawce: **zero błędów przy operacjach, które mają przejść**.
