@@ -5029,3 +5029,46 @@ liczy `błąd || prawda` jako przejście. Poprawność z trójwartościowej logi
 z konstrukcji — plus błąd w logach przy KAŻDYM żądaniu przewoźnika, w którym utonąłby
 prawdziwy problem. Teraz `token.get('rola', '')` i `exists()` przed `get()`.
 Zmierzone po poprawce: **zero błędów przy operacjach, które mają przejść**.
+
+## 2026-10-05/06 — FreeTruck: czarny ekran panelu i mapa klienta (w tym repo zero zmian)
+
+Praca w `~/Desktop/freetruck.nosync`. Commity `46419b7` i `ddc6df7`.
+
+### Czarny ekran — trzy wnioski, każdy do zapamiętania
+
+User zgłosił „jak dodaję auto, to nic mi nie pokazuje" i przysłał zrzut **całkiem czarnej
+strony, bez nagłówka**. Przyczyna: `L.map(...)` bez `setView`, a zaraz potem dorzucany okrąg.
+Mapa bez środka nie przeliczy współrzędnych i rzuca wyjątek, a **wyjątek w renderze
+odmontowuje CAŁE drzewo Reacta**.
+
+1. ⚠️ **Logi funkcji rozstrzygnęły szybciej niż kod.** `nadajRole` i `geokoduj` miały wpisy,
+   a `naZgloszeniu` **ani jednego uruchomienia** — czyli panel gasł, zanim user zdążył
+   cokolwiek opublikować. `firebase functions:log --only <nazwa>` jako pierwszy krok.
+2. ⚠️ **Czytnik konsoli w przeglądarce ZBIERA wpisy między przeładowaniami.** Dwa razy
+   wyglądało, że błąd wraca po poprawce. Rozstrzyga własny `window.addEventListener('error')`
+   zakładany po załadowaniu strony — wtedy pusto znaczy pusto.
+3. Doszedł **`Bezpiecznik`** (granica błędu) wokół zawartości zakładki. Czarny ekran nie mówi
+   nic ani userowi, ani mnie; teraz awaria widoku zostawia działający nagłówek i treść błędu.
+
+Żeby to w ogóle dało się sprawdzić, powstało **środowisko na emulatorze** (`npm run emul`
++ `npm run dev:emul`) z kontem spedytora. To zamyka na stałe lukę „ekranów po zalogowaniu
+nie da się zweryfikować", którą zgłaszałem dzień wcześniej — i w której dokładnie siedział ten bug.
+
+🐛 **Mój błąd we wdrożeniu, nie w kodzie**: poprawkę przenoszącą etykietę na `obszar.etykieta`
+napisałem PO ostatnim wdrożeniu funkcji, a potem wdrażałem już tylko `nadajRole` i reguły.
+`naZgloszeniu` na produkcji dalej czyta stare pole, więc wpisy wychodzą **bez nazwy miasta**.
+Ponowne wdrożenie padło na wygasłych poświadczeniach (`firebase login --reauth` — po stronie usera).
+
+### Mapa klienta — LIVE
+
+`freetruck.pl` przestaje być zaślepką. Okręgi wolnych aut, lista, filtry, PL/EN.
+**Decyzja usera: klient NIE wysyła zapytań przez aplikację** — widzi, co wolne, i dzwoni do
+swojego spedytora. Strona jest więc wyłącznie do czytania, zero zapisu od obcych ludzi.
+
+Bez SDK Firebase i bez Reacta: **6,6 kB po spakowaniu** zamiast ponad 240 kB. Stronę otwiera
+człowiek po zeskanowaniu kodu, często telefonem w kiepskim zasięgu. Sprawdzone wprost, że REST
+bez logowania zwraca `worek`, a `zgloszenia` odbija z 403.
+
+🚩 Skutek decyzji usera: **kolekcja `zapytania` straciła sens**, a reguła nadal przepuszcza
+anonimowy zapis. Zamknięcie jej kasuje jedyny powód, dla którego potrzebny był App Check.
+Do rozstrzygnięcia.
