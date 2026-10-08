@@ -5108,3 +5108,37 @@ jeden piksel, więc doszły **znaczniki** — kropla wzięta wprost z modułu Pa
 sprawdzały, a w panelu nie było gdzie go zmienić — pole udawało zabezpieczenie).
 
 Testy: **100 logiki + 50 reguł**, cała ścieżka przewoźnika przejechana na emulatorze.
+
+### 08.10 cd. — FreeTruck po pierwszym użyciu panelu przez usera
+
+Cztery poprawki, **wszystkie wyszły z przeklikania, żadna z czytania kodu**. Commity
+`d28cca8`, `9db0111`, `09f0928`, `51fb30f` (w `~/Desktop/freetruck.nosync`).
+
+🚩 **Nie pisz przewoźnikowi, czego klient nie widzi.** Zdanie przy rejestracji „klient nie
+widzi nazwy firmy ani telefonu" user słusznie zakwestionował: **podsuwa myśl, że mógłby
+widzieć**, a przewoźnik CHCE, żeby klient pisał bezpośrednio do niego — stąd blisko do
+wpisania numeru w nazwę obszaru. Teraz mówimy, PO CO te dane są. Pozostałe wzmianki
+(rejestracja, dokładna pozycja) zostawione świadomie: dotyczą rzeczy, których przewoźnik
+sam nie chce pokazywać, więc czytają się jak ochrona, nie jak zakaz.
+
+🚩 **Żadne pole pojazdu nie może mieć wartości podpowiedzianej.** Kategoria startowała na
+„Solo" — user: „od razu przypisało mi solo". Rejestracja niczego nie przypisywała, ale
+podpowiedź wygląda identycznie, a gorsze jest to, co z niej wynika: kto nie spojrzy,
+opublikuje **zestaw opisany jako solo**.
+
+🚩 **Geokoder nie sortuje po szczegółowości.** „Gdańsk" → pierwszy wynik to całe województwo.
+Kliknięcie pierwszej pozycji dawało **okrąg 5 km podpisany nazwą regionu**. ⚠️ Sortujemy
+TAKŻE wyniki z cache'u (żyje 30 dni) — bez tego poprawka wyglądałaby na wdrożoną, nie będąc.
+🐛 `ostrzezeniaDlaWyniku` było napisane i **nigdy niewywoływane** — martwy kod przez 4 dni.
+
+🚩 **Publikacja wpis po wpisie nie skaluje się.** User: „jak spedytor będzie miał 30 aut
+w jednym czasie, nie zrobi tego na czas". Bramka nie znika — przenosi się o poziom wyżej:
+**zatwierdza się FIRMĘ raz**, potem jej auta idą na mapę bez klikania. Trzy stany konta
+(`nowy` → `aktywny` → `wstrzymany`); istniejące konta mają już `aktywny`, więc bez migracji.
+Nie otworzyliśmy publikacji dla każdego, bo `/przewoznik` jest odgadywalny, a mapa to ta sama,
+na którą prowadzi QR z kalendarzy.
+
+**Zweryfikowane na emulatorze**: rejestracja → baner „czeka na zatwierdzenie" → spedytor
+klika „Zatwierdź" → przewoźnik zgłasza → wpis w publicznym worku **bez kliknięcia spedytora**,
+zero wycieku. Testy: **118 logiki + 56 reguł**.
+**NIEZWERYFIKOWANE**: ścieżka przewoźnika na PRODUKCJI — tam sprawdzony tylko render stron.
