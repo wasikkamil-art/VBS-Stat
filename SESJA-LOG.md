@@ -5268,3 +5268,26 @@ wywaliłby CAŁĄ stronę przy starcie (ten sam mechanizm co czarny ekran panelu
 
 Zweryfikowane na produkcji: pakiet bajt w bajt z buildem HEAD, jedna karta, „7 aut",
 1 bąbel + 4 pinezki, podpisy „okrąg 5 km" na miejscu.
+
+### 08.10 cd. 7 — FreeTruck: przekazanie modelu do Logisteo (tu zero zmian)
+
+🔑 **Decyzja usera: giełda ma stanąć w ramach Logisteo**, wdrażać będą nasi ludzie. Prototyp
+FreeTruck zostaje jako referencja do przeklikania.
+
+Powstał `PRZEKAZANIE.md` (427 linii) plus ta sama treść jako dokument z dwoma rysunkami
+(obieg wpisu, anonimowość strukturalna). Opisuje ZASADĘ, nie nasz stos: trzy role, cykl życia
+wpisu, model danych z białą listą pól publicznych, reguły jako wymagania, geometria obszaru
+z niezmiennikiem, wygasanie, wymagania widoku klienta, decyzje-drobiazgi i kryteria odbioru.
+
+🔇 **Warunek: nigdzie nie wskazywać FleetStata ani nazwy firmy** (formalny, por. art. 22 GBER
+przy Logisteo). Wyczyszczone 6 wzmianek o FS i 4 o firmie w czterech plikach repo; `grep` daje
+zero. ℹ️ Zbudowana strona nigdy ich nie zawierała, bo build zdejmuje komentarze.
+
+🚩 **Moja wpadka**: zostawiłem w dokumencie link do prywatnej strony Claude, a user zdążył
+wysłać plik. Odbiorca widzi ekran logowania, nie dokument. Zasada na przyszłość: **dokument
+do wysłania nie zawiera adresów działających tylko na koncie autora**, a wersję z rysunkami
+przekazuje się jako wyeksportowany PDF.
+
+Dopisane do założeń dwa wymagania wynikające z celu: płatny dostawca map i geokodowania
+(darmowy OpenStreetMap ogranicza użycie komercyjne) oraz **stały adres spod kodu QR**, bo
+kalendarze z kodem na każdej stronie leżą u klientów cały rok.
