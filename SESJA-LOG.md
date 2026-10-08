@@ -5225,3 +5225,25 @@ i ogłosiłem „nie ma go w worku", choć był. Nie porównywać po skróconych
 🚩 **Otwarte**: w worku są wpisy TESTOWE (Rome 2 500 kg, Kielce 3 000 kg) — do zdjęcia przez
 usera, zanim kalendarze z kodem QR pójdą do klientów. Plus stary wpis z `r=10` (Paris, 06.10),
 który wyrówna się sam po wygaśnięciu.
+
+### 08.10 cd. 5 — FreeTruck: widok klienta przygotowany na sto aut (tu zero zmian)
+
+Commity `f8112eb` i `7d9ce4e` w `~/Desktop/freetruck.nosync`, oba na produkcji.
+
+**Układ.** Od 1060 px lista po lewej, mapa `position:sticky` po prawej na całą wysokość
+okna — przewijanie stu wpisów nie gubi mapy z oczu. Kółko myszy przybliża, ale **tylko
+w tym układzie**: nad mapą wstawioną w przewijaną stronę przechwytywałoby przewijanie
+strony. ⚠️ Telefon (tam prowadzi QR) zostaje bez zmian: filtry → mapa → lista.
+
+**Grupowanie pinezek** (`leaflet.markercluster` z CDN, SRI policzone z pobranych plików).
+🐛 Przy okazji naprawiło ukrytą usterkę: środek okręgu to komórka siatki, więc dwa auta
+z tego samego rejonu mają **identyczny punkt** — pinezki siedziały jedna na drugiej
+i widać było jedną. Pięć wpisów z Warszawy w teście = jedna widoczna pinezka.
+
+🔒 **Sufit przybliżenia na 12 (miasto).** Grupowanie dojeżdżało do zoomu 16 — ulice
+i numery budynków — a taki kadr czyta się jako „auto stoi pod tym adresem", choć punkt
+jest środkiem komórki. To ta sama decyzja co okrąg zamiast pinezki.
+
+Zweryfikowane: emulator ze 100 wpisami (co piąty w punkcie wspólnym), potem **produkcja** —
+pakiet bajt w bajt z buildem HEAD, `markerClusterGroup` załadowany (SRI przeszło).
+ℹ️ Znany limit: `pageSize=300` przy pobieraniu worka, bez stronicowania.
