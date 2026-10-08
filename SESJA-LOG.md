@@ -5142,3 +5142,40 @@ na którą prowadzi QR z kalendarzy.
 klika „Zatwierdź" → przewoźnik zgłasza → wpis w publicznym worku **bez kliknięcia spedytora**,
 zero wycieku. Testy: **118 logiki + 56 reguł**.
 **NIEZWERYFIKOWANE**: ścieżka przewoźnika na PRODUKCJI — tam sprawdzony tylko render stron.
+
+### 08.10 cd. 2 — FreeTruck: `zapytania` zamknięte, produkcja zrównana z repo (tu zero zmian)
+
+Praca w `~/Desktop/freetruck.nosync`, commit `ea341f4`.
+
+**Punkt wyjścia**: `51fb30f` („zatwierdzamy FIRMĘ raz") siedział tylko lokalnie — czyli model
+trzech stanów konta **nie działał na produkcji**, mimo że w logu był opisany jako zrobiony.
+Ruszał i reguły, i front, więc musiały wyjść razem.
+
+🔑 **Domknięta decyzja z 06.10 (klient nie pisze przez aplikację).** Nikt do `zapytania` nie
+pisał od dwóch dni, ale reguła wciąż przepuszczała **anonimowy `create`** — jedyna w całej bazie
+droga zapisu dla kogoś bez konta stała otwarta bez żadnego powodu. Teraz nie ma `match` dla tej
+kolekcji (domyślna odmowa), zakładka w panelu spedycji poszła **razem z komponentem** (martwy
+komponent wraca przy pierwszym czytaniu pliku), indeks wypisany z `firestore.indexes.json`.
+**To skreśla App Check z listy rzeczy przed startem** — był potrzebny wyłącznie dlatego, że
+reguły nie zrobią limitu tempa anonimowego zapisu. Przywrócenie formularza = powrót App Checku;
+zapisane w komentarzu przy regule, pilnowane przez 6 asercji (także dla spedytora, na dokumencie
+wpisanym z pominięciem reguł — nie na pustym miejscu).
+
+⚠️ **Wyszło przy okazji**: `09f0928` (sortowanie geokodera + ta sama logika na wynikach z cache'u)
+ruszał `functions/index.js` i `functions/lib/geokod.js`, a **nie dało się ustalić, czy był
+wdrożony** — `functions:list` nie pokazuje czasu aktualizacji. Wdrożony komplet czterech funkcji,
+żeby produkcja nie była zagadką. Lekcja: po commicie ruszającym `functions/` deploy od razu,
+bo dzień później nie ma jak sprawdzić.
+
+**Zweryfikowane na produkcji po deployu**: `freetruck.pl` dalej czyta worek (3 auta, etykiety
+Nantes / Bordeaux / Paris, numery FT, zero danych przewoźnika, zero błędów w konsoli), a oba
+pakiety panelu są **bajt w bajt identyczne** z lokalnym buildem HEAD (SHA-256) — `spedycja`
+bez ani jednego „Zapytania", `przewoznik` z banerem „czeka na zatwierdzenie".
+
+⚠️ **NIEZWERYFIKOWANE**: ścieżka przewoźnika na produkcji (rejestracja → zatwierdzenie →
+publikacja) — nadal tylko emulator. Test na żywo zakłada prawdziwe konto w produkcyjnym Auth,
+czeka na decyzję usera. Indeks `zapytania` zostaje w projekcie Firebase (kasowanie prosi
+o potwierdzenie; na pustej kolekcji nieszkodliwy).
+
+ℹ️ **Harness blokuje `git push origin main`** („Production Deploy") — push odpala user z terminala.
+Commit i `firebase deploy` idą normalnie.
