@@ -5204,3 +5204,24 @@ Zweryfikowane **na emulatorze przez przeklikanie**, obie strony na tych samych d
 Zatwierdź → worek 2 (Kielce, Warsaw) · Wstrzymaj → worek 0, oba zgłoszenia `zdjete`
 · Odwieś → komunikat odmieniony („odwieszona", nie „zatwierdzona").
 Testy: 118 logiki + 54 reguł. ⚠️ Na produkcję **jeszcze nie poszło** — czeka na push usera.
+
+### 08.10 cd. 4 — FreeTruck: ścieżka przewoźnika potwierdzona NA PRODUKCJI
+
+Trzy commity (`d58eb66`, `54948f8`, `39b6827`) wypchnięte przez usera; produkcja serwuje
+pakiet o **SHA-256 identycznym** z lokalnym buildem HEAD.
+
+✅ **Ostatni dług weryfikacyjny zamknięty.** User klikał widoki za loginem, ja sprawdzałem
+bazę publicznym kluczem (czyli dokładnie to, co widzi obcy): rejestracja nowego konta →
+profil `nowy` → zgłoszenie **w poczekalni, worek nietknięty** → „Zatwierdź" → wpis
+w publicznym worku (Solo · Plandeka, „Rome", IT, okrąg 5 km, wyłącznie pola z białej listy).
+Osobno potwierdzone **„publikuje od ręki"**: zatwierdzona firma (VBS) wrzuciła wpis z panelu
+PRZEWOŹNIKA prosto na mapę, bez kliknięcia spedytora. Wszystkie 7 wpisów w worku czyste.
+
+ℹ️ Podział pracy, który się sprawdził i warto powtarzać: **user klika to, co za loginem,
+Claude weryfikuje skutek w bazie** — bez zakładania kont na produkcji.
+🐛 Własna pułapka: szukałem wpisu po id **obciętym do 12 znaków** z wcześniejszego zrzutu
+i ogłosiłem „nie ma go w worku", choć był. Nie porównywać po skróconych identyfikatorach.
+
+🚩 **Otwarte**: w worku są wpisy TESTOWE (Rome 2 500 kg, Kielce 3 000 kg) — do zdjęcia przez
+usera, zanim kalendarze z kodem QR pójdą do klientów. Plus stary wpis z `r=10` (Paris, 06.10),
+który wyrówna się sam po wygaśnięciu.
