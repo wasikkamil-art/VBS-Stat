@@ -5247,3 +5247,24 @@ jest środkiem komórki. To ta sama decyzja co okrąg zamiast pinezki.
 Zweryfikowane: emulator ze 100 wpisami (co piąty w punkcie wspólnym), potem **produkcja** —
 pakiet bajt w bajt z buildem HEAD, `markerClusterGroup` załadowany (SRI przeszło).
 ℹ️ Znany limit: `pageSize=300` przy pobieraniu worka, bez stronicowania.
+
+### 08.10 cd. 6 — FreeTruck: stronicowanie worka i usunięta karta o okręgu (tu zero zmian)
+
+Commity `67c06a9` i `9d37716` w `~/Desktop/freetruck.nosync`, oba na produkcji.
+
+🐛 **Worek pobierał się bez stronicowania** — brało się pierwszą stronę i tyle, reszta
+znikała z mapy **bez żadnego błędu**. ⚠️ I nie chodziło o magiczne 300: **serwer sam
+decyduje, ile odda** (limituje rozmiarem odpowiedzi) — emulator oddawał po 150 mimo
+`pageSize=300`, więc próg utraty był niższy niż zapisany i zależał od wielkości dokumentów.
+Teraz pętla po `pageToken`, bezpiecznik 20 stron z ostrzeżeniem w konsoli. Sprawdzone
+na 700 wpisach: 5 żądań, „700 aut", 700 kart, 24 bąble.
+
+**Karta „Dlaczego okrąg, a nie pinezka?" usunięta** na polecenie usera („to klienta nie
+interesuje"). Dołożyłem ją 06.10 z obawy, że brak dokładności wyjdzie na usterkę — user
+ocenia, że klient czyta to jako tłumaczenie się z czegoś, czego nie zauważył, i to on
+rozmawia z klientami. Model bez zmian: okrąg, podpis „okrąg 5 km", sufit zoomu na mieście.
+⚠️ Usunięte też wypełnianie `#okragTytul`/`#okragTresc` — zostawiony `null.textContent`
+wywaliłby CAŁĄ stronę przy starcie (ten sam mechanizm co czarny ekran panelu 05.10).
+
+Zweryfikowane na produkcji: pakiet bajt w bajt z buildem HEAD, jedna karta, „7 aut",
+1 bąbel + 4 pinezki, podpisy „okrąg 5 km" na miejscu.
