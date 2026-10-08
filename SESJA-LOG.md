@@ -5072,3 +5072,39 @@ bez logowania zwraca `worek`, a `zgloszenia` odbija z 403.
 🚩 Skutek decyzji usera: **kolekcja `zapytania` straciła sens**, a reguła nadal przepuszcza
 anonimowy zapis. Zamknięcie jej kasuje jedyny powód, dla którego potrzebny był App Check.
 Do rozstrzygnięcia.
+
+## 2026-10-06/08 — FreeTruck: typy aut, mapa klienta i panel przewoźnika (tu zero zmian)
+
+Praca w `~/Desktop/freetruck.nosync`. **FreeTruck ma od 08.10 komplet trzech ról.**
+
+**Typy aut.** User: „potrzeba dodać tir, chłodnia itd, znajdź typy w sieci". Sprawdzenie
+u źródła (Trans.eu) pokazało, że problem był głębszy niż brakujące pozycje: giełdy rozdzielają
+**kategorię** (jak duże auto), **nadwozie** (czym zabudowane) i **załadunek** (którędy wchodzi
+towar), a nasze pole `zabudowa` = Bok/Tył/Góra było **załadunkiem udającym nadwozie** — chłodni
+ani wywrotki nie było gdzie wpisać. Doszło osobne pole, osiem pozycji.
+⚠️ Wartości w bazie zostają nienaruszalne, zmieniają się tylko etykiety. Listy żyją w jednym
+pliku, a **test czyta `firestore.rules` i porównuje obie kopie znak po znaku** — rozjazd byłby
+cichy: panel pozwala wybrać, reguła odrzuca, człowiek widzi samo „nie udało się zapisać".
+
+🐛 Przy tłumaczeniu wpadłem we własną pułapkę: `Kontener: "Box / rigid"`, a „rigid" w angielskim
+transporcie znaczy **solówkę**, czyli naszą kategorię. To samo słowo opisywało dwie różne rzeczy
+w sąsiednich polach. **Przy tłumaczeniu sprawdzaj, czy słowo nie jest już użyte w innym wymiarze.**
+User dwa razy zgłosił żargon („solówka to potocznie", „reefer to jakiś skrót") — zasada brzmi:
+etykiety z dokumentów przewozowych, nie z rozmowy na parkingu.
+
+**Mapa klienta.** `freetruck.pl` przestało być zaślepką. Bez SDK Firebase i bez Reacta:
+**6,6 kB gzip** zamiast ponad 240 kB, bo stronę otwiera człowiek po skanie QR, telefonem,
+często w słabym zasięgu. Decyzja usera: **klient nie wysyła zapytań przez aplikację** — widzi,
+co wolne, i dzwoni do swojego spedytora. Zamiast formularza: **numer wpisu** (FT-XXXXX,
+alfabet bez I, L, O i U, bo numer jest dyktowany przez telefon) i „kopiuj szczegóły".
+
+**Promień 20 → 10 → 5 km** w jeden dzień. ⚠️ Pole ukrycia maleje z KWADRATU promienia, więc
+to szesnastokrotne zmniejszenie (79 km² zamiast 1257). Zaakceptowane świadomie — worek jest
+sygnałem „w tym rejonie bywa taki sprzęt", nie pozycją. Przy 5 km okrąg przy widoku Europy ma
+jeden piksel, więc doszły **znaczniki** — kropla wzięta wprost z modułu Paliwo FleetStata.
+
+**Panel przewoźnika** — dwie luki znalezione PRZED pisaniem kodu: „wciąż wolne" nie zadziałałoby
+(przycisk musi przesuwać okno, nie odświeżać wpis), a status konta był **martwy** (reguły go nie
+sprawdzały, a w panelu nie było gdzie go zmienić — pole udawało zabezpieczenie).
+
+Testy: **100 logiki + 50 reguł**, cała ścieżka przewoźnika przejechana na emulatorze.
