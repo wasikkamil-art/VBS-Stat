@@ -5291,3 +5291,23 @@ przekazuje się jako wyeksportowany PDF.
 Dopisane do założeń dwa wymagania wynikające z celu: płatny dostawca map i geokodowania
 (darmowy OpenStreetMap ogranicza użycie komercyjne) oraz **stały adres spod kodu QR**, bo
 kalendarze z kodem na każdej stronie leżą u klientów cały rok.
+
+### 08.10 cd. 8 — FreeTruck: konta dostępowe dla wdrożeniowców (tu zero zmian)
+
+Założone na produkcji dwa konta, żeby zespół Logisteo przeszedł model sam:
+**spedytor** `wdrozenie@freetruck.pl` (claim `rola: spedytor`) i **przewoźnik**
+`przewoznik@freetruck.pl` (profil „Przewoźnik testowy", stan konta **`nowy`**).
+
+ℹ️ Stan `nowy` jest celowy: zgłaszają auto, widzą baner i pustą mapę, przelogowują się na
+spedytora, zatwierdzają firmę i oglądają, jak wpis wchodzi na mapę. Tej części modelu nie da
+się zrozumieć z opisu. Przewoźnik nie dostał żadnego claimu i tak ma zostać.
+
+🔑 **Hasła wyłącznie w pliku `~/Desktop/freetruck-konto-wdrozeniowcy.txt`** (uprawnienia 600),
+nie w czacie i nie w repo — transkrypt bywa kopiowany dalej, a tą drogą wyciekł już token.
+⚠️ Nie logowałem się na żadne z kont (nie wpisuję haseł na produkcyjnych serwisach), więc
+dowodem jest odczytany z Auth claim i zielone testy reguł, nie przeklikany panel.
+⚠️ Konta i profil do skasowania po wdrożeniu.
+
+ℹ️ Technicznie: `firebase-admin` nie miał na tej maszynie poświadczeń ADC, więc konta poszły
+administracyjnym API Identity Toolkit z tokenem `gcloud auth print-access-token` i nagłówkiem
+`x-goog-user-project`. Nie trzeba było `gcloud auth application-default login`.
