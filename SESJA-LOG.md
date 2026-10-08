@@ -5179,3 +5179,28 @@ o potwierdzenie; na pustej kolekcji nieszkodliwy).
 
 ℹ️ **Harness blokuje `git push origin main`** („Production Deploy") — push odpala user z terminala.
 Commit i `firebase deploy` idą normalnie.
+
+### 08.10 cd. 3 — FreeTruck: przełącznik stanu firmy rusza też jej wpisami (tu zero zmian)
+
+Commity `d58eb66`, `54948f8`, `39b6827` w `~/Desktop/freetruck.nosync`. **Wszystkie trzy
+rzeczy wyszły z przeklikania panelu przez usera, żadna z czytania kodu** — trzeci raz tej doby.
+
+🐛 **„Wyślij link potwierdzający" nie robił NIC** — `sendEmailVerification` bez `catch`.
+Odmowa jest tam stanem TYPOWYM (jeden link wychodzi automatycznie przy zakładaniu konta,
+więc kliknięcie chwilę później trafia w `auth/too-many-requests`), czyli ścieżka bez znaku
+życia była najczęstszą ścieżką tego przycisku. Przy okazji: potwierdzenie adresu ma znaczenie
+**wyłącznie dla `nadajRole`** — przewoźnik go nie potrzebuje.
+
+🚩 **„Zatwierdź" dotyczyło tylko przyszłych wpisów.** User założył konto, zgłosił auto
+i dostał „nadal czeka na spedytora": zatwierdzenie ruszało sam `przewoznicy.status`,
+a zgłoszenie zostawało w poczekalni i trzeba je było dobić w drugiej zakładce. Teraz
+zatwierdzenie publikuje paczką całą poczekalnię firmy.
+
+🚩 **„Wstrzymaj" zostawiał wpisy na mapie** — wstrzymane konto dalej się reklamowało.
+Decyzja usera (wariant A): wstrzymanie **zdejmuje wpisy z mapy**; przewoźnik po odwieszeniu
+przywraca je przyciskiem „wciąż wolne".
+
+Zweryfikowane **na emulatorze przez przeklikanie**, obie strony na tych samych danych:
+Zatwierdź → worek 2 (Kielce, Warsaw) · Wstrzymaj → worek 0, oba zgłoszenia `zdjete`
+· Odwieś → komunikat odmieniony („odwieszona", nie „zatwierdzona").
+Testy: 118 logiki + 54 reguł. ⚠️ Na produkcję **jeszcze nie poszło** — czeka na push usera.
