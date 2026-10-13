@@ -5311,3 +5311,47 @@ dowodem jest odczytany z Auth claim i zielone testy reguł, nie przeklikany pane
 ℹ️ Technicznie: `firebase-admin` nie miał na tej maszynie poświadczeń ADC, więc konta poszły
 administracyjnym API Identity Toolkit z tokenem `gcloud auth print-access-token` i nagłówkiem
 `x-goog-user-project`. Nie trzeba było `gcloud auth application-default login`.
+
+## 2026-10-13 — Odpowiedź dla wykonawcy FreeTrucka i analiza wynagrodzeń kierowców
+
+**W repo zero zmian.** Sesja bez kodu: korespondencja z wykonawcą i analiza na plikach Excela.
+
+### FreeTruck w Logisteo — odpowiedź Bartosza Polaka
+
+Wykonawca odpisał 09.10 siedmioma pytaniami o architekturę. Logisteo **ma już** zgłaszanie
+wolnego pojazdu, okno dostępności i zakresy publiczny/zaufani/prywatny, więc rozszerza
+istniejący mechanizm, a nasz dokument jest specyfikacją ZACHOWANIA, nie projektem bazy.
+
+Decyzje usera: **mapa jest Logisteo** (nie stawiamy drugiej), **klient widzi markę Logisteo**,
+bo to nazwa programu, a VBS to firma; dostęp do repozytorium damy, jeśli poproszą.
+
+⚠️ Zgłoszone userowi i wpisane do odpowiedzi jako wymaganie: **wejście spod kodu QR musi
+prowadzić do widoku z kontekstem VBS**, bo klient ma wiedzieć, do kogo dzwoni, a kalendarz
+inaczej promuje cudzą markę. Drugie wymaganie: **opisanie, co na wspólnej mapie widzą inne
+spedycje** — anonimowość wobec klienta mamy przemyślaną, widoczność między spedycjami nie.
+ℹ️ Sprostowane moje własne zdanie z dokumentu („pod jego nazwą i domeną"), które okazało się
+dwuznaczne i wywołało pytanie wykonawcy.
+
+### Wynagrodzenia kierowców — co się bardziej opłaca
+
+Analiza na `VAT + wynagordzenia.xlsx` i `Auta VBS 2025 (21).xlsx`. Model listy płac
+**skalibrowany na pliku z dokładnością 0,01%**: brutto 5 122 → netto 4 000, CO 6 170,72,
+czyli zlecenie, pełny ZUS bez chorobowej, FP i FGŚP, PIT-2, KUP 20%, **zero diet**.
+
+Realny obraz I półrocza: **158 329 zł do ręki, z czego 86 789 zł (55%) gotówką**, 434 doby
+za granicą, średnio 24,1 doby na kierowco-miesiąc. Gotówka kosztuje 1,31 zł za złotówkę
+(nie jest kosztem), dieta 1,00 zł i jest kosztem.
+
+🔑 **Wniosek**: przeniesienie gotówki na listę płac bez diet jest DROŻSZE o ok. 47 tys. rocznie,
+ale przebudowa pakietu na wynagrodzenie + dieta daje **+47 tys. rocznie w kieszeni** przy tej
+samej kwocie na rękę. Umowa o pracę wypada 22 tys. gorzej od dziś (podłoga ZUS na poziomie
+przeciętnego wynagrodzenia zjada ulgę). Ryczałt 5,5% bije dzisiejszy układ, ale **przegrywa
+z liniówką po legalizacji** — im więcej kosztów w książce, tym bardziej liniówka wygrywa.
+
+🚩 Znalezione przy okazji: **mandaty ok. 7 700 zł za półrocze siedzą w kosztach aut**, a grzywny
+nie są kosztem uzyskania przychodu.
+
+**Pliki**: `~/Desktop/Wynagrodzenia-kierowcy-warianty.xlsx` (4 zakładki, żywe formuły) oraz
+arkusz Google „Wynagrodzenia kierowców: co się bardziej opłaca" (wartości, bez formuł).
+⚠️ **Nic z tego nie jest zweryfikowane przez księgową** — sześć pytań czeka na odpowiedź,
+w tym kluczowe o diety przy umowie zlecenie, od którego zależy cała oszczędność.
