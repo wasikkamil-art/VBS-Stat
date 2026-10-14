@@ -12,6 +12,12 @@ import {
   suggestBaseReturnFromRest,
 } from "../utils/czasPracy";
 
+// Próg, powyżej którego tygodniowa pauza przestaje być pauzą, a zaczyna urlopem lub
+// nieużywaną kartą. 100h = ponad 4 doby; regularny tygodniowy to 45h, więc długi weekend
+// z zapasem wciąż mieści się poniżej. To podpowiedź dla dyspozytora, NIE reguła 561/2006 —
+// dlatego próg żyje tutaj, a nie w REGULATION.
+const URLOP_HINT_MIN = 100 * 60;
+
 export default function TachografComplianceSection({ device, position, driverActivities = [], multiDayView = null, onUpdateVehicle, showToast }) {
   const [, forceTick] = useState(0);
 
@@ -511,17 +517,24 @@ export default function TachografComplianceSection({ device, position, driverAct
                         ? "bg-amber-50 border-amber-200"
                         : "bg-emerald-50 border-emerald-200"
                     }`}
-                    title={w.isReduced ? "Skrócony (poniżej 45h)" : "Regularny (45h lub więcej)"}
+                    title={
+                      w.durMin >= URLOP_HINT_MIN
+                        ? "Ponad 100h — prawdopodobnie urlop albo nieużywana karta kierowcy"
+                        : w.isReduced ? "Skrócony (poniżej 45h)" : "Regularny (45h lub więcej)"
+                    }
                   >
                     <span className="text-[11px] text-gray-500">{i + 1}. pauza</span>
                     <strong className={`text-sm font-bold tabular-nums ${w.isReduced ? "text-amber-800" : "text-emerald-800"}`}>
                       {fmtHM(w.durMin)}
                     </strong>
+                    {w.durMin >= URLOP_HINT_MIN && (
+                      <span className="text-[10px] text-gray-500 italic">urlop</span>
+                    )}
                   </div>
                 ))}
               </div>
               <div className="text-[11px] text-gray-500 mt-2">
-                Zielone = regularny (≥45h) · bursztynowe = skrócony (&lt;45h). Jeden odpoczynek na tydzień kalendarzowy, najdłuższy ≥24h.
+                Zielone = regularny (≥45h) · bursztynowe = skrócony (&lt;45h) · „urlop" = ponad 100h, czyli urlop albo nieużywana karta. Jeden odpoczynek na tydzień kalendarzowy, najdłuższy ≥24h.
               </div>
             </>
           ) : (

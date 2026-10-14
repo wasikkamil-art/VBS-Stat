@@ -5479,7 +5479,10 @@ dyspozytorowi inne pauzy niż compliance obok.
 
 ⚠️ **Lista pokazuje wartości typu 402h i 228h** przy urlopie lub braku karty. To nie błąd —
 to najdłuższy odpoczynek ≥24h w tym tygodniu, czyli dokładnie to, czym liczy się wyrównanie.
-Ścięcie wyświetlania rozerwałoby zgodność z compliance, więc zostawione; do decyzji usera.
+**Rozstrzygnięte przez usera: dopisek „urlop" powyżej 100h** (`URLOP_HINT_MIN` w komponencie,
+celowo NIE w `REGULATION` — to podpowiedź dla dyspozytora, nie reguła 561/2006). Sama liczba
+zostaje nietknięta, więc zgodność z compliance jest zachowana. Sprawdzone na produkcji:
+dopisek łapie 402h33, 228h43 i 159h10, a 66h34 słusznie zostaje bez niego.
 
 ### Wyjaśnione przy okazji (nie są to błędy)
 
