@@ -5537,7 +5537,17 @@ dla v3, dokładnie tyle, ile wyszło z surowych plików (1,803 €/L).
 ✅ E-100 storno: 2 wiersze ujemne, oba na rejestracjach spoza floty.
 ✅ Zgodność z sierpniem w każdej pozycji (v3: 25→15 dni, 10 652→6 984 km, mniej paliwa).
 
-❌ **Import do FS NIE zrobiony** — user wgrywa pliki sam w zakładce Paliwo, po deployu.
+### Jeden plik zbiorczy na import (commit `ab0ef0f`)
+
+User poprosił o jeden plik zamiast czterech. 🚩 **Pętla po arkuszach robiła `break` na
+pierwszym z transakcjami** — z pliku zbiorczego wczytałby się sam Eurowag, a reszta
+przepadłaby po cichu (import pokazałby „sukces" i 40 transakcji mniej). `break` nie był
+jednak bez sensu: chronił przed skoroszytem z powtórzonymi transakcjami. **Zawężone:
+każdy rodzaj karty wczytuje się raz** — zbiorczy działa, ochrona zostaje.
+✅ Sprawdzone: `Paliwo_wrzesien_2026_ZBIORCZY.xlsx` (4 arkusze) = cztery osobne pliki,
+**107 transakcji, zgodność co do grosza i litra** per karta i produkt.
+
+❌ **Import do FS NIE zrobiony** — user wgrywa plik sam w zakładce Paliwo, po deployu.
 ❌ Nie oglądane w przeglądarce.
 
 ### Otwarte
