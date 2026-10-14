@@ -5474,7 +5474,7 @@ dyspozytorowi inne pauzy niż compliance obok.
   v5 Volodymyr L → 24h11 (skr.) · 159h10 · 44h30 (skr.) · 26h01 (skr.).
   Liczba skróconych na liście zgadza się z wyrównaniem obok (v5: 3 skrócone, 18h59 do oddania).
 
-❌ **NIE oglądane w przeglądarce** — sekcja Tachograf jest za loginem (GPS/Monitoring), klika user.
+✅ **Potwierdzone przez usera na produkcji 14.10** — sekcja Tachograf (GPS/Monitoring), działa.
 ❌ Nie sprawdzony układ na wąskim ekranie (jest `flex-wrap`, ale to przypuszczenie).
 
 ⚠️ **Lista pokazuje wartości typu 402h i 228h** przy urlopie lub braku karty. To nie błąd —
