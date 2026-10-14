@@ -5355,3 +5355,93 @@ nie są kosztem uzyskania przychodu.
 arkusz Google „Wynagrodzenia kierowców: co się bardziej opłaca" (wartości, bez formuł).
 ⚠️ **Nic z tego nie jest zweryfikowane przez księgową** — sześć pytań czeka na odpowiedź,
 w tym kluczowe o diety przy umowie zlecenie, od którego zależy cała oszczędność.
+
+## 2026-10-13/14 — Wynagrodzenia kierowców: pełny model w arkuszu Google, zwrot w stronę zlecenia
+
+**W repo zero zmian w kodzie.** Sesja analityczna: model podatkowy, dane z tachografów,
+siedem kart w arkuszu Google, dokument dla księgowej. Skrypty robocze
+(`diagnose_godziny_*.mjs`, `make_dashboard_ksiegowa.js`) są gitignorowane.
+
+### Konektor Google Sheets podłączony
+
+Do tej pory Dysk pozwalał tylko czytać (`update_file` zmienia wyłącznie tytuł i folder).
+User podłączył oficjalny konektor Google Sheets → zapis wprost do komórek.
+🚩 **Karta nazywa się `"Symulacja "` ze spacją na końcu** — bez niej każdy zakres odbija się
+`Unable to parse range`. ℹ️ Zapis do scalonej komórki wchodzi w komórkę-kotwicę.
+
+### Model odtworzony i skalibrowany
+
+🔑 **Narzut pracodawcy w listach płac usera = 20,48% ponad brutto**, stały z dokładnością
+0,002% na 10 parach netto/CO. Po odjęciu emerytalnej i rentowej zostaje **4,22 pp** zamiast
+typowych ~2,77 — **1,45 pp nadwyżki nie rozkłada się na znane stawki**, pytanie do księgowej.
+🔑 **Wypłata to `−(stawka dzienna × dni w trasie) / kurs`** — na rękę jest w PLN, EUR to tylko
+przeliczenie. Kursy w formułach są wklepane na sztywno (zwykle 4,25) i różnią się od tabelki.
+
+🚩 **Stawki dzienne skrzyżowane między kierowcami**: Siergiej ma je wklepane w treść formuły
+(360/370), Ivan liczy się ze stawki Siergieja (w. 45), Włodziu ze stawki Ivana (w. 87).
+W VII–VIII trzech kierowców na trzech różnych stawkach. Niewyjaśnione.
+🚩 **Ivan, luty: `#VALUE!` w `Total_26`** — „Ilość dni" to była spacja zamiast 18.
+**User poprawił w trakcie sesji, potwierdzone odczytem.**
+
+### Godziny z tachografu
+
+Z `driverActivities` przez `preferDddSegments` (priorytet DDD): **3 519 h za I–VIII,
+średnio 7,3 h na dobę w trasie** — nie 8–10, jak najpierw założyłem.
+⚠️ **To skorygowało mój własny szacunek z „9–29 tys." na ~42 tys.** przy wariancie z dietą.
+🚩 Sergiej pracuje tyle samo godzin co Volodym L (1 181 vs 1 187), a dostaje 62 350 zamiast
+74 600 zł. Na rękę za godzinę: 52,8 vs 62,8 vs 66,5 (Ivanskyi).
+⚠️ Mykola nie ma ANI JEDNEGO segmentu w bazie (0 z 28 875).
+
+### Zwrot akcji — zlecenie z ulgą ZUS bije umowę o pracę
+
+User zapytał, czy ulgi działają przy zleceniu, bo **przy etacie płaci się niezależnie od tego,
+czy jest ładunek**. Po rozdzieleniu obu ulg:
+
+| wariant | koszt netto I–VIII | vs dziś rocznie | elastyczność |
+|---|---|---|---|
+| **zlecenie + ulga ZUS** | **237 312** | **−15 917** | pełna |
+| dziś (część gotówką) | 226 701 | 0 | pełna |
+| umowa o pracę (obie ulgi) | 241 861 | −22 740 | BRAK |
+| zlecenie bez ulg | 257 372 | −46 007 | pełna |
+
+🔑 **Ulga ZUS (rozp. składkowe § 2 ust. 1 pkt 16 w zw. z § 5 ust. 2) prawdopodobnie działa
+przy zleceniu; zwolnienie PIT 30% (art. 21 ust. 1 pkt 20) raczej nie — mówi o stosunku pracy.**
+🚩 **Elastyczność, której model wcześniej nie wyceniał: każde 10% spadku pracy = 34 005 zł
+rocznie**, które zlecenie oszczędza, a etat nie. Historycznie wykorzystane 15 724 zł w 8 mc
+(Sergiej, czerwiec: 8 dni zamiast 25) ≈ 27 123 zł rocznie.
+→ **Po doliczeniu elastyczności etat wypada ~34 tys. rocznie gorzej od zlecenia z ulgą ZUS.**
+
+### Co powstało
+
+- **Arkusz Google `1DpdfXCC...6c9h8`, 7 kart**: `Założenia` (parametry) → `Dane` (32 wiersze
+  kierowca × miesiąc) → `Umowa o pracę` (wyprowadzenie z kontrolą netto) → `Symulacja ` →
+  `rachunek` (4 warianty) → `koszt 1 zł` → `dziś vs umowa o pracę`.
+  ⚠️ Brutto w `Umowa o pracę` kol. E jest rozwiązane numerycznie, nie formułą — po zmianie
+  założeń trzeba je przeliczyć, sygnałem jest kolumna M (dziś suma różnic 1,46 zł na 32 wiersze).
+- **`Uporzadkowanie_wynagrodzen_pytania_do_ksiegowej.pdf`** (pulpit, 2 strony, z logo) —
+  przebudowany trzy razy: najpierw spór o diety, potem plan „umowa o pracę", na końcu
+  **pytanie otwarte z trzema wariantami**.
+- **Krótka treść maila do księgowej w czacie** — user uznał PDF za za szczegółowy:
+  *„najpierw niech odpowie na proste zasadnicze pytania, później liczenie"*. 6 pytań, zero liczb.
+
+### Zweryfikowane / NIE
+
+✅ Każdy zapis do arkusza potwierdzony odczytem. ✅ Sumy `Dane` zgadzają się z danymi usera
+(574,5 dni, 210 270 zł, 95 640/114 630, 3 519,4 h, 122 238 zł diet). ✅ Model listy płac trafia
+w CO z błędem ≤0,64 zł na 10 parach. ✅ Dwie niezależne drogi dają ten sam wynik: `koszt 1 zł`
+→ 257 305 i 241 783 wobec `rachunek` → 257 371 i 241 861 (0,03%). ✅ Luty Ivana naprawiony
+przez usera, sprawdzone odczytem.
+❌ **Numery przepisów podane z pamięci, niezweryfikowane w źródłach.** ❌ Druga strona PDF-u
+oglądana tylko przez pomiar przepływu, nie na zrzucie. ❌ Stawka minimalna 31,40 zł/h,
+przeciętne wynagrodzenie 9 000 zł i KUP 250 zł to założenia. ❌ **Nic nie potwierdzone
+przez księgową** — to jest cała otwarta część.
+
+### Otwarte
+
+1. **Mail do księgowej** — treść gotowa w czacie, user wysyła.
+2. Po odpowiedzi: przeliczyć warianty na potwierdzonych zasadach, dokończyć PDF.
+3. 🚩 Dwie pozycje w `Total_26` wyglądają na rezerwy, nie faktury: „Serwis" −600 EUR i „koszt
+   uruchomienia auta" −1 000 EUR **równo w każdym miesiącu do grudnia** (13 568 EUR ≈ 58 400 zł
+   w 8 mc). Do sprawdzenia w fakturach — zawyża poziom „w kieszeni", nie zmienia różnic.
+4. 🚩 Skrzyżowane stawki dzienne i anomalia Sergieja (narzut 17,92% zamiast 20,48% od lipca).
+5. Wrzesień: dni w trasie niewpisane w `Total_26`, więc wypłat za IX nie ma czym policzyć.
