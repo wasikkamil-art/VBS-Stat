@@ -5489,3 +5489,62 @@ dopisek łapie 402h33, 228h43 i 159h10, a 66h34 słusznie zostaje bez niego.
 - **v1 bez aktywnego kierowcy** — Volodymyr Iwansky zakończył pracę, user odpiął go z auta 06.10.
 - **v2 Mykola bez `email` w `driverHistory`** i zero segmentów w `driverActivities` — robi prawo
   jazdy na solo, wcześniej jeździł busem. Brak danych tachografu jest poprawny.
+
+## 2026-10-14 (cd.) — Rozliczenie września: tankpool jako czwarta karta + Total_26 (commity `7e88e78`, `3954ae8`)
+
+Sześć źródeł: Eurowag, E-100, Andamur, **tankpool (nowy)**, NegoMetal, **e-TOLL**.
+
+### Tankpool — parser w aplikacji
+
+Plik `transaktionen-view-*.csv`, separator `;`, nagłówki niemieckie.
+🚩 **Ostatni wiersz to podsumowanie** (`Vorgänge;3;…;186,82 l;…;347,54 €`) — ta sama pułapka
+co subtotale NegoMetalu; odcina go warunek na produkt (w sumie kolumna Produkt pusta).
+🔑 **„Vorläufiger Gesamtpreis" to NETTO.** Najpierw założyłem brutto (1,9943 €/L wyglądało
+na cenę z VAT) — **błąd**. Rozstrzygnęło porównanie z Eurowagiem za ten sam miesiąc i kraj:
+tankpool 1,860 €/L wobec **Eurowag DE 2,003 €/L netto**. Przy założeniu brutto wyszłoby
+1,563 €/L, czyli 22% poniżej rynku niemieckiego.
+✅ Parser sprawdzony na realnym pliku: 3 tx, **186,82 L / 347,54 €** — co do grosza zgodne
+z podsumowaniem w samym pliku; wiersz sumy odrzucony.
+
+### 🚩 Próg sanity €/L z pamięci był NIEAKTUALNY
+
+Stary próg „1,4–1,8 €/L" oblewała we wrześniu cała flota. Porównanie per kraj z bazy
+(`fuelTransactions/YYYY-MM/tx`, pole **`netEUR`**) pokazało, że to trend, nie błąd:
+FR 1,770 (VII) → 1,920 (VIII) → **2,006 (IX)** · DE 1,727 → 1,885 → **2,003**.
+**Zastąpione regułą: porównuj miesiąc do miesiąca per kraj, nie do stałego progu.**
+
+### Wrzesień 2026 — wpisane do Total_26, kolumna K
+
+| | Paliwo € | L | Spalanie | KM | Nego | E-Toll | inne |
+|---|---|---|---|---|---|---|---|
+| v3 | −1 637,39 | 908,08 | 13,0 | 6 984 | −554,81 | −32,29 | −22,34 |
+| v1 | −1 796,75 | 945,00 | 15,1 | 6 258 | −484,00 | −85,92 | −37,81 |
+| v5 | −2 640,05 | 1 425,01 | 14,2 | 10 065 | −661,46 | −68,33 | −104,88 |
+| v4 | −2 695,18 | 1 399,93 | 15,8 | 8 868 | 0 (bus) | −110,08 | −116,98 |
+
+Razem paliwo **8 769,36 € / 4 678,02 L**, AdBlue 160,89 € / 182,35 L, opłaty 2 118,29 €.
+E-Toll formułą `=-PLN/4,3446` (średni NBP IX). Notatki przy „inne" rozbijają kwotę.
+ℹ️ **Decyzja usera: autostrady E100 (A1, A4, A2) → „inne" z opisem**, nie Nego ani E-Toll.
+
+### Zweryfikowane
+
+✅ **NegoMetal nie ucięty** — 690 tx zgadza się z subtotalami co do grosza. Plik ma DWA poziomy
+subtotali (per rejestracja+waluta oraz sumy zbiorcze z pustą rejestracją) — kontrola musi
+porównywać tylko pierwszy. Rejestracje bywają i ze spacją, i bez — normalizuj.
+✅ Waluty NegoMetal: EUR, CZK, PLN, **HUF** (NBP podaje HUF za 100 jednostek — dzielić przez 100).
+✅ Arkusz sam potwierdził rachunek: wiersz „średnia cena za litr" przeliczył się na **−1,80**
+dla v3, dokładnie tyle, ile wyszło z surowych plików (1,803 €/L).
+✅ E-100 storno: 2 wiersze ujemne, oba na rejestracjach spoza floty.
+✅ Zgodność z sierpniem w każdej pozycji (v3: 25→15 dni, 10 652→6 984 km, mniej paliwa).
+
+❌ **Import do FS NIE zrobiony** — user wgrywa pliki sam w zakładce Paliwo, po deployu.
+❌ Nie oglądane w przeglądarce.
+
+### Otwarte
+
+1. 🚩 **Frachty v3 za wrzesień niekompletne**: 3 400 € przy 6 984 km = **0,49 €/km**, reszta floty
+   1,0–1,2 €/km. W kolekcji `frachty` tylko 1 pozycja dla v3. **„Ilość frachtów" celowo NIE wpisana**
+   do Total_26 — czeka na sprawdzenie przez usera.
+2. **Andamur wrzesień** — `C260039909.zip` w Downloads, rekoncyliacja rabatu niezrobiona.
+   Sierpień też nadal wisi (0 z 8 tx z flagą `corrected`).
+3. ℹ️ **WE2CG94 = Renault Trafic, bus osobowy, poza flotą** — dopisany do `SKIP_PLATE` (`3954ae8`).
