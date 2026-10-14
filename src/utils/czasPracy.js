@@ -441,13 +441,11 @@ function _mondayOf(ms) {
   return d.getTime();
 }
 
-// Wyrównanie za skrócone tygodniowe odpoczynki (Pakiet Mobilności, art. 8 ust. 6).
-// Kierowca może skrócić tygodniowy odpoczynek do 24h (zamiast 45h regularnego).
-// Brakujące godziny (45h - actual) muszą być wyrównane przed końcem trzeciego
-// tygodnia następującego po danym tygodniu (art. 8 ust. 6), a samo wyrównanie
-// wykorzystuje się JEDNORAZOWO (en bloc) dołączone do innego odpoczynku
-// trwającego co najmniej 9 godzin (art. 8 ust. 6b).
-export function weeklyRestCompensation(segments, nowMs) {
+// Tygodniowe odpoczynki w oknie 4 tygodni — JEDNO źródło prawdy dla wyrównania
+// (weeklyRestCompensation) i dla listy pokazywanej dyspozytorowi (weeklyRestList).
+// Wydzielone 2026-10-14: wcześniej logika żyła tylko wewnątrz weeklyRestCompensation,
+// więc każdy drugi odczyt tych samych odpoczynków groziłby rozjazdem z kartą compliance.
+function _weeklyRestsByWeek(segments, nowMs) {
   // Pre-coalesce: scal rest fragmenty oddzielone "ciszą" CSV (silnik OFF) —
   // bez tego weekend kierowcy bywa rozbity na 2-3 sub-24h fragmenty i żaden
   // nie kwalifikuje się jako weekly rest. Patrz coalesceRestGaps.
@@ -468,6 +466,33 @@ export function weeklyRestCompensation(segments, nowMs) {
     const cur = byWeek.get(wk);
     if (!cur || s.durMin > cur.durMin) byWeek.set(wk, s);
   }
+  return { coalesced, inWindow, byWeek };
+}
+
+// Lista tygodniowych odpoczynków dla dyspozytora: same długości, od najstarszego.
+// Prośba Agnieszki (14.10.2026): "zapisywało godziny tygodniowej pauzy, np. 1 pauza 30h,
+// 2 pauza 28 — nie potrzeba dat". Dlatego zwracamy durMin + flagę skrócenia i nic więcej
+// poza startMs, który służy wyłącznie do stabilnego sortowania i kluczy Reacta.
+export function weeklyRestList(segments, nowMs) {
+  const { byWeek } = _weeklyRestsByWeek(segments, nowMs);
+  return [...byWeek.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([wk, s]) => ({
+      weekStartMs: wk,
+      startMs: s.startMs,
+      durMin: s.durMin,
+      isReduced: s.durMin < REGULATION.WEEKLY_REST_REGULAR, // < 45h
+    }));
+}
+
+// Wyrównanie za skrócone tygodniowe odpoczynki (Pakiet Mobilności, art. 8 ust. 6).
+// Kierowca może skrócić tygodniowy odpoczynek do 24h (zamiast 45h regularnego).
+// Brakujące godziny (45h - actual) muszą być wyrównane przed końcem trzeciego
+// tygodnia następującego po danym tygodniu (art. 8 ust. 6), a samo wyrównanie
+// wykorzystuje się JEDNORAZOWO (en bloc) dołączone do innego odpoczynku
+// trwającego co najmniej 9 godzin (art. 8 ust. 6b).
+export function weeklyRestCompensation(segments, nowMs) {
+  const { coalesced, inWindow, byWeek } = _weeklyRestsByWeek(segments, nowMs);
   const weeklyStarts = new Set([...byWeek.values()].map(s => s.startMs));
 
   const targetMin = 45 * 60; // 2700 min = 45h regularny tygodniowy
@@ -678,6 +703,9 @@ export function computeDriverCompliance(rawSegments = [], periodStart = null, no
       start: biweekStart,
     },
     weeklyRestComp: weeklyRestCompensation(segments, nowMs),
+    // Lista tygodniowych pauz dla dyspozytora (prośba Agnieszki, 14.10.2026).
+    // To samo źródło co weeklyRestComp — patrz _weeklyRestsByWeek.
+    weeklyRests: weeklyRestList(segments, nowMs),
     // NEW (fix #3+#4): endMs ostatniego rzeczywistego weekly rest (≥45h) w lookback 14d.
     // Używane przez computeDriverPlan do liczenia deadline kolejnego weekly rest
     // wg 561/2006 art. 8.6 (zamiast hard-coded niedziela kalendarzowa). null = fallback.

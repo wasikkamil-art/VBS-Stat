@@ -492,6 +492,43 @@ export default function TachografComplianceSection({ device, position, driverAct
         <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4 pb-2 border-b border-gray-100">
           Zmniejszone tygodniowe czasy odpoczynków
         </div>
+
+        {/* Lista tygodniowych pauz — prośba dyspozytora (14.10.2026): same godziny,
+            ponumerowane, bez dat. To samo źródło co wyrównanie niżej. */}
+        <div className="mb-4 pb-4 border-b border-gray-100">
+          <div className="flex items-center gap-1.5 mb-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0369a1" strokeWidth="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg>
+            <span className="text-[10px] font-semibold text-gray-500 uppercase">Tygodniowe pauzy · ostatnie 4 tygodnie</span>
+          </div>
+          {(compliance.weeklyRests || []).length > 0 ? (
+            <>
+              <div className="flex flex-wrap gap-2">
+                {compliance.weeklyRests.map((w, i) => (
+                  <div
+                    key={w.startMs}
+                    className={`flex items-baseline gap-1.5 rounded-lg px-2.5 py-1.5 border ${
+                      w.isReduced
+                        ? "bg-amber-50 border-amber-200"
+                        : "bg-emerald-50 border-emerald-200"
+                    }`}
+                    title={w.isReduced ? "Skrócony (poniżej 45h)" : "Regularny (45h lub więcej)"}
+                  >
+                    <span className="text-[11px] text-gray-500">{i + 1}. pauza</span>
+                    <strong className={`text-sm font-bold tabular-nums ${w.isReduced ? "text-amber-800" : "text-emerald-800"}`}>
+                      {fmtHM(w.durMin)}
+                    </strong>
+                  </div>
+                ))}
+              </div>
+              <div className="text-[11px] text-gray-500 mt-2">
+                Zielone = regularny (≥45h) · bursztynowe = skrócony (&lt;45h). Jeden odpoczynek na tydzień kalendarzowy, najdłuższy ≥24h.
+              </div>
+            </>
+          ) : (
+            <div className="text-[11px] text-gray-500">Brak odpoczynków ≥24h w ostatnich 4 tygodniach.</div>
+          )}
+        </div>
+
         <div>
           <div className="flex items-center gap-1.5 mb-2">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>
