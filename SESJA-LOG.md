@@ -5445,3 +5445,44 @@ przez księgową** — to jest cała otwarta część.
    w 8 mc). Do sprawdzenia w fakturach — zawyża poziom „w kieszeni", nie zmienia różnic.
 4. 🚩 Skrzyżowane stawki dzienne i anomalia Sergieja (narzut 17,92% zamiast 20,48% od lipca).
 5. Wrzesień: dni w trasie niewpisane w `Total_26`, więc wypłat za IX nie ma czym policzyć.
+
+## 2026-10-14 — Tachograf: lista tygodniowych pauz dla dyspozytora (commit `e92e9f0`)
+
+Prośba Agnieszki ze spedycji: *„żeby było okienko tu albo osobne i zapisywało godziny
+tygodniowej pauzy, np. 1 pauza 30 h, 2 pauza 28 — nie potrzeba dat, nic. Aby ściągało liczbę
+godzin pauzy tygodniowej w jednym miejscu"*.
+
+### Co zrobione
+
+🔑 **Wydzielony `_weeklyRestsByWeek`** w `src/utils/czasPracy.js` — jedno źródło prawdy dla
+wyrównania (`weeklyRestCompensation`) i dla nowej listy (`weeklyRestList`). Wcześniej logika
+„jeden najdłuższy rest ≥24h na tydzień kalendarzowy" żyła wyłącznie wewnątrz funkcji
+wyrównania; drugi, niezależny odczyt tych samych odpoczynków prędzej czy później pokazałby
+dyspozytorowi inne pauzy niż compliance obok.
+- `weeklyRestList()` zwraca `{weekStartMs, startMs, durMin, isReduced}`, posortowane od najstarszej.
+- Wystawione jako `compliance.weeklyRests`.
+- UI w `TachografComplianceSection.jsx`, w karcie „Zmniejszone tygodniowe czasy odpoczynków",
+  **nad** blokiem wyrównania: ponumerowane kafelki, same godziny, bez dat.
+  Zielone = regularny (≥45h), bursztynowe = skrócony (<45h).
+
+### Zweryfikowane
+
+✅ `npm run build` przechodzi, chunk `TachografComplianceSection` 25,51 kB.
+✅ ESLint: 0 błędów (4 warningi, wszystkie zastane — `react-hooks/static-components`).
+✅ **Sprawdzone skryptem na produkcyjnej bazie** (`diagnose_pauzy.mjs`, gitignored):
+  v3 Siarhei → 402h33 · 38h13 (skr.) · 66h34 · v4 Mirek → 38h08 (skr.) · 228h43 · 44h58 (skr.) ·
+  v5 Volodymyr L → 24h11 (skr.) · 159h10 · 44h30 (skr.) · 26h01 (skr.).
+  Liczba skróconych na liście zgadza się z wyrównaniem obok (v5: 3 skrócone, 18h59 do oddania).
+
+❌ **NIE oglądane w przeglądarce** — sekcja Tachograf jest za loginem (GPS/Monitoring), klika user.
+❌ Nie sprawdzony układ na wąskim ekranie (jest `flex-wrap`, ale to przypuszczenie).
+
+⚠️ **Lista pokazuje wartości typu 402h i 228h** przy urlopie lub braku karty. To nie błąd —
+to najdłuższy odpoczynek ≥24h w tym tygodniu, czyli dokładnie to, czym liczy się wyrównanie.
+Ścięcie wyświetlania rozerwałoby zgodność z compliance, więc zostawione; do decyzji usera.
+
+### Wyjaśnione przy okazji (nie są to błędy)
+
+- **v1 bez aktywnego kierowcy** — Volodymyr Iwansky zakończył pracę, user odpiął go z auta 06.10.
+- **v2 Mykola bez `email` w `driverHistory`** i zero segmentów w `driverActivities` — robi prawo
+  jazdy na solo, wcześniej jeździł busem. Brak danych tachografu jest poprawny.
