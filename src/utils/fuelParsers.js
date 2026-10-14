@@ -30,7 +30,9 @@ export const FLAG = {
 };
 
 // Rejestracje poza flotą (prywatne / na okaziciela / benzynowe / przyczepa).
-export const SKIP_PLATE = /^(OKAZICIEL|TRUCK|UNIVERSAL|TK760AP)/i;
+// WE2CG94 = Renault Trafic, bus osobowy — dopisany 2026-10-14, wypłynął w raporcie e-TOLL
+// za wrzesień (31 przejazdów, 102,53 PLN). Do floty się nie liczy.
+export const SKIP_PLATE = /^(OKAZICIEL|TRUCK|UNIVERSAL|TK760AP|WE2CG94)/i;
 
 export const norm = s => String(s || "").replace(/\s+/g, "").toUpperCase();
 
