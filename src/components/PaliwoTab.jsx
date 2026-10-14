@@ -704,12 +704,23 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
           kind = r.kind; rows = r.rows;
         } else {
           const wb = XLSX.read(await f.arrayBuffer(), { type: "array", cellDates: true });
+          // Jeden skoroszyt może zbierać raporty KILKU kart (wygodny plik zbiorczy na
+          // miesięczny import). Dawniej pętla robiła `break` na pierwszym arkuszu z
+          // transakcjami — chroniło to przed skoroszytem, w którym te same transakcje
+          // leżą dwa razy (np. arkusz szczegółowy + przestawny), ale przy pliku zbiorczym
+          // wczytywała się tylko jedna karta. Teraz bierzemy KAŻDY rodzaj karty, ale
+          // każdy tylko RAZ — ochrona przed duplikatem zostaje, zbiorczy plik działa.
+          const widzianeKarty = new Set();
           for (const sn of wb.SheetNames) {
             const aoa = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: "" });
             const r = detectAndParse(aoa, stationCountry);
-            if (r.rows.length) { kind = r.kind; rows = r.rows; break; }
-            if (r.kind && !kind) kind = r.kind;
+            if (!r.kind) continue;
+            if (!kind) kind = r.kind;
+            if (!r.rows.length || widzianeKarty.has(r.kind)) continue;
+            widzianeKarty.add(r.kind);
+            rows = rows.concat(r.rows);
           }
+          if (widzianeKarty.size > 1) kind = [...widzianeKarty].join(" + ");
         }
         detected.push({ name: f.name, kind, count: rows.length });
         raw = raw.concat(rows);
