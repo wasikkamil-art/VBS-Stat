@@ -1,4 +1,4 @@
-// Parsery raportów kart paliwowych (Eurowag / E100 / Andamur) — CZYSTA LOGIKA.
+// Parsery raportów kart paliwowych (Eurowag / E100 / Andamur / Tankpool) — CZYSTA LOGIKA.
 //
 // Wydzielone z PaliwoTab.jsx świadomie: zero importów Firebase/React, więc da się to
 // odpalić w node i przetestować na prawdziwych plikach (patrz diagnose_paliwo_parsers.mjs).
@@ -12,6 +12,7 @@ export const CARDS = {
   eurowag: { name: "Eurowag", color: "#2563eb" },
   e100:    { name: "E100",    color: "#16a34a" },
   andamur: { name: "Andamur", color: "#ea580c" },
+  tankpool: { name: "Tankpool", color: "#7c3aed" },
 };
 
 // VAT per kraj — brutto→netto tam, gdzie raport nie podaje netto (E100, Andamur).
@@ -208,12 +209,56 @@ export function parseAndamur(aoa, stationCountry = {}) {
   return out;
 }
 
+// ── Tankpool (raport „transaktionen-view-*.csv", nagłówki po niemiecku) ──────
+// Dodane 2026-10-14 — czwarta karta w flocie.
+//
+// ⚠️ Ostatni wiersz pliku to PODSUMOWANIE („Vorgänge;3;…;186,82 l;…;347,54 €").
+// Odcina go warunek na produkt (w wierszu sumy kolumna Produkt jest pusta) — bez tego
+// miesiąc policzyłby się podwójnie, dokładnie jak subtotale w raporcie NegoMetalu.
+//
+// 🔑 „Vorläufiger Gesamtpreis" to kwota NETTO. Ustalone porównaniem z Eurowagiem za ten
+// sam miesiąc i kraj: tankpool 1,860 €/L wobec Eurowag DE 2,003 €/L netto. Gdyby to było
+// brutto, po podzieleniu przez 1,19 wyszłoby 1,563 €/L — o 22% poniżej rynku niemieckiego,
+// co jest niemożliwe. Dlatego netLocal bierzemy wprost, a brutto doliczamy VAT-em kraju.
+export function parseTankpool(aoa) {
+  const hi = aoa.findIndex(r => r.some(c => String(c).toLowerCase().includes("kennzeichen")));
+  if (hi < 0) return [];
+  const h = aoa[hi];
+  const I = {
+    plate: colIdx(h, "kennzeichen"), country: colIdx(h, "land"),
+    qty: colIdx(h, "tankmenge"), product: colIdx(h, "produkt"),
+    ts: colIdx(h, "datum"), amount: colIdx(h, "gesamtpreis"),
+    station: colIdx(h, "tankstelle"),
+  };
+  const out = [];
+  for (let i = hi + 1; i < aoa.length; i++) {
+    const r = aoa[i]; if (!r || !r.length) continue;
+    const product = productOf(cell(r, I.product));
+    if (product !== "on" && product !== "adblue") continue;   // odcina też wiersz podsumowania
+    const liters = numOf(cell(r, I.qty));          // „64,00 l" → 64
+    const net = numOf(cell(r, I.amount));          // „127,64 €" → 127.64
+    const ts = tsOf(cell(r, I.ts));                // „21.09.2026 22:18:00"
+    if (!liters || net == null || !ts) continue;
+    const country = String(cell(r, I.country) || "DE").toUpperCase().slice(0, 2);
+    out.push({
+      card: "tankpool", plateRaw: cell(r, I.plate), ts, product, liters, country,
+      storno: net < 0 || liters < 0,
+      station: String(cell(r, I.station) || "").trim(), address: "",
+      currency: "EUR",
+      netLocal: net, grossLocal: net * (1 + (VAT[country] ?? 0.19)),
+    });
+  }
+  return out;
+}
+
 export function detectAndParse(aoa, stationCountry = {}) {
   const flat = aoa.slice(0, 12).flat().map(c => String(c).toLowerCase()).join(" | ");
   if (flat.includes("tablica rejestracyjna")) return { kind: "eurowag", rows: parseEurowag(aoa) };
   if (flat.includes("numer samochodu")) return { kind: "e100", rows: parseE100(aoa) };
   if (flat.includes("moje zużycie") || (flat.includes("stacja") && flat.includes("litry")))
     return { kind: "andamur", rows: parseAndamur(aoa, stationCountry) };
+  if (flat.includes("kennzeichen") && flat.includes("tankmenge"))
+    return { kind: "tankpool", rows: parseTankpool(aoa) };
   return { kind: null, rows: [] };
 }
 
