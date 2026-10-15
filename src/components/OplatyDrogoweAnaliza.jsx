@@ -11,6 +11,11 @@ import { toEUR } from "../utils/nbp";
 
 const MIES = ["styczeń", "luty", "marzec", "kwiecień", "maj", "czerwiec",
   "lipiec", "sierpień", "wrzesień", "październik", "listopad", "grudzień"];
+// Miejscownik z przyimkiem — żeby w zdaniu wychodziło „we wrześniu", a nie „w miesiącu wrzesień".
+const MIES_W = ["styczniu", "lutym", "marcu", "kwietniu", "maju", "czerwcu",
+  "lipcu", "sierpniu", "wrześniu", "październiku", "listopadzie", "grudniu"];
+const wMies = (month) => { const i = +String(month).slice(5, 7) - 1; return (i === 8 ? "we " : "w ") + MIES_W[i]; };
+const WMies = (month) => wMies(month).replace(/^w/, "W");
 const KRAJ = { DE: "Niemcy", FR: "Francja", ES: "Hiszpania", PL: "Polska", BE: "Belgia",
   NL: "Holandia", AT: "Austria", CZ: "Czechy", CH: "Szwajcaria", IT: "Włochy",
   PT: "Portugalia", LU: "Luksemburg", HU: "Węgry", SK: "Słowacja", BG: "Bułgaria" };
@@ -214,6 +219,31 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
     return i > 0 ? dane[i - 1] : null;
   }, [dane, aktMies]);
 
+  // Skąd wzięła się zmiana rachunku w danym kraju. Rozbicie jest dokładne:
+  //   Δrachunek = (km_b − km_p) × stawka_p   +   (rachunek_b − rachunek_p − efektKm)
+  // czyli „tyle z tego, że przejechaliśmy inaczej dużo" + „tyle z tego, że zmieniła się stawka".
+  // Liczymy z surowych kwot i kilometrów, nie z zaokrąglonych stawek z dokumentu.
+  const zmianyStawek = useMemo(() => {
+    if (!poprz || !biez) return {};
+    const out = {};
+    for (const cc of new Set([...Object.keys(biez.km || {}), ...Object.keys(poprz.km || {})])) {
+      const kmB = biez.km?.[cc] || 0, kmP = poprz.km?.[cc] || 0;
+      const oB = biez.oplatyNego?.[cc] || 0, oP = poprz.oplatyNego?.[cc] || 0;
+      const sB = biez.stawki?.[cc], sP = poprz.stawki?.[cc];
+      const d = (sB === undefined || sP === undefined) ? null : sB - sP;
+      const efektKm = kmP > 0 ? (kmB - kmP) * (oP / kmP) : null;
+      out[cc] = { kmB, kmP, oB, oP, sB, sP, d, dRachunek: oB - oP,
+        efektKm, efektStawki: efektKm === null ? null : oB - oP - efektKm };
+    }
+    return out;
+  }, [biez, poprz]);
+
+  // Komentarz pod tabelą — trzy kraje, które najmocniej ruszyły rachunkiem.
+  const powody = useMemo(() => Object.entries(zmianyStawek)
+    .filter(([, z]) => Math.abs(z.dRachunek) >= 10 && (z.kmB > 200 || z.kmP > 200))
+    .sort((a, b) => Math.abs(b[1].dRachunek) - Math.abs(a[1].dRachunek))
+    .slice(0, 3), [zmianyStawek]);
+
   if (blad) return <div className="bg-white rounded-2xl border border-gray-100 p-6 text-sm text-red-600">
     Nie udało się wczytać analiz: {blad}
   </div>;
@@ -376,7 +406,7 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
         </div>
         <div className="text-xs text-gray-500 mb-2">
           Jeśli stawka stoi w miejscu, a rachunek rośnie, to zmieniły się kierunki — nie taryfa.
-          Kolejność od najdroższego kierunku w miesiącu <b>{MIES[+biez.month.slice(5, 7) - 1]}</b>;
+          Kolejność od najdroższego kierunku <b>{wMies(biez.month)}</b>;
           <span style={{ color: "#dc2626" }} className="font-semibold"> na czerwono</span> stawki powyżej {pl2(PROG_DROGI)} €/km.
         </div>
         <table className="w-full text-xs" style={{ borderCollapse: "collapse" }}>
@@ -387,6 +417,7 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
                 style={{ borderBottom: "1px solid #e2e8f0" }}>{MIES[+poprz.month.slice(5, 7) - 1]}</th>}
               <th colSpan={2} className="text-center py-1 px-1.5 text-[10px] uppercase text-gray-700 font-semibold"
                 style={{ borderBottom: "1px solid #cbd5e1" }}>{MIES[+biez.month.slice(5, 7) - 1]}</th>
+              {poprz && <th rowSpan={2} className="text-right py-1 px-1.5 text-[10px] uppercase text-gray-500 font-semibold align-bottom">zmiana</th>}
             </tr>
             <tr>
               {poprz && <>
@@ -402,6 +433,7 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
               const sb = biez.stawki?.[cc], sp = poprz?.stawki?.[cc];
               const wazny = cc === "DE";
               const drogi = sb !== undefined && sb >= PROG_DROGI;
+              const zm = zmianyStawek[cc];
               return (
                 <tr key={cc} style={{ borderTop: "1px solid #f1f5f9" }}>
                   <td className={"py-1 " + (wazny ? "font-bold text-gray-900" : "text-gray-700")}>{KRAJ[cc] || cc}</td>
@@ -414,11 +446,42 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
                   <td className={"text-right py-1 px-1.5 tabular-nums " + (drogi || wazny ? "font-bold" : "")}
                     style={{ color: sb === undefined ? "#9ca3af" : drogi ? "#dc2626" : "#1f2937" }}>
                     {sb === undefined ? "–" : sb < 0.0005 ? <span style={{ color: "#16a34a" }}>bez opłat</span> : pl3(sb)}</td>
+                  {poprz && <td className="text-right py-1 px-1.5 tabular-nums font-semibold whitespace-nowrap"
+                    style={{ color: zm?.d == null ? "#cbd5e1" : Math.abs(zm.d) < 0.0005 ? "#9ca3af" : zm.d > 0 ? "#dc2626" : "#16a34a" }}>
+                    {zm?.d == null ? "–" : Math.abs(zm.d) < 0.0005 ? "bez zmian" : `${zm.d > 0 ? "▲ +" : "▼ "}${pl3(zm.d)}`}</td>}
                 </tr>
               );
             })}
           </tbody>
         </table>
+
+        {powody.length > 0 && (
+          <div className="mt-2 pt-2 text-[11px] text-gray-600 leading-relaxed" style={{ borderTop: "1px solid #f1f5f9" }}>
+            <div className="font-semibold text-gray-700 mb-1">Skąd ta zmiana</div>
+            {powody.map(([cc, z]) => (
+              <div key={cc} className="mb-0.5">
+                <b>{KRAJ[cc] || cc}</b>{" "}
+                <span style={{ color: z.dRachunek >= 0 ? "#dc2626" : "#16a34a" }} className="font-semibold">
+                  {sgn(z.dRachunek)} €
+                </span>
+                {/* Rozbicie ma sens tylko wtedy, gdy OBA miesiące mają policzoną stawkę.
+                    Przy 115 km w poprzednim miesiącu „stawka" to szum i rozbicie wychodzi
+                    większe niż sama zmiana rachunku — wtedy lepiej nie liczyć wcale. */}
+                {z.sP === undefined || z.sB === undefined ? (
+                  <> — przebieg {num(z.kmP)} → {num(z.kmB)} km. {WMies(poprz.month)} było tego
+                    za mało na wiarygodną stawkę, więc rozbicia nie ma — to po prostu zmiana kierunków.</>
+                ) : (
+                  <> — przebieg {num(z.kmP)} → {num(z.kmB)} km, co daje <b>{sgn(Math.round(z.efektKm))} €</b>;
+                    stawka {pl3(z.sP)} → {pl3(z.sB)} €/km, co daje <b>{sgn(Math.round(z.efektStawki))} €</b>.</>
+                )}
+              </div>
+            ))}
+            <div className="text-gray-400 mt-1">
+              Taryfy zmieniają się rzadko, więc ruch samej stawki zwykle znaczy, że na tej samej trasie
+              doszło albo ubyło dróg płatnych.
+            </div>
+          </div>
+        )}
       </div>
 
       {/* kontrola e-TOLL */}
