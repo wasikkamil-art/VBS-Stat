@@ -5836,3 +5836,80 @@ lądowały na samym dole**. Teraz w obu tabelach Niemcy są pierwsze.
 🔑 Kraje i podsumowania poszły do jednej listy `wiersze` (`{klucz, nazwa, b, p, suma}`) —
 bez tego bloki kolorów miały dziury na wierszach „NegoMetal razem" i „RAZEM". Podsumowania
 **straciły szare tło całego wiersza** (rozcinało bloki); wyróżnia je grubsza kreska i pogrubienie.
+
+## 2026-10-15 cd.4 — Stawki €/km były zawyżone: bus w mianowniku, niepełne okno, storno (`f6ac81c`, `63efbaa`, `a741d67`)
+
+Pytanie usera: *„stawki za km pływają, czyli to co może mieć wpływ — większa cena za km
+ze względu na podniesienie opłat, a nie większa lub mniejsza ilość km"*. Sprawdzenie tezy
+odsłoniło trzy niezależne wady we wskaźniku.
+
+### Taryfa stoi — dowód
+
+🔑 **e-TOLL to jedyne źródło z prawdziwymi kilometrami per transakcja.** VIII **0,409** →
+IX **0,407 PLN/km**, przy taryfie urzędowej 0,41. **Polska taryfa nie drgnęła.**
+🔑 **Niemcy, ten sam miesiąc, stawka per pojazdo-dzień: 0,136 · 0,168 · 0,207 · 0,222 €/km** —
+**1,6× rozrzutu**. Gdyby rządziła taryfa, wszystkie dni dałyby tę samą liczbę. Rządzi udział
+dróg płatnych w trasie.
+
+### Trzy wady, które zawyżały stawkę
+
+1. 🚩 **Busy siedziały w mianowniku, a myta nie płacą.** Wrzesień: **5 479 km**
+   (FR 2 295, DE 1 711) przy **0 €** opłat zagranicznych. `kmZDni` przyjmuje teraz listę
+   pojazdów do pominięcia, budowaną z pola **`type: "Bus"`** — łapie v2, v4 i v6.
+2. 🚩 **Licznik i mianownik z różnych okien.** `countryKmDaily` nie ma dni 01–09.09,
+   a opłaty szły za cały miesiąc — **dla Niemiec 70% rachunku padało w dni bez kilometrów**.
+   `zbudujAnalize` liczy stawkę z opłat tylko z dni mających przebieg (`dniZKm`).
+   **Kwoty w `oplatyNego` zostają za cały miesiąc** — to rachunek, nie wskaźnik.
+3. 🚩 **`parseNego`/`parseEtoll` brały `Math.abs(amount)`**, więc storno (wiersz ujemny)
+   wchodziło jako kolejne obciążenie — rachunek rósł o **dwukrotność** korekty.
+   Ten sam błąd naprawiono w paliwie 17.09 (`nettujStorno`), do myta nie trafił.
+
+**Efekt:** DE 0,272 → **0,182** (taryfa Toll Collect 0,19–0,22 ✓) · AT 0,197 → 0,144 ·
+BE 0,200 → 0,115, ale **FR 0,048 → 0,081 i CZ 0,023 → 0,035 w GÓRĘ** — tam bus jeździł
+najwięcej za darmo. Korekta działa w obie strony, czyli to naprawa, nie przesunięcie.
+✅ Kwoty bez zmian co do centa: `sumaNego` 1 784,08 €, `etollEUR` 296,93 €.
+
+### Solówki i busy osobno (decyzja usera: *„bus nam brudzi widok"*)
+
+`zbudujAnalize` zwraca `grupy.solo` i `grupy.bus`. Tabela opłat kończy się:
+NegoMetal razem → e-TOLL solówki → **RAZEM solówki** → Busy e-TOLL → **RAZEM flota**.
+Sumy się domykają (1 784 + 186 = 1 970; + 111 = 2 081). Tabela stawek jest opisana jako
+**solówki**, busy mają pod nią własną pozycję z kilometrami i kwotami.
+ℹ️ Lipiec i sierpień nie mają `grupy` (liczone ręcznie) — tam zostaje jedna pozycja e-TOLL,
+a w kolumnie porównania stoi „–" zamiast zmyślonego podziału.
+
+### „Skąd ta zmiana" — wpływ w procentach, nie w euro
+
+Po poprawce 2 rozkład na euro przestał się sumować do rachunku (kwota za 30 dni, kilometry
+z 21) i dla Niemiec na jednym ekranie stanęłyby **dwie różne kwoty: −790 € i −1 378 €**.
+Teraz kwota zgadza się z tabelą opłat, a wpływ km i stawki idzie w procentach.
+🔑 **User odrzucił ukrywanie kolumny zmiany**: *„czemu mamy ukrywać zmiany? z niego wyciągam
+wniosek na pierwszy rzut oka"*. Zamiast chowania — dwa zdania pod tabelą: które pojazdy są
+wyłączone i z ilu dni są kilometry. Dopisek o niepełnym miesiącu zniknie sam od października.
+
+### Eksport NegoMetalu VII–VIII sprawdzony
+
+`negometal_toll_transactions_website_export (46).xlsx`: **352 transakcje**, 01.07–28.08,
+trzy solówki. ✅ **Wszystkie 11 grup rejestracja+waluta zgadza się z subtotalami portalu
+co do grosza** (ze znakiem) — filtr „ukryj transakcje z FV" był wyłączony. Busa w pliku
+nie ma w ogóle. **Import jeszcze NIE zrobiony** — user klika po deployu.
+
+### Zweryfikowane
+
+✅ Render komponentu na prawdziwych `tollAnalysis` dla obu wariantów (z `grupy` i bez).
+✅ Sumy grup domykają się do `sumaNego` i `etollEUR` co do centa.
+✅ Kontrola rozbicia storna: po poprawce parser = subtotale portalu, przed poprawką +10,14 €.
+✅ ESLint 0 błędów, build zielony, podgląd w przeglądarce. Serwer zatrzymany, atrapy skasowane.
+✅ `tollAnalysis/2026-09` przeliczony w bazie tymi samymi funkcjami, których używa uploader.
+
+❌ **Nie klikane w produkcji.**
+❌ Lipiec i sierpień zostają na km z tras zleceń — `countryKmDaily` przed 10.09 nie istnieje
+i nie da się tego odtworzyć (breadcrumbs żyją 7 dni).
+⚠️ **Nie wiem, czy wrześniowy eksport NegoMetalu miał wiersze ujemne** — jeśli miał, baza ma
+je zapisane jako dodatnie. Z samej bazy tego nie sprawdzę, trzeba by ponownie wyeksportować.
+
+### Otwarte
+
+1. **e-TOLL za lipiec i sierpień** — bez niego podział solówki/busy dla tych miesięcy zostaje „–".
+2. 🚩 **Portugalia 127 km (11.09) bez ani jednej opłaty** — możliwa brakująca faktura Via Verde.
+3. Andamur: rekoncyliacja rabatu za sierpień i wrzesień.
