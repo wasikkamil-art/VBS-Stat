@@ -5678,3 +5678,71 @@ to 17.09.2026). 11.09 ma 363 odrzucone odcinki i pokrycie 86%, 14.09 pokrycie 12
 2. Frachty v3 za wrzesień niekompletne (3 400 € przy 6 984 km) — „ilość frachtów" w Total_26
    celowo niewpisana.
 3. Andamur: rekoncyliacja rabatu za sierpień i wrzesień.
+
+## 2026-10-15 cd.2 — Zderzenie opłat z tachografem: Włodziu v5 i obalona hipoteza „brak opłat = postój"
+
+Ten sam test co dla Siergieja, na v5 / WGM 0507M (Volodymyr Lukashuchuk). **Wynik odwrotny:
+cisza w opłatach NIE była odpoczynkiem.** Przerwa między opłatami jest tu **163,9 h**
+(07.09 16:54 PERPIGNAN-SUD → LE PERTHUS → 14.09 12:49 ES VIA-T Etzegarate-Lasarte),
+a w tym czasie auto przejechało **ponad 2 200 km po Hiszpanii i Portugalii**.
+
+### Dzień po dniu (tacho po `preferDddSegments` + `countryKmDaily` + opłaty)
+
+| dzień | jazda | praca | odpocz. | km per kraj (CAN) | opłaty |
+|---|---|---|---|---|---|
+| 08.09 | 7h52 | 1h01 | 15h05 | brak dokumentu | 0 |
+| 09.09 | **0** | 1h51 | 22h09 | brak dokumentu | 0 |
+| 10.09 | 8h27 | 0h17 | 15h16 | ES 617 | 0 |
+| 11.09 | 7h09 | 1h18 | 15h33 | ES 400 · **PT 127** | 0 |
+| 12.09 | **0** | **0** | **24h00** | **brak wpisu = 0 km** | 0 |
+| 13.09 | 4h59 | 0h10 | 17h03 | ES 498 | 0 |
+| 14.09 | 8h55 | 0h21 | 16h33 | ES 394 · FR 345 | ES 12,65 € · FR 45,01 € |
+
+Segmenty: 391 surowych → **221 po priorytecie DDD** (205 ddd, 12 ww_csv, 4 auto_gps).
+
+### Odpoczynek jest, ale krótszy niż cisza w opłatach
+
+🔑 **Tygodniowy odpoczynek 11.09 20:22 → 13.09 18:00 = 45 h 38 min — REGULARNY (≥45 h).**
+Inaczej niż u Siergieja (36 h 09, skrócony): **tu nie ma czego wyrównywać.**
+Wcześniej w tym samym tygodniu dwa długie dobowe: 08.09 18:36 → 09.09 18:30 (**23 h 54**)
+i 09.09 21:00 → 10.09 12:30 (15 h 30).
+
+### 🚩 WNIOSEK METODYCZNY: brak opłat ≠ postój
+
+W Hiszpanii i Portugalii jeździmy **krajówkami bez myta** — w całym wrześniu baza ma dla ES/PT
+**dwie transakcje na 12,65 €** (obie 14.09, baskijskie AP przy wyjeździe na Francję), przy
+1 169 transakcjach w miesiącu. To zgadza się z ustaleniem z sierpnia („FR/ES jeździmy
+krajówkami za ułamek stawki", 0,043 €/km we Francji).
+**Sama cisza w opłatach nie dowodzi niczego — zawsze dołóż `countryKmDaily` i tankowania.**
+
+### Czwarte źródło: tankowania pokazują miejsce postoju
+
+`fuelTransactions/2026-09/tx` ma `station`, `lat`, `lng` — i to ono domknęło sprawę:
+**11.09 i 13.09 to samo „Abrea Cuquejo"** (Galicja/pogranicze z Portugalią), czyli auto stało
+w jednym miejscu przez cały weekendowy odpoczynek. Dalej: 14.09 **Gexa (43,3192 / −1,8605)**,
+czyli Andoain/Lasarte — dokładnie tam, gdzie o 12:49 pada pierwsza opłata VIA-T.
+Wcześniej 08.09 Guarromán (Jaén) i Siete Aguas (Walencja), 10.09 El Casar de Talavera (Toledo).
+
+### Zweryfikowane
+
+✅ Trasa z czterech źródeł spójna: FR (Albi) → Barcelona → Andaluzja/Walencja → Toledo →
+   Galicja + Portugalia → 45 h odpoczynku → Kraj Basków → FR → BE → NL.
+✅ 12.09 potwierdzone trzema źródłami niezależnie (0 opłat · 1440 min odpoczynku · 0 km).
+✅ Zero transakcji z sieci `Myto CZ` / `TOLLPASS` w tym oknie, więc problem niepewnych
+   znaczników czasu (patrz przypadek Siergieja) tu nie występuje.
+
+❌ **Nie oglądane w przeglądarce** — analiza skryptami na bazie produkcyjnej, zero zapisów.
+❌ **„Abrea Cuquejo" nie ma geokodu** (`lat`/`lng` puste, `country: "?"`) — że to Galicja,
+   wnioskuję z nazwy i ze 127 km w PT tego dnia, **nie potwierdziłem współrzędnymi**.
+⚠️ `countryKmDaily` 13.09 (pokrycie 125%) i 14.09 (112%) — dni sprzed naprawy
+   `scheduledGpsPoll`, km orientacyjne. Postój potwierdzają, €/km nie.
+⚠️ Pole `rejestracja` w `fleetv2_vehicles` **nie istnieje** — jest `plate` (ze spacją,
+   `"WGM 0507M"`). Starsze skrypty robiły `v.rejestracja || v.id` i po cichu pokazywały `v5`.
+
+### Otwarte
+
+1. 🚩 **Portugalia 127 km (11.09) bez ani jednej opłaty.** W PT myto jest elektroniczne na
+   większości autostrad. Albo trasa szła drogami bezpłatnymi, albo **brakuje nam faktury**
+   (Via Verde / inny operator niż NegoMetal). Do sprawdzenia przy zamykaniu października.
+2. Frachty v3 za wrzesień niekompletne — bez zmian.
+3. Andamur: rekoncyliacja rabatu za sierpień i wrzesień — bez zmian.
