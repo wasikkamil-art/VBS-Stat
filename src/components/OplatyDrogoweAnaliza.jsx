@@ -34,6 +34,7 @@ const BLOK = {
   biez:  { pasek: "#dbeafe", tlo: "#eff6ff", tekst: "#1e40af", linia: "#dbeafe", liniaSuma: "#93c5fd" },
 };
 
+const fmtDzien = (iso) => (iso ? `${iso.slice(8, 10)}.${iso.slice(5, 7)}` : "—");
 const eur0 = (n) => Math.round(n).toLocaleString("pl-PL") + " €";
 const num = (n) => Math.round(n).toLocaleString("pl-PL");
 const pl1 = (n) => Number(n).toLocaleString("pl-PL", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -162,13 +163,20 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
         const snap = await getDocs(collection(db, "tollTransactions", m, "tx"));
         const tx = snap.docs.map(d => d.data());
 
+        // Busy nie płacą myta (u nas TK 314CL), więc ich kilometry nie mogą dzielić opłat —
+        // siedziałyby w mianowniku stawki €/km przy zerowym liczniku i zaniżały wynik.
+        const busy = (vehicles || []).filter(v => String(v.type || "").toLowerCase() === "bus").map(v => v.id);
+
         // Kilometry: najpierw z licznika CAN (countryKmDaily), bo to twarde dane.
-        let kmPerKraj = {}, zrodloKm = "";
+        let kmPerKraj = {}, zrodloKm = "", dniZKm = null, kmBusow = {};
         try {
           const dni = await getDocs(query(collection(db, "countryKmDaily"),
             where("date", ">=", `${m}-01`), where("date", "<=", `${m}-31`)));
           if (!dni.empty) {
-            kmPerKraj = kmZDni(dni.docs.map(d => d.data()));
+            const wynik = kmZDni(dni.docs.map(d => d.data()), busy);
+            kmPerKraj = wynik.km;
+            dniZKm = wynik.dni;
+            kmBusow = wynik.kmPominiete;
             zrodloKm = `kilometry z licznika CAN (countryKmDaily, ${dni.size} ${dni.size === 1 ? "doba" : "dni"})`;
           }
         } catch { /* brak danych dobowych */ }
@@ -195,6 +203,7 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
         const analiza = zbudujAnalize({
           month: m, transakcje: tx, kmPerKraj, zrodloKm, kmFloty,
           frachty: frachtyM, krajeFrachtu: krajeFrachtuDomyslne,
+          dniZKm, pomijanePojazdy: busy, kmPominiete: kmBusow,
         });
         // Kilometry i stawki z wcześniejszej metody zostają, gdy import ich nie przyniósł.
         if (zachowaneKm) Object.assign(analiza, zachowaneKm);
@@ -238,15 +247,39 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
     const out = {};
     for (const cc of new Set([...Object.keys(biez.km || {}), ...Object.keys(poprz.km || {})])) {
       const kmB = biez.km?.[cc] || 0, kmP = poprz.km?.[cc] || 0;
+      // Kwota to CAŁY rachunek miesiąca — ta sama liczba, co w tabeli opłat wyżej.
+      // Wpływu kilometrów i stawki NIE przeliczamy na euro: kilometry bywają z okna
+      // krótszego niż miesiąc (patrz `stawkiPodstawa`), więc rozkład na euro nie sumowałby
+      // się do rachunku i na jednym ekranie stałyby dwie różne kwoty. Procenty mówią to samo.
       const oB = biez.oplatyNego?.[cc] || 0, oP = poprz.oplatyNego?.[cc] || 0;
       const sB = biez.stawki?.[cc], sP = poprz.stawki?.[cc];
       const d = (sB === undefined || sP === undefined) ? null : sB - sP;
-      const efektKm = kmP > 0 ? (kmB - kmP) * (oP / kmP) : null;
       out[cc] = { kmB, kmP, oB, oP, sB, sP, d, dRachunek: oB - oP,
-        efektKm, efektStawki: efektKm === null ? null : oB - oP - efektKm };
+        procKm: kmP > 0 ? (kmB / kmP - 1) * 100 : null,
+        procStawka: (sP > 0 && sB !== undefined) ? (sB / sP - 1) * 100 : null };
     }
     return out;
   }, [biez, poprz]);
+
+  // Busy nie płacą myta, więc ich kilometry są poza stawką €/km. To trzeba napisać wprost:
+  // bez tej informacji nie widać, dlaczego kilometry w tej tabeli nie zgadzają się z przebiegiem
+  // floty, ani dlaczego stawka w kraju skacze, gdy bus zacznie tam jeździć więcej albo mniej.
+  const busy = useMemo(() => {
+    const pod = biez?.stawkiPodstawa;
+    if (!pod?.pominietePojazdy?.length) return null;
+    const km = pod.kmPominiete || {};
+    const razem = Object.values(km).reduce((a, b) => a + b, 0);
+    if (razem < 1) return null;
+    const nazwy = pod.pominietePojazdy
+      .map(id => (vehicles || []).find(v => v.id === id)?.plate || id);
+    const czolo = Object.entries(km).sort((a, b) => b[1] - a[1]).slice(0, 2);
+    // Ile dni miesiąca w ogóle ma kilometry. Licznik CAN ruszył 10.09.2026, więc wrzesień
+    // ma 21 dni z 30 — bez tej informacji nie widać, czemu przebieg w tabeli jest niższy
+    // od przebiegu floty.
+    const wMiesiacu = new Date(+biez.month.slice(0, 4), +biez.month.slice(5, 7), 0).getDate();
+    const niepelny = pod.dni && pod.dni < wMiesiacu ? { dni: pod.dni, wMiesiacu, od: pod.od, do: pod.do } : null;
+    return { nazwy, razem, czolo, niepelny };
+  }, [biez, vehicles]);
 
   // Komentarz pod tabelą — trzy kraje, które najmocniej ruszyły rachunkiem.
   const powody = useMemo(() => Object.entries(zmianyStawek)
@@ -497,6 +530,25 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
           </tbody>
         </table>
 
+        {busy && (
+          <div className="mt-2 pt-2 text-[11px] leading-relaxed" style={{ borderTop: "1px solid #f1f5f9", color: "#92400e", background: "#fffbeb", borderRadius: 6, padding: "6px 8px" }}>
+            <b>Busy liczą się inaczej.</b> {busy.nazwy.join(", ")} nie {busy.nazwy.length > 1 ? "płacą" : "płaci"} myta,
+            więc {busy.nazwy.length > 1 ? "ich" : "jego"} przebieg jest wyłączony z tej tabeli —
+            w tym miesiącu <b>{num(busy.razem)} km</b>
+            {busy.czolo.length > 0 && <> (najwięcej {busy.czolo.map(([cc, km]) => `${KRAJ[cc] || cc} ${num(km)}`).join(", ")})</>}.
+            Gdyby te kilometry wliczać, każdy ich wzrost w danym kraju zaniżałby tamtejszą stawkę €/km,
+            a spadek ją podnosił — przy zerowych opłatach po stronie busa.
+            {busy.niepelny && (
+              <div className="mt-1">
+                <b>Niepełny miesiąc.</b> Kilometry są z <b>{busy.niepelny.dni} dni z {busy.niepelny.wMiesiacu}</b>
+                {" "}({fmtDzien(busy.niepelny.od)}–{fmtDzien(busy.niepelny.do)}) — licznik nie zapisał wcześniejszych.
+                Opłaty w stawce liczymy z tych samych dni, więc wskaźnik jest uczciwy, ale przebieg
+                w tabeli jest niższy od rzeczywistego.
+              </div>
+            )}
+          </div>
+        )}
+
         {powody.length > 0 && (
           <div className="mt-2 pt-2 text-[11px] text-gray-600 leading-relaxed" style={{ borderTop: "1px solid #f1f5f9" }}>
             <div className="font-semibold text-gray-700 mb-1">Skąd ta zmiana</div>
@@ -506,15 +558,15 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
                 <span style={{ color: z.dRachunek >= 0 ? "#dc2626" : "#16a34a" }} className="font-semibold">
                   {sgn(z.dRachunek)} €
                 </span>
-                {/* Rozbicie ma sens tylko wtedy, gdy OBA miesiące mają policzoną stawkę.
-                    Przy 115 km w poprzednim miesiącu „stawka" to szum i rozbicie wychodzi
-                    większe niż sama zmiana rachunku — wtedy lepiej nie liczyć wcale. */}
+                {/* Porównanie stawek ma sens tylko wtedy, gdy OBA miesiące ją mają.
+                    Przy 115 km w poprzednim miesiącu „stawka" to szum, nie wskaźnik. */}
                 {z.sP === undefined || z.sB === undefined ? (
-                  <> — przebieg {num(z.kmP)} → {num(z.kmB)} km. {WMies(poprz.month)} było tego
-                    za mało na wiarygodną stawkę, więc rozbicia nie ma — to po prostu zmiana kierunków.</>
+                  <> — przebieg {num(z.kmP)} → {num(z.kmB)} km{z.procKm !== null && <> (<b>{sgn(Math.round(z.procKm))}%</b>)</>}.
+                    {" "}{WMies(poprz.month)} nie było tu dość kilometrów na wiarygodną stawkę,
+                    więc zmianę robią same kierunki.</>
                 ) : (
-                  <> — przebieg {num(z.kmP)} → {num(z.kmB)} km, co daje <b>{sgn(Math.round(z.efektKm))} €</b>;
-                    stawka {pl3(z.sP)} → {pl3(z.sB)} €/km, co daje <b>{sgn(Math.round(z.efektStawki))} €</b>.</>
+                  <> — przebieg {num(z.kmP)} → {num(z.kmB)} km (<b>{sgn(Math.round(z.procKm))}%</b>),
+                    stawka {pl3(z.sP)} → {pl3(z.sB)} €/km (<b>{sgn(Math.round(z.procStawka))}%</b>).</>
                 )}
               </div>
             ))}

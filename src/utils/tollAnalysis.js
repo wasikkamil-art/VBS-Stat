@@ -18,7 +18,7 @@ const r1 = (n) => Math.round(n * 10) / 10;
  * @param {Array}  p.frachty               frachty miesiąca (do struktury zleceń), bez busa
  * @param {function} p.krajeFrachtu        fracht → Set kodów krajów
  */
-export function zbudujAnalize({ month, transakcje = [], kmPerKraj = {}, zrodloKm, kmFloty = 0, frachty = [], krajeFrachtu }) {
+export function zbudujAnalize({ month, transakcje = [], kmPerKraj = {}, zrodloKm, kmFloty = 0, frachty = [], krajeFrachtu, dniZKm = null, pomijanePojazdy = [], kmPominiete = {} }) {
   const nego = transakcje.filter(t => t.source === "nego");
   const etoll = transakcje.filter(t => t.source === "etoll");
 
@@ -36,10 +36,36 @@ export function zbudujAnalize({ month, transakcje = [], kmPerKraj = {}, zrodloKm
   const etollEUR = r2(etoll.reduce((a, t) => a + (t.amountEUR || 0), 0));
 
   // Stawka €/km liczona tylko tam, gdzie przebieg jest na tyle duży, że wskaźnik coś znaczy.
+  //
+  // Licznik musi pochodzić z TEGO SAMEGO okna co mianownik. Gdy kilometry są tylko za część
+  // miesiąca (`dniZKm`), bierzemy opłaty wyłącznie z tych dni — inaczej stawka jest zawyżona
+  // dokładnie o to, czego w mianowniku brakuje. Kwoty w `oplatyNego` zostają za CAŁY miesiąc,
+  // bo to rachunek do zaksięgowania, nie wskaźnik.
+  const okno = dniZKm?.length ? new Set(dniZKm) : null;
+  const negoDoStawek = okno ? nego.filter(t => okno.has(t.day)) : nego;
+  const oplatyDoStawek = {};
+  for (const t of negoDoStawek) {
+    if (t.amountEUR == null) continue;
+    oplatyDoStawek[t.country] = (oplatyDoStawek[t.country] || 0) + t.amountEUR;
+  }
   const stawki = {};
   for (const [cc, km] of Object.entries(kmPerKraj)) {
-    if (km > 200) stawki[cc] = Math.round(((oplatyNego[cc] || 0) / km) * 1000) / 1000;
+    if (km > 200) stawki[cc] = Math.round(((oplatyDoStawek[cc] || 0) / km) * 1000) / 1000;
   }
+  // Opłaty w tym samym oknie, z którego liczona jest stawka. Rozbicie zmiany rachunku
+  // („ile z kilometrów, ile ze stawki") musi liczyć się z TEJ pozycji, nie z `oplatyNego`,
+  // bo inaczej dzieli kwotę za cały miesiąc przez przebieg z jego części i wychodzą bzdury.
+  // Gdy okna nie ma (km z tras zleceń), jest to po prostu kopia `oplatyNego`.
+  const oplatyStawkowe = Object.fromEntries(Object.entries(oplatyDoStawek).map(([k, v]) => [k, r2(v)]));
+
+  const stawkiPodstawa = {
+    dni: okno ? okno.size : null,
+    od: okno ? dniZKm[0] : null,
+    do: okno ? dniZKm[dniZKm.length - 1] : null,
+    pominietePojazdy: pomijanePojazdy,
+    kmPominiete: Object.fromEntries(Object.entries(kmPominiete).map(([k, v]) => [k, r1(v)])),
+    oplatyWOknie: r2(Object.values(oplatyDoStawek).reduce((a, b) => a + b, 0)),
+  };
 
   const struktura = frachty.length ? {
     frachty: frachty.length,
@@ -64,6 +90,8 @@ export function zbudujAnalize({ month, transakcje = [], kmPerKraj = {}, zrodloKm
     etollEUR,
     km: Object.fromEntries(Object.entries(kmPerKraj).map(([k, v]) => [k, r1(v)])),
     stawki,
+    oplatyStawkowe,
+    stawkiPodstawa,
     kmFloty,
     ...(struktura ? { struktura } : {}),
     ...(etoll.length ? {
@@ -96,16 +124,31 @@ export function krajeFrachtuDomyslne(f) {
   return out;
 }
 
-/** Km per kraj z dokumentów countryKmDaily danego miesiąca (suma po pojazdach i dniach). */
-export function kmZDni(dokumentyDobowe = []) {
-  const out = {};
+/**
+ * Km per kraj z dokumentów countryKmDaily danego miesiąca (suma po pojazdach i dniach).
+ *
+ * `pomijajVid` wyrzuca pojazdy, które z definicji nie płacą myta (u nas busy). Bez tego
+ * ich kilometry siedzą w mianowniku stawki €/km przy zerowych opłatach i zaniżają wynik:
+ * we wrześniu 2026 bus v4 wniósł 1 711 z 3 063 niemieckich kilometrów, nie płacąc ani euro.
+ *
+ * Zwraca też `dni` — zbiór dat, dla których kilometry w ogóle istnieją. Stawkę wolno liczyć
+ * tylko z opłat z tych samych dni, inaczej dzielimy rachunek za cały miesiąc przez przebieg
+ * z jego części (wrzesień 2026: opłaty za 30 dni, kilometry za 21).
+ */
+export function kmZDni(dokumentyDobowe = [], pomijajVid = []) {
+  const pomijaj = new Set(pomijajVid);
+  const km = {};
+  const kmPominiete = {};
+  const dni = new Set();
   for (const d of dokumentyDobowe) {
-    for (const perKraj of Object.values(d.vehicles || {})) {
-      for (const [cc, km] of Object.entries(perKraj)) {
+    if (d.date) dni.add(d.date);
+    for (const [vid, perKraj] of Object.entries(d.vehicles || {})) {
+      const cel = pomijaj.has(vid) ? kmPominiete : km;
+      for (const [cc, v] of Object.entries(perKraj)) {
         if (cc === "??") continue;
-        out[cc] = (out[cc] || 0) + km;
+        cel[cc] = (cel[cc] || 0) + v;
       }
     }
   }
-  return out;
+  return { km, kmPominiete, dni: [...dni].sort() };
 }
