@@ -265,10 +265,21 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
   const naTys = biez.kmFloty ? (razem / biez.kmFloty) * 1000 : null;
   const naTysP = poprz?.kmFloty ? (razemP / poprz.kmFloty) * 1000 : null;
 
+  // Ta sama reguła co w tabeli stawek: na górze to, co w WYBRANYM miesiącu jest największe.
+  // Wcześniej było sortowanie po zmianie, przez co Niemcy — największy rachunek — lądowały na dole.
   const kraje = [...new Set([...Object.keys(biez.oplatyNego || {}), ...Object.keys(poprz?.oplatyNego || {})])]
     .map(cc => ({ cc, b: biez.oplatyNego?.[cc] || 0, p: poprz?.oplatyNego?.[cc] || 0 }))
     .map(x => ({ ...x, d: x.b - x.p }))
-    .sort((a, b) => b.d - a.d);
+    .sort((a, b) => b.b - a.b || b.p - a.p);
+
+  // Kraje i podsumowania w jednej liście, żeby bloki kolorów szły przez całą tabelę bez przerw.
+  const wiersze = [
+    ...kraje.filter(k => k.b > 3 || k.p > 3)
+      .map(k => ({ klucz: k.cc, nazwa: KRAJ[k.cc] || k.cc, b: k.b, p: k.p, suma: false })),
+    { klucz: "_nego", nazwa: "NegoMetal razem", b: biez.sumaNego, p: poprz?.sumaNego || 0, suma: true },
+    { klucz: "_etoll", nazwa: "e-TOLL (Polska)", b: biez.etollEUR || 0, p: poprz?.etollEUR || 0, suma: false },
+    { klucz: "_razem", nazwa: "RAZEM", b: razem, p: razemP || 0, suma: true },
+  ];
 
   // Sortujemy po stawce WYBRANEGO miesiąca malejąco — najdroższe kierunki na górze.
   // Kraje bez policzonej stawki lądują na końcu, tam porządkuje je przebieg.
@@ -364,45 +375,43 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
         <div className="font-bold text-sm text-gray-900 mb-2">
           Opłaty per kraj <span className="font-normal text-gray-500">· NegoMetal, EUR</span>
         </div>
-        <table className="w-full text-xs" style={{ borderCollapse: "collapse" }}>
+        {/* Te same bloki kolorów co w tabeli stawek niżej — separate, bo collapse zjada zaokrąglenia. */}
+        <table className="w-full text-xs" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
           <thead>
             <tr>
-              <th className="text-left py-1 text-[10px] uppercase text-gray-500 font-semibold">Kraj</th>
-              {poprz && <th className="text-right py-1 px-1.5 text-[10px] uppercase text-gray-500 font-semibold">{MIES[+poprz.month.slice(5, 7) - 1]}</th>}
-              <th className="text-right py-1 px-1.5 text-[10px] uppercase text-gray-700 font-semibold">{MIES[+biez.month.slice(5, 7) - 1]}</th>
-              {poprz && <th className="text-right py-1 px-1.5 text-[10px] uppercase text-gray-500 font-semibold">Zmiana</th>}
+              <th className="text-left py-1 pr-2 text-[10px] uppercase text-gray-500 font-semibold">Kraj</th>
+              {poprz && <th className="text-right py-1 px-1.5 text-[10px] uppercase font-semibold"
+                style={{ background: BLOK.poprz.pasek, color: BLOK.poprz.tekst, borderRadius: "6px 6px 0 0" }}>
+                {MIES[+poprz.month.slice(5, 7) - 1]}</th>}
+              {poprz && <th style={{ width: 10 }} />}
+              <th className="text-right py-1 px-1.5 text-[10px] uppercase font-semibold"
+                style={{ background: BLOK.biez.pasek, color: BLOK.biez.tekst, borderRadius: "6px 6px 0 0" }}>
+                {MIES[+biez.month.slice(5, 7) - 1]}</th>
+              {poprz && <th className="text-right py-1 pl-2 text-[10px] uppercase text-gray-500 font-semibold">Zmiana</th>}
             </tr>
           </thead>
           <tbody>
-            {kraje.filter(k => k.b > 3 || k.p > 3).map(k => (
-              <tr key={k.cc} style={{ borderTop: "1px solid #f1f5f9" }}>
-                <td className="py-1 text-gray-700">{KRAJ[k.cc] || k.cc}</td>
-                {poprz && <td className="text-right py-1 px-1.5 tabular-nums text-gray-500">{eur0(k.p)}</td>}
-                <td className="text-right py-1 px-1.5 tabular-nums text-gray-900 font-semibold">{eur0(k.b)}</td>
-                {poprz && <td className="text-right py-1 px-1.5 tabular-nums font-semibold"
-                  style={{ color: k.d >= 0 ? "#dc2626" : "#16a34a" }}>{sgn(k.d)} €</td>}
-              </tr>
-            ))}
-            <tr style={{ borderTop: "1.5px solid #cbd5e1", background: "#f8fafc" }}>
-              <td className="py-1 font-bold text-gray-900">NegoMetal razem</td>
-              {poprz && <td className="text-right py-1 px-1.5 tabular-nums">{eur0(poprz.sumaNego)}</td>}
-              <td className="text-right py-1 px-1.5 tabular-nums font-bold">{eur0(biez.sumaNego)}</td>
-              {poprz && <td className="text-right py-1 px-1.5 tabular-nums font-bold">{sgn(biez.sumaNego - poprz.sumaNego)} €</td>}
-            </tr>
-            <tr style={{ borderTop: "1px solid #f1f5f9" }}>
-              <td className="py-1 text-gray-700">e-TOLL (Polska)</td>
-              {poprz && <td className="text-right py-1 px-1.5 tabular-nums text-gray-500">{eur0(poprz.etollEUR || 0)}</td>}
-              <td className="text-right py-1 px-1.5 tabular-nums text-gray-900 font-semibold">{eur0(biez.etollEUR || 0)}</td>
-              {poprz && <td className="text-right py-1 px-1.5 tabular-nums font-semibold"
-                style={{ color: (biez.etollEUR || 0) - (poprz.etollEUR || 0) >= 0 ? "#dc2626" : "#16a34a" }}>
-                {sgn((biez.etollEUR || 0) - (poprz.etollEUR || 0))} €</td>}
-            </tr>
-            <tr style={{ borderTop: "1.5px solid #cbd5e1", background: "#f8fafc" }}>
-              <td className="py-1 font-bold text-gray-900">RAZEM</td>
-              {poprz && <td className="text-right py-1 px-1.5 tabular-nums font-bold">{eur0(razemP)}</td>}
-              <td className="text-right py-1 px-1.5 tabular-nums font-bold">{eur0(razem)}</td>
-              {poprz && <td className="text-right py-1 px-1.5 tabular-nums font-bold">{sgn(razem - razemP)} €</td>}
-            </tr>
+            {wiersze.map((w, i) => {
+              const dol = i === wiersze.length - 1 ? { borderRadius: "0 0 6px 6px" } : null;
+              const kreska = w.suma ? "1.5px solid #cbd5e1" : "1px solid #f1f5f9";
+              const kom = (blok) => ({ background: blok.tlo, borderTop: kreska, ...(dol || {}) });
+              return (
+                <tr key={w.klucz}>
+                  <td className={"py-1 pr-2 " + (w.suma ? "font-bold text-gray-900" : "text-gray-700")}
+                    style={{ borderTop: kreska }}>{w.nazwa}</td>
+                  {poprz && <>
+                    <td className={"text-right py-1 px-1.5 tabular-nums " + (w.suma ? "font-bold" : "text-gray-500")}
+                      style={kom(BLOK.poprz)}>{eur0(w.p)}</td>
+                    <td />
+                  </>}
+                  <td className={"text-right py-1 px-1.5 tabular-nums " + (w.suma ? "font-bold" : "text-gray-900 font-semibold")}
+                    style={kom(BLOK.biez)}>{eur0(w.b)}</td>
+                  {poprz && <td className="text-right py-1 pl-2 tabular-nums font-semibold"
+                    style={{ borderTop: kreska, color: w.suma ? "#1f2937" : w.b - w.p >= 0 ? "#dc2626" : "#16a34a" }}>
+                    {sgn(w.b - w.p)} €</td>}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
