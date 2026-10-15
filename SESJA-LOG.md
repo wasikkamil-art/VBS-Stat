@@ -5558,3 +5558,69 @@ każdy rodzaj karty wczytuje się raz** — zbiorczy działa, ochrona zostaje.
 2. **Andamur wrzesień** — `C260039909.zip` w Downloads, rekoncyliacja rabatu niezrobiona.
    Sierpień też nadal wisi (0 z 8 tx z flagą `corrected`).
 3. ℹ️ **WE2CG94 = Renault Trafic, bus osobowy, poza flotą** — dopisany do `SKIP_PLATE` (`3954ae8`).
+
+## 2026-10-15 — Import września wykonany + TRZY moje błędy w przeliczeniach (commit `d800e77`)
+
+Dzień korekt. Import paliwa i myta przeszedł, ale moje liczby wpisane wcześniej do Total_26
+okazały się w trzech miejscach złe. **Każdy raz miał tę samą przyczynę: liczyłem własnym
+skryptem równolegle do aplikacji, zamiast wziąć wynik z bazy po imporcie.**
+
+### Import — dwuetapowy, zapis trzeba kliknąć
+
+🚩 Po pierwszym uploadzie `fuelTransactions/2026-09` **nie istniał w ogóle**. Myto zapisało się
+od razu, paliwo nie. Powód: `PaliwoTab` ma fazę `preview` i dopiero przycisk
+**„Zapisz N tankowań →"** (`confirmImport`) pisze do bazy. Myto zapisuje inaczej.
+Po kliknięciu: **94 transakcje, 4 karty, litry zgodne co do setnej na wszystkich autach.**
+
+### Błąd 1 — E100 i Andamur podają BRUTTO, nie netto
+
+Notatka w pamięci („wszystko netto", 2026-06-02) była nieaktualna. `parseE100` i `parseAndamur`
+od dawna liczą `netLocal = gross / (1 + VAT[kraj])` i **mają rację**. Tylko Eurowag ma prawdziwą
+kolumnę netto; tankpool też podaje netto.
+**Korekta w Total_26 (kolumna K):** v3 paliwo −1637,39 → **−1604,40** · v4 −2695,18 → **−2649,46** ·
+v5 −2640,05 → **−2518,70** · v4 „inne" −116,98 → **−103,86** · v5 „inne" −104,88 → **−90,74**.
+Razem **−227,32 €** zawyżenia. Dotyczyło też opłat A1/A2/A4 z pliku E100.
+ℹ️ Sygnał, który to złapał: **€/L**. v5 wychodziło 1,853, a tankuje w Hiszpanii, gdzie Eurowag
+ma 1,462 — niemożliwe. Baza dała 1,767.
+
+### Błąd 2 — NBP podaje HUF za 1 jednostkę, nie za 100
+
+Dzieliłem dodatkowo przez 100, więc węgierskie myto wyszło stukrotnie za małe:
+30 821,22 HUF to **85,03 €**, a nie 0,84 €.
+**Korekta:** v3 Nego −554,81 → **−638,99 €**.
+🔑 Wzór jest ten sam dla każdej waluty: `kwota × kurs_waluty / kurs_EUR`, bez mnożników —
+tak robi `toEUR` w `src/utils/nbp.js`.
+✅ Po poprawce suma NegoMetal per kraj zgadza się z `tollAnalysis/2026-09.oplatyNego`
+**na 11 krajach co do grosza** (poza BG 0,37 € z zaokrąglenia kursu dnia).
+
+### Błąd 3 — tankpool (złapany przed wpisaniem, opisany we wpisie z 14.10)
+
+### Zweryfikowane
+
+✅ Paliwo w bazie: 94 tx, litry **945,00 / 908,08 / 1399,93 / 1425,01** — zgodne z Total_26 co do setnej.
+✅ Arkusz potwierdził korekty własną formułą „średnia cena za litr": v3 przeliczyło się na
+**−1,77**, baza ma 1,767 €/L. Przed korektą było −1,80.
+✅ NegoMetal: 690 transakcji w pliku, **0 duplikatów po txId**, kwoty per kraj = aplikacja.
+✅ e-TOLL: 493 przejazdy, 1 288,71 PLN — bus WE2CG94 (31 przejazdów) poprawnie odrzucony.
+✅ `d800e77` dopisał WE2CG94 także do `SKIP_PLATE` w `tollParsers.js` (był tylko w fuelParsers).
+
+❌ **Nic nie oglądane w przeglądarce** — import klikał user.
+⚠️ Aplikacja raportuje `transakcji.nego: 676`, ja liczę 690. **Kwoty zgadzają się co do grosza**,
+więc na księgowanie nie wpływa, ale rozbieżności licznika nie rozgryzłem.
+
+### Zapytania o myto (na życzenie, bez zmian w danych)
+
+- **WGM 0507M, 11–15.09**: 159,33 € — całość NegoMetal, zero e-TOLL. 11–13.09 bez opłat,
+  pierwsza 14.09 12:50 w Hiszpanii. Trasa: Kraj Basków → Biriatou → Bayonne → Poitiers → Roye.
+- **WGM 5367K, 11–15.09**: 206,38 € (NegoMetal 189,26 + e-TOLL 17,11 / 181,7 km).
+  AT 100,83 (73 tx) · DE 58,60 · PL 29,09 · HU 10,49 · CZ 7,36.
+  🔑 **12.09 zero opłat** — ostatnia 11.09 o 18:54 (A8 Frasdorf), następna 13.09 o 7:31.
+  Przerwa ~36 h, wygląda na odpoczynek tygodniowy w Bawarii. **Do porównania z tachografem.**
+
+### Otwarte
+
+1. **Następny krok: porównać opłaty drogowe z tachografem** — czy przerwa 12.09 u Siergieja
+   pokrywa się z zarejestrowanym odpoczynkiem.
+2. 🚩 **Frachty v3 za wrzesień niekompletne**: 3 400 € przy 6 984 km = 0,49 €/km (reszta floty
+   1,0–1,2). W kolekcji `frachty` 1 pozycja. „Ilość frachtów" w Total_26 celowo NIE wpisana.
+3. **Andamur** — rekoncyliacja rabatu za sierpień i wrzesień nadal niezrobiona (`C260039909.zip`).
