@@ -13,7 +13,11 @@ const MIES = ["styczeń", "luty", "marzec", "kwiecień", "maj", "czerwiec",
   "lipiec", "sierpień", "wrzesień", "październik", "listopad", "grudzień"];
 const KRAJ = { DE: "Niemcy", FR: "Francja", ES: "Hiszpania", PL: "Polska", BE: "Belgia",
   NL: "Holandia", AT: "Austria", CZ: "Czechy", CH: "Szwajcaria", IT: "Włochy",
-  PT: "Portugalia", LU: "Luksemburg", HU: "Węgry", SK: "Słowacja" };
+  PT: "Portugalia", LU: "Luksemburg", HU: "Węgry", SK: "Słowacja", BG: "Bułgaria" };
+
+// Powyżej tego kraj realnie obciąża fracht (DE 0,27 · BE 0,20 · AT 0,20 · NL 0,13),
+// poniżej jeździmy za grosze (FR 0,048 · CZ 0,023 · PL 0,004). Próg do zmiany w jednym miejscu.
+const PROG_DROGI = 0.1;
 
 const eur0 = (n) => Math.round(n).toLocaleString("pl-PL") + " €";
 const num = (n) => Math.round(n).toLocaleString("pl-PL");
@@ -228,9 +232,18 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
     .map(x => ({ ...x, d: x.b - x.p }))
     .sort((a, b) => b.d - a.d);
 
+  // Sortujemy po stawce WYBRANEGO miesiąca malejąco — najdroższe kierunki na górze.
+  // Kraje bez policzonej stawki lądują na końcu, tam porządkuje je przebieg.
   const krajeKm = [...new Set([...Object.keys(biez.km || {}), ...Object.keys(poprz?.km || {})])]
     .filter(cc => (biez.km?.[cc] || 0) > 200 || (poprz?.km?.[cc] || 0) > 200)
-    .sort((a, b) => (biez.km?.[b] || 0) - (biez.km?.[a] || 0));
+    .sort((a, b) => {
+      const sa = biez.stawki?.[a], sb = biez.stawki?.[b];
+      if (sa === undefined && sb === undefined) return (biez.km?.[b] || 0) - (biez.km?.[a] || 0);
+      if (sa === undefined) return 1;
+      if (sb === undefined) return -1;
+      if (sb !== sa) return sb - sa;
+      return (biez.km?.[b] || 0) - (biez.km?.[a] || 0);
+    });
 
   return (
     <div className="space-y-4">
@@ -363,23 +376,32 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
         </div>
         <div className="text-xs text-gray-500 mb-2">
           Jeśli stawka stoi w miejscu, a rachunek rośnie, to zmieniły się kierunki — nie taryfa.
+          Kolejność od najdroższego kierunku w miesiącu <b>{MIES[+biez.month.slice(5, 7) - 1]}</b>;
+          <span style={{ color: "#dc2626" }} className="font-semibold"> na czerwono</span> stawki powyżej {pl2(PROG_DROGI)} €/km.
         </div>
         <table className="w-full text-xs" style={{ borderCollapse: "collapse" }}>
           <thead>
             <tr>
-              <th className="text-left py-1 text-[10px] uppercase text-gray-500 font-semibold">Kraj</th>
+              <th rowSpan={2} className="text-left py-1 text-[10px] uppercase text-gray-500 font-semibold align-bottom">Kraj</th>
+              {poprz && <th colSpan={2} className="text-center py-1 px-1.5 text-[10px] uppercase text-gray-500 font-semibold"
+                style={{ borderBottom: "1px solid #e2e8f0" }}>{MIES[+poprz.month.slice(5, 7) - 1]}</th>}
+              <th colSpan={2} className="text-center py-1 px-1.5 text-[10px] uppercase text-gray-700 font-semibold"
+                style={{ borderBottom: "1px solid #cbd5e1" }}>{MIES[+biez.month.slice(5, 7) - 1]}</th>
+            </tr>
+            <tr>
               {poprz && <>
-                <th className="text-right py-1 px-1.5 text-[10px] uppercase text-gray-500 font-semibold">km</th>
-                <th className="text-right py-1 px-1.5 text-[10px] uppercase text-gray-500 font-semibold">€/km</th>
+                <th className="text-right py-1 px-1.5 text-[10px] uppercase text-gray-400 font-semibold">km</th>
+                <th className="text-right py-1 px-1.5 text-[10px] uppercase text-gray-400 font-semibold">€/km</th>
               </>}
-              <th className="text-right py-1 px-1.5 text-[10px] uppercase text-gray-700 font-semibold">km</th>
-              <th className="text-right py-1 px-1.5 text-[10px] uppercase text-gray-700 font-semibold">€/km</th>
+              <th className="text-right py-1 px-1.5 text-[10px] uppercase text-gray-500 font-semibold">km</th>
+              <th className="text-right py-1 px-1.5 text-[10px] uppercase text-gray-500 font-semibold">€/km</th>
             </tr>
           </thead>
           <tbody>
             {krajeKm.map(cc => {
               const sb = biez.stawki?.[cc], sp = poprz?.stawki?.[cc];
               const wazny = cc === "DE";
+              const drogi = sb !== undefined && sb >= PROG_DROGI;
               return (
                 <tr key={cc} style={{ borderTop: "1px solid #f1f5f9" }}>
                   <td className={"py-1 " + (wazny ? "font-bold text-gray-900" : "text-gray-700")}>{KRAJ[cc] || cc}</td>
@@ -389,7 +411,8 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
                       {sp === undefined ? "–" : sp < 0.0005 ? "bez opłat" : pl3(sp)}</td>
                   </>}
                   <td className="text-right py-1 px-1.5 tabular-nums text-gray-800">{num(biez.km?.[cc] || 0)}</td>
-                  <td className={"text-right py-1 px-1.5 tabular-nums " + (wazny ? "font-bold text-gray-900" : "text-gray-800")}>
+                  <td className={"text-right py-1 px-1.5 tabular-nums " + (drogi || wazny ? "font-bold" : "")}
+                    style={{ color: sb === undefined ? "#9ca3af" : drogi ? "#dc2626" : "#1f2937" }}>
                     {sb === undefined ? "–" : sb < 0.0005 ? <span style={{ color: "#16a34a" }}>bez opłat</span> : pl3(sb)}</td>
                 </tr>
               );
