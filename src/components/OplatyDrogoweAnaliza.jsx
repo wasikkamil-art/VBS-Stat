@@ -27,9 +27,11 @@ const PROG_DROGI = 0.1;
 // Każdy miesiąc ma własny kolor przez całą wysokość tabeli stawek, żeby nie trzeba było
 // szukać w nagłówku, która para kolumn to który miesiąc. Pasek nagłówka jest o ton ciemniejszy
 // od komórek, więc blok czyta się jako jedna całość.
+// `linia` i `liniaSuma` są w odcieniu własnego bloku — zwykła szarość #f1f5f9 na kolorowym
+// tle jest niewidoczna i wiersze zlewają się w jedną plamę.
 const BLOK = {
-  poprz: { pasek: "#e2e8f0", tlo: "#f8fafc", tekst: "#475569" },   // szary — miesiąc odniesienia
-  biez:  { pasek: "#dbeafe", tlo: "#eff6ff", tekst: "#1e40af" },   // błękit — miesiąc wybrany
+  poprz: { pasek: "#e2e8f0", tlo: "#f8fafc", tekst: "#475569", linia: "#e2e8f0", liniaSuma: "#cbd5e1" },
+  biez:  { pasek: "#dbeafe", tlo: "#eff6ff", tekst: "#1e40af", linia: "#dbeafe", liniaSuma: "#93c5fd" },
 };
 
 const eur0 = (n) => Math.round(n).toLocaleString("pl-PL") + " €";
@@ -394,7 +396,11 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
             {wiersze.map((w, i) => {
               const dol = i === wiersze.length - 1 ? { borderRadius: "0 0 6px 6px" } : null;
               const kreska = w.suma ? "1.5px solid #cbd5e1" : "1px solid #f1f5f9";
-              const kom = (blok) => ({ background: blok.tlo, borderTop: kreska, ...(dol || {}) });
+              const kom = (blok) => ({
+                background: blok.tlo,
+                borderTop: `${w.suma ? "1.5px" : "1px"} solid ${w.suma ? blok.liniaSuma : blok.linia}`,
+                ...(dol || {}),
+              });
               return (
                 <tr key={w.klucz}>
                   <td className={"py-1 pr-2 " + (w.suma ? "font-bold text-gray-900" : "text-gray-700")}
@@ -459,10 +465,14 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
               const wazny = cc === "DE";
               const drogi = sb !== undefined && sb >= PROG_DROGI;
               const zm = zmianyStawek[cc];
-              // Blok miesiąca ma być jedną bryłą, więc linia między wierszami idzie tylko
-              // w kolumnach poza blokami, a dołem bloku zamykamy zaokrąglenie.
+              // Dołem bloku zamykamy zaokrąglenie; wiersze rozdziela linia w odcieniu bloku,
+              // żeby przy 10 kolumnach dało się przejechać wzrokiem po wierszu.
               const dol = i === krajeKm.length - 1 ? { borderRadius: "0 0 6px 6px" } : null;
-              const kom = (blok) => ({ background: blok.tlo, ...(dol || {}) });
+              const kom = (blok) => ({
+                background: blok.tlo,
+                borderTop: `1px solid ${blok.linia}`,
+                ...(dol || {}),
+              });
               return (
                 <tr key={cc}>
                   <td className={"py-1 pr-2 " + (wazny ? "font-bold text-gray-900" : "text-gray-700")}
