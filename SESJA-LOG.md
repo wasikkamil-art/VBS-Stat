@@ -5746,3 +5746,65 @@ Wcześniej 08.09 Guarromán (Jaén) i Siete Aguas (Walencja), 10.09 El Casar de 
    (Via Verde / inny operator niż NegoMetal). Do sprawdzenia przy zamykaniu października.
 2. Frachty v3 za wrzesień niekompletne — bez zmian.
 3. Andamur: rekoncyliacja rabatu za sierpień i wrzesień — bez zmian.
+
+## 2026-10-15 cd.3 — Tabela stawek €/km czytelna + przebieg floty za wrzesień (commity `9d445bb`, `78d2a80`)
+
+Uwaga usera do modułu Analizy → Opłaty drogowe: *„w stawce per kraj nie wiem co się odnosi
+do czego, bo mamy km 2× i €/km 2×, za które miesiące to jest"*.
+
+### Co zrobione w `OplatyDrogoweAnaliza.jsx`
+
+1. **Dwupoziomowy nagłówek** — nad każdą parą kolumn stoi nazwa miesiąca, tak jak w tabeli
+   opłat wyżej (`rowSpan`/`colSpan`).
+2. **Sortowanie malejąco po stawce WYBRANEGO miesiąca** (było: po przebiegu). Kraje bez
+   policzonej stawki lądują na końcu. Zmiana miesiąca w selektorze przesortowuje tabelę.
+3. **Czerwień powyżej `PROG_DROGI` = 0,10 €/km** (stała na górze pliku, jedno miejsce do zmiany).
+   Dzieli DE 0,272 · BE 0,200 · AT 0,197 · NL 0,132 od reszty, gdzie jeździmy za grosze.
+4. **Kolumna ZMIANA** — ▲ czerwona przy wzroście stawki, ▼ zielona przy spadku.
+5. **Blok „Skąd ta zmiana"** pod tabelą: trzy kraje, które najmocniej ruszyły rachunkiem,
+   z rozbiciem `Δrachunek = (km_b − km_p) × stawka_p + reszta na karb stawki`.
+   Liczone z **surowych kwot i kilometrów**, nie z zaokrąglonych stawek z dokumentu.
+6. `BG` dopisane do słownika krajów (pokazywało się surowe „BG”), miesiące w miejscowniku.
+
+🚩 **Pułapka, którą trzeba było zablokować**: dla Austrii rozbicie pokazywało „efekt km +587 €"
+przy faktycznej zmianie rachunku **+282 €**. Powód: sierpniowa stawka Austrii policzona ze
+**115 km** to szum — `zbudujAnalize` dlatego w ogóle nie publikuje stawek poniżej 200 km.
+**Gdy któryś miesiąc nie ma stawki, rozbicia nie pokazujemy**, tylko zdanie o zmianie kierunków.
+
+### 🔧 Zapis do produkcji: `operacyjne` za wrzesień (poza kodem)
+
+KPI „Przebieg floty" pokazywało **0 km**, a „Koszt na 1 000 km" `–`. Powód: `kmFloty` sumuje
+`operacyjne.kmLicznik`, a **za wrzesień nie było tam ani jednego rekordu** (lipiec i sierpień
+mają po cztery). Na prośbę usera dopisane cztery rekordy:
+
+| | km | litry ON | spalanie |
+|---|---|---|---|
+| v1 | 6 258 | 945,00 | 15,1 |
+| v3 | 6 984 | 908,08 | 13,0 |
+| v4 | 8 868 | 1 399,93 | 15,8 |
+| v5 | 10 065 | 1 425,01 | 14,2 |
+
+Km z **Total_26 (raport ww)** — ta sama konwencja co sierpień, gdzie `vehicleKmMonthly` ma
+`source: "report"`. Litry **prosto z `fuelTransactions/2026-09`**, nie z własnego liczenia.
+Spalanie = litry/km × 100, wzór potwierdzony na sierpniu (odtwarza 14,1 · 14,2 · 17,1 · 13,8).
+`kmFloty` w `tollAnalysis/2026-09` przeliczone z tego, co leży w bazie = **32 175 km**.
+Teraz KPI: przebieg 32 175 km (▼ −6,9%), koszt na 1 000 km **64,7 €** (▼ −11,4%).
+
+⚠️ **`dni`/`iloscDni` NIE wpisane** — nie było skąd wziąć. Sierpniowe rekordy to mają.
+⚠️ **Licznik CAN daje inne km** niż raport ww: v1 6 271 · v3 6 750 · v4 8 662 · v5 9 981
+(`vehicleKmMonthly/2026-09`, `source: "snapshot"`), rozjazd 0,2–3,5%. Wybrany Total_26.
+
+### Zweryfikowane
+
+✅ **Render komponentu poza przeglądarką na prawdziwych `tollAnalysis`** (`renderToString`,
+   komponent przyjmuje prop `analizy`) — kolejność, nagłówki, strzałki, kolory i treść komentarza.
+   🔑 Wzorzec wart powtarzania: `esbuild --bundle --packages=external` do pliku w repo
+   (inaczej `node_modules` się nie rozwiąże), shim z `try/catch` na `globalThis.navigator`
+   (Node 25 ma je read-only).
+✅ Arytmetyka rozbicia sprawdzona na 7 krajach — składniki sumują się do zmiany rachunku
+   **co do centa**.
+✅ Obejrzane w przeglądarce na atrapie; **dev server zatrzymany, pliki atrapy skasowane**.
+✅ ESLint 0 błędów. `rules-of-hooks` wyłapał `useMemo` wstawiony po early return — poprawione.
+
+❌ **Nie klikane w produkcji** — zakładka za loginem admina, klika user.
+❌ Nie sprawdzony układ na wąskim ekranie: tabela ma teraz **6 kolumn** i nie ma `overflow-x`.
