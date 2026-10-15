@@ -2,7 +2,10 @@
 // Czysty moduł — bez Reacta i Firebase, żeby dało się go przetestować na plikach.
 // Wzorzec ten sam co fuelParsers.js: surowe wiersze → znormalizowane transakcje → dedup po txId.
 
-export const SKIP_PLATE = /^(OKAZICIEL|TRUCK|UNIVERSAL|TK760AP)/i;
+// WE2CG94 = Renault Trafic, bus osobowy — dopisany 2026-10-14. Wypłynął w eksporcie
+// e-TOLL za wrzesień (31 przejazdów, 102,53 PLN). Bez tego wpisu ląduje co miesiąc
+// na liście „obcych rejestracji" i trzeba go oceniać od nowa.
+export const SKIP_PLATE = /^(OKAZICIEL|TRUCK|UNIVERSAL|TK760AP|WE2CG94)/i;
 
 /** Rejestracja bez spacji, wielkimi literami.
  *  KONIECZNE: eksport NegoMetalu niesie dwie pisownie tego samego auta —
