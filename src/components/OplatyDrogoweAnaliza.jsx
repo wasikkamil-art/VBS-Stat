@@ -24,6 +24,14 @@ const KRAJ = { DE: "Niemcy", FR: "Francja", ES: "Hiszpania", PL: "Polska", BE: "
 // poniżej jeździmy za grosze (FR 0,048 · CZ 0,023 · PL 0,004). Próg do zmiany w jednym miejscu.
 const PROG_DROGI = 0.1;
 
+// Każdy miesiąc ma własny kolor przez całą wysokość tabeli stawek, żeby nie trzeba było
+// szukać w nagłówku, która para kolumn to który miesiąc. Pasek nagłówka jest o ton ciemniejszy
+// od komórek, więc blok czyta się jako jedna całość.
+const BLOK = {
+  poprz: { pasek: "#e2e8f0", tlo: "#f8fafc", tekst: "#475569" },   // szary — miesiąc odniesienia
+  biez:  { pasek: "#dbeafe", tlo: "#eff6ff", tekst: "#1e40af" },   // błękit — miesiąc wybrany
+};
+
 const eur0 = (n) => Math.round(n).toLocaleString("pl-PL") + " €";
 const num = (n) => Math.round(n).toLocaleString("pl-PL");
 const pl1 = (n) => Number(n).toLocaleString("pl-PL", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -409,45 +417,60 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
           Kolejność od najdroższego kierunku <b>{wMies(biez.month)}</b>;
           <span style={{ color: "#dc2626" }} className="font-semibold"> na czerwono</span> stawki powyżej {pl2(PROG_DROGI)} €/km.
         </div>
-        <table className="w-full text-xs" style={{ borderCollapse: "collapse" }}>
+        {/* separate + spacing 0, bo przy border-collapse zaokrąglenia rogów bloków nie działają */}
+        <table className="w-full text-xs" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
           <thead>
             <tr>
-              <th rowSpan={2} className="text-left py-1 text-[10px] uppercase text-gray-500 font-semibold align-bottom">Kraj</th>
-              {poprz && <th colSpan={2} className="text-center py-1 px-1.5 text-[10px] uppercase text-gray-500 font-semibold"
-                style={{ borderBottom: "1px solid #e2e8f0" }}>{MIES[+poprz.month.slice(5, 7) - 1]}</th>}
-              <th colSpan={2} className="text-center py-1 px-1.5 text-[10px] uppercase text-gray-700 font-semibold"
-                style={{ borderBottom: "1px solid #cbd5e1" }}>{MIES[+biez.month.slice(5, 7) - 1]}</th>
-              {poprz && <th rowSpan={2} className="text-right py-1 px-1.5 text-[10px] uppercase text-gray-500 font-semibold align-bottom">zmiana</th>}
+              <th rowSpan={2} className="text-left py-1 pr-2 text-[10px] uppercase text-gray-500 font-semibold align-bottom">Kraj</th>
+              {poprz && <th colSpan={2} className="text-center py-1 px-1.5 text-[10px] uppercase font-semibold"
+                style={{ background: BLOK.poprz.pasek, color: BLOK.poprz.tekst, borderRadius: "6px 6px 0 0" }}>
+                {MIES[+poprz.month.slice(5, 7) - 1]}</th>}
+              {poprz && <th rowSpan={2} style={{ width: 10 }} />}
+              <th colSpan={2} className="text-center py-1 px-1.5 text-[10px] uppercase font-semibold"
+                style={{ background: BLOK.biez.pasek, color: BLOK.biez.tekst, borderRadius: "6px 6px 0 0" }}>
+                {MIES[+biez.month.slice(5, 7) - 1]}</th>
+              {poprz && <th rowSpan={2} className="text-right py-1 pl-2 text-[10px] uppercase text-gray-500 font-semibold align-bottom">zmiana</th>}
             </tr>
             <tr>
               {poprz && <>
-                <th className="text-right py-1 px-1.5 text-[10px] uppercase text-gray-400 font-semibold">km</th>
-                <th className="text-right py-1 px-1.5 text-[10px] uppercase text-gray-400 font-semibold">€/km</th>
+                <th className="text-right py-1 px-1.5 text-[10px] uppercase font-semibold"
+                  style={{ background: BLOK.poprz.tlo, color: BLOK.poprz.tekst }}>km</th>
+                <th className="text-right py-1 px-1.5 text-[10px] uppercase font-semibold"
+                  style={{ background: BLOK.poprz.tlo, color: BLOK.poprz.tekst }}>€/km</th>
               </>}
-              <th className="text-right py-1 px-1.5 text-[10px] uppercase text-gray-500 font-semibold">km</th>
-              <th className="text-right py-1 px-1.5 text-[10px] uppercase text-gray-500 font-semibold">€/km</th>
+              <th className="text-right py-1 px-1.5 text-[10px] uppercase font-semibold"
+                style={{ background: BLOK.biez.tlo, color: BLOK.biez.tekst }}>km</th>
+              <th className="text-right py-1 px-1.5 text-[10px] uppercase font-semibold"
+                style={{ background: BLOK.biez.tlo, color: BLOK.biez.tekst }}>€/km</th>
             </tr>
           </thead>
           <tbody>
-            {krajeKm.map(cc => {
+            {krajeKm.map((cc, i) => {
               const sb = biez.stawki?.[cc], sp = poprz?.stawki?.[cc];
               const wazny = cc === "DE";
               const drogi = sb !== undefined && sb >= PROG_DROGI;
               const zm = zmianyStawek[cc];
+              // Blok miesiąca ma być jedną bryłą, więc linia między wierszami idzie tylko
+              // w kolumnach poza blokami, a dołem bloku zamykamy zaokrąglenie.
+              const dol = i === krajeKm.length - 1 ? { borderRadius: "0 0 6px 6px" } : null;
+              const kom = (blok) => ({ background: blok.tlo, ...(dol || {}) });
               return (
-                <tr key={cc} style={{ borderTop: "1px solid #f1f5f9" }}>
-                  <td className={"py-1 " + (wazny ? "font-bold text-gray-900" : "text-gray-700")}>{KRAJ[cc] || cc}</td>
+                <tr key={cc}>
+                  <td className={"py-1 pr-2 " + (wazny ? "font-bold text-gray-900" : "text-gray-700")}
+                    style={{ borderTop: "1px solid #f1f5f9" }}>{KRAJ[cc] || cc}</td>
                   {poprz && <>
-                    <td className="text-right py-1 px-1.5 tabular-nums text-gray-500">{num(poprz.km?.[cc] || 0)}</td>
-                    <td className="text-right py-1 px-1.5 tabular-nums text-gray-500">
+                    <td className="text-right py-1 px-1.5 tabular-nums text-gray-500" style={kom(BLOK.poprz)}>{num(poprz.km?.[cc] || 0)}</td>
+                    <td className="text-right py-1 px-1.5 tabular-nums text-gray-500" style={kom(BLOK.poprz)}>
                       {sp === undefined ? "–" : sp < 0.0005 ? "bez opłat" : pl3(sp)}</td>
+                    <td />
                   </>}
-                  <td className="text-right py-1 px-1.5 tabular-nums text-gray-800">{num(biez.km?.[cc] || 0)}</td>
+                  <td className="text-right py-1 px-1.5 tabular-nums text-gray-800"
+                    style={kom(BLOK.biez)}>{num(biez.km?.[cc] || 0)}</td>
                   <td className={"text-right py-1 px-1.5 tabular-nums " + (drogi || wazny ? "font-bold" : "")}
-                    style={{ color: sb === undefined ? "#9ca3af" : drogi ? "#dc2626" : "#1f2937" }}>
+                    style={{ ...kom(BLOK.biez), color: sb === undefined ? "#9ca3af" : drogi ? "#dc2626" : "#1f2937" }}>
                     {sb === undefined ? "–" : sb < 0.0005 ? <span style={{ color: "#16a34a" }}>bez opłat</span> : pl3(sb)}</td>
-                  {poprz && <td className="text-right py-1 px-1.5 tabular-nums font-semibold whitespace-nowrap"
-                    style={{ color: zm?.d == null ? "#cbd5e1" : Math.abs(zm.d) < 0.0005 ? "#9ca3af" : zm.d > 0 ? "#dc2626" : "#16a34a" }}>
+                  {poprz && <td className="text-right py-1 pl-2 tabular-nums font-semibold whitespace-nowrap"
+                    style={{ borderTop: "1px solid #f1f5f9", color: zm?.d == null ? "#cbd5e1" : Math.abs(zm.d) < 0.0005 ? "#9ca3af" : zm.d > 0 ? "#dc2626" : "#16a34a" }}>
                     {zm?.d == null ? "–" : Math.abs(zm.d) < 0.0005 ? "bez zmian" : `${zm.d > 0 ? "▲ +" : "▼ "}${pl3(zm.d)}`}</td>}
                 </tr>
               );
