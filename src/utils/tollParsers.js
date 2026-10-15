@@ -82,7 +82,12 @@ export function parseNego(aoa) {
       section: [cell(r, I.inGate), cell(r, I.outGate)].map(x => String(x || "").trim()).filter(Boolean).join(" → "),
       km: null,
       currency: String(cell(r, I.cur) || "EUR").toUpperCase(),
-      amountLocal: Math.abs(amount),
+      // ZNAK ZOSTAJE. Portal księguje korekty jako wiersze ujemne (storno przejazdu),
+      // a `Math.abs` zamieniał je w kolejne obciążenie — rachunek rósł o dwukrotność
+      // storna. Eksport lipiec–sierpień 2026: dwa wiersze (−3,42 FR i −1,65 ES) dawały
+      // 10,14 € zawyżenia. Subtotale NegoMetalu zgadzają się dopiero ze znakiem.
+      // Ten sam błąd naprawiono w parserach paliwa 17.09.2026 (patrz `nettujStorno`).
+      amountLocal: amount,
       unpaidLocal: 0,
       deviceId: String(cell(r, I.dev) || "").trim(),
     });
@@ -121,8 +126,8 @@ export function parseEtoll(aoa) {
       section: String(cell(r, I.sec) || "").trim(),
       km: num(cell(r, I.km)) ?? null,
       currency: "PLN",
-      amountLocal: Math.abs(amount),
-      unpaidLocal: Math.abs(num(cell(r, I.nieuiszcz)) ?? 0),
+      amountLocal: amount,                                   // znak zostaje — jak w NegoMetalu
+      unpaidLocal: Math.abs(num(cell(r, I.nieuiszcz)) ?? 0), // to jest wielkość, nie obciążenie
       deviceId: String(cell(r, I.dev) || "").trim(),
     });
   }
