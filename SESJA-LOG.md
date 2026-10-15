@@ -5624,3 +5624,57 @@ więc na księgowanie nie wpływa, ale rozbieżności licznika nie rozgryzłem.
 2. 🚩 **Frachty v3 za wrzesień niekompletne**: 3 400 € przy 6 984 km = 0,49 €/km (reszta floty
    1,0–1,2). W kolekcji `frachty` 1 pozycja. „Ilość frachtów" w Total_26 celowo NIE wpisana.
 3. **Andamur** — rekoncyliacja rabatu za sierpień i wrzesień nadal niezrobiona (`C260039909.zip`).
+
+## 2026-10-15 (cd.) — Zderzenie opłat drogowych z tachografem: pierwszy przypadek czysty
+
+**W repo zero zmian w kodzie.** Analiza na danych z bazy, bez modyfikacji.
+
+### Gdzie to żyje
+
+Moduł **Analizy → 🛣️ Opłaty drogowe** (`OplatyDrogoweAnaliza.jsx`, zakładka `nego`) liczy
+**€/km per kraj i per miesiąc**. To, czego user chciał teraz — zderzenie konkretnych opłat
+z zapisem tachografu per dzień i per kierowca — jest drobniejsze, więc zrobione skryptem.
+
+ℹ️ **Po wczorajszym imporcie surowe transakcje są w bazie: `tollTransactions/2026-09/tx`,
+1 169 pozycji** (pola `day`, `country`, `vehicleId`, `amountEUR`, `section`, `network`).
+**Nie trzeba już czytać plików z `~/Downloads`.**
+
+### Przypadek: Siergiej (v3, WGM 5367K), przerwa 12.09.2026
+
+Trzy niezależne źródła mówią to samo:
+
+| źródło | 11.09 | 12.09 | 13.09 |
+|---|---|---|---|
+| tachograf (`driverActivities`, priorytet DDD) | jazda 7,7 h | **0,0 h / 24 h odpoczynku** | jazda 8,5 h |
+| opłaty (`tollTransactions`) | ostatnia 18:54 | **brak** | pierwsza 07:31 |
+| `countryKmDaily` | DE 398 km | **brak wpisu** | DE 29 + AT 512 |
+
+🔑 **Zgodność co do minuty:** odpoczynek wg tachografu **11.09 18:56 → 13.09 07:05**, ostatnia
+opłata **11.09 18:54** (A8 Frasdorf), pierwsza po przerwie **13.09 07:31** (A8 Rohrdorf).
+Różnica 2 min na wejściu, 26 min na wyjściu.
+
+🔑 **To był tygodniowy odpoczynek SKRÓCONY: 36 h 09 min.** Mieści się w 24–45 h, więc
+kwalifikuje się jako tygodniowy, ale **brakuje 8 h 51 min do 45 h** → obowiązek wyrównania
+w ciągu trzech kolejnych tygodni.
+⚠️ **Lista pauz w Tachografie (zrobiona 14.10) tego NIE pokaże** — patrzy 4 tygodnie wstecz,
+a tydzień z 11.09 już z tego okna wypadł.
+
+ℹ️ **DDD wyciął ponad połowę szumu**: 290 segmentów surowych na te dni (ddd 136, ww_csv 95,
+auto_gps 59) → **136 po `preferDddSegments`**. Licząc z GPS, 12.09 pokazałby mikroruchy z dryfu.
+
+### Zweryfikowane / NIE
+
+✅ Dane z trzech źródeł zgodne co do minuty na przypadku Siergieja.
+✅ `tollTransactions/2026-09` = 1 169 tx; `countryKmDaily` ma 21 dni września (10–30.09).
+❌ **Nic nie oglądane w przeglądarce** — cała analiza skryptem na bazie.
+⚠️ **11–15.09 wpada w okno „orientacyjne" `countryKmDaily`** (pierwszy w pełni wiarygodny dzień
+to 17.09.2026). 11.09 ma 363 odrzucone odcinki i pokrycie 86%, 14.09 pokrycie 120% —
+**na tych dniach nie da się zbudować twardego €/km dzień po dniu**, tylko potwierdzić postój.
+
+### Otwarte
+
+1. **Kolejne przypadki do zderzenia**: Włodziu (v5, WGM 0507M) — 11–13.09 też bez żadnych opłat,
+   pierwsza dopiero 14.09 o 12:50 w Hiszpanii. Do sprawdzenia tachografem tą samą metodą.
+2. Frachty v3 za wrzesień niekompletne (3 400 € przy 6 984 km) — „ilość frachtów" w Total_26
+   celowo niewpisana.
+3. Andamur: rekoncyliacja rabatu za sierpień i wrzesień.
