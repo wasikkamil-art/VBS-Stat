@@ -5825,3 +5825,14 @@ przeszła na `separate` + `borderSpacing: 0`; tabela opłat wyżej została na `
 ✅ Sprawdzony przypadek **jednego miesiąca w bazie** (wybrany najstarszy, brak poprzedniego):
 render bez wyjątku, kolumna zmiany i blok powodów znikają. Poprawiona niespójność, która
 wtedy wychodziła — pasek kolorowy, komórki pod nim białe.
+
+### Dogrywka 2: obie tabele w jednym układzie (commit `c6a34d4`)
+
+User: *„zrób tak, żeby obie tabele były spójne"*. Górna („Opłaty per kraj") dostała te same
+bloki kolorów co dolna **oraz tę samą regułę sortowania — malejąco po kwocie WYBRANEGO
+miesiąca**. Wcześniej szła po zmianie, przez co **Niemcy, czyli największy rachunek (834 €),
+lądowały na samym dole**. Teraz w obu tabelach Niemcy są pierwsze.
+
+🔑 Kraje i podsumowania poszły do jednej listy `wiersze` (`{klucz, nazwa, b, p, suma}`) —
+bez tego bloki kolorów miały dziury na wierszach „NegoMetal razem" i „RAZEM". Podsumowania
+**straciły szare tło całego wiersza** (rozcinało bloki); wyróżnia je grubsza kreska i pogrubienie.
