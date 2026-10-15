@@ -5808,3 +5808,20 @@ Teraz KPI: przebieg 32 175 km (▼ −6,9%), koszt na 1 000 km **64,7 €** (▼
 
 ❌ **Nie klikane w produkcji** — zakładka za loginem admina, klika user.
 ❌ Nie sprawdzony układ na wąskim ekranie: tabela ma teraz **6 kolumn** i nie ma `overflow-x`.
+
+### Dogrywka: kolory bloków miesięcy (commit `fb3b88e`)
+
+Sam podział na dwa miesiące nadal nie czytał się dobrze. Userowi pokazane **dwa warianty**
+(A — bloki obok siebie, B — wybrany miesiąc na pierwszym planie, poprzedni jako podpis
+„było 0,221"). **Wybrany A z dwoma kolorami.**
+
+Każda para `km` + `€/km` to blok w jednym kolorze przez całą wysokość tabeli: miesiąc
+odniesienia szary (`#f8fafc`, pasek `#e2e8f0`), miesiąc wybrany błękitny (`#eff6ff`,
+pasek `#dbeafe`), między blokami 10 px przerwy, rogi zaokrąglone. `Kraj` i `zmiana`
+zostają na białym — dotyczą obu miesięcy. Stała `BLOK` na górze pliku.
+
+🚩 **`border-collapse: collapse` zabija `border-radius` na komórkach.** Tabela stawek
+przeszła na `separate` + `borderSpacing: 0`; tabela opłat wyżej została na `collapse`.
+✅ Sprawdzony przypadek **jednego miesiąca w bazie** (wybrany najstarszy, brak poprzedniego):
+render bez wyjątku, kolumna zmiany i blok powodów znikają. Poprawiona niespójność, która
+wtedy wychodziła — pasek kolorowy, komórki pod nim białe.
