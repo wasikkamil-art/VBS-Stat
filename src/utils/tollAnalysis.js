@@ -31,6 +31,29 @@ export function zbudujAnalize({ month, transakcje = [], kmPerKraj = {}, zrodloKm
   }
   const sumaNego = r2(Object.values(oplatyNego).reduce((a, b) => a + b, 0));
 
+  // Solówki i busy rozliczamy osobno. Bus nie płaci myta zagranicznego w ogóle (wrzesień 2026:
+  // 0 € NegoMetalu na wszystkich krajach), płaci wyłącznie polski e-TOLL — więc wrzucony do
+  // jednego worka tylko zaciemnia obraz: dokłada kilometry bez opłat i opłaty bez kilometrów
+  // zagranicznych. Sumę floty zostawiamy na końcu, żeby rachunek dalej się domykał.
+  const bus = new Set(pomijanePojazdy);
+  const jestBus = (t) => bus.has(t.vehicleId);
+  const sumaEUR = (arr) => r2(arr.reduce((a, t) => a + (t.amountEUR || 0), 0));
+  const grupy = {
+    solo: {
+      sumaNego: sumaEUR(nego.filter(t => !jestBus(t))),
+      etollEUR: sumaEUR(etoll.filter(t => !jestBus(t))),
+      etollKm: r1(etoll.filter(t => !jestBus(t)).reduce((a, t) => a + (t.km || 0), 0)),
+      km: r1(Object.values(kmPerKraj).reduce((a, b) => a + b, 0)),
+    },
+    bus: {
+      sumaNego: sumaEUR(nego.filter(jestBus)),
+      etollEUR: sumaEUR(etoll.filter(jestBus)),
+      etollKm: r1(etoll.filter(jestBus).reduce((a, t) => a + (t.km || 0), 0)),
+      km: r1(Object.values(kmPominiete).reduce((a, b) => a + b, 0)),
+      pojazdy: pomijanePojazdy,
+    },
+  };
+
   const etollPLN = etoll.reduce((a, t) => a + t.amountLocal, 0);
   const etollKm = etoll.reduce((a, t) => a + (t.km || 0), 0);
   const etollEUR = r2(etoll.reduce((a, t) => a + (t.amountEUR || 0), 0));
@@ -92,6 +115,7 @@ export function zbudujAnalize({ month, transakcje = [], kmPerKraj = {}, zrodloKm
     stawki,
     oplatyStawkowe,
     stawkiPodstawa,
+    grupy,
     kmFloty,
     ...(struktura ? { struktura } : {}),
     ...(etoll.length ? {

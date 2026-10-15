@@ -308,12 +308,29 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
     .sort((a, b) => b.b - a.b || b.p - a.p);
 
   // Kraje i podsumowania w jednej liście, żeby bloki kolorów szły przez całą tabelę bez przerw.
+  //
+  // Solówki i busy stoją osobno. Bus nie płaci myta zagranicznego (wrzesień 2026: 0 € na
+  // wszystkich krajach NegoMetalu), płaci tylko polski e-TOLL — wrzucony do wspólnej sumy
+  // dokładał opłaty bez zagranicznych kilometrów i zaciemniał obraz. Suma floty zostaje
+  // na końcu, więc rachunek dalej się domyka.
+  // Analizy sprzed tej zmiany (lipiec, sierpień) nie mają pola `grupy` — wtedy pokazujemy
+  // e-TOLL jedną pozycją, jak wcześniej, zamiast zmyślać podział.
+  const gB = biez.grupy, gP = poprz?.grupy;
   const wiersze = [
     ...kraje.filter(k => k.b > 3 || k.p > 3)
       .map(k => ({ klucz: k.cc, nazwa: KRAJ[k.cc] || k.cc, b: k.b, p: k.p, suma: false })),
     { klucz: "_nego", nazwa: "NegoMetal razem", b: biez.sumaNego, p: poprz?.sumaNego || 0, suma: true },
-    { klucz: "_etoll", nazwa: "e-TOLL (Polska)", b: biez.etollEUR || 0, p: poprz?.etollEUR || 0, suma: false },
-    { klucz: "_razem", nazwa: "RAZEM", b: razem, p: razemP || 0, suma: true },
+    ...(gB ? [
+      { klucz: "_etollSolo", nazwa: "e-TOLL — solówki", b: gB.solo.etollEUR || 0,
+        p: gP ? gP.solo.etollEUR || 0 : null, suma: false },
+      { klucz: "_razemSolo", nazwa: "RAZEM solówki", b: biez.sumaNego + (gB.solo.etollEUR || 0),
+        p: gP ? (poprz.sumaNego || 0) + (gP.solo.etollEUR || 0) : null, suma: true },
+      { klucz: "_bus", nazwa: "Busy — e-TOLL", b: (gB.bus.etollEUR || 0) + (gB.bus.sumaNego || 0),
+        p: gP ? (gP.bus.etollEUR || 0) + (gP.bus.sumaNego || 0) : null, suma: false },
+    ] : [
+      { klucz: "_etoll", nazwa: "e-TOLL (Polska)", b: biez.etollEUR || 0, p: poprz?.etollEUR || 0, suma: false },
+    ]),
+    { klucz: "_razem", nazwa: gB ? "RAZEM flota" : "RAZEM", b: razem, p: razemP || 0, suma: true },
   ];
 
   // Sortujemy po stawce WYBRANEGO miesiąca malejąco — najdroższe kierunki na górze.
@@ -440,14 +457,14 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
                     style={{ borderTop: kreska }}>{w.nazwa}</td>
                   {poprz && <>
                     <td className={"text-right py-1 px-1.5 tabular-nums " + (w.suma ? "font-bold" : "text-gray-500")}
-                      style={kom(BLOK.poprz)}>{eur0(w.p)}</td>
+                      style={kom(BLOK.poprz)}>{w.p === null ? "–" : eur0(w.p)}</td>
                     <td />
                   </>}
                   <td className={"text-right py-1 px-1.5 tabular-nums " + (w.suma ? "font-bold" : "text-gray-900 font-semibold")}
                     style={kom(BLOK.biez)}>{eur0(w.b)}</td>
                   {poprz && <td className="text-right py-1 pl-2 tabular-nums font-semibold"
-                    style={{ borderTop: kreska, color: w.suma ? "#1f2937" : w.b - w.p >= 0 ? "#dc2626" : "#16a34a" }}>
-                    {sgn(w.b - w.p)} €</td>}
+                    style={{ borderTop: kreska, color: w.p === null ? "#cbd5e1" : w.suma ? "#1f2937" : w.b - w.p >= 0 ? "#dc2626" : "#16a34a" }}>
+                    {w.p === null ? "–" : `${sgn(w.b - w.p)} €`}</td>}
                 </tr>
               );
             })}
@@ -458,7 +475,7 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
       {/* stawki i kilometry */}
       <div className="rounded-xl border border-gray-200 p-3 bg-white">
         <div className="font-bold text-sm text-gray-900 mb-0.5">
-          Stawka €/km per kraj <span className="font-normal text-gray-500">· opłaty ÷ kilometry trasy</span>
+          Stawka €/km per kraj <span className="font-normal text-gray-500">· solówki, opłaty ÷ kilometry trasy</span>
         </div>
         <div className="text-xs text-gray-500 mb-2">
           Jeśli stawka stoi w miejscu, a rachunek rośnie, to zmieniły się kierunki — nie taryfa.
@@ -531,17 +548,18 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
         </table>
 
         {busy && (
-          <div className="mt-2 pt-2 text-[11px] leading-relaxed" style={{ borderTop: "1px solid #f1f5f9", color: "#92400e", background: "#fffbeb", borderRadius: 6, padding: "6px 8px" }}>
-            <b>Busy liczą się inaczej.</b> {busy.nazwy.join(", ")} nie {busy.nazwy.length > 1 ? "płacą" : "płaci"} myta,
-            więc {busy.nazwy.length > 1 ? "ich" : "jego"} przebieg jest wyłączony z tej tabeli —
-            w tym miesiącu <b>{num(busy.razem)} km</b>
-            {busy.czolo.length > 0 && <> (najwięcej {busy.czolo.map(([cc, km]) => `${KRAJ[cc] || cc} ${num(km)}`).join(", ")})</>}.
-            Gdyby te kilometry wliczać, każdy ich wzrost w danym kraju zaniżałby tamtejszą stawkę €/km,
-            a spadek ją podnosił — przy zerowych opłatach po stronie busa.
+          <div className="mt-2 pt-2 text-[11px] leading-relaxed text-gray-600" style={{ borderTop: "1px solid #f1f5f9" }}>
+            <div>
+              <b className="text-gray-800">Busy osobno</b> — {busy.nazwy.join(", ")}: <b>{num(busy.razem)} km</b>
+              {busy.czolo.length > 0 && <> (najwięcej {busy.czolo.map(([cc, km]) => `${KRAJ[cc] || cc} ${num(km)}`).join(", ")})</>},
+              {" "}myta zagranicznego <b>{eur0(biez.grupy?.bus?.sumaNego || 0)}</b>, e-TOLL <b>{eur0(biez.grupy?.bus?.etollEUR || 0)}</b>.
+              Nie płacą myta poza Polską, więc ich kilometry nie dzielą opłat w tabeli wyżej — inaczej
+              każdy ich kilometr w danym kraju zaniżałby tamtejszą stawkę.
+            </div>
             {busy.niepelny && (
               <div className="mt-1">
-                <b>Niepełny miesiąc.</b> Kilometry są z <b>{busy.niepelny.dni} dni z {busy.niepelny.wMiesiacu}</b>
-                {" "}({fmtDzien(busy.niepelny.od)}–{fmtDzien(busy.niepelny.do)}) — licznik nie zapisał wcześniejszych.
+                <b className="text-gray-800">Niepełny miesiąc</b> — kilometry są z <b>{busy.niepelny.dni} dni z {busy.niepelny.wMiesiacu}</b>
+                {" "}({fmtDzien(busy.niepelny.od)}–{fmtDzien(busy.niepelny.do)}), licznik nie zapisał wcześniejszych.
                 Opłaty w stawce liczymy z tych samych dni, więc wskaźnik jest uczciwy, ale przebieg
                 w tabeli jest niższy od rzeczywistego.
               </div>
