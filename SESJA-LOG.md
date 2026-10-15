@@ -5913,3 +5913,60 @@ je zapisane jako dodatnie. Z samej bazy tego nie sprawdzę, trzeba by ponownie w
 1. **e-TOLL za lipiec i sierpień** — bez niego podział solówki/busy dla tych miesięcy zostaje „–".
 2. 🚩 **Portugalia 127 km (11.09) bez ani jednej opłaty** — możliwa brakująca faktura Via Verde.
 3. Andamur: rekoncyliacja rabatu za sierpień i wrzesień.
+
+## 2026-10-15 cd.5 — Import lipca i sierpnia: podział solo/bus domknięty, taryfa potwierdzona
+
+User wyeksportował NegoMetal za VII–VIII (`(46).xlsx`, 352 tx) oraz e-TOLL osobno za lipiec
+(`376256.csv`, 564 przejazdy) i sierpień (`376262.csv`, 612 przejazdów). Import zrobiony
+przez UI po deployu poprawki storna.
+
+### Stan po imporcie (odczyt z bazy, nie z plików)
+
+| | nego | e-TOLL | NegoMetal € | e-TOLL € | RAZEM € |
+|---|---|---|---|---|---|
+| lipiec | 163 | 451 | 1 446,28 | 285,66 | **1 731,94** |
+| sierpień | 189 | 612 | 2 109,34 | 412,60 | **2 521,94** |
+| wrzesień | 676 | 493 | 1 784,08 | 296,93 | **2 081,01** |
+
+**Podział solówki/busy wypełniony we wszystkich trzech miesiącach**, sumy domykają się co do
+centa. e-TOLL busów: VII **22,80 €** · VIII **44,41 €** · IX **110,60 €**.
+🔑 **Bus nie zapłacił złotówki myta zagranicznego w żadnym z trzech miesięcy** — zero
+NegoMetalu. To już nie założenie, tylko dane.
+
+### Zweryfikowane
+
+✅ **Storno weszło ze znakiem**: −1,65 € (ES, 17.07) i −3,42 € (FR, 23.07), oba WGM 5367K.
+   Poprawka `a741d67` zadziałała na realnym imporcie.
+✅ **TK566FN odfiltrowane co do grosza.** Plik lipcowy: 564 przejazdy / 3 937,6 km /
+   1 738,32 PLN. W bazie: **451 / 3 064,6 / 1 231,88** — różnica to dokładnie te 113
+   przejazdów i 506,44 PLN. (Rejestracja spoza floty, Euro 4, **0,580 PLN/km** zamiast 0,40,
+   na tym samym koncie 918763, urządzenie `M26-AT97PS-2`. **User: „tym się nie przejmuj"**,
+   więc NIE dopisana do `SKIP_PLATE` — importer pokazuje ją w ostrzeżeniu.)
+✅ Zero duplikatów w obu miesiącach, wrzesień nietknięty.
+✅ **Taryfa e-TOLL stabilna przez kwartał: VII 0,402 · VIII 0,409 · IX 0,407 PLN/km**
+   przy urzędowej 0,41. Teza usera o podniesieniu opłat ostatecznie zamknięta.
+✅ Stawka DE: VII 0,224 · VIII 0,221 · IX 0,182 — wrzesień niżej, bo jako jedyny liczony
+   bez busa i z okna dni z kilometrami.
+
+### Zmiany wobec liczb sprzed importu (kursy NBP z dnia zamiast orientacyjnego 4,28)
+
+- **sierpień e-TOLL: 416 → 412,60 €** (−3,40) — **do podmiany w Total_26, jeśli zaksięgowane**
+- sierpień NegoMetal: 2 109 → 2 109,34 € (+0,34)
+- lipiec RAZEM: 1 731 → 1 731,94 €
+
+### 🚩 Mój błąd: godziny z pliku były o 2 h do przodu
+
+Czytałem eksport NegoMetalu w node przez `XLSX.readFile` z **`raw: true`** — dostaję wtedy
+surowe numery seryjne Excela, a konwersja idzie przez UTC. **Aplikacja czyta z
+`cellDates: true`** i dostaje czas lokalny; to ona ma rację (`OplatyDrogoweAnaliza.jsx:87`).
+Storno: moje `18:12` / `22:33` wobec bazy `16:12` / `20:33`.
+🔑 **Parsując eksport poza aplikacją, ZAWSZE `cellDates: true`.**
+ℹ️ Wrześniowe zderzenie myta z tachografem robiłem na danych z bazy, więc tamten wniosek stoi
+(opłata 18:54, odpoczynek od 18:56).
+
+### Otwarte
+
+1. 🚩 **Portugalia 127 km (11.09) bez ani jednej opłaty** — możliwa brakująca faktura Via Verde.
+2. Andamur: rekoncyliacja rabatu za sierpień i wrzesień.
+3. ℹ️ Niewyjaśnione od 15.10: aplikacja liczy `transakcji.nego = 676` za wrzesień, ja w pliku
+   miałem 690. Kwoty zgadzają się co do grosza, więc na księgowanie nie wpływa.
