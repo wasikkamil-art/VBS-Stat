@@ -5970,3 +5970,85 @@ Storno: moje `18:12` / `22:33` wobec bazy `16:12` / `20:33`.
 2. Andamur: rekoncyliacja rabatu za sierpień i wrzesień.
 3. ℹ️ Niewyjaśnione od 15.10: aplikacja liczy `transakcji.nego = 676` za wrzesień, ja w pliku
    miałem 690. Kwoty zgadzają się co do grosza, więc na księgowanie nie wpływa.
+
+## 2026-10-16 — Domknięcie września: Andamur, Total_26, koszty, konto kierowcy
+
+Dzień bez zmian w kodzie — same dane. Wrzesień jest teraz spięty w pięciu miejscach:
+`frachty`, `fuelTransactions`, `tollTransactions`, `operacyjne`, `costs` + arkusz Total_26.
+
+### Rekoncyliacja Andamuru (sierpień + wrzesień)
+
+ℹ️ **Sierpień był już zrobiony** — 6 z 8 transakcji ma stempel `andamur-netto-2026-09-18`,
+pozostałe dwie to AdBlue, którego cena z pylonu pokrywała się z fakturą. Notatka w pamięci
+„sierpień 0 z 8" była nieaktualna.
+
+**Wrzesień**: faktura `C260039909` (8 pozycji = 8 transakcji w bazie), rabat flotowy
+**593,36 → 556,13 €, czyli −37,23 €**. Suma w bazie = suma `Importe` z faktury **co do grosza**.
+Przy okazji trzy transakcje z `country: "?"` (Porta de Barcelona Sur, 2× Abrea Cuquejo)
+dostały kraj **ES** — to domyka pytanie, gdzie leży „Abrea Cuquejo".
+
+### Total_26 — dwa zapisy przez Sheets API
+
+- **K91 (v5 Paliwo): −2 518,70 → −2 481,46** + notatka komórki z numerem faktury i starą wartością.
+  Przed zapisem asercja, że w komórce faktycznie stoi stara wartość.
+- **K100 „inne" NIE ruszane** — notatka mówi `AdBlue: 43,41 € · 52,06 L` + `Autostrada A2: 47,33 €`,
+  a AdBlue po korekcie też wychodzi 43,41.
+- **Ilość frachtów** (K23/K65/K107/K149): v3 **1** · v1 **5** · v5 **8** · v4 **5**, flota **19**.
+  Przed zapisem kontrola: etykieta w kolumnie B, nagłówek bloku i pustość komórki.
+✅ Rollup floty (wiersze 218–246) sprawdzony pod kątem zepsutego wzorca `=-(...)` — czysty.
+
+### `costs` za wrzesień — nie było ich wcale
+
+🚩 Kolekcja `costs` miała **23 pozycje na 10 847 €** wobec 56 na 28 481 € w sierpniu. Brakowało
+leasingu, wypłat, serwisu, opłat, OCPD, imi, hoteli i „inne" — Rentowność pokazywałaby wrzesień
+z zawyżonym zyskiem o ~17 600 €.
+
+Przeniesione z Total_26 wzorcem sierpniowym (mapowanie offsetów wyprowadzone z sierpnia, gdzie
+obie strony były znane): **+4 pozycje paliwa, potem +30, potem +2** (v4 `imi` i `OCPD`, które
+user dopisał do arkusza w trakcie). Razem **53 → 55 pozycji**, `costs` 1185 → 1221.
+Dedup po kluczu pojazd+kategoria+rodzaj opłaty: ZUS v1 i v3 pominięte (były z importu Excela),
+dopisany tylko ZUS v5 — dokładnie jak w sierpniu.
+
+✅ **KONTROLA KRZYŻOWA: suma per auto = wiersz „suma kosztów" arkusza co do grosza**
+(v1 6 413,38 · v3 6 060,32 · v4 5 925,72 · v5 7 985,24; u v1 grosz różnicy z zaokrąglenia
+formuły E-Toll).
+
+Wynik września: frachty **30 094 €**, koszty **26 384 €**, **+3 710 €**. v3 na minusie
+(−2 560 €) poprawnie — kurs do Płowdiwu ma datę załadunku 31.08, a od 16.09 Siergiej na urlopie.
+
+### `operacyjne` — uzupełnione „Ilość dni"
+
+Zakładając wpisy wrześniowe nie miałem skąd wziąć tej liczby. Jest w Total_26 (offset +38):
+v3 **15** · v1 **17** · v5 **24** · v4 **20**. Zapisane do obu pól `dni` i `iloscDni`.
+
+### Konto kierowcy — Mykola Omelianiuk (v1)
+
+User zgłosił: *„czemu nie mam przypisanego kierowcy, jak go przypisałem i widnieje"*.
+🔑 **Przyczyna: wpis w `driverHistory` miał `email: ""`.** Lewa lista czyta `name` (więc wygląda
+na przypisanego), a `TachografComplianceSection` czyta **`email`** — bo cały czas pracy stoi na
+`driverActivities.driverEmail`. Formularz ma pole e-mail, zostało puste.
+ℹ️ **Dodanie kierowcy ręcznie w panelu pojazdu nie robi tego, co „Przypisz do pojazdu"
+w panelu Użytkowników** — ta druga droga idzie przez `dbAssignDriverToVehicle`, które w transakcji
+wpisuje e-mail, ustawia `assignedDriver` i zamyka poprzednie przypisanie.
+
+Zrobione: dokument `users` z rolą **kierowca** założony z wyprzedzeniem (przy pierwszym logowaniu
+aplikacja znajdzie go po adresie, przeniesie na UID i zachowa rolę — `App.jsx:933`), e-mail
+i `assignedDriver` na v1, zamknięty wpis na v2 (`to: 2026-10-12`).
+
+🚩 **Literówka w domenie.** User założył konto jako `mykola@fleestat.pl` — **domena `fleestat.pl`
+nie istnieje (NXDOMAIN)**, wszyscy inni mają `@fleetstat.pl`. Po usunięciu i założeniu
+`mykola@fleetstat.pl` podmieniłem adres w trzech miejscach (users, driverHistory, assignedDriver).
+ℹ️ Panel Użytkowników ładuje listę jednorazowo (`getDocs`, nie `onSnapshot`) — po zmianie danych
+w tle trzeba odświeżyć stronę, inaczej widać stary stan.
+ℹ️ **v2 TK 130EF (sprzedany) i v6 zostają we flocie bez `fleetLeaveDate`** — decyzja usera:
+„muszą wisieć, ich wyniki są potrzebne do monitoringu". Brak aktywnego kierowcy tam jest POPRAWNY.
+
+### Otwarte
+
+1. Mykola jeszcze się nie logował — po pierwszym logowaniu sprawdzić, czy rola przeszła na UID
+   i czy Custom Claims poszły przez `onRoleChange`.
+2. 🚩 **Portugalia 127 km (11.09) bez ani jednej opłaty.** Fracht był realny — v5 ładował
+   11.09 w Ponte de Lima (PT) i wiózł do Paryża za 2 650 €. Tym bardziej podejrzenie
+   o brakującą fakturę Via Verde.
+3. ℹ️ Sierpniowy v4 ma w `costs` 1 971,03 € paliwa, a karty dają 1 946,03 — równo **25,00 €**
+   różnicy, prawdopodobnie tankowanie gotówkowe doliczone ręcznie. Wrzesień takiej różnicy nie ma.
