@@ -8958,6 +8958,27 @@ function MultiDayActivityView({ vehicle, driverActivities = [], currentUser = nu
     return [...byId.values()];
   }, [driverActivities, fetchedActs, belongsHere]);
 
+  // ── Granica pokrycia tachografem ──
+  // Po ostatnim segmencie DDD zostaje już tylko GPS, a GPS odróżnia wyłącznie „jedzie"
+  // od „stoi" — praca na postoju (załadunek, papiery, tankowanie) jest wtedy niewidoczna
+  // i wpada do odpoczynku. Bez tej informacji wykres wygląda na kompletny, a zaniża pracę:
+  // 16.10.2026 pokazywał 1h05 jazdy i 0h18 pracy, podczas gdy karta w panelu przewoźnika
+  // miała 1h54 jazdy i 1h45 innej pracy — cała różnica siedziała po ostatnim DDD (08:02).
+  // Atlas API nie oddaje stanu karty (sprawdzone 2026-10-16: /drivers, /tacho,
+  // /remainingDriving i kilkanaście innych → 404), więc jedynym źródłem zostaje plik DDD.
+  const pokrycieDdd = useMemo(() => {
+    const koniec = (a) => a?.endTs || a?.startTs || "";
+    let ostatniDdd = "", ostatniGps = "";
+    for (const a of vehicleActivities) {
+      const k = koniec(a);
+      if (!k) continue;
+      if (a.source === "ddd") { if (k > ostatniDdd) ostatniDdd = k; }
+      else if (a.source !== "correction" && k > ostatniGps) ostatniGps = k;
+    }
+    if (!ostatniDdd || !ostatniGps || ostatniGps <= ostatniDdd) return null;
+    return { ostatniDdd, ostatniGps };
+  }, [vehicleActivities]);
+
   // ── Korekty tachografu (source="correction") — adnotacja avail→rest ──
   const corrections = useMemo(
     () => vehicleActivities
@@ -9297,6 +9318,18 @@ function MultiDayActivityView({ vehicle, driverActivities = [], currentUser = nu
             )}
           </div>
         </div>
+
+        {/* Dokąd sięga tachograf — reszta wykresu jest z GPS i zaniża pracę */}
+        {pokrycieDdd && (
+          <div className="mb-3 rounded-xl border p-3 text-[11px] leading-relaxed"
+            style={{ background: "#fffbeb", borderColor: "#fde68a", color: "#92400e" }}>
+            <b>Tachograf sięga do {fmtCorrTs(pokrycieDdd.ostatniDdd)}</b> — dalej, do{" "}
+            {fmtCorrTs(pokrycieDdd.ostatniGps)}, wykres rysujemy wyłącznie z GPS.
+            GPS odróżnia tylko „jedzie" od „stoi", więc <b>praca na postoju</b> — załadunek,
+            papiery, tankowanie — jest w tym fragmencie <b>niewidoczna i liczy się jako odpoczynek</b>.
+            Po wgraniu świeższego pliku DDD obraz się uzupełni.
+          </div>
+        )}
 
         {/* Korekty tachografu — lista adnotacji avail→rest (audyt + cofnięcie) */}
         {corrections.length > 0 && (
