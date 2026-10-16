@@ -6052,3 +6052,52 @@ w tle trzeba odświeżyć stronę, inaczej widać stary stan.
    o brakującą fakturę Via Verde.
 3. ℹ️ Sierpniowy v4 ma w `costs` 1 971,03 € paliwa, a karty dają 1 946,03 — równo **25,00 €**
    różnicy, prawdopodobnie tankowanie gotówkowe doliczone ręcznie. Wrzesień takiej różnicy nie ma.
+
+## 2026-10-16 cd. — Panel Pojazdy: dwie naprawy przed przebudową (commit `48b5821`)
+
+Obie wyszły przy przypinaniu Mykoły, zgłoszone przeze mnie, user kazał naprawić.
+
+### 1. Kierowca mógł być aktywny na dwóch autach naraz
+
+🚩 `dbAssignDriverToVehicle` wykrywało stare przypisanie po polu **`assignedDriver`**. Wpis
+dodany ręcznie w panelu pojazdu tego pola nie ustawia (a przy pustym e-mailu nie ustawi go
+nawet `syncAssignedDriver`), więc stary wpis zostawał otwarty — Mykola wisiał jednocześnie
+na TK 130EF i WGM 0475M. **Teraz stare przypisanie wykrywamy po OTWARTYM WPISIE W HISTORII.**
+
+🔑 Dodatkowo **`updateVehicle` przepuszcza aktywnego kierowcę z e-mailem przez tę samą
+funkcję**, więc zapis z panelu pojazdu robi to samo, co „Przypisz do pojazdu" z panelu
+Użytkowników. Funkcja jest idempotentna — przy już aktywnym wpisie tylko ustawia `assignedDriver`.
+
+🔑 **Zapis z aktywnym kierowcą bez e-maila kończy się ostrzeżeniem**, nie zwykłym
+potwierdzeniem: *„Zapisane, ale kierowca nie ma e-maila — Czas pracy i DDD nie zadziałają"*.
+Bez adresu `TachografComplianceSection` pokazuje „brak aktywnego kierowcy", bo
+`driverActivities` są kluczowane po `driverEmail`.
+
+⚠️ **Czego to NIE załatwia**: jeśli stary wpis na innym aucie nie ma e-maila, nadal się nie
+domknie — dopasowanie idzie po adresie, a zgadywanie tożsamości po imieniu byłoby proszeniem
+się o kłopoty. Takie wpisy nie powinny już powstawać dzięki ostrzeżeniu.
+
+### 2. Lista użytkowników ładowana jednorazowo
+
+`getDocs` → **`onSnapshot`** w `UsersTab`. Wcześniej zmiana roli albo przypisania zrobiona
+gdzie indziej nie pojawiała się bez odświeżenia strony (user zobaczył to dziś na własne oczy —
+stary adres Mykoły wisiał w panelu, choć w bazie już go nie było). Kolekcja ma kilkanaście
+dokumentów, a listener żyje tylko przy otwartej zakładce.
+
+### Zweryfikowane
+
+✅ **Test logiki przypisania — 5 przypadków, wszystkie zielone.** 🔑 Test **wyciąga kod wprost
+z `App.jsx`** (slice po `next = prev.map(`) i buduje funkcję przez `new Function`, zamiast
+przepisywać logikę — dzięki temu nie rozjedzie się z tym, co leci na produkcję.
+Przypadki: regresja z Mykoły (otwarty wpis bez `assignedDriver`), stara ścieżka, cudzy pojazd
+nietknięty, idempotencja, zamknięte wpisy historyczne nietknięte.
+✅ ESLint 0 błędów, build zielony (`index` 1 730,01 kB / gzip 441,00).
+
+❌ **Nie klikane w produkcji** — oba widoki za loginem admina.
+
+### Co dalej z panelem Pojazdy
+
+User: *„zakupujemy nowe auta i jak będę miał zestaw wszystkich umów, dowodów rejestracyjnych,
+wind, to zamieszczę tutaj i będziemy to wdrażać oraz zderzać, co mamy a czego brakuje"*.
+**Temat czeka na dokumenty** — kontekst i inwentarz pól panelu w pamięci
+`project_nowe_auta_panel_pojazdy`.
