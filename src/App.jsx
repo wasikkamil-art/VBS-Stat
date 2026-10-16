@@ -449,9 +449,14 @@ async function dbAssignDriverToVehicle(vehicleId, driverEmail, driverName) {
         const newEntry = { id: Date.now().toString(36), name: driverName || driverEmail, email: driverEmail, phone: "", from: today, to: "" };
         return { ...v, driverHistory: [...updated, newEntry], assignedDriver: driverEmail };
       }
-      if (v.assignedDriver === driverEmail) {
+      // Stare przypisanie wykrywamy po OTWARTYM WPISIE W HISTORII, nie po `assignedDriver`.
+      // Wpis dodany ręcznie w panelu pojazdu nie ustawia `assignedDriver` (a bez e-maila
+      // nie ustawi go nawet sync) — wtedy kierowca zostawał aktywny na dwóch autach naraz.
+      // Tak było z Mykolą: otwarty wpis na TK 130EF i drugi na WGM 0475M (2026-10-16).
+      const otwartyTutaj = (v.driverHistory || []).some(d => !d.to && d.email === driverEmail);
+      if (otwartyTutaj || v.assignedDriver === driverEmail) {
         const hist = (v.driverHistory || []).map(d => !d.to && d.email === driverEmail ? { ...d, to: today } : d);
-        return { ...v, driverHistory: hist, assignedDriver: "" };
+        return { ...v, driverHistory: hist, assignedDriver: v.assignedDriver === driverEmail ? "" : (v.assignedDriver || "") };
       }
       return v;
     });
@@ -2461,8 +2466,18 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     const { id: _id, ...patch } = veh;
     try {
       await dbUpdateVehicleField(veh.id, patch);
+      // Kierowca dopisany ręcznie w panelu pojazdu przechodził inną drogą niż "Przypisz do
+      // pojazdu" z panelu Użytkowników i nie zamykał przypisania na poprzednim aucie.
+      // Przepuszczamy go przez tę samą funkcję — jest idempotentna: gdy wpis już jest
+      // aktywny, tylko ustawia `assignedDriver`.
+      const aktywny = (veh.driverHistory || []).find(d => !d.to);
+      if (aktywny?.email) await dbAssignDriverToVehicle(veh.id, aktywny.email, aktywny.name);
       logAction("update", "vehicles", { id: veh.id, plate: veh.plate });
-      showToast("✅ Zmiany zapisane");
+      // Bez e-maila cały Czas pracy jest ślepy — `driverActivities` są kluczowane po
+      // `driverEmail`, a sekcja Tachograf pokazuje wtedy "brak aktywnego kierowcy".
+      showToast(aktywny && !aktywny.email
+        ? "⚠️ Zapisane, ale kierowca nie ma e-maila — Czas pracy i DDD nie zadziałają"
+        : "✅ Zmiany zapisane");
       setEditVehicleId(null);
     } catch (e) {
       console.error("updateVehicle error", e);
@@ -9828,18 +9843,21 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
   const [expandedUid, setExpandedUid] = useState(null);
   const [subTab, setSubTab]   = useState("biuro"); // "biuro" | "kierowcy"
 
+  // Na żywo, nie jednorazowo: lista ładowana przez `getDocs` pokazywała stan sprzed zmiany
+  // roli czy przypisania zrobionej gdzie indziej, aż ktoś odświeżył stronę (2026-10-16).
+  // Kolekcja ma kilkanaście dokumentów i listener żyje tylko gdy zakładka jest otwarta,
+  // więc koszt odczytów jest pomijalny.
   useEffect(() => {
-    (async () => {
-      try {
-        const snap = await getDocs(collection(db, "users"));
+    const unsub = onSnapshot(
+      collection(db, "users"),
+      (snap) => {
         const list = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
         setUsers(list.sort((a,b) => (a.email||"").localeCompare(b.email||"")));
-      } catch(e) {
-        console.error("Błąd ładowania użytkowników:", e);
-      } finally {
         setLoading(false);
-      }
-    })();
+      },
+      (e) => { console.error("Błąd ładowania użytkowników:", e); setLoading(false); },
+    );
+    return () => unsub();
   }, []);
 
   // Defaulty per rola (muszą być zgodne z DEFAULT_TABS_BY_ROLE w App)
