@@ -6221,3 +6221,73 @@ miesiącami, nienaruszona suma floty i — najważniejsze — **bez przełomu ni
 z loginem `volodymyr.lukashuchuk` w polu `name` zamiast imienia. Po zmianie ranking
 potraktowałby to jako dwie osoby. **User poprawił nazwę** — v5 znów jest jednym wierszem.
 ℹ️ Oba wpisy v5 nadal stykają się datą 15.04; scalenie w jeden zostawione do decyzji.
+
+## 2026-10-20 cd. — Konto Mykoły: rola przeszła, ale migracja zostawiła sierotę (commit `b7aa131`, CF wdrożona)
+
+Punkt 1 z listy otwartych zamknięty. Mykola zalogował się dziś **09:27:13** i cały łańcuch
+zadziałał tak, jak był zaprojektowany.
+
+### Zweryfikowane odczytem z bazy
+
+✅ **Custom Claims `{"role":"kierowca"}`** — `claimsUpdatedAt` 09:27:18, czyli `onRoleChange`
+odpalił **5 sekund po logowaniu**. Potwierdzone też w logach funkcji:
+`✅ Custom Claim ustawiony: pI29QIUAECOgSwYRUupthVh5uM02 → kierowca`.
+✅ Dokument przeniesiony z losowego ID na UID, rola zachowana, `migratedFrom` wpisany.
+✅ Przypisanie czyste: v1 WGM 0475M, otwarty wpis z e-mailem i kartą `1760501202560000`,
+v2 zamknięty 12.10 — tylko jeden otwarty wpis, regresja „dwa auta naraz" się nie powtórzyła.
+✅ 257 segmentów czasu pracy na jego adresie: DDD 127 (16.09–16.10), `ww_csv` 61, `auto_gps` 69.
+
+ℹ️ **26 segmentów bez `vehicleId` to NIE sieroty DDD z września.** Wszystkie mają `type=rest`
+i równo 24 h — to całodobowe dni odpoczynku, przy których żaden pojazd nie bierze udziału.
+Brak `vehicleId` jest tam poprawny, nie ma czego backfillować.
+ℹ️ Plik DDD wgrany dwa razy (08:10 i 08:50), ale **segmenty się nie zdublowały**: wszystkie 127
+wiszą pod późniejszym uploadem, zero duplikatów par (start, typ).
+
+### 🚩 Migracja przy pierwszym logowaniu NIE potrafi posprzątać po sobie
+
+Po logowaniu w `users` zostały **dwa wiersze „Mykola"**. `App.jsx` kopiuje dokument na UID
+i zaraz robi `deleteDoc` starego — ale `firestore.rules:53` daje `delete` **tylko adminowi**,
+a wywołanie siedzi w `try{}catch{}`, więc **padło po cichu**.
+
+🔑 Martwy wiersz jest groźny nie tym, że jest, tylko tym, że **wygląda jak żywy**: zmiana roli
+klikniętej na nim nie zrobiłaby nic, bo `onRoleChange` traktuje ID dokumentu jako UID i leci
+`getUser("EUDQQ9dF…")` → wyjątek. Rola z dokumentu pod losowym ID **nigdy** nie trafiała
+do Custom Claims — każda jej zmiana była cichym no-opem.
+
+### Łatka `onRoleChange` (`b7aa131`, wdrożona — rewizja `onrolechange-00030-koy`)
+
+Przy `auth/user-not-found` funkcja szuka konta **po e-mailu** i domyka migrację za klienta:
+- **dokumentu pod prawdziwym UID NIE nadpisujemy** rolą z sieroty — to on jest źródłem prawdy,
+  inaczej dokument założony z wyprzedzeniem mógłby zdegradować admina. Sierotę tylko sprzątamy.
+- **brak konta Auth = normalny stan** założenia z wyprzedzeniem; nic nie ruszamy, log mówi,
+  że rola pojedzie, gdy konto powstanie.
+- **sierota bez e-maila** — nie zgadujemy tożsamości po imieniu.
+- **kasowanie sieroty prostowane notką w `auditLog`** (`noRealAccount: true`), bo inaczej
+  zostawia ślad nie do odróżnienia od ODEBRANIA roli kierowcy.
+
+✅ **28 testów** (`diagnose_test_onrolechange.mjs`, gitignored) — ciało handlera **wycinane
+wprost z `functions/index.js`** przez `new Function` na atrapach Auth/Firestore, nie
+przepisywane. Przypadki: regresja Mykoły, duplikat przy istniejącym dokumencie na UID,
+próba degradacji admina przez sierotę, założenie z wyprzedzeniem bez konta, ścieżka normalna,
+idempotencja, kasowanie prawdziwego konta, notka w audycie, sierota bez e-maila, zła rola.
+✅ ESLint `functions/index.js`: 0 błędów (8 ostrzeżeń, wszystkie zastane, żadne w nowym kodzie).
+
+### ⚠️ Czego NIE udało się zrobić
+
+**Dwa duplikaty wciąż są w bazie** — klasyfikator auto mode zablokował mi zapis do Firestore
+(`Modify Shared Resources`), więc skryptu kasującego nie odpaliłem:
+1. `users/EUDQQ9dFCnXOAlOBrxUL` — sierota po migracji
+2. `dddFiles/zV21SKgnYoxdkern85FG` — powtórny upload tego samego pliku, 0 segmentów pod spodem
+
+Skrypt z backupem i asercjami stoi gotowy w `diagnose_mykola_cleanup.mjs` (gitignored).
+ℹ️ **Sierota zniknie też sama**, gdy cokolwiek zapisze do tego dokumentu — wdrożona funkcja
+ją wtedy sprzątnie. Wystarczy dotknąć tego wiersza w panelu Użytkowników.
+
+### Do decyzji usera (uprawnienia = jego sprawa, nie ruszam sam)
+
+`firestore.rules` mogłoby pozwolić zalogowanemu usunąć **dokument z jego własnym e-mailem,
+niebędący jego UID-em** — wtedy `deleteDoc` po stronie klienta przestałby padać i sierota
+nie powstawałaby wcale. To zmiana w uprawnieniach, więc czeka na zgodę.
+
+ℹ️ Mykola nadal ma `emailVerified: false` i `allowedTabs` nieustawione — dostaje domyślny
+zestaw zakładek roli `kierowca`.
