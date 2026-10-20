@@ -6102,6 +6102,73 @@ wind, to zamieszczę tutaj i będziemy to wdrażać oraz zderzać, co mamy a cze
 **Temat czeka na dokumenty** — kontekst i inwentarz pól panelu w pamięci
 `project_nowe_auta_panel_pojazdy`.
 
+## 2026-10-16/19 — Czas pracy: skąd rozjazd z panelem przewoźnika (commit `6ac2581`)
+
+User pokazał obok siebie nasz panel i „Kierowca" z widziszwszystko dla WGM 0475M, 16.10:
+
+| | jazda | inna praca |
+|---|---|---|
+| nasz panel | 1h05 | 0h18 |
+| karta w panelu przewoźnika | 1h54 | 1h45 |
+
+### Przyczyna: wykres kończy się tam, gdzie kończy się plik DDD
+
+Ostatni segment DDD Mykoły to **16.10 o 08:02**. Potem w bazie: **dziura 08:02–10:33**
+(ani DDD, ani GPS), a od 10:33 wyłącznie `auto_gps`.
+🔑 **GPS odróżnia tylko „jedzie" od „stoi"** — praca na postoju (załadunek, papiery,
+tankowanie) jest niewidoczna i wpada do odpoczynku. Między wgraniami DDD zawsze
+zaniżamy pracę i zawyżamy odpoczynek. To nie bug, to granica źródła.
+
+### ⛔ Atlas API NIE oddaje stanu karty — sprawdzone, nie powtarzać
+
+Sonda 20 ścieżek na `/atlas/{group}/{user}/…`: `drivers`, `driver`, `driverList`,
+`tachograph`, `tacho`, `tachographs`, `driverActivity`, `driverActivities`, `activity`,
+`activities`, `workTime`, `worktime`, `driverStatus`, `driverCards`, `cards`,
+`remainingDriving`, `ddd`, `dddFiles`, `files` → **wszystkie 404 `routing not found`**.
+Odpowiadają tylko **`devices`, `positionsWithCanDetails`, `history`**.
+W pełnej odpowiedzi CAN zero śladu tachografu (brak `driver`, `tacho`, `card`, numeru
+karty, `remaining`); jedyne trafienie na „break" to `sourceName: "CANBUS BreakS"` przy
+liczniku. Pola CAN: `mileage, voltage, rpm, ignition, fuelUsage, movement, gasPedal,
+canSpeed, gpsSpeed, odometer, gpsDistance, fuelLevelCan, fuelLevelInput, fuelType,
+doors, cruiseControl, eco*, business, roaming`.
+
+### Wdrożone: pasek z granicą pokrycia (`6ac2581`)
+
+Nad listą dni w `MultiDayActivityView` pojawia się informacja, do kiedy sięga tachograf,
+dokąd rysujemy z GPS i co z tego wynika. **Pokazuje się TYLKO gdy ogon po DDD istnieje** —
+po wgraniu świeższego pliku znika sam. Korekty (`source="correction"`) nie udają ogona GPS.
+✅ 7 testów (`diagnose_test_pokrycie.mjs`, gitignored) — test wyciąga memo wprost z App.jsx.
+
+### Raport „Karta drogowa" z ww — sprawdzony, ale niepotrzebny cyklicznie
+
+User wrzucił `report-worktime-2026-10-16-1410.csv` (`object;type;start;end;distance`).
+Przepuszczony przez logikę naszej CF (`WW_TYPE_MAP` + `mapWwPostojToType`) dał
+**jazda 2h05 · praca 1h44** wobec **1h54 · 1h45** z karty — **praca trafia co do minuty**.
+🔑 Heurystyka „postój ≥45 min = odpoczynek" okazała się trafiać lepiej, niż sugerował
+ostrożny komentarz przy niej. Raport wypełnia też dziurę 08:02–10:33 (31,70 km jazdy
+o 09:33) i ma jawny stan „Brak danych" zamiast zaklejania odpoczynkiem.
+
+⛔ **Ale cykliczny raport odpada.** Planer ww ma tylko okresy ZAMKNIĘTE (ostatni dzień /
+tydzień / 2 tygodnie / miesiąc / ostatnie dni) — **nie ma „dzisiaj"**, więc trzy raporty
+dziennie dałyby trzy razy to samo wczoraj. A przy codziennym porannym DDD raport i tak
+jest zbędny: `preferDddSegments` odrzuca `ww_csv` wszędzie tam, gdzie DDD jest, i obejmuje
+dokładnie ten sam zamknięty dzień. **Decyzja usera: codzienne DDD zamiast cyklicznego
+raportu**, raport ww zostaje narzędziem doraźnym.
+ℹ️ Ponowny import jest bezpieczny — CF kasuje z zakresu `auto_gps` i `ww_csv`, a `ddd`
+i `correction` zostawia nietknięte.
+
+### Co naprawdę rozwiązałoby problem
+
+**Zdalne pobieranie tachografu.** Widziszwszystko pokazuje stan karty na żywo, więc ich
+urządzenia czytają tacho zdalnie. Do zapytania przy najbliższym kontakcie, razem z pytaniem
+o API. Mamy już połowę infrastruktury: `imports@inbox.fleetstat.pl`, CF i `readesm-js`.
+
+### Zweryfikowane
+
+✅ Sonda Atlasa na żywo, symulacja raportu ww przez logikę CF, 7 testów paska.
+✅ ESLint 0 błędów, build zielony.
+❌ **Nie klikane w produkcji** — widok za loginem admina.
+
 ## 2026-10-19/20 — Wrzesień zamknięty, ranking przypisany do właściwego kierowcy (commit `4ce0d20`)
 
 ### Wrzesień: potwierdzone zamknięcie
