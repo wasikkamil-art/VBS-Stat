@@ -49,8 +49,30 @@ service cloud.firestore {
         (request.auth.uid == userId && request.resource.data.role == resource.data.role)
       );
 
-      // Tylko admin może usuwać użytkowników
-      allow delete: if isAdmin();
+      // Admin może usuwać użytkowników.
+      //
+      // Poza adminem zalogowany może usunąć WYŁĄCZNIE sierotę po sobie: dokument
+      // ze swoim e-mailem, stojący pod ID, które NIE jest jego UID-em. Taki duplikat
+      // powstaje, gdy konto zakładamy z wyprzedzeniem pod losowym ID — `App.jsx`
+      // kopiuje wtedy dokument na `users/{uid}`, ale starego skasować nie mógł, bo
+      // `delete` było zarezerwowane dla admina. Kasowanie siedzi po stronie klienta
+      // w try{}catch{}, więc padało po cichu i zostawiało w panelu Użytkowników
+      // martwy wiersz wyglądający jak żywy. Diagnoza: SESJA-LOG 2026-10-20.
+      //
+      // Czego tą ścieżką NIE da się zrobić:
+      //  - skasować własnego dokumentu (`userId != request.auth.uid`),
+      //  - skasować cudzego (zgodność e-maila z tokenem; e-mail w tokenie pochodzi
+      //    z Auth, klient go nie podrobi),
+      //  - zostać bez żadnego dokumentu — wymagamy, by dokument pod własnym UID-em
+      //    już istniał, więc usuwa się tylko NADMIAROWY wiersz.
+      allow delete: if isAdmin() || (
+        isAuth()
+        && userId != request.auth.uid
+        && resource.data.email is string
+        && request.auth.token.email is string
+        && resource.data.email.lower() == request.auth.token.email.lower()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+      );
     }
 
     // ═══════════════════════════════════════════════════════════════

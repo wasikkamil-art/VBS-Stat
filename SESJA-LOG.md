@@ -6291,3 +6291,24 @@ nie powstawałaby wcale. To zmiana w uprawnieniach, więc czeka na zgodę.
 
 ℹ️ Mykola nadal ma `emailVerified: false` i `allowedTabs` nieustawione — dostaje domyślny
 zestaw zakładek roli `kierowca`.
+
+### `firestore.rules` — zalogowany może sprzątnąć sierotę po sobie (decyzja usera, wdrożone)
+
+`allow delete` w `/users/{userId}` przestało być wyłącznie adminowe. Poza adminem zalogowany
+może usunąć **tylko dokument ze swoim e-mailem, stojący pod ID innym niż jego UID** — czyli
+dokładnie nadmiarowy wiersz po migracji. Dzięki temu `deleteDoc` po stronie klienta przestaje
+padać i sierota **nie powstaje wcale** przy następnym koncie zakładanym z wyprzedzeniem.
+
+Trzy ograniczniki w regule:
+- `userId != request.auth.uid` — nie skasujesz własnego dokumentu
+- zgodność `resource.data.email` z `request.auth.token.email` (po `.lower()`, z kontrolą
+  `is string`) — nie skasujesz cudzego; e-mail w tokenie pochodzi z Auth, klient go nie podrobi
+- `exists(users/{request.auth.uid})` — **nie zostaniesz bez żadnego dokumentu**; usuwa się
+  wyłącznie wiersz NADMIAROWY
+
+✅ `firebase deploy --only firestore:rules` — kompilacja czysta, reguły wypuszczone.
+❌ **Reguła NIE została odpalona przeciw emulatorowi** — na tej maszynie nie ma Javy, więc
+`@firebase/rules-unit-testing` nie ma na czym stanąć. Poprawność jest wyrozumowana z treści
+reguły, nie zmierzona. Weryfikacja end-to-end wymagałaby zalogowania się jako kierowca.
+⚠️ **Mykole to nie pomoże wstecz** — jego migracja wykonała się przed zmianą reguł, a klient
+próbuje kasować tylko w trakcie migracji. Jego sierota wciąż czeka na ręczne usunięcie.
