@@ -40,14 +40,38 @@ export function zakresRozliczony(costs, rok) {
   return { mFrom: mFrom || 0, mTo };
 }
 
-// Kierowca = pojazd (w 2026 nikt nie zmieniał auta). Bierzemy aktywny wpis
-// z driverHistory, a gdy go brak — ostatni zamknięty; w ostateczności rejestrację.
+// Nazwa zastępcza, gdy w danym miesiącu żaden wpis historii nie pokrywa auta.
 function kierowcaPojazdu(v) {
   const hist = Array.isArray(v.driverHistory) ? v.driverHistory : [];
   const aktywny = hist.find(d => d && !d.to);
   const ostatni = hist.length ? hist[hist.length - 1] : null;
   const nazwa = (aktywny?.name || ostatni?.name || "").trim();
   return ladnaNazwa(nazwa) || v.plate || v.id;
+}
+
+// Kierowca MIESIĄCA — ten, który miał auto przez WIĘKSZOŚĆ DNI tego miesiąca.
+//
+// Wcześniej ranking brał aktywny wpis z driverHistory i podpisywał nim cały okres,
+// z założeniem „w 2026 nikt nie zmieniał auta". 2026-10-06 przestało być prawdziwe:
+// WGM 0475M zdał Volodymyr Iwansky, 12.10 podjął Mykola Omelianiuk. Bez tej funkcji
+// ranking za październik przypisałby Mykoli sześć dni cudzej jazdy, a ranking roczny —
+// dziewięć miesięcy cudzych wyników. Po to są daty zdania i podjęcia auta.
+//
+// Dni bez żadnego kierowcy (przerwa między wpisami) nie liczą się do większości.
+function kierowcaMiesiaca(v, rok, mo) {
+  const hist = (Array.isArray(v.driverHistory) ? v.driverHistory : []).filter(d => d && d.name);
+  if (!hist.length) return null;
+  const ileDni = new Date(rok, mo, 0).getDate();
+  const licznik = new Map();
+  for (let d = 1; d <= ileDni; d++) {
+    const iso = `${rok}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const kto = hist.find(x => iso >= (x.from || "0000-01-01") && iso <= (x.to || "9999-12-31"));
+    if (!kto) continue;
+    const nazwa = ladnaNazwa(String(kto.name).trim());
+    licznik.set(nazwa, (licznik.get(nazwa) || 0) + 1);
+  }
+  if (!licznik.size) return null;
+  return [...licznik.entries()].sort((a, b) => b[1] - a[1])[0][0];
 }
 
 // driverHistory bywa zasilana loginem zamiast imieniem („volodymyr.lukashuchuk"),
@@ -120,7 +144,30 @@ export function buildRankingi({ frachty = [], costs = [], operacyjne = [], vehic
   // z jednego miesiąca i zaniżał wiersz FLOTA w każdej tabeli.
   const czynny = p => { const b = p.m[DO]; return b.fr > 0 || b.km > 0 || b.dni > 0; };
   const wszyscy = Object.values(P);
-  const ZAWODNICY = wszyscy.filter(czynny);
+
+  // Auto, które w okresie zmieniło kierowcę, rozbijamy na osobnych zawodników —
+  // każdy dostaje TYLKO swoje miesiące, pozostałe ma wyzerowane. Inaczej dziewięć
+  // miesięcy Iwańskiego wpadłoby do wiersza podpisanego Mykolą. Gdy kierowca się nie
+  // zmieniał (zwykły przypadek), lista wychodzi identyczna jak wcześniej — ten sam
+  // `vid`, ta sama nazwa, zero zmian w UI.
+  const pojazdyWg = Object.fromEntries((vehicles || []).map(v => [v.id, v]));
+  const rozbij = (p) => {
+    const v = pojazdyWg[p.vid];
+    if (!v) return [p];
+    const wgMc = {};
+    for (const mo of MONTHS) wgMc[mo] = kierowcaMiesiaca(v, rok, mo) || p.name;
+    const nazwy = [...new Set(MONTHS.map(mo => wgMc[mo]))];
+    if (nazwy.length <= 1) return [{ ...p, name: nazwy[0] || p.name, short: skrot(nazwy[0] || p.name) }];
+    return nazwy.map((nazwa, i) => {
+      const m = {};
+      for (const mo of MONTHS) {
+        m[mo] = wgMc[mo] === nazwa ? p.m[mo] : { fr: 0, obrot: 0, koszt: 0, dni: 0, km: 0, litry: 0 };
+      }
+      return { ...p, vid: `${p.vid}#${i}`, name: nazwa, short: skrot(nazwa),
+        col: PALETA[(Object.keys(pojazdyWg).indexOf(p.vid) + i * 3) % PALETA.length], m };
+    });
+  };
+  const ZAWODNICY = wszyscy.filter(czynny).flatMap(rozbij);
   const pominieci = wszyscy
     .filter(p => !czynny(p) && MONTHS.some(mo => p.m[mo].fr > 0 || p.m[mo].km > 0 || p.m[mo].dni > 0))
     .map(p => ({ vid: p.vid, plate: p.plate, name: p.name }));
