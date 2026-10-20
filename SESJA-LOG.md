@@ -6101,3 +6101,56 @@ User: *„zakupujemy nowe auta i jak będę miał zestaw wszystkich umów, dowod
 wind, to zamieszczę tutaj i będziemy to wdrażać oraz zderzać, co mamy a czego brakuje"*.
 **Temat czeka na dokumenty** — kontekst i inwentarz pól panelu w pamięci
 `project_nowe_auta_panel_pojazdy`.
+
+## 2026-10-19/20 — Wrzesień zamknięty, ranking przypisany do właściwego kierowcy (commit `4ce0d20`)
+
+### Wrzesień: potwierdzone zamknięcie
+
+Kontrola w ośmiu punktach, wszystkie zielone: frachty **19 szt / 30 094 €**, koszty
+**55 pozycji / 26 395 €** (komplet 13 kategorii), `operacyjne` 4/4 z kompletem pól,
+paliwo 94 tx z czterech kart po rekoncyliacji Andamuru, myto 1 169 tx z podziałem
+solówki/busy, `kmFloty` 32 175 km. Sumy kosztów = wiersz „suma kosztów" w Total_26
+co do grosza. **Lipiec, sierpień i wrzesień zamknięte komplenie.**
+
+Wynik września: **+3 710 €** (v5 +3 875 · v1 +1 637 · v4 +758 · v3 −2 560).
+v3 na minusie POPRAWNIE — kurs do Płowdiwu za 6 000 € ma datę załadunku 31.08, więc
+wartość wziął sierpień, a wrzesień dostał same kilometry; do tego urlop od 16.09.
+
+### 🚩 Ranking przypisywał wyniki aktualnemu kierowcy, nie temu z okresu
+
+Pokazałem userowi P&L z v1 podpisanym „Mykola" — a we wrześniu v1 prowadził **Volodymyr
+Iwansky**. User: *„nie możemy tak pokazywać, po to mamy zdanie i podjęcie auta, trzeba
+tego pilnować"*. Sprawdzenie pokazało, że **aplikacja robi dokładnie ten sam błąd**.
+
+W `src/utils/rankingKierowcow.js` stało wprost: *„Kierowca = pojazd (w 2026 nikt nie
+zmieniał auta)"*. **2026-10-06 przestało być prawdziwe** — WGM 0475M zdał Iwansky,
+12.10 podjął Mykola. Ranking brał aktywny wpis z `driverHistory` i podpisywał nim CAŁY
+okres, więc ranking 1–9 pokazywał dorobek Iwańskiego pod nazwiskiem Mykoły.
+
+🔑 **Wybrany wariant A (decyzja usera): kierowca miesiąca = WIĘKSZOŚĆ DNI.**
+`kierowcaMiesiaca(v, rok, mo)` liczy dni z okien `from..to`; dni bez kierowcy nie głosują.
+Auto, które w okresie zmieniło ręce, **rozbija się na osobnych zawodników** — każdy
+dostaje tylko swoje miesiące, reszta wyzerowana. Bez przełomu wynik jest identyczny
+jak wcześniej: ten sam `vid`, ta sama nazwa, zero zmian w UI.
+
+⚠️ **Cena wariantu A**: miesiąc idzie w całości do kierowcy z większością dni.
+Październik v1 trafi do Mykoły **razem z sześcioma dniami Iwańskiego**. Podział
+proporcjonalny odrzucony świadomie — frachtu nie da się pociąć datą.
+
+**Na produkcji**: zakres 1–9 pokazuje teraz v1 jako **Volodymyr Iwansky** zamiast Mykoły.
+Po domknięciu października v1 rozpadnie się na Iwansky 73 801 € + Mykola 3 203 €,
+suma floty bez zmian.
+
+### Zweryfikowane
+
+✅ **7 testów** (`diagnose_test_ranking.mjs`, gitignored): rozbicie, brak przecieku między
+miesiącami, nienaruszona suma floty i — najważniejsze — **bez przełomu nic się nie zmienia**.
+✅ Przebieg na prawdziwych danych dla obu zakresów. Build zielony, ESLint 0 błędów.
+❌ Nie oglądane w aplikacji — zakładka Ranking za loginem.
+
+### Posprzątane przy okazji
+
+🚩 **v5 miał sztuczny przełom w kwietniu**: wpis zamknięty 15.04 i od razu otwarty nowy,
+z loginem `volodymyr.lukashuchuk` w polu `name` zamiast imienia. Po zmianie ranking
+potraktowałby to jako dwie osoby. **User poprawił nazwę** — v5 znów jest jednym wierszem.
+ℹ️ Oba wpisy v5 nadal stykają się datą 15.04; scalenie w jeden zostawione do decyzji.
