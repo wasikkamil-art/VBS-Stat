@@ -46,9 +46,12 @@ exports.onRoleChange = onDocumentWritten(
     const afterRole = after?.role || null;
 
     // Audit log: każda zmiana roli zapisana (kto/kiedy/co). Pominę jeśli rola się nie zmieniła.
+    // `auditRef` trzymamy, bo przy sprzątaniu duplikatu dopiszemy do tego wpisu notkę —
+    // inaczej usunięcie sieroty zostawia w logu ślad nie do odróżnienia od ODEBRANIA roli.
+    let auditRef = null;
     if (beforeRole !== afterRole) {
       try {
-        await getFirestore().collection("auditLog").add({
+        auditRef = await getFirestore().collection("auditLog").add({
           action: "role_change",
           ts: new Date().toISOString(),
           targetUid: uid,
@@ -68,7 +71,27 @@ exports.onRoleChange = onDocumentWritten(
         await getAuth().setCustomUserClaims(uid, { role: null });
         console.log(`Claims usunięte dla ${uid}`);
       } catch (e) {
-        console.error(`Błąd usuwania claims dla ${uid}:`, e);
+        // Skasowany dokument mógł stać pod LOSOWYM ID (sierota po założeniu konta
+        // z wyprzedzeniem) — wtedy nie ma żadnego konta Auth, któremu odebrać
+        // uprawnienia, i to nie jest błąd. Bez tego rozróżnienia sprzątanie
+        // duplikatu zostawiało w logach `console.error`.
+        if (e.code === "auth/user-not-found") {
+          console.log(`Usunięto users/${uid} — to nie jest UID żadnego konta, brak claims do odebrania.`);
+          // Prostujemy wpis w audycie: to nie było odebranie roli, tylko sprzątnięcie
+          // dokumentu, który nigdy nie wskazywał na konto.
+          if (auditRef) {
+            try {
+              await auditRef.update({
+                note: "dokument nie był UID-em żadnego konta — sprzątnięcie duplikatu, nie odebranie roli",
+                noRealAccount: true,
+              });
+            } catch (err) {
+              console.warn(`Nie udało się dopisać notki do audytu ${auditRef.id}:`, err.message);
+            }
+          }
+        } else {
+          console.error(`Błąd usuwania claims dla ${uid}:`, e);
+        }
       }
       return;
     }
@@ -81,9 +104,56 @@ exports.onRoleChange = onDocumentWritten(
       return;
     }
 
+    // Dokument `users` bywa zakładany Z WYPRZEDZENIEM pod LOSOWYM ID — admin tworzy
+    // kierowcę, zanim ten pierwszy raz się zaloguje. Wtedy ID dokumentu NIE jest
+    // UID-em, `getUser` leci wyjątkiem i przed tą obsługą rola takiego dokumentu
+    // NIGDY nie trafiała do Custom Claims: każda jej zmiana była cichym no-opem.
+    // Drugi problem: po pierwszym logowaniu klient kopiuje dokument na UID, ale nie
+    // potrafi skasować starego (`firestore.rules` daje `delete` tylko adminowi, a
+    // wywołanie siedzi w try{}catch{}), więc zostaje duplikat wyglądający jak żywy
+    // wiersz w panelu Użytkowników. Diagnoza: SESJA-LOG 2026-10-20 (konto Mykoły).
+    let userRecord;
+    try {
+      userRecord = await getAuth().getUser(uid);
+    } catch (e) {
+      if (e.code !== "auth/user-not-found") {
+        console.error(`Błąd odczytu konta ${uid}:`, e);
+        return;
+      }
+      const email = after.email;
+      if (!email) {
+        console.warn(`users/${uid} nie jest UID-em i nie ma e-maila — nie wiadomo, komu nadać rolę.`);
+        return;
+      }
+      let realUser;
+      try {
+        realUser = await getAuth().getUserByEmail(email);
+      } catch {
+        // Normalny stan dokumentu założonego z wyprzedzeniem: konta Auth jeszcze nie ma.
+        console.log(`users/${uid} (${email}) czeka na konto Auth — rola pojedzie, gdy ono powstanie.`);
+        return;
+      }
+      // Konto istnieje, tylko pod innym UID-em — domykamy migrację za klienta.
+      const realRef = getFirestore().doc(`users/${realUser.uid}`);
+      try {
+        if ((await realRef.get()).exists) {
+          // Dokument na UID jest źródłem prawdy. Roli z sieroty NIE przepisujemy —
+          // nadpisalibyśmy nią rolę ustawioną pod prawdziwym UID-em. Tu tylko sprzątamy.
+          await getFirestore().doc(`users/${uid}`).delete();
+          console.log(`🧹 Usunięto duplikat users/${uid} — źródłem prawdy jest users/${realUser.uid}.`);
+        } else {
+          await realRef.set({ ...after, email, migratedFrom: uid, migratedAt: new Date().toISOString() });
+          await getFirestore().doc(`users/${uid}`).delete();
+          console.log(`🔀 users/${uid} → users/${realUser.uid} (rola ${newRole}); claim ustawi trigger tego zapisu.`);
+        }
+      } catch (err) {
+        console.error(`Błąd domykania migracji users/${uid} → ${realUser.uid}:`, err);
+      }
+      return;
+    }
+
     // Sprawdź czy claim się zmienił (unikaj pętli)
     try {
-      const userRecord = await getAuth().getUser(uid);
       const currentClaim = userRecord.customClaims?.role;
 
       if (currentClaim === newRole) {
