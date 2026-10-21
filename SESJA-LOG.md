@@ -6371,3 +6371,52 @@ choć dokument `users` nie ma pola `name`.
 
 🔑 **Punkt 1 z listy otwartych zamknięty end-to-end**: rola na UID, Custom Claims, przypisanie
 do auta, dane czasu pracy i realny ekran kierowcy — wszystko potwierdzone.
+
+## 2026-10-21 cd. — v5: scalenie sztucznego podziału w `driverHistory`
+
+Punkt 5 z listy otwartych. v5 WGM 0507M miał **dwa wpisy tego samego człowieka**,
+rozcięte 2026-04-15 bez żadnej przerwy:
+
+```
+[0] Volodymyr Lukashuchuk | 2025-01-08 → 2026-04-15 | tel +380 98 071 5449 | bez karty
+[1] Volodymyr Lukashuchuk | 2026-04-15 → otwarty    | karta UAD000000BFVJ000 | bez telefonu
+```
+
+Ten sam e-mail, ta sama osoba — podział powstał najpewniej przy dopisywaniu numeru karty
+tachografu: zamiast uzupełnić wiersz, ktoś zamknął stary i otworzył nowy.
+
+### Czemu to warto było sprzątnąć, choć nic nie psuło
+
+ℹ️ **Ranking był bezpieczny**, bo grupuje po NAZWISKU, nie po numerze wpisu
+(`rankingKierowcow.js`, `nazwy.length <= 1 → jeden wiersz`). Dlatego po poprawieniu
+nazwy przez usera v5 wrócił do jednego wiersza.
+
+Realne wady stanu sprzed scalenia:
+1. **dane rozbite na pół** — telefon w zamkniętym wpisie, karta w otwartym; widoki
+   patrzące na aktywnego kierowcę widziały kartę, ale nie telefon
+2. **15.04 należał do obu wpisów naraz** (`to` == `from`); tu bez skutku, bo nazwa ta sama,
+   ale przy różnych nazwach zrobiłby się cichy rozjazd
+3. historia **kłamała, że auto zmieniło ręce**
+
+### Jak zrobione
+
+Jeden wpis `2025-01-08 → otwarty`, z kartą **i** telefonem, id wpisu otwartego (`mo04wzyz`;
+id jest używane tylko lokalnie w panelu edycji, nic go nie trzyma na stałe).
+
+Zapis **transakcją z asercją długości tablicy** `fleetv2_vehicles` (ochrona przed shrinkiem,
+incydent 2026-05-06) + asercje przed scaleniem: zgodne e-maile, zgodne nazwy, styk dokładnie
+na 2026-04-15, drugi wpis otwarty, a po scaleniu — karta i telefon nie zgubione.
+
+### ✅ Zweryfikowane
+
+- odczyt po zapisie: **6 pojazdów bez zmiany**, v5 ma **jeden wpis** z kartą i telefonem,
+  **żaden inny pojazd nie tknięty** (porównanie JSON z backupem sprzed zapisu)
+- **ranking przed vs po — bajt w bajt identyczny** na prawdziwych danych
+  (750 frachtów, 1221 kosztów, 97 operacyjnych, okres 1–9). 6 rankingów po 4 kierowców,
+  v5 jako **jeden wiersz** „Volodymyr Lukashuchuk", bez rozbicia na `v5#0`/`v5#1`
+
+🚩 **Pierwsze podejście do tej weryfikacji było bezwartościowe**: zgadłem nazwy kolekcji
+(`fleetv2_frachty`, `fleetv2_costs`) i dostałem **0 dokumentów**, więc „ranking identyczny"
+porównywało dwie pustki. Frachty i koszty mieszkają we własnych kolekcjach od 24–25.09 —
+czytać **wyłącznie** przez `src/utils/daneRaportow.mjs`, który rzuca wyjątkiem zamiast
+zwrócić pustą listę. Backup tablicy pojazdów sprzed zapisu leży poza repo.
