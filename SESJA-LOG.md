@@ -6483,3 +6483,92 @@ po lipcowym seedowaniu modułu Paliwo. Czerwiec nie jest wśród miesięcy zamkn
 jeśli gdziekolwiek liczymy jego spalanie albo €/L, ta pozycja je zaburza.
 **Nie ruszane.** Zaproponowałem przeczesanie bazy pod kątem innych seedów — objęte tą samą
 decyzją „nie szukamy na siłę", więc nie wracam z tym sam.**
+
+---
+
+## 2026-10-21 — Case study z danych floty (szkic odłożony)
+
+### Punkt wyjścia: wątek z X o książkach AI
+
+User pokazał wątek @TommiPedruzzi o zarabianiu ~10 000 $/mc na książkach generowanych AI
+na Amazon KDP i spytał, czy to ma rację bytu. **Odradziłem** — nie dlatego, że model nie
+istnieje, ale dlatego, że ten konkretny wątek jest reklamą masterclassu (publishingos.io),
+a nie instrukcją:
+
+- matematyka naciągnięta („1 egz./dzień × 4 rynki" — dla angielskiej książki pod
+  pseudonimem rynki .de/.fr/.it/.es sprzedają ~zero),
+- myli promocję Kindle (0,99 $) z royalty z paperbacka (7 $) — dwa różne produkty,
+- **„15–25 recenzji przez niszowe grupy FB" to manipulacja recenzjami i kara to zamknięcie
+  konta KDP z zablokowanymi należnościami** — czyli typowy koniec tego schematu,
+- BSR < 100 000 to rząd 1 egz. na 1–3 dni, nie „sprzedaje się",
+- dowody społeczne („barman 31 373 $") nieweryfikowalne; 700 000 $ w 11 mc da się zrobić
+  sprzedażą kursu, nie książek.
+
+Jedyny element wart ukradnięcia: **czytanie recenzji 3-gwiazdkowych pod kątem luk** —
+to działa jako research, też dla SaaS-u.
+
+### Decyzja usera: zamiast książki — materiał z własnych danych
+
+Zaproponowałem kolejność formatów pod sprzedaż FleetStata: **case study (1–2 str.) >
+checklista/kalkulator > seria postów LinkedIn > e-book > książka**. Książka na KDP
+odrzucona. User wybrał case study, z zastrzeżeniem: *„zapisz to na kiedyś jak uznam że
+będzie to potrzebne po ukończeniu FS-a"*.
+
+### Co powstało
+
+- **`materialy-marketingowe/CASE-STUDY-flota-12mc.md`** — 7 wniosków z okna
+  1.10.2025–30.09.2026: 338 frachtów, 416 159 € obrotu, 373 111 km, marża 16,8%.
+- **`materialy-marketingowe/CASE-STUDY-dane-zrodlowe.md`** — surowy dump wszystkich tabel.
+- **`scripts/case-study-dane.mjs`** — generator, whitelistowany w `.gitignore`, odtwarza
+  każdą liczbę dla dowolnego okna zamkniętych miesięcy (`node scripts/case-study-dane.mjs
+  2026-01 2026-12`).
+
+🔑 **Dwa najmocniejsze wnioski:**
+
+1. **v1 vs v5 — ta sama stawka, trzykrotnie różna marża.** 1,179 vs 1,180 €/km, leasing
+   co do euro ten sam (17 461 €), serwis i ZUS identyczne. Różnica jedna: v1 przejechał
+   **20 068 km mniej**. Marża 7,5% vs 23,1%. Próg opłacalności v1 = 70 077 km/rok,
+   przejechał 79 694 — **801 km/mc nad progiem**. v5 miał bufor 2 810 km/mc.
+   v6 to ten sam wniosek bez znieczulenia: zero frachtów, 3 729 € kosztów, 3 729 € straty.
+2. **Karta paliwowa to szum, kraj to pieniądz.** Andamur wygląda o 0,33 €/L taniej od
+   Eurowag — ale to geografia, nie karta. **Ta sama karta w tym samym kraju: delta
+   0,004–0,059 €/L. Rozpiętość MIĘDZY krajami: 0,51 €/L** (ES 1,345 ↔ IT 1,855).
+   Jedna trzecia wolumenu (8 528 L) poszła we Francji, w najdroższym pasie.
+   1 000 L przesunięte z pasa drogiego do taniego = **361 €**.
+
+Dalej: marża miesięczna od −5,0% do +33,5% (roczne 16,8% kłamie); Niemcy 160 przejazdów =
+53,5% myta (21,20 €/przejazd vs 0,67 € w PL); mandaty 4 653 € w 4 miesiącach, potem
+**osiem miesięcy zera**; karta kierowcy pracuje 55,3% dni, 6,3 h jazdy/dzień = 70% limitu.
+
+### ⚠️ Co jest w pliku świadomie oznaczone jako niepewne
+
+Dopisałem sekcje **„Czego te dane NIE mówią"** i **„Przed publikacją"**, bo materiał
+mógłby inaczej pójść na zewnątrz z liczbami, których nie da się obronić:
+
+- **puste przebiegi 8,2%** — metoda niedomknięta (km frachtowe z routingu vs licznikowe
+  z raportu; dwa miesiące wychodzą ujemne). Sygnał, nie kwota.
+- **mandaty → zero** — fakt potwierdzony, **przyczyna nie**. Korelacja z monitoringiem
+  jest, ale zmienił się też skład kierowców i struktura tras.
+- **243 nazwy klientów nienormalizowane** („Crafter" / „Crafter Zawody" / „CRAFTER ZAWODY"
+  to prawdopodobnie jeden podmiot), więc koncentracja TOP3 = 6,6% nie odpowiada na pytanie
+  o uzależnienie od klienta.
+- **wypłaty jako koszt stały** w progu opłacalności — tak się zachowują empirycznie
+  (v1 zrobił 20 tys. km mniej, wypłatę miał niższą o 6%), ale przy rozliczeniu
+  kilometrowym próg wyszedłby inny.
+- blokery publikacyjne do decyzji usera: ujawnianie stawek/marż czytanych przez
+  zleceniodawców, rejestracje, **nazwiska kierowców w sekcji 8 (RODO — raczej
+  anonimizować)**, nazwy klientów.
+
+### Poprawione w trakcie
+
+Przy weryfikacji tabel względem dumpu znalazłem u siebie 5 błędów i naniosłem je przed
+commitem: km v1 (wklejony obrót zamiast km), liczba krajów w wierszu „pozostałe" myta
+(7→6 krajów, 368→362 przejazdy), 9,6 tys. € opisane jako roczne gdy dotyczy 9 miesięcy,
+„cztery mandaty" przy pięciu pozycjach, oraz „243 różnych zleceniodawców" → „243 nazwy
+w bazie" (bo nazwy nie są scalone).
+
+### Stan
+
+Commit `74268f5` **lokalnie — `git push` zablokowany** przez klasyfikator auto mode
+(Out-of-Place Publication). Do wypchnięcia ręcznie przez usera.
+Pamięć: `project_case_study_flota.md` + wpis w `MEMORY.md` z adnotacją „nie wracać samemu".
