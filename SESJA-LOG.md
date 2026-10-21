@@ -6420,3 +6420,66 @@ na 2026-04-15, drugi wpis otwarty, a po scaleniu — karta i telefon nie zgubion
 porównywało dwie pustki. Frachty i koszty mieszkają we własnych kolekcjach od 24–25.09 —
 czytać **wyłącznie** przez `src/utils/daneRaportow.mjs`, który rzuca wyjątkiem zamiast
 zwrócić pustą listę. Backup tablicy pojazdów sprzed zapisu leży poza repo.
+
+## 2026-10-21 cd.2 — Portugalia: nie zgubiona faktura, tylko ślepa plama (punkt doprecyzowany)
+
+Punkt 2 z listy otwartych: „Portugalia 127 km (11.09, v5) bez ani jednej opłaty — możliwa
+brakująca faktura Via Verde". Po sprawdzeniu **hipoteza o zgubionej fakturze jest za mocna**,
+ale problem jest szerszy, niż wyglądał.
+
+### Co to był za fracht
+
+`qmviysgk`, v5: załadunek **11.09 u Carpintaria Filipe Afonso, Ponte de Lima (PT 4990-530)**,
+rozładunek 15.09 w Paryżu — **trzy adresy tego samego dnia** (rue Maronniers 08:00,
+rue Bonaparte 10:00, Avenue Georges Mandel 12:00). Zleceniodawca Desfecho Atempado /
+ASAP Express, zlecenie 8231, „minitir", **2 650 €**.
+
+### 🚩 Moja nadinterpretacja — skorygowana po pytaniu usera
+
+Zgłosiłem jako podejrzane, że v5 nie ma **żadnej** opłaty w dniach 10–13.09, mimo ~1 500 km
+Hiszpanii. User dopytał, czy to nie była po prostu pauza. Sprawdzenie:
+
+| dzień | km | tachograf | myto |
+|---|---|---|---|
+| 10.09 | ES 617 | jazda | zero |
+| 11.09 | ES 400 + **PT 127** | jazda | zero |
+| 12.09 | — | **odpoczynek** | — (auto stoi) |
+| 13.09 | ES 498 | jazda | zero |
+| 14.09 | ES 394 + FR 345 | jazda | 7 tx / 57,66 € |
+
+🔑 **Pauza była realna (12.09, sobota) i tłumaczy swój dzień.** A zero opłat w Hiszpanii
+**to norma, nie luka** — tamtejsze autostrady są w większości bezpłatne od 2021 i widać to
+w całym miesiącu: v5 ma w ES **12,65 € za wrzesień**, wyłącznie VIA-T przy granicy 14.09.
+Ten sam wzorzec: 19.09 — 65 km w NL bez opłat, 26 i 28.09 — 2 i 9 km w PL bez opłat.
+**Zanim uznasz brak opłat za lukę, zderz go z km i tachografem.**
+
+### Co zostaje naprawdę
+
+**Zero transakcji z `country: "PT"` w 2 584 transakcjach z trzech miesięcy**, a w Portugalii
+byliśmy co najmniej cztery dni: v5 11.09 (127 km) oraz **v3 w październiku — 09.10: 54 km,
+11.10: 146 km, 14.10: 229 km**. To nie jest incydent jednego frachtu.
+
+### ⛔ Temat zamknięty decyzją usera — nie drążymy
+
+Najpierw padło polecenie, żeby sprawdzić Portugalię przy imporcie października. Po chwili
+user je cofnął: **„nie mam myta, nie nasza sprawa; jak się pojawi, to zapłacimy, nie szukam
+tego na siłę".**
+
+🔑 **Nie wracać z tym przy zamykaniu miesięcy, nie pytać dostawcy.** Jeśli faktura za PT
+kiedyś przyjdzie, księgujemy ją jak każdą inną. Najprawdopodobniejsze wyjaśnienie —
+niesprawdzane dalej — jest takie, że karta nie obsługuje Portugalii, a tamtejsze autostrady
+(Via Verde / ex-SCUT) biją po tablicy i rozliczają się osobno.
+Zapis stanu zostaje w pamięci `project_analiza_oplat_drogowych`, żeby nie diagnozować tego
+drugi raz od zera.
+
+⚠️ `countryKmDaily` to **okno przesuwne ~41 dni** (21.10 sięgało do 10.09) — nie odpowie,
+czy byliśmy w PT wcześniej. Nie wyciągać z niego wniosków historycznych.
+
+### 🚩 Znalezione przy okazji: dane testowe w produkcyjnym paliwie
+
+`fuelTransactions/2026-06` zawiera tankowanie z polem **`importedBy: "seed
+(diagnose_paliwo_seed.mjs)"`** — WGM 0507M, 26.06, 62,79 L, 91,99 €, kraj PT. To pozostałość
+po lipcowym seedowaniu modułu Paliwo. Czerwiec nie jest wśród miesięcy zamkniętych, ale
+jeśli gdziekolwiek liczymy jego spalanie albo €/L, ta pozycja je zaburza.
+**Nie ruszane.** Zaproponowałem przeczesanie bazy pod kątem innych seedów — objęte tą samą
+decyzją „nie szukamy na siłę", więc nie wracam z tym sam.**
