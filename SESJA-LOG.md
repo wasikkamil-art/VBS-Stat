@@ -6312,3 +6312,60 @@ Trzy ograniczniki w regule:
 reguły, nie zmierzona. Weryfikacja end-to-end wymagałaby zalogowania się jako kierowca.
 ⚠️ **Mykole to nie pomoże wstecz** — jego migracja wykonała się przed zmianą reguł, a klient
 próbuje kasować tylko w trakcie migracji. Jego sierota wciąż czeka na ręczne usunięcie.
+
+## 2026-10-21 — Sierota sprzątnięta przez wdrożoną funkcję (weryfikacja na produkcji)
+
+### 🚩 Najpierw mój błąd: Mykola stracił rolę kierowcy
+
+Napisałem userowi „otwórz wiersz Mykoły i zapisz bez zmian", żeby dotknięcie dokumentu
+odpaliło sprzątanie. W sekcji **Kierowcy** jedyne przyciski to *Odpisz od auta* i
+*Zmień na Podgląd* — user kliknął to drugie i **rola spadła na `podglad`**
+(`auditLog 2026-10-21T08:30:38 | kierowca → podglad`, claim też).
+
+🔑 **Rada była podwójnie zła**: dotknięcie wiersza pisze do dokumentu pod **UID-em**,
+a funkcja sprząta sierotę tylko wtedy, gdy zapis idzie **do sierotu**. Duplikat i tak
+by nie zniknął.
+
+### Jak to odkręciliśmy — bez skryptu, samym panelem
+
+🔑 `driverUsers = users.filter(u => u.role === "kierowca")`, więc po degradacji
+**prawdziwy Mykola wypadł z zakładki Kierowcy, a został w niej sam duplikat** (sierota
+trzymała rolę `kierowca`). Dzięki temu dało się go wskazać jednoznacznie.
+
+1. *Zmień na Podgląd* na wierszu w zakładce Kierowcy → `changeRole(sierota, "podglad")` →
+   `setUserRole` leci `getUser(losoweID)` → wyjątek → klient robi **fallback `setDoc`
+   na sierotę** → `onRoleChange` ją kasuje.
+2. Zakładka **Biuro** → prawdziwy Mykola (plakietka Podgląd) → *Kierowca*.
+
+ℹ️ Żółty toast „Rola zapisana, ale Custom Claim niezsynchronizowany" jest w kroku 1
+**oczekiwany** — tak wygląda ścieżka fallbacku, która odpala sprzątanie.
+
+### ✅ Zweryfikowane odczytem z bazy
+
+- `users`: **12 dokumentów, jeden wiersz Mykoły**, pod UID-em, `role: "kierowca"`
+- Custom Claims: `{"role":"kierowca"}`, `claimsUpdatedAt` 08:38:47
+- przypisanie nietknięte: v1 otwarty wpis z e-mailem i kartą, v2 zamknięty 12.10
+- **`auditLog` ma wpis `podglad → null` oznaczony `[sierota]`** — notka `noRealAccount`
+  z wczorajszej łatki zadziałała na produkcji, więc kasowanie duplikatu **nie udaje
+  odebrania roli kierowcy**
+
+🔑 To jest **pierwsze odpalenie łatki `b7aa131` na żywych danych** — wczoraj miała tylko
+28 testów i „nie klikane w produkcji". Teraz ścieżka „sierota + istniejący dokument na UID
+→ skasuj duplikat, nie ruszaj roli" jest potwierdzona na produkcji.
+
+### Zostało
+
+- `dddFiles/zV21SKgnYoxdkern85FG` — powtórny upload z 16.10, 0 segmentów pod spodem.
+  Nadal w bazie (zapisy do Firestore blokował klasyfikator).
+- ℹ️ Doszedł nowy plik DDD `ur0mASiJyXt18scsZGEX` (20.10 09:45) — Mykoły są teraz trzy.
+### ✅ Domknięte na telefonie Mykoły (10:44)
+
+User pokazał zrzut z jego konta: nagłówek **„Mykola Omelianiuk · WGM 0475M"**, kafelki
+Zlecenia / Serwis (*Przegląd za 13d*) / Dokumenty / Tankowania (*24 tankowań*) / Czas pracy /
+Mapa / Pojazd. **To jest `DriverPanel`, nie widok podglądu** — gdyby claim był zepsuty,
+zobaczyłby sidebar i zakładki roli `podglad`.
+ℹ️ Imię w nagłówku idzie z `driverHistory`, nie z loginu — dlatego „Mykola Omelianiuk",
+choć dokument `users` nie ma pola `name`.
+
+🔑 **Punkt 1 z listy otwartych zamknięty end-to-end**: rola na UID, Custom Claims, przypisanie
+do auta, dane czasu pracy i realny ekran kierowcy — wszystko potwierdzone.
