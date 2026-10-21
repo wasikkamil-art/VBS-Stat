@@ -6572,3 +6572,68 @@ w bazie" (bo nazwy nie są scalone).
 Commit `74268f5` **lokalnie — `git push` zablokowany** przez klasyfikator auto mode
 (Out-of-Place Publication). Do wypchnięcia ręcznie przez usera.
 Pamięć: `project_case_study_flota.md` + wpis w `MEMORY.md` z adnotacją „nie wracać samemu".
+
+---
+
+## 2026-10-21 cd. — Pytanie Agnieszki o tacho Volodymyra → realny bug w planie tygodniowym
+
+### Co zgłosiła Aga
+
+Rozbieżność między listą pauz w FleetStacie a jej ręcznym wyliczeniem. Lista pokazywała
+`2. pauza 44h30 / 3. pauza 26h01 / 4. pauza 45h06`, a Aga pytała, „czemu czyta jako 26 h",
+twierdząc jednocześnie, że Włodek „stał 45", ruszył w niedzielę o 9:27 i jazdę ma do
+soboty 24.10 do 9:27. Plik DDD z 21.10 06:25 wgrany (`7X9gqp9997CQpUi3wlaw`).
+
+### Weryfikacja na produkcyjnych segmentach
+
+Odtworzyłem pipeline 1:1 (`computeDriverCompliance` → `computeDriverPlan`) na 8 117
+segmentach `driverActivities` dla `volodymyr.lukashuchuk@fleetstat.pl`.
+
+🔑 **Lista pauz była POPRAWNA i zgadzała się z Agą co do minuty** — 44h30 (sb 03.10 →
+pn 05.10), 26h01 (pt 09.10 12:56 → sb 10.10 14:57), 45h06 (pt 16.10 12:15 → **nd 18.10
+09:21**). Dokładnie „dwie skrócone i jedna pełna", jak opisała. 26h01 też jest realne:
+DDD pokazuje, że od pt 12:56 stał i ruszył dopiero sb 14:57.
+
+### 🚩 Bug: `lastWeeklyRest` brał postój za kolejny tygodniowy
+
+Po 45h06 Volodymyr ruszył 18.10 o 09:27, przejechał ~6h i **stanął jeszcze na 26h15**
+(nd 18.10 15:17 → pn 19.10 17:32) — czekał na załadunek. `lastWeeklyRest` brało
+**ostatni rest ≥24h w lookbacku**, nie pytając, do którego tygodnia kalendarzowego
+należy, więc za kotwicę wzięło ten postój. Skutki w panelu:
+
+| | przed fixem | po fixie | realnie |
+|---|---|---|---|
+| deadline kolejnego tygodniowego | nd 25.10 16:32 | **sb 24.10 09:21** | sb 24.10 09:21 |
+| ostatni tygodniowy | 26h15, skrócony | **45h06, regularny** | 45h06 |
+| `mustBeRegular` | true | false | — |
+
+**32 godziny fałszywego luzu.** Dyspozytor planujący z panelu wysłałby auto w trasę po
+terminie art. 8.6 = mandat. Dodatkowo `mustBeRegular=true` twierdziło, że ostatni
+tygodniowy był skrócony — czyli plan przeczył liście pauz na tym samym ekranie, i to
+właśnie ten rozjazd Aga wyłapała.
+
+Postój zaczynający się w nd 18.10 należy do tygodnia pn 12.10, który swój tygodniowy już
+miał (45h06). Kolejnym tygodniowym więc nie jest. `_weeklyRestsByWeek` (lista + wyrównanie)
+liczyło to dobrze — rozjazd był tylko w `lastWeeklyRest`.
+
+### Fix
+
+`537ddcb` — kotwica idzie z `_weeklyRestsByWeek`, tego samego źródła prawdy co lista i
+wyrównanie. Ironia: ten helper wydzielono 2026-10-14 **dokładnie po to**, żeby dwa odczyty
+tych samych odpoczynków się nie rozjechały — `lastWeeklyRest` wtedy przeoczono.
+
+Weryfikacja na wszystkich 6 kierowcach z segmentami: zmiana **tylko u Lukashchuka**
+(−32,2 h, kierunek ostrzejszy), Teper / Kolabau / Ivanskyy / Omelianiuk ×2 bez zmian.
+Lint 0 errors, build green.
+
+### Co zostaje do zrobienia przez człowieka
+
+- ⚠️ **Dług wyrównania 18h59 do nd 01.11 23:00** (za skrócenie 26h01 w tygodniu 05.10;
+  45h − 26h01). Fix tego nie zmienił. Żeby go oddać, trzeba odpoczynku z nadwyżką ≥18h59
+  **jednorazowo** (art. 8.6b): tygodniowy ≥63h59 albo dzienny ≥29h59. Sam 45h06 miał
+  nadwyżkę 6 min, a postój 26h15 — 15h15, więc żaden nie pokrył. **Aga o tym nie wie.**
+- `537ddcb` **nie wypchnięty** — push na `main` jest teraz za zgodą usera.
+- 🚩 Przy okazji: `dddFiles` ma **duplikat** `C_20261020_0604_V_Lukashchuk` (dokumenty
+  `23tOhh0qnq7Ibs9p5ELX` i `IHBYNdNNdCwSD3lqn3GZ`, upload 09:47 i 09:49). Nie ruszane —
+  kasowanie danych produkcyjnych wymaga decyzji usera. Compliance to nie zaburza, bo CF
+  czyści segmenty `source=ddd` przy reuploadzie, ale lista plików kłamie.
