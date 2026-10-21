@@ -6355,8 +6355,10 @@ trzymała rolę `kierowca`). Dzięki temu dało się go wskazać jednoznacznie.
 
 ### Zostało
 
-- `dddFiles/zV21SKgnYoxdkern85FG` — powtórny upload z 16.10, 0 segmentów pod spodem.
-  Nadal w bazie (zapisy do Firestore blokował klasyfikator).
+- ✅ `dddFiles/zV21SKgnYoxdkern85FG` — powtórny upload z 16.10, **skasowany**. Przed usunięciem
+  asercje: ta sama nazwa i rozmiar (123 197 B) co plik, który zostaje, i **0 segmentów pod
+  kasowanym**. Po usunięciu kontrola odczytem: `dddFiles` 93, Mykoły 2 (16.10 + 20.10),
+  `users` 12 / jeden wiersz, claims i przypisanie nietknięte.
 - ℹ️ Doszedł nowy plik DDD `ur0mASiJyXt18scsZGEX` (20.10 09:45) — Mykoły są teraz trzy.
 ### ✅ Domknięte na telefonie Mykoły (10:44)
 
