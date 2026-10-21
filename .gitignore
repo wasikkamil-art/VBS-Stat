@@ -42,6 +42,7 @@ update_vehicles.js
 scripts/*
 # Whitelistowane reusable scripts (świadomie commituj — patrz CLAUDE.md sekcja Backup workflow)
 !scripts/backup-claude-memory.sh
+!scripts/case-study-dane.mjs
 
 # Images - working files
 *.png
