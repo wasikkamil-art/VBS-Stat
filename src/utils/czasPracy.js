@@ -268,27 +268,40 @@ export function lastActualWeeklyRestEnd(segments, now) {
 // LUB skróconego 24-45h), nie tylko ≥45h. Zwraca też lastRegularEnd (ostatni ≥45h) i
 // isReduced (czy ostatni był skrócony → następny musi być pełny ≥45h, reguła 2 tygodni).
 // Zwraca {endMs, durMin, isReduced, lastRegularEnd} lub null. (opcja C, 2026-06-10)
+//
+// FIX (2026-10-21, case WGM 0507M / Volodymyr Lukashchuk — pytanie Agnieszki):
+// wcześniej brany był po prostu OSTATNI rest ≥24h w lookback, bez pytania, do którego
+// tygodnia należy. Volodymyr zrobił regularny 45h06 (pt 16.10 12:15 → nd 18.10 09:21),
+// ruszył, przejechał ~6h i stanął jeszcze na 26h15 (nd 18.10 15:17 → pn 19.10 17:32)
+// czekając na załadunek. Ten postój to NIE kolejny tygodniowy — zaczyna się w tym samym
+// tygodniu kalendarzowym (pn 12.10), który swój tygodniowy już miał. Stary kod brał go
+// za kotwicę, więc:
+//   • deadline kolejnego tygodniowego wychodził nd 25.10 16:32 zamiast sb 24.10 09:21
+//     (31h fałszywego luzu — dyspozytor planuje jazdę po terminie = mandat),
+//   • nextMustBeRegular robiło się true („ostatni był skrócony 26h15"), choć ostatni
+//     tygodniowy był pełny 45h06 — co przeczyło liście pauz na TYM SAMYM ekranie.
+// Teraz kotwica idzie z `_weeklyRestsByWeek` — tego samego źródła prawdy, co lista
+// dyspozytora i wyrównanie. Jeden tygodniowy na tydzień kalendarzowy (najdłuższy rest
+// ≥24h, przypisany wg startu), więc postój po odbytym tygodniowym nie udaje kolejnego.
 export function lastWeeklyRest(segments, now, lookbackDays = 21) {
   const nowMs = now.getTime();
   const lookbackMs = nowMs - lookbackDays * 24 * 3600000;
-  const coalesced = coalesceRestGaps(segments);
-  let lastWk = null, lastRegEnd = null;
-  for (const s of coalesced) {
-    if (s.type !== "rest") continue;
-    if (s.endMs < lookbackMs || s.endMs > nowMs) continue;
-    if (s.durMin >= REGULATION.WEEKLY_REST_REDUCED) {        // ≥24h (regularny lub skrócony)
-      if (!lastWk || s.endMs > lastWk.endMs) lastWk = { endMs: s.endMs, durMin: s.durMin };
-    }
-    if (s.durMin >= REGULATION.WEEKLY_REST_REGULAR) {        // ≥45h (regularny)
-      if (lastRegEnd === null || s.endMs > lastRegEnd) lastRegEnd = s.endMs;
-    }
-  }
-  if (!lastWk) return null;
+  const { byWeek } = _weeklyRestsByWeek(segments, nowMs);
+
+  // Kandydaci = tygodniowe wybrane per tydzień kalendarzowy, przycięte do lookbacku
+  // wywołującego (_weeklyRestsByWeek ma własne okno 4 tygodni, zwykle szersze).
+  const wk = [...byWeek.values()]
+    .filter(s => s.endMs >= lookbackMs && s.endMs <= nowMs)
+    .sort((a, b) => a.endMs - b.endMs);
+  if (!wk.length) return null;
+
+  const lastWk = wk[wk.length - 1];
+  const regular = wk.filter(s => s.durMin >= REGULATION.WEEKLY_REST_REGULAR);
   return {
     endMs: lastWk.endMs,
     durMin: lastWk.durMin,
     isReduced: lastWk.durMin < REGULATION.WEEKLY_REST_REGULAR,
-    lastRegularEnd: lastRegEnd,
+    lastRegularEnd: regular.length ? regular[regular.length - 1].endMs : null,
   };
 }
 
