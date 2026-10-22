@@ -542,6 +542,89 @@ export default function TachografComplianceSection({ device, position, driverAct
           )}
         </div>
 
+        {/* Reguły art. 8 ust. 6 i 6b — dodane 22.10.2026 po pytaniu Agnieszki o drugi
+            skrócony pod rząd. Do tej pory panel liczył tylko dług wyrównania, więc
+            dyspozytor nie wiedział ani o parze skróconych, ani o obowiązku z ust. 6b
+            akapit 2. ŚWIADOMIE bez werdyktu „naruszenie" — patrz weeklyRestRules:
+            odstępstwo zależy od kraju rozpoczęcia odpoczynku (nie ma go w DDD), a sam
+            przepis nie wskazuje, które z trzech okien 4-tygodniowych jest „tym". */}
+        {(() => {
+          const rules = compliance.weeklyRestRules;
+          if (!rules) return null;
+          const dd = (ms) => {
+            const d = new Date(ms);
+            return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`;
+          };
+          if (!rules.pairs.length && !rules.nextMustBeRegular) return null;
+          return (
+            <div className="mb-4 pb-4 border-b border-gray-100">
+              <div className="flex items-center gap-1.5 mb-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#b45309" strokeWidth="2"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+                <span className="text-[10px] font-semibold text-gray-500 uppercase">Reguły skróconych tygodniowych (art. 8 ust. 6 i 6b)</span>
+              </div>
+
+              {rules.nextMustBeRegular && (
+                <div className="rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-2 mb-2">
+                  <div className="text-[12px] font-semibold text-amber-900">
+                    Następny tygodniowy musi być regularny (≥45h)
+                  </div>
+                  <div className="text-[11px] text-amber-800 mt-0.5">
+                    Ostatni tygodniowy był skrócony — art. 8 ust. 6 akapit 1 lit. b dopuszcza
+                    w dwóch kolejnych tygodniach tylko jeden skrócony.
+                  </div>
+                </div>
+              )}
+
+              {rules.pairs.map((p) => (
+                <div key={p.secondWeekMs} className="rounded-lg bg-red-50 border border-red-200 px-2.5 py-2 mb-2">
+                  <div className="text-[12px] font-semibold text-red-900">
+                    Dwa skrócone pod rząd — tyg. {dd(p.firstWeekMs)} ({fmtHM(p.firstDurMin)}) + tyg. {dd(p.secondWeekMs)} ({fmtHM(p.secondDurMin)})
+                  </div>
+                  <div className="text-[11px] text-red-800 mt-1">
+                    Dopuszczalne tylko z odstępstwa (art. 8 ust. 6 akapit 3): międzynarodowy przewóz
+                    rzeczy, a oba skrócone <strong>rozpoczęte</strong> poza państwem siedziby i poza
+                    państwem zamieszkania kierowcy. <strong>Tego panel nie sprawdza</strong> — kraju
+                    rozpoczęcia odpoczynku nie ma w pliku DDD.
+                  </div>
+
+                  <div className="text-[11px] text-gray-700 mt-1.5">
+                    <div className="font-semibold">Okna 4 tygodni (odstępstwo wymaga ≥4 odpoczynków, z tego ≥2 regularnych):</div>
+                    {p.windows.map((w) => (
+                      <div key={w.fromWeekMs} className="tabular-nums">
+                        {dd(w.fromWeekMs)}–{dd(w.toWeekMs)}: {w.restCount} odp. / <strong className={w.regularCount >= 2 ? "text-emerald-700" : "text-red-700"}>{w.regularCount} reg.</strong>
+                        {w.truncated && <span className="text-gray-400 italic"> · okno przed początkiem danych, nieliczone</span>}
+                      </div>
+                    ))}
+                    <div className="text-gray-500 mt-0.5">
+                      Przepis nie wskazuje, które z tych okien jest „tym" — ocenę zostawiamy człowiekowi.
+                    </div>
+                  </div>
+
+                  <div className="text-[11px] mt-1.5 pt-1.5 border-t border-red-200">
+                    <strong>art. 8 ust. 6b akapit 2:</strong> następny tygodniowy musi być poprzedzony
+                    rekompensatą za oba skrócenia, czyli <strong>{fmtHM(p.owedTotalMin)}</strong> jednorazowo.{" "}
+                    {p.compensationBeforeNext === null ? (
+                      <span className="text-amber-800 font-semibold">Następnego tygodniowego jeszcze nie było — obowiązek otwarty.</span>
+                    ) : p.compensationBeforeNext ? (
+                      <span className="text-emerald-700 font-semibold">Spełnione.</span>
+                    ) : (
+                      <span className="text-red-800 font-semibold">
+                        NIE spełnione — tygodniowy z {fmtDateTime(p.nextWeeklyStartMs)} nie był poprzedzony takim odpoczynkiem.
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              {rules.olderPairsCount > 0 && (
+                <div className="text-[11px] text-gray-500">
+                  Poza pokazanym horyzontem: {rules.olderPairsCount} wcześniejsza para skróconych pod rząd.
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         <div>
           <div className="flex items-center gap-1.5 mb-2">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>

@@ -458,12 +458,17 @@ function _mondayOf(ms) {
 // (weeklyRestCompensation) i dla listy pokazywanej dyspozytorowi (weeklyRestList).
 // Wydzielone 2026-10-14: wcześniej logika żyła tylko wewnątrz weeklyRestCompensation,
 // więc każdy drugi odczyt tych samych odpoczynków groziłby rozjazdem z kartą compliance.
-function _weeklyRestsByWeek(segments, nowMs) {
+function _weeklyRestsByWeek(segments, nowMs, lookbackWeeks = 4) {
   // Pre-coalesce: scal rest fragmenty oddzielone "ciszą" CSV (silnik OFF) —
   // bez tego weekend kierowcy bywa rozbity na 2-3 sub-24h fragmenty i żaden
   // nie kwalifikuje się jako weekly rest. Patrz coalesceRestGaps.
+  //
+  // lookbackWeeks domyślnie 4 — tyle widzi lista dyspozytora i wyrównanie. Reguły
+  // z `weeklyRestRules` potrzebują szerszego okna, bo okno odstępstwa (art. 8 ust. 6
+  // akapit 3) to 4 tygodnie LICZONE OD PARY SKRÓCONYCH, więc żeby ocenić parę z
+  // początku widoku trzeba widzieć kilka tygodni przed nią.
   const coalesced = coalesceRestGaps(segments);
-  const lookbackMs = nowMs - 4 * 7 * 24 * 3600000; // 4 tygodnie wstecz
+  const lookbackMs = nowMs - lookbackWeeks * 7 * 24 * 3600000;
   const inWindow = s => s.endMs >= lookbackMs && s.endMs <= nowMs;
 
   // Rest segments ≥ 24h kwalifikują się jako tygodniowy (mniejsze = dzienne).
@@ -496,6 +501,139 @@ export function weeklyRestList(segments, nowMs) {
       durMin: s.durMin,
       isReduced: s.durMin < REGULATION.WEEKLY_REST_REGULAR, // < 45h
     }));
+}
+
+// ── REGUŁY SKRÓCONYCH TYGODNIOWYCH (art. 8 ust. 6 i 6b) ──────────────────────
+//
+// Dodane 2026-10-22 na prośbę usera po pytaniu Agnieszki. Do tej pory panel liczył
+// WYŁĄCZNIE dług wyrównania i deadline 6×24h — stała `WEEKLY_REST_REDUCED_PER_2WEEKS`
+// leżała w `REGULATION` nieużywana, więc dyspozytor nie dostawał żadnego ostrzeżenia
+// o dwóch skróconych pod rząd ani o obowiązku z ust. 6b akapit 2.
+//
+// Numeracja sprawdzona 22.10.2026 w tekście skonsolidowanym na EUR-Lex
+// (CELEX:02006R0561-20200820):
+//   • ust. 6 akapit 1 — w 2 kolejnych tygodniach: 2 regularne ALBO 1 regularny
+//     + 1 skrócony ≥24h. Dwa skrócone pod rząd łamią tę regułę...
+//   • ust. 6 akapit 3 — ...CHYBA że zadziała odstępstwo: międzynarodowy przewóz
+//     RZECZY, oba skrócone rozpoczęte poza państwem siedziby i poza państwem
+//     zamieszkania kierowcy (akapit 4), a w 4 kolejnych tygodniach ≥4 tygodniowe,
+//     z czego ≥2 regularne.
+//   • ust. 6b akapit 2 — po dwóch kolejnych skróconych wg akapitu 3 NASTĘPNY
+//     tygodniowy musi być POPRZEDZONY odpoczynkiem-rekompensatą za OBA skrócenia.
+//
+// ⚠️ CZEGO TA FUNKCJA NIE ROZSTRZYGA, i to świadomie:
+//   1. Czy odstępstwo w ogóle przysługuje — wymaga wiedzy, gdzie kierowca ROZPOCZĄŁ
+//      oba skrócone (poza PL i poza krajem zamieszkania). Kraju nie ma w DDD; dałoby
+//      się go wyciągnąć z `countryKmDaily`, ale to okno ~41 dni i osobne źródło.
+//      Zwracamy fakty, UI pyta człowieka.
+//   2. Które z okien 4 tygodni jest „tym" oknem. Przepis mówi „w ciągu kolejnych
+//      czterech tygodni", nie wskazując kotwicy. Dla pary skróconych istnieją 3 okna
+//      ją zawierające i u Volodymyra dają różne wyniki (1 albo 2 regularne), więc
+//      ogłaszanie jednego wyniku jako „naruszenie" byłoby zmyślaniem wykładni.
+//      Zwracamy WSZYSTKIE okna + minimum, decyzja należy do człowieka.
+// Dlatego pola nazywają się `...Info` / `minRegularIn4wk`, a nie `violation`.
+export function weeklyRestRules(segments, nowMs, { lookbackWeeks = 12, reportWeeks = 5 } = {}) {
+  const { byWeek } = _weeklyRestsByWeek(segments, nowMs, lookbackWeeks);
+  const coalesced = coalesceRestGaps(segments);
+  const target = REGULATION.WEEKLY_REST_REGULAR;
+
+  // Kolejny poniedziałek przez setDate, NIE przez +7×24h — doba zmiany czasu ma
+  // 23 lub 25 godzin, a zmiana wypada 25.10.2026, czyli dokładnie teraz.
+  const nextMonday = (ms) => { const d = new Date(ms); d.setDate(d.getDate() + 7); return d.getTime(); };
+
+  const weeks = [...byWeek.entries()].sort((a, b) => a[0] - b[0]).map(([wk, s]) => ({
+    weekStartMs: wk, startMs: s.startMs, endMs: s.endMs, durMin: s.durMin,
+    isReduced: s.durMin < target,
+  }));
+  // Kształt MUSI być identyczny jak w zwrotce na końcu — UI czyta olderPairsCount
+  // wprost. Brak tego pola wyszedł w kontrakcie dla kierowcy z jednym segmentem.
+  if (!weeks.length) return { weeks: [], pairs: [], olderPairsCount: 0, nextMustBeRegular: false };
+
+  // Ciągła lista tygodni kalendarzowych — tydzień BEZ odpoczynku ≥24h też się liczy
+  // (jako zero tygodniowych w oknie), więc nie można iterować po samej tablicy `weeks`.
+  const calendar = [];
+  for (let w = weeks[0].weekStartMs, guard = 0; w <= _mondayOf(nowMs) && guard < 60; w = nextMonday(w), guard++) {
+    calendar.push(w);
+  }
+  const restOfWeek = new Map(weeks.map(w => [w.weekStartMs, w]));
+
+  // Okno jest WIARYGODNE tylko wtedy, gdy wszystkie 4 tygodnie leżą w danych, a nie
+  // wystają przed początek lookbacku. Bez tego para z początku okna dostawała okna
+  // obcięte i „0 regularnych" było artefaktem zasięgu, nie stanem faktycznym —
+  // dokładnie to wyszło przy pierwszym przebiegu na wszystkich 5 kierowcach.
+  const firstKnownWeek = calendar[0];
+  const windowStats = (startWeekMs) => {
+    const i = calendar.indexOf(startWeekMs);
+    if (i < 0) return null;
+    const win = calendar.slice(i, i + 4);
+    if (win.length < 4) return null;
+    const rests = win.map(w => restOfWeek.get(w)).filter(Boolean);
+    return {
+      fromWeekMs: win[0], toWeekMs: win[3],
+      restCount: rests.length,
+      regularCount: rests.filter(r => !r.isReduced).length,
+      // true gdy okno zaczyna się na pierwszym znanym tygodniu — dane mogą być ucięte
+      truncated: win[0] === firstKnownWeek,
+    };
+  };
+
+  const pairs = [];
+  for (let i = 1; i < weeks.length; i++) {
+    const a = weeks[i - 1], b = weeks[i];
+    if (b.weekStartMs !== nextMonday(a.weekStartMs)) continue; // nie sąsiednie tygodnie
+    if (!a.isReduced || !b.isReduced) continue;
+
+    const owedTotalMin = (target - a.durMin) + (target - b.durMin);
+
+    // 3 okna 4-tygodniowe zawierające oba tygodnie pary: start w a-2, a-1, a
+    const windows = [];
+    let cursor = a.weekStartMs;
+    for (let back = 0; back < 3; back++) {
+      const st = windowStats(cursor);
+      if (st) windows.unshift(st);
+      const idx = calendar.indexOf(cursor);
+      if (idx <= 0) break;
+      cursor = calendar[idx - 1];
+    }
+    const solid = windows.filter(w => !w.truncated);
+    const minRegularIn4wk = solid.length ? Math.min(...solid.map(w => w.regularCount)) : null;
+    const maxRegularIn4wk = solid.length ? Math.max(...solid.map(w => w.regularCount)) : null;
+
+    // ust. 6b akapit 2 — rekompensata za OBA skrócenia musi poprzedzać następny tygodniowy
+    const next = weeks.find(w => w.weekStartMs > b.weekStartMs) || null;
+    const carrier = coalesced.find(s =>
+      s.type === "rest" &&
+      s.startMs >= b.endMs &&
+      (!next || s.endMs <= next.startMs) &&
+      s.durMin >= REGULATION.DAILY_REST_REDUCED &&
+      (s.durMin - REGULATION.DAILY_REST_REGULAR) >= owedTotalMin
+    ) || null;
+
+    pairs.push({
+      firstWeekMs: a.weekStartMs, secondWeekMs: b.weekStartMs,
+      firstDurMin: a.durMin, secondDurMin: b.durMin,
+      owedTotalMin,
+      windows, minRegularIn4wk, maxRegularIn4wk,
+      nextWeeklyStartMs: next ? next.startMs : null,
+      // null = następnego tygodniowego jeszcze nie było, więc obowiązek jest OTWARTY,
+      // a nie naruszony. UI musi te dwa stany rozróżniać.
+      compensationBeforeNext: next ? Boolean(carrier) : null,
+      carrierStartMs: carrier ? carrier.startMs : null,
+    });
+  }
+
+  // Pokazujemy tylko pary z horyzontu, który dyspozytor i tak widzi na liście pauz.
+  // Para z sierpnia jest historią, na którą nikt już nic nie poradzi, a zaśmieca kartę.
+  const reportFromMs = nowMs - reportWeeks * 7 * 24 * 3600000;
+  const recent = pairs.filter(p => p.secondWeekMs >= _mondayOf(reportFromMs));
+
+  const last = weeks[weeks.length - 1];
+  return {
+    weeks,
+    pairs: recent,
+    olderPairsCount: pairs.length - recent.length,
+    nextMustBeRegular: Boolean(last && last.isReduced),
+  };
 }
 
 // Wyrównanie za skrócone tygodniowe odpoczynki (Pakiet Mobilności, art. 8 ust. 6).
@@ -719,6 +857,9 @@ export function computeDriverCompliance(rawSegments = [], periodStart = null, no
     // Lista tygodniowych pauz dla dyspozytora (prośba Agnieszki, 14.10.2026).
     // To samo źródło co weeklyRestComp — patrz _weeklyRestsByWeek.
     weeklyRests: weeklyRestList(segments, nowMs),
+    // Reguły art. 8 ust. 6 / 6b — dwa skrócone pod rząd, okno odstępstwa, rekompensata
+    // przed następnym tygodniowym. Patrz weeklyRestRules (świadomie bez werdyktu).
+    weeklyRestRules: weeklyRestRules(segments, nowMs),
     // NEW (fix #3+#4): endMs ostatniego rzeczywistego weekly rest (≥45h) w lookback 14d.
     // Używane przez computeDriverPlan do liczenia deadline kolejnego weekly rest
     // wg 561/2006 art. 8.6 (zamiast hard-coded niedziela kalendarzowa). null = fallback.
