@@ -576,11 +576,11 @@ export default function TachografComplianceSection({ device, position, driverAct
               )}
 
               {rules.pairs.map((p) => (
-                <div key={p.secondWeekMs} className="rounded-lg bg-red-50 border border-red-200 px-2.5 py-2 mb-2">
-                  <div className="text-[12px] font-semibold text-red-900">
+                <div key={p.secondWeekMs} className="rounded-lg bg-amber-50 border border-amber-300 px-2.5 py-2 mb-2">
+                  <div className="text-[12px] font-semibold text-amber-900">
                     Dwa skrócone pod rząd — tyg. {dd(p.firstWeekMs)} ({fmtHM(p.firstDurMin)}) + tyg. {dd(p.secondWeekMs)} ({fmtHM(p.secondDurMin)})
                   </div>
-                  <div className="text-[11px] text-red-800 mt-1">
+                  <div className="text-[11px] text-amber-800 mt-1">
                     Dopuszczalne tylko z odstępstwa (art. 8 ust. 6 akapit 3): międzynarodowy przewóz
                     rzeczy, a oba skrócone <strong>rozpoczęte</strong> poza państwem siedziby i poza
                     państwem zamieszkania kierowcy. <strong>Tego panel nie sprawdza</strong> — kraju
@@ -591,7 +591,7 @@ export default function TachografComplianceSection({ device, position, driverAct
                     <div className="font-semibold">Okna 4 tygodni (odstępstwo wymaga ≥4 odpoczynków, z tego ≥2 regularnych):</div>
                     {p.windows.map((w) => (
                       <div key={w.fromWeekMs} className="tabular-nums">
-                        {dd(w.fromWeekMs)}–{dd(w.toWeekMs)}: {w.restCount} odp. / <strong className={w.regularCount >= 2 ? "text-emerald-700" : "text-red-700"}>{w.regularCount} reg.</strong>
+                        {dd(w.fromWeekMs)}–{dd(w.toWeekMs)}: {w.restCount} odp. / <strong className={w.regularCount >= 2 ? "text-emerald-700" : "text-amber-700"}>{w.regularCount} reg.</strong>
                         {w.truncated && <span className="text-gray-400 italic"> · okno przed początkiem danych, nieliczone</span>}
                       </div>
                     ))}
@@ -600,7 +600,7 @@ export default function TachografComplianceSection({ device, position, driverAct
                     </div>
                   </div>
 
-                  <div className="text-[11px] mt-1.5 pt-1.5 border-t border-red-200">
+                  <div className="text-[11px] mt-1.5 pt-1.5 border-t border-amber-300">
                     <strong>art. 8 ust. 6b akapit 2:</strong> następny tygodniowy musi być poprzedzony
                     rekompensatą za oba skrócenia, czyli <strong>{fmtHM(p.owedTotalMin)}</strong> jednorazowo.{" "}
                     {p.compensationBeforeNext === null ? (
@@ -608,7 +608,7 @@ export default function TachografComplianceSection({ device, position, driverAct
                     ) : p.compensationBeforeNext ? (
                       <span className="text-emerald-700 font-semibold">Spełnione.</span>
                     ) : (
-                      <span className="text-red-800 font-semibold">
+                      <span className="text-amber-900 font-semibold">
                         NIE spełnione — tygodniowy z {fmtDateTime(p.nextWeeklyStartMs)} nie był poprzedzony takim odpoczynkiem.
                       </span>
                     )}
