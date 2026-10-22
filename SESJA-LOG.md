@@ -6715,3 +6715,70 @@ i to jest stan faktyczny, nie fałszywy alarm.** Czy to naruszenia — ocena nal
 kogoś, kto robi im analizę tacho; ja pokazuję fakty i podstawę prawną.
 
 `3669acb` **nie wypchnięty** — push na `main` za zgodą usera.
+
+## 2026-10-22 cd. — Waluta zlecenia: złotówki przeliczane na euro kursem NBP (commit `faba66c`)
+
+User: *„Mykola jeździ teraz tylko po Polsce, a tam rozliczamy się w zł, nie w euro — trzeba
+dodać wybór waluty, bo podaje wszystko w euro; jak wstawimy złotówki, ma przeliczyć"*.
+
+### Decyzja architektoniczna: przeliczamy NA WEJŚCIU, nie w raportach
+
+🔑 `cenaEur` czyta **kilkanaście miejsc** — rentowność, rankingi, dashboardy dyspozytorów,
+€/km, moduł FV, tracker, maile. Zamiast uczyć każde z nich o walutach, dyspozytor wpisuje
+kwotę w swojej walucie, a do bazy idzie **dodatkowo** wartość w euro. Doszły pola `waluta`,
+`kwota`, `kurs`, `kursData`; **`cenaEur` znaczy dokładnie to, co znaczyło**, więc ani jeden
+raport nie wymagał zmiany. Rekordy sprzed zmiany czytają się jako EUR.
+
+**Wariant kursu — decyzja usera: DATA ZAŁADUNKU.** Tym samym polem filtrujemy miesiąc
+w raportach, więc fracht i jego kurs lądują w tym samym miesiącu. Wariant „dzień wystawienia
+FV" odpadł, bo fracht byłby bez wartości do czasu wpisania faktury.
+🔑 **Kurs zapisujemy i NIE przeliczamy ponownie** — inaczej wartość września zmieniałaby się
+w grudniu, gdy NBP się ruszy. Nowy `nbpRateInfo` zwraca też **dzień tabeli**, bo przy weekendzie
+kurs jest z innego dnia niż transakcja.
+
+Rozstrzygnięte bez pytania (user zostawił do decyzji): kwoty w PLN to **netto** jak wszystko
+u nas, a waluta **domyślnie EUR** — automatycznego PLN per pojazd NIE wstawiam, bo źle ustawiona
+waluta po cichu psuje przychód, a jedno kliknięcie jest tańsze niż taki błąd.
+
+### 🚩 Trzy rzeczy złapane przy okazji — każda była realną pułapką
+
+1. **Parser PDF wpisywał wszystko jako euro.** Prompt mówił „kwota NETTO w EUR", więc polskie
+   zlecenie na 6 500 zł weszłoby do raportów jako **6 500 €**. Teraz zwraca `kwota` + `waluta`
+   i ma jawny zakaz przeliczania. Kwotę i walutę bierzemy PARĄ (`kwotaZPdf`) — wzięcie samej
+   liczby to dokładnie ten błąd.
+2. **`FVEditModal` pozwalał nadpisać cenę w euro ręcznie** — przy frachcie w złotówkach kwota
+   i kurs zostałyby w bazie, tłumacząc już nie tę liczbę. Przy obcej walucie pole jest tylko
+   do odczytu, z podpisem skąd wynik.
+3. **`nbp.js` pamiętał nieudane pobranie NA ZAWSZE** (`fxCache.set(key, null)`). Przy imporcie
+   paliwa to przechodziło (leci raz), ale odkąd brak kursu blokuje zapis frachtu, jeden mig
+   sieci unieruchomiłby dyspozytora do przeładowania strony. Teraz porażka pamięta się **60 s**.
+   ⚠️ To wspólny moduł — dotyka też importu paliwa i myta, na ich korzyść.
+
+🔑 **Brak kursu = brak liczby i zablokowany zapis**, nigdy kwota z sufitu. Zlecenie z kwotą,
+ale bez `cenaEur`, nie wypada po cichu z filtra w `zapiszZlecenia` — zostaje i jest zgłaszane.
+
+### Zweryfikowane
+
+✅ **36 testów** (`diagnose_test_waluta.mjs`, gitignored; NBP podmienione atrapą `fetch`):
+dzień wolny → kurs z dnia wcześniejszego i **data tego dnia**, brak daty załadunku, padnięte
+NBP, **ponowienie po awarii**, przecinek dziesiętny, zgodność wstecz, dwa zlecenia w różnych
+walutach, lustro pól płaskich.
+🚩 Cztery testy świeciły na czerwono: dwa to moje **błędne oczekiwania** (6500/4,2715 to 1521,71,
+nie 1521,69), ale dwa wykryły realny problem z cache'em negatywnym — opisany wyżej.
+
+✅ **Na żywo, prawdziwym kursem NBP**, w atrapie montującej PRAWDZIWY `FrachtyModal`:
+6 500 zł → **1 489,43 €** kursem 4,3641 z 21.10 · €/km liczone z euro (2,98) · blokada zapisu
+bez kursu z czytelnym komunikatem · po powrocie na EUR kwota brana 1:1 · dwa zlecenia
+1 150 € + 6 500 zł = **2 639,43 €** · **zero mutacji DOM w spoczynku** (efekt kursowy się nie
+zapętla) · zapis oddał dokładnie `{cenaEur, waluta, kwota, kurs, kursData}`.
+✅ Poprawione **przycięte pole kwoty** — bez `min-w-0` input w kontenerze flex ucinał „6500"
+do „650(". Widać to było dopiero na zrzucie, nie w kodzie.
+✅ Lint 0 błędów, build zielony (1 734 kB, gzip 442,7 — było 1 730 / 441,3).
+✅ Atrapa **skasowana, serwer zatrzymany** (zasada: podgląd nie ma prawa zostać pod produkcją).
+
+### ❌ Czego NIE zweryfikowałem
+
+- **Aplikacji za logowaniem.** Modal był prawdziwy, ale propsy i zapis to atrapy — do Firestore
+  nic nie poszło.
+- **Parsera AI na prawdziwym polskim zleceniu w PLN.** Prompt zmieniony, dokument przez niego
+  nie przeszedł. **Do sprawdzenia pierwszym realnym zleceniem Mykoły.**
