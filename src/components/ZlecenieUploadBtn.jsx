@@ -92,12 +92,14 @@ Odpowiedz TYLKO w formacie JSON (bez markdown):
   "towarPalety": "wymiary towaru, każda pozycja w nowej linii (np. 2× 240x120x240\\n1× 120x120xH240) lub null",
   "wagaLadunku": "waga w kg (sama cyfra) lub null",
   "zaladunekTyp": "typ załadunku (bok, tył, góra) lub null",
-  "cenaEur": "kwota frachtu NETTO w EUR, sama liczba bez waluty (np. 1150) lub null",
+  "kwota": "kwota frachtu NETTO, sama liczba bez waluty (np. 1150) lub null — PRZEPISZ DOKŁADNIE TĘ LICZBĘ, KTÓRA JEST W DOKUMENCIE, NIE PRZELICZAJ NA INNĄ WALUTĘ",
+  "waluta": "waluta tej kwoty: EUR albo PLN (dokładnie jeden z tych dwóch napisów). Gdy dokument nie podaje waluty, zwróć EUR",
   "uwagi": "uwagi operacyjne istotne dla kierowcy (BEZ cen, BEZ warunków płatności) lub null"
 }
 Gdy w miejscu nazwy firmy, ulicy, miasta lub kodu widzisz adnotację zamiast danych (np. "wg cmr", "wg zlecenia", "jak wyżej", "do ustalenia", "brak", "-"), zwróć dla tego pola null. To NIE jest nazwa ani adres. Nie zgaduj i nie przepisuj takiej adnotacji.
 Rozładunków może być od 1 do 5 — wypełnij DOKŁADNIE tyle, ile jest w zleceniu, w kolejności trasy (pierwszy rozładunek = pola bez cyfry, kolejne = 2/3/4/5). Nieużyte komplety rozładunków zostaw jako null. NIE zwijaj kilku rozładunków w jeden.
-Kwotę frachtu podaj WYŁĄCZNIE w polu "cenaEur". NIE umieszczaj cen w "uwagi" — te trafiają do kierowcy.
+Kwotę frachtu podaj WYŁĄCZNIE w polach "kwota" i "waluta". NIE umieszczaj cen w "uwagi" — te trafiają do kierowcy.
+Polskie zlecenia bywają w złotówkach (PLN, zł) — wtedy "waluta" to "PLN", a "kwota" to liczba ze złotówek. Przeliczenie na euro robimy u siebie kursem NBP, więc TY nie przeliczaj.
 NIE podawaj warunków płatności, NIP, danych spedytora ani warunków umowy.` }
           ]
         }]

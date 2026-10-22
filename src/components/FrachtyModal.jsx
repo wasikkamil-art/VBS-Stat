@@ -18,12 +18,61 @@ import { logAction } from "../utils/logAction";
 import TripSummaryPanel from "./TripSummaryPanel";
 import RozliczenieTrasyPanel from "./RozliczenieTrasyPanel";
 import ZlecenieUploadBtn from "./ZlecenieUploadBtn";
-import { zleceniaFrachtu, zapiszZlecenia, sumaZlecen, pusteZlecenie } from "../utils/zleceniaFrachtu";
+import { zleceniaFrachtu, zapiszZlecenia, sumaZlecen, pusteZlecenie, WALUTY_ZLECENIA } from "../utils/zleceniaFrachtu";
+import { naEur, opisPrzeliczenia, wymagaPrzeliczenia, zleceniaBezKursu } from "../utils/walutaFrachtu";
 import { unloadStops } from "../utils/orderFormatters";
 
 // Lazy sub-modale — pobierane dopiero gdy admin klika konkretny przycisk wewnątrz modala
 const CopyOrderPreviewModal = lazy(() => import("./CopyOrderPreviewModal"));
 const WhatsappSendPreviewModal = lazy(() => import("./WhatsappSendPreviewModal"));
+
+/**
+ * Przełącznik waluty + kwota zlecenia. Wpisana kwota żyje w `kwota`/`waluta`, a `cenaEur`
+ * jest z niej WYLICZANA — raporty czytają wyłącznie euro i nie wiedzą o złotówkach.
+ * Komponent stoi poza `FrachtyModal` świadomie: definiowany w środku renderu gubiłby stan
+ * pola przy każdym przerysowaniu (i słusznie krzyczałby na to `react-hooks/static-components`).
+ */
+/**
+ * Kwota i waluta wyjęte z PDF-a zlecenia. Zwraca `{}`, gdy dyspozytor już coś wpisał —
+ * to, co wpisał człowiek, jest wiążące. Kwotę i walutę bierzemy PARĄ: wzięcie samej liczby
+ * bez waluty zrobiłoby ze zlecenia na 6 500 zł fracht za 6 500 €.
+ * `cenaEur` celowo NIE jest tu ustawiana — wylicza ją efekt kursowy.
+ */
+function kwotaZPdf(z, p) {
+  if (z.kwota) return {};
+  const surowa = p?.kwota ?? p?.cenaEur;          // `cenaEur` — starsze odpowiedzi parsera
+  if (surowa == null || surowa === "") return {};
+  const w = String(p?.waluta || "").toUpperCase();
+  return { kwota: String(surowa), waluta: WALUTY_ZLECENIA.includes(w) ? w : "EUR" };
+}
+
+function PoleKwoty({ z, blad, inp, onWaluta, onKwota }) {
+  const waluta = z?.waluta || "EUR";
+  const opis = opisPrzeliczenia(z);
+  return (
+    <>
+      {/* `min-w-0` na polu kwoty jest konieczne: bez niego input w kontenerze flex trzyma
+          własną szerokość minimalną i w wąskiej kolumnie ucina cyfry (6500 → „650("). */}
+      <div className="flex gap-1">
+        <div className="flex rounded-lg overflow-hidden border border-gray-200 shrink-0">
+          {WALUTY_ZLECENIA.map(w => (
+            <button key={w} type="button" onClick={() => onWaluta(w)}
+              className="px-1.5 text-[10px] font-bold transition-colors"
+              style={{ background: waluta === w ? "#111827" : "#fff", color: waluta === w ? "#fff" : "#9ca3af" }}>
+              {w}
+            </button>
+          ))}
+        </div>
+        <input type="number" placeholder="0.00" value={z?.kwota || ""} onChange={e => onKwota(e.target.value)} className={inp + " flex-1 min-w-0"} />
+      </div>
+      {blad
+        ? <div className="text-[11px] text-red-600 mt-1 font-medium">⚠️ {blad}</div>
+        : wymagaPrzeliczenia(waluta) && z?.cenaEur
+          ? <div className="text-[11px] text-emerald-700 mt-1 font-semibold">≈ {Number(z.cenaEur).toFixed(2)} € <span className="text-gray-400 font-normal">· {opis}</span></div>
+          : null}
+    </>
+  );
+}
 
 export default function FrachtyModal({ record, vehicles, driverEvents = [], fuelEntries = [], onSave, onPatch = null, onClose, onAddReturn = null, onPlanRoute = null, defaultVehicleId="", appUsers = [], currentUser = null, showToast = () => {} }) {
   // ── pomocnik: rozbij "PL 44-100 Gliwice" → ["PL 44-100", "Gliwice"] ──
@@ -105,6 +154,47 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
   const wieleZlecen = zlecenia.length > 1;
   const sumaEur = sumaZlecen(zlecenia);
   const przystanki = unloadStops(f);
+
+  // ── WALUTA ZLECENIA → EUR ──
+  // Dyspozytor wpisuje kwotę w walucie zlecenia, a `cenaEur` jest z niej wyliczana kursem
+  // NBP z DATY ZAŁADUNKU (decyzja usera 2026-10-22 — tym polem filtrujemy miesiąc
+  // w raportach, więc fracht i jego kurs lądują w tym samym miesiącu).
+  // Efekt zależy wyłącznie od tego, co wpływa na wynik — gdyby patrzył na całą tablicę
+  // `zlecenia`, wpisywałby do niej kurs i natychmiast budził sam siebie.
+  const [fxBledy, setFxBledy] = useState([]);
+  const kluczWalut = zlecenia.map(z => `${z.waluta || "EUR"}|${z.kwota || ""}`).join(";") + "@" + (f.dataZaladunku || "");
+  useEffect(() => {
+    let anulowane = false;
+    (async () => {
+      // `zlecenia` z tego renderu wystarczy: każda zmiana kwoty, waluty albo liczby zleceń
+      // zmienia `kluczWalut`, więc efekt dostaje świeżą tablicę. Zapis i tak idzie przez
+      // `prev`, więc równoległa edycja innego pola nic nie nadpisze.
+      const wyniki = await Promise.all(zlecenia.map(z => naEur(z.kwota, z.waluta, f.dataZaladunku)));
+      if (anulowane) return;
+      setFxBledy(wyniki.map(w => w?.blad || ""));
+      setZlecenia(prev => {
+        let zmiana = false;
+        const next = prev.map((z, i) => {
+          const w = wyniki[i];
+          if (!w) return z;
+          if (w.blad) {
+            // Kurs nie doszedł — kasujemy starą wartość w euro zamiast zostawiać liczbę,
+            // która nie pasuje już do wpisanej kwoty.
+            if (!z.cenaEur && !z.kurs) return z;
+            zmiana = true;
+            return { ...z, cenaEur: "", kurs: "", kursData: "" };
+          }
+          if (z.cenaEur === w.cenaEur && z.kurs === w.kurs && z.kursData === w.kursData) return z;
+          zmiana = true;
+          return { ...z, ...w };
+        });
+        return zmiana ? next : prev;
+      });
+    })();
+    return () => { anulowane = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kluczWalut]);
+  const bezKursu = zleceniaBezKursu(zlecenia);
 
   const eurKmLad = f.kmLadowne && sumaEur ? (sumaEur/parseInt(f.kmLadowne)).toFixed(2) : null;
   const eurKmWsz = f.kmWszystkie && sumaEur ? (sumaEur/parseInt(f.kmWszystkie)).toFixed(2) : null;
@@ -342,7 +432,7 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
       urlZlecenie: url,
       nr: z.nr || tekst(p.nrZlecenia),
       ref: z.ref || tekst(p.nrRef),
-      cenaEur: z.cenaEur || tekst(p.cenaEur),
+      ...kwotaZPdf(z, p),
       palety: z.palety || tekst(p.towarIloscPalet),
       waga: z.waga || tekst(p.wagaLadunku),
       rozladunek: z.rozladunek || docelowy,
@@ -362,14 +452,14 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
       ...z,
       nr: z.nr || tekst(parsed.nrZlecenia),
       ref: z.ref || tekst(parsed.nrRef),
-      cenaEur: z.cenaEur || tekst(parsed.cenaEur),
+      ...kwotaZPdf(z, parsed),
       palety: z.palety || tekst(parsed.towarIloscPalet),
       waga: z.waga || tekst(parsed.wagaLadunku),
       rozladunek: z.rozladunek || "1",
     }));
     Object.entries(parsed).forEach(([k, v]) => {
       if (v == null || v === "") return;
-      if (k === "cenaEur") return;     // kwota żyje w karcie zlecenia, nie w polu frachtu
+      if (k === "cenaEur" || k === "kwota" || k === "waluta") return;  // kwota żyje w karcie zlecenia, nie w polu frachtu
       const sv = String(v);
       if (k === "zaladunekKod" && !f.zaladunekKodPocztowy) {
         const [kp, km] = splitKM(sv); set("zaladunekKodPocztowy", kp); set("zaladunekMiasto", km);
@@ -646,10 +736,11 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
               <div><label className={lbl}>Dyspozytor</label><input placeholder="imię dyspozytora" value={f.dyspozytor||""} onChange={e => set("dyspozytor",e.target.value)} className={inp} /></div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
-              <div><label className={lbl}>{wieleZlecen ? `Cena EUR (suma ${zlecenia.length} zleceń)` : "Cena EUR"}</label>
+              <div><label className={lbl}>{wieleZlecen ? `Cena EUR (suma ${zlecenia.length} zleceń)` : "Cena"}</label>
                 {wieleZlecen
-                  ? <input readOnly value={sumaEur.toFixed(2)} className={inp+" bg-blue-50 text-blue-800 font-semibold"} title="Suma kwot ze zleceń — edytuj w sekcji Zlecenia transportowe" />
-                  : <input type="number" placeholder="0.00" value={zlecenia[0]?.cenaEur||""} onChange={e => setZl(0,"cenaEur",e.target.value)} className={inp} />}
+                  ? <input readOnly value={sumaEur.toFixed(2)} className={inp+" bg-blue-50 text-blue-800 font-semibold"} title="Suma kwot ze zleceń, przeliczona na euro — edytuj w sekcji Zlecenia transportowe" />
+                  : <PoleKwoty z={zlecenia[0]} blad={fxBledy[0]} inp={inp}
+                      onWaluta={w => setZl(0,"waluta",w)} onKwota={v => setZl(0,"kwota",v)} />}
               </div>
               <div><label className={lbl}>KM podjazd</label><input type="number" placeholder="0" value={f.kmPodjazd||""} onChange={e => set("kmPodjazd",e.target.value)} className={inp} /></div>
               <div><label className={lbl}>KM ładowne</label><input type="number" placeholder="0" value={f.kmLadowne||""} onChange={e => set("kmLadowne",e.target.value)} className={inp} /></div>
@@ -702,7 +793,10 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
                 {wieleZlecen && (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2">
                     <div><label className={lbl}>Nr zlecenia {i + 1}</label><input placeholder={`numer zlecenia ${i + 1}`} value={z.nr||""} onChange={e => setZl(i,"nr",e.target.value)} className={inp} /></div>
-                    <div><label className={lbl}>Cena EUR</label><input type="number" placeholder="0.00" value={z.cenaEur||""} onChange={e => setZl(i,"cenaEur",e.target.value)} className={inp} /></div>
+                    <div><label className={lbl}>Cena</label>
+                      <PoleKwoty z={z} blad={fxBledy[i]} inp={inp}
+                        onWaluta={w => setZl(i,"waluta",w)} onKwota={v => setZl(i,"kwota",v)} />
+                    </div>
                     <div><label className={lbl}>Nr FV</label><input placeholder={`faktura ${i + 1}`} value={z.nrFV||""} onChange={e => setZl(i,"nrFV",e.target.value)} className={inp} /></div>
                     <div><label className={lbl}>Termin płatności</label><input type="date" value={z.terminPlatnosci||""} onChange={e => setZl(i,"terminPlatnosci",e.target.value)} className={inp} /></div>
                   </div>
@@ -828,7 +922,14 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
             })()}
             <button onClick={() => {
               if(!f.vehicleId){alert("Wybierz pojazd");return;}
-              if(!sumaEur){alert("Wpisz cenę EUR");return;}
+              // Zlecenie z kwotą, ale bez wartości w euro = kurs NBP nie doszedł. Taki fracht
+              // trafiłby do rentowności i raportu dyspozytorów z pustą kwotą, więc blokujemy
+              // zapis zamiast wpuszczać dziurę po cichu.
+              if(bezKursu.length){
+                alert(`Nie mam kursu dla ${bezKursu.length === 1 ? "zlecenia" : "zleceń"} ${bezKursu.map(({i}) => i+1).join(", ")}.\n\nSprawdź datę załadunku — z jej dnia bierzemy kurs NBP — albo przełącz walutę na EUR i wpisz kwotę w euro.`);
+                return;
+              }
+              if(!sumaEur){alert("Wpisz cenę");return;}
               // Heurystyka: adres zawierający enumerację "1. ... 2. ..." prawdopodobnie skleja
               // wiele punktów rozładunku w jedno pole — powinny być rozdzielone na R1/R2/...
               const hasMulti = (addr) => addr && /(^|\n)\s*1\.\s/.test(addr) && /(^|\n)\s*2\.\s/.test(addr);

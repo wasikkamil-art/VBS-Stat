@@ -17398,11 +17398,25 @@ function FVEditModal({ record, onSave, onClose }) {
             </div>
           )}
           <div><label className={lbl}>Klient</label><input placeholder="nazwa klienta" value={f.klient} onChange={e => set("klient", e.target.value)} className={inp} /></div>
-          <div><label className={lbl}>{wieleZlecen ? "Cena EUR (suma zleceń)" : "Cena EUR"}</label>
-            {wieleZlecen
-              ? <input readOnly value={f.cenaEur} className={inp + " bg-blue-50 text-blue-800 font-semibold"} title="Suma kwot ze zleceń — edytuj w oknie zlecenia" />
-              : <input type="number" placeholder="0.00" value={f.cenaEur} onChange={e => set("cenaEur", e.target.value)} className={inp} />}
-          </div>
+          {/* Fracht rozliczany w obcej walucie ma `cenaEur` WYLICZONĄ z kwoty i kursu NBP.
+              Ręczna edycja euro rozjechałaby je z kwotą w złotówkach, a w bazie zostałby
+              kurs, który już niczego nie tłumaczy — dlatego tu tylko podgląd. */}
+          {(() => {
+            const obcaWaluta = (f.waluta || "EUR") !== "EUR";
+            return (
+              <div><label className={lbl}>{wieleZlecen ? "Cena EUR (suma zleceń)" : obcaWaluta ? `Cena EUR (przeliczona z ${f.waluta})` : "Cena EUR"}</label>
+                {wieleZlecen || obcaWaluta
+                  ? <input readOnly value={f.cenaEur} className={inp + " bg-blue-50 text-blue-800 font-semibold"}
+                      title={wieleZlecen ? "Suma kwot ze zleceń — edytuj w oknie zlecenia" : `Przeliczone z ${f.kwota} ${f.waluta} kursem ${f.kurs || "—"}${f.kursData ? " z " + f.kursData : ""} — zmieniaj w oknie frachtu`} />
+                  : <input type="number" placeholder="0.00" value={f.cenaEur} onChange={e => set("cenaEur", e.target.value)} className={inp} />}
+                {!wieleZlecen && obcaWaluta && (
+                  <div className="text-[11px] text-gray-500 mt-1">
+                    {f.kwota} {f.waluta} · kurs {f.kurs || "—"}{f.kursData ? ` z ${f.kursData}` : ""} — kwotę zmieniasz w oknie frachtu
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           <div className="grid grid-cols-2 gap-3">
             <div><label className={lbl}>Data wysłania FV</label><input type="date" value={f.dataWyslania} onChange={e => set("dataWyslania", e.target.value)} className={inp} /></div>
             <div><label className={lbl}>Termin płatności</label><input type="date" value={f.terminPlatnosci} onChange={e => set("terminPlatnosci", e.target.value)} className={inp} /></div>

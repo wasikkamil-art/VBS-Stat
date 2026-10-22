@@ -7,12 +7,27 @@
 
 const fxCache = new Map();
 
-/** Średni kurs NBP (tabela A) waluty na dzień `isoDate` (YYYY-MM-DD). Null, gdy nie udało się pobrać. */
-export async function nbpRate(code, isoDate) {
+// Nieudane pobrania pamiętamy TYLKO przez chwilę. Wcześniej `null` siadał w cache na stałe:
+// jeden mig sieci i do końca życia karty żadna próba dla tego dnia już nie wychodziła.
+// Przy imporcie paliwa czy myta to było do przeżycia (lecą raz), ale odkąd kurs blokuje
+// zapis frachtu w złotówkach, dyspozytor zostawałby z pustą kwotą aż do przeładowania strony.
+// Krótkie okno chroni jednocześnie importy masowe przed zalewem ponowień.
+const fxFail = new Map();
+const FAIL_TTL_MS = 60_000;
+
+/**
+ * Kurs NBP wraz z DNIEM TABELI, z której pochodzi — przy weekendzie i święcie
+ * cofamy się wstecz, więc dzień transakcji i dzień kursu to nie zawsze to samo.
+ * Zwraca `{ mid, date }` albo `null`. Potrzebne tam, gdzie kurs zapisujemy na stałe
+ * (zlecenia w PLN) i trzeba móc odtworzyć, skąd wzięła się kwota.
+ */
+export async function nbpRateInfo(code, isoDate) {
   const cur = String(code || "PLN").toUpperCase();
-  if (cur === "PLN") return 1;
+  if (cur === "PLN") return { mid: 1, date: isoDate };
   const key = `${cur}|${isoDate}`;
   if (fxCache.has(key)) return fxCache.get(key);
+  const nieudane = fxFail.get(key);
+  if (nieudane && Date.now() - nieudane < FAIL_TTL_MS) return null;
   let d = new Date(isoDate + "T12:00:00Z");
   for (let i = 0; i < 6; i++) {
     const ds = d.toISOString().slice(0, 10);
@@ -21,13 +36,23 @@ export async function nbpRate(code, isoDate) {
       if (r.ok) {
         const j = await r.json();
         const mid = j?.rates?.[0]?.mid;
-        if (mid) { fxCache.set(key, mid); return mid; }
+        if (mid) {
+          const info = { mid, date: j?.rates?.[0]?.effectiveDate || ds };
+          fxCache.set(key, info);
+          return info;
+        }
       }
     } catch { /* sieć — próbujemy dzień wcześniej */ }
     d = new Date(d.getTime() - 86400000);
   }
-  fxCache.set(key, null);
+  fxFail.set(key, Date.now());
   return null;
+}
+
+/** Średni kurs NBP (tabela A) waluty na dzień `isoDate` (YYYY-MM-DD). Null, gdy nie udało się pobrać. */
+export async function nbpRate(code, isoDate) {
+  const info = await nbpRateInfo(code, isoDate);
+  return info ? info.mid : null;
 }
 
 /**
