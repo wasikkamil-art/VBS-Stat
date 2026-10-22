@@ -6637,3 +6637,81 @@ Lint 0 errors, build green.
   `23tOhh0qnq7Ibs9p5ELX` i `IHBYNdNNdCwSD3lqn3GZ`, upload 09:47 i 09:49). Nie ruszane —
   kasowanie danych produkcyjnych wymaga decyzji usera. Compliance to nie zaburza, bo CF
   czyści segmenty `source=ddd` przy reuploadzie, ale lista plików kłamie.
+
+---
+
+## 2026-10-22 — Reguły skróconych tygodniowych w panelu (art. 8 ust. 6 i 6b)
+
+### Najpierw: korekta mojej własnej odpowiedzi z 21.10
+
+Na pytanie Agi „czy nie może teraz zrobić 24h" odpowiedziałem **błędnie, że nie może**.
+Zastosowałem warunek „4 kolejne tygodnie / ≥2 regularne" jako ogólną regułę kroczącą.
+Po sprawdzeniu tekstu skonsolidowanego na EUR-Lex (`CELEX:02006R0561-20200820`, art. 8)
+jest inaczej:
+
+- **ust. 6 akapit 1** — w 2 kolejnych tygodniach: 2 regularne **albo** 1 regularny
+  + 1 skrócony ≥24h. To reguła podstawowa.
+- **ust. 6 akapit 3** — odstępstwo na **dwa skrócone pod rząd** (międzynarodowy przewóz
+  rzeczy, poza państwem siedziby) i **dopiero tam** wisi warunek 4 tygodni / ≥2 regularne.
+- **ust. 6a** — to okazjonalny przewóz **osób** (autokary). Pomyliłem z nim akapit 3.
+
+🔑 **Volodymyr mógł wziąć 24h** — tydzień 12.10 miał pełny 45h06, więc para „12.10 + 19.10"
+to jeden regularny + jeden skrócony, nie dwa skrócone pod rząd, i okno 4 tygodni go nie
+dotyczy. Numeracja wprost trafiła do komentarza w kodzie i do pamięci
+`reference_rekompensata_art86b`, żeby nie powtórzyć.
+
+**Lekcja (druga raz ta sama, patrz 11.09):** przy sporze o compliance czytam przepis
+u źródła, nie z pamięci. EUR-Lex przez `WebFetch` zwraca **pustą stronę** (i HTML, i PDF) —
+trzeba wbudowanej przeglądarki, a „Artykuł 9" ma niełamliwą spację, więc `indexOf` nie
+trafia, dopiero regex `/Artyku[łl]\s*9/`.
+
+### Co doszło do panelu — `3669acb`
+
+Nowe `weeklyRestRules` + blok w karcie „Zmniejszone tygodniowe czasy odpoczynków”:
+dwa skrócone pod rząd, okna 4 tygodni dla odstępstwa, oraz **art. 8 ust. 6b akapit 2**
+(czy następny tygodniowy był poprzedzony rekompensatą za oba skrócenia).
+
+⚠️ **Świadomie bez werdyktu „naruszenie".** Dwóch rzeczy panel nie wie i nie udaje, że wie:
+kraju **rozpoczęcia** obu skróconych (nie ma go w DDD; `countryKmDaily` to inne źródło
+z oknem ~41 dni) oraz **które z trzech okien 4-tygodniowych jest „tym"** — przepis nie
+wskazuje kotwicy, a u Volodymyra okna dają 1 albo 2 regularne. UI mówi wprost, że ocenę
+zostawia człowiekowi.
+
+Z zakresu **odpuszczone**: art. 8 ust. 8a (powrót do bazy) — koliduje z istniejącym
+ręcznym licznikiem `tachoCardStart` i decyzją „tacho to świętość, nie łączyć"; art. 8
+ust. 8 (odpoczynek nie w kabinie) — z danych niewykrywalne.
+
+### 🚩 Dwa błędy złapane własną weryfikacją, nie lintem
+
+1. **Okna obcięte przez lookback** dawały fałszywe „0 regularnych" u **wszystkich 5
+   kierowców**. Pierwszy przebieg świecił alarmem dla całej floty i to był artefakt
+   zasięgu danych, nie stan faktyczny. Fix: flaga `truncated`, minimum liczone tylko
+   z pełnych okien.
+2. **Ścieżka wczesnego wyjścia** (kierowca bez odpoczynków ≥24h) nie zwracała
+   `olderPairsCount` → niespójny kontrakt z UI. Wyszło w teście kontraktu na przypadkach
+   skrajnych (0 segmentów, 1 segment).
+
+Weryfikacja: `diagnose_tacho_reguly.mjs` (przegląd 5 kierowców) + `diagnose_tacho_kontrakt.mjs`
+(**129 asercji** na każdym polu, które czyta JSX, plus kierowca bez segmentów i z jednym
+segmentem) = 0 błędów. Oba gitignored, zostają lokalnie jako wzorzec przy kolejnej zmianie
+w compliance.
+
+### 🚩 Czego NIE zweryfikowałem
+
+**Nie widziałem tego bloku wyrenderowanego.** Panel siedzi za logowaniem, w zakładce
+GPS/Monitoring → Tachograf, na pojeździe z aktywnym kierowcą — nie mam poświadczeń i ich
+nie używam. Sprawdzone: lint 0 errors, build green, chunk 25,75 → 29,30 kB (gzip 6,01 →
+7,03), oraz kontrakt danych pole po polu. **Wygląd i układ bloku do obejrzenia przez usera
+po deployu.**
+
+### Stan floty, który przy okazji wyszedł
+
+Po fixie artefaktu: pary dwóch skróconych pod rząd w horyzoncie 5 tygodni ma **3 z 5
+kierowców** (Teper ×2, Lukashchuk, Ivanskyy), a `nextMustBeRegular` jest aktywne u Tepera
+i Kolabaua. Art. 8 ust. 6b akapit 2 **niespełniony** u Tepera (tygodniowy 24.09) i
+Lukashchuka (tygodniowy 16.10). To nie szum — flota realnie jeździ na skróconych
+tygodniowych w okolicach 34–45h. **Panel będzie teraz świecił u większości kierowców
+i to jest stan faktyczny, nie fałszywy alarm.** Czy to naruszenia — ocena należy do
+kogoś, kto robi im analizę tacho; ja pokazuję fakty i podstawę prawną.
+
+`3669acb` **nie wypchnięty** — push na `main` za zgodą usera.
