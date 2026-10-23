@@ -98,3 +98,13 @@ dashboard_*.html
 # inaczej deploy Cloud Functions z czystego klona padnie
 !functions/data/europe-borders.json
 backup_allowedTabs_*.json
+
+# Skille agentowe instalowane przez `npx skills add` (2026-10-22) — 2,4 MB per skill,
+# odtwarzalne komendą instalacyjną. Konwencja jak dla `fix_*`/`import_*`: zostają lokalnie.
+.agents/
+.claude/skills/
+.claude/settings.local.json
+.claude/worktrees/
+.github/skills/
+.github/agents/
+.claude/agents/

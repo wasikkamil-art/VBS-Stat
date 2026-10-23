@@ -631,6 +631,22 @@ const DEFAULT_EQUIPMENT = [
   { id: "plandeka",    label: "Plandeka" },
 ];
 
+// Typ pojazdu = PODWOZIE (czym auto jest), nie zabudowa. Zabudowę (plandeka,
+// agregat chłodniczy, winda) trzymamy w DEFAULT_EQUIPMENT, bo łączy się ze sobą:
+// plandeka z windą i chłodnia z windą to realne konfiguracje, a jedno pole
+// wyboru by tego nie uniosło. Oba razem sterują ikoną — patrz vehicleShape().
+// "Chłodnia"/"Plandeka" zostają na końcu listy tylko dla starych rekordów:
+// nie kasujemy ich, żeby nic się nie rozjechało, ale odradzamy w etykiecie.
+const VEHICLE_TYPES = [
+  { value: "Solo",     label: "Solo (do 7,5 t)" },
+  { value: "Bus",      label: "Bus / dostawczy" },
+  { value: "Zestaw",   label: "Zestaw z przyczepą" },
+  { value: "TIR",      label: "TIR — ciągnik + naczepa" },
+  { value: "Inny",     label: "Inny" },
+  { value: "Chłodnia", label: "Chłodnia (stare — zaznacz w Wyposażeniu)" },
+  { value: "Plandeka", label: "Plandeka (stare — zaznacz w Wyposażeniu)" },
+];
+
 const DOC_TYPES = [
   { id: "oc",        label: "OC",               icon: "🛡️",  color: "#3b82f6", group: "Ubezpieczenia" },
   { id: "ac",        label: "AC",               icon: "🚗",  color: "#6366f1", group: "Ubezpieczenia" },
@@ -698,12 +714,95 @@ function atlasDateTimeToMs(dt) {
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// Vehicle icons (SVG)
-const IconTruck = ({size=20}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="6" width="11" height="10" rx="2"/><path d="M14 10h3.5l3 3v3a1 1 0 0 1-1 1h-1"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M9 17h6"/><path d="M3 16h1.5"/></svg>;
+// ── Ikony pojazdów ────────────────────────────────────────────────────────────
+// Jedna rodzina sylwetek: wysokość viewBox 20, kreska 1.3, wspólna linia jezdni,
+// wyłącznie currentColor (działa na jasnym, ciemnym i w kolorowym kafelku statusu).
+// Sylwetki odrysowane ze zdjęć floty. Rozpoznawalna różnica Daily vs TIR:
+// w Daily skrzynia WYSTAJE ponad kabinę, w TIR-ze kabina i naczepa są równe.
 
-const IconTruckTrailer = ({size=20}) => <svg width={size*1.4} height={size} viewBox="0 0 28 18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="4" width="9" height="7" rx="1.5"/><circle cx="3.5" cy="12.5" r="1.5"/><circle cx="8" cy="12.5" r="1.5"/><line x1="10" y1="8.5" x2="12" y2="8.5"/><rect x="12" y="4" width="5.5" height="7" rx="1.5"/><path d="M17.5 6.5h4l3 3v1.5h-7"/><circle cx="14.5" cy="12.5" r="1.5"/><circle cx="22" cy="12.5" r="1.5"/></svg>;
+// Co narysować — składane z pól, które już są w bazie (type, equipment, plate2).
+const vehicleShape = (v) => {
+  const eq = v?.equipment || [];
+  const t = (v?.type || "").toLowerCase();
+  const hasSecond = !!v?.plate2;
+  // Kolejność ma znaczenie: druga rejestracja wygrywa z "Bus"/"Solo", bo bus
+  // z przyczepą to ZESTAW, nie samotny bus (incydent przy weryfikacji 2026-10-23:
+  // TK 314CL ma type="Bus" + plate2 i rysował się jako solo bus).
+  const chassis = t === "tir" ? "tir"
+    : (hasSecond || t === "zestaw") ? "zestaw"
+    : t === "bus" ? "bus"
+    : "solo";
+  // Zabudowa z wyposażenia; chłodnia wygrywa nad plandeką (agregat niesie więcej
+  // informacji). Stare wartości v.type "Chłodnia"/"Plandeka" nadal czytamy.
+  let body = (eq.includes("chłodnia") || t === "chłodnia") ? "chlodnia"
+    : (eq.includes("plandeka") || t === "plandeka") ? "plandeka"
+    : "box";
+  // Na przyczepie chłodnie i windy nie występują (ustalone z userem 2026-10-23).
+  if (chassis === "zestaw" && body === "chlodnia") body = "plandeka";
+  return { chassis, body, winda: eq.includes("winda") && chassis === "solo" };
+};
 
-const VehicleIcon = ({v, size=20, className=""}) => <span className={className}>{v?.plate2 ? <IconTruckTrailer size={size}/> : <IconTruck size={size}/>}</span>;
+const ICON_SVG = { fill: "none", stroke: "currentColor", strokeWidth: 1.3, strokeLinecap: "round", strokeLinejoin: "round" };
+const ICON_RATIO = { solo: 1.8, zestaw: 2.5, tir: 2.3, bus: 1.3 };
+const ICON_VBOX  = { solo: "0 0 36 20", zestaw: "0 0 50 20", tir: "0 0 46 20", bus: "0 0 26 20" };
+
+const VehicleIcon = ({ v, size = 20, className = "" }) => {
+  const { chassis, body, winda } = vehicleShape(v);
+  const curtain = body === "plandeka";
+  const fridge = body === "chlodnia";
+
+  const parts = chassis === "tir" ? (
+    <>
+      <path d="M2 14.5V6.4a1.4 1.4 0 0 1 1.4-1.4h5.2"/>
+      <rect x="8.6" y="2.8" width="34" height="10.8" rx=".8"/>
+      {curtain && <path d="M12.6 3.7v9M16.6 3.7v9M20.6 3.7v9M24.6 3.7v9M28.6 3.7v9M32.6 3.7v9M36.6 3.7v9" opacity=".4"/>}
+      {fridge && <><rect x="9.8" y=".5" width="5.4" height="2.3" rx=".5"/><path d="M11 1.3h3M11 2h3" opacity=".5"/></>}
+      <path d="M21 13.6v2.2"/>
+      <circle cx="5" cy="16" r="1.9"/><circle cx="11.5" cy="16" r="1.9"/>
+      <circle cx="34" cy="16" r="1.9"/><circle cx="38.6" cy="16" r="1.9"/>
+      <path d="M6.9 16h2.7M13.4 16h18.7M40.5 16h2.1M2 14.5h4.4"/>
+    </>
+  ) : chassis === "zestaw" ? (
+    <>
+      <path d="M2 14.5V9.2l2.4-2.6h3.2"/><path d="M6.1 6.6 8.8 4"/>
+      <rect x="8.8" y="4" width="15.2" height="10.5" rx=".8"/>
+      {curtain && <path d="M12.2 4.9v8.7M15.6 4.9v8.7M19 4.9v8.7M22.4 4.9v8.7" opacity=".45"/>}
+      <path d="M24 13.2h3.4"/>
+      <rect x="27.4" y="4.6" width="17.6" height="9.9" rx=".8"/>
+      {curtain && <path d="M30.8 5.5v8.1M34.2 5.5v8.1M37.6 5.5v8.1M41 5.5v8.1" opacity=".45"/>}
+      <circle cx="5" cy="16" r="1.9"/><circle cx="19" cy="16" r="1.9"/>
+      <circle cx="34" cy="16" r="1.9"/><circle cx="38.6" cy="16" r="1.9"/>
+      <path d="M6.9 16h10.2M29 16h3.1M40.5 16h4.5M2 14.5h4.4"/>
+    </>
+  ) : chassis === "bus" ? (
+    <>
+      <path d="M2 14.5V7.6a2 2 0 0 1 2-2h8.4l4.6 4h3.4a2 2 0 0 1 2 2v2.9"/>
+      <path d="M12.4 5.6v4h4.6"/>
+      <circle cx="6.5" cy="16" r="1.9"/><circle cx="18.5" cy="16" r="1.9"/>
+      <path d="M8.4 16h8.2M2 14.5h2.6M20.4 14.5h2"/>
+    </>
+  ) : (
+    <>
+      <path d="M2 14.5V9.2l2.4-2.6h3.2"/><path d="M6.1 6.6 8.8 4"/>
+      <rect x="8.8" y="4" width="21.2" height="10.5" rx=".8"/>
+      {curtain && <path d="M12.5 4.9v8.7M16.3 4.9v8.7M20.1 4.9v8.7M23.9 4.9v8.7M27.7 4.9v8.7" opacity=".45"/>}
+      {fridge && <><rect x="9.9" y="1.6" width="5.6" height="2.4" rx=".5"/><path d="M11.2 2.4h3M11.2 3.2h3" opacity=".5"/></>}
+      {winda && <><path d="M30 12.6h4.4"/><path d="M34.4 12.6v2.3"/></>}
+      <circle cx="5" cy="16" r="1.9"/><circle cx="22" cy="16" r="1.9"/>
+      <path d="M6.9 16h13.2M23.9 16h6.1M2 14.5h4.4"/>
+    </>
+  );
+
+  return (
+    <span className={className} style={{ display: "inline-flex", alignItems: "center" }}>
+      <svg width={size * ICON_RATIO[chassis]} height={size} viewBox={ICON_VBOX[chassis]} {...ICON_SVG}>{parts}</svg>
+    </span>
+  );
+};
+
+// Generyczna ciężarówka bez kontekstu pojazdu — ekran ładowania, plakietka statusu.
+// Celowo przez VehicleIcon, żeby nie powstał drugi, rozjeżdżający się styl.
+const IconTruck = ({ size = 20 }) => <VehicleIcon v={null} size={size} />;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // LOGIN SCREEN
@@ -14784,7 +14883,7 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
           </MF>
           <MF label="Typ pojazdu">
             <MSelect value={v.type} onChange={(val) => setF("type", val)}>
-              {["Solo","Bus","Zestaw","Chłodnia","Plandeka","Inny"].map((t) => <option key={t}>{t}</option>)}
+              {VEHICLE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
             </MSelect>
           </MF>
           <div className="col-span-2">
@@ -15280,7 +15379,7 @@ function AddVehicleModal({ onSave, onClose }) {
             <MF label="Rok"><MInput type="number" value={form.year} onChange={(v) => set("year", v)} /></MF>
             <MF label="Typ pojazdu">
               <MSelect value={form.type} onChange={(v) => set("type", v)}>
-                {["Solo","Bus","Zestaw","Chłodnia","Plandeka","Inny"].map((t) => <option key={t}>{t}</option>)}
+                {VEHICLE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
               </MSelect>
             </MF>
           </div>
