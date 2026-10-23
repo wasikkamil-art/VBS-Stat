@@ -297,10 +297,17 @@ export function lastWeeklyRest(segments, now, lookbackDays = 21) {
 
   const lastWk = wk[wk.length - 1];
   const regular = wk.filter(s => s.durMin >= REGULATION.WEEKLY_REST_REGULAR);
+  // Gdy ostatni kandydat pochodzi z TRWAJĄCEGO tygodnia, nie wolno ogłaszać, że
+  // „ostatni tygodniowy był skrócony" — tydzień się nie skończył i dłuższy odpoczynek
+  // może dopiero nadejść (zgłoszenie Agnieszki, 2026-10-23). `endMs` zostawiamy jako
+  // kotwicę terminu 6×24h: to ostatni faktyczny odpoczynek ≥24h i liczenie od niego
+  // jest ostrożniejsze niż cofanie się do poprzedniego tygodnia.
+  const wToku = _mondayOf(lastWk.startMs) === _mondayOf(nowMs);
   return {
     endMs: lastWk.endMs,
     durMin: lastWk.durMin,
-    isReduced: lastWk.durMin < REGULATION.WEEKLY_REST_REGULAR,
+    isReduced: wToku ? false : lastWk.durMin < REGULATION.WEEKLY_REST_REGULAR,
+    wToku,
     lastRegularEnd: regular.length ? regular[regular.length - 1].endMs : null,
   };
 }
@@ -484,7 +491,15 @@ function _weeklyRestsByWeek(segments, nowMs, lookbackWeeks = 4) {
     const cur = byWeek.get(wk);
     if (!cur || s.durMin > cur.durMin) byWeek.set(wk, s);
   }
-  return { coalesced, inWindow, byWeek };
+  // ⚠️ TYDZIEŃ W TOKU NIE JEST ROZSTRZYGNIĘTY (2026-10-23, zgłoszenie Agnieszki).
+  // „Najdłuższy odpoczynek ≥24h w tygodniu" ma sens dopiero, gdy tydzień się skończył.
+  // W trwającym tygodniu najdłuższy dotychczasowy odpoczynek bywa czymś zupełnie innym
+  // niż tygodniowy — u Mirka blok 24h41 był dobowym z doczepioną rekompensatą, a prawdziwą
+  // tygodniówkę zaczynał dopiero tego dnia. Panel ogłosił z tego „skrócony tygodniowy",
+  // dorobił parę dwóch skróconych pod rząd i dług 30h41 — wszystko nieistniejące.
+  // Dlatego bieżący tydzień WOLNO pokazać, ale NIE WOLNO z niego wyciągać werdyktów.
+  const biezacyTydzienMs = _mondayOf(nowMs);
+  return { coalesced, inWindow, byWeek, biezacyTydzienMs };
 }
 
 // Lista tygodniowych odpoczynków dla dyspozytora: same długości, od najstarszego.
@@ -492,15 +507,21 @@ function _weeklyRestsByWeek(segments, nowMs, lookbackWeeks = 4) {
 // 2 pauza 28 — nie potrzeba dat". Dlatego zwracamy durMin + flagę skrócenia i nic więcej
 // poza startMs, który służy wyłącznie do stabilnego sortowania i kluczy Reacta.
 export function weeklyRestList(segments, nowMs) {
-  const { byWeek } = _weeklyRestsByWeek(segments, nowMs);
+  const { byWeek, biezacyTydzienMs } = _weeklyRestsByWeek(segments, nowMs);
   return [...byWeek.entries()]
     .sort((a, b) => a[0] - b[0])
-    .map(([wk, s]) => ({
-      weekStartMs: wk,
-      startMs: s.startMs,
-      durMin: s.durMin,
-      isReduced: s.durMin < REGULATION.WEEKLY_REST_REGULAR, // < 45h
-    }));
+    .map(([wk, s]) => {
+      const wToku = wk === biezacyTydzienMs;
+      return {
+        weekStartMs: wk,
+        startMs: s.startMs,
+        durMin: s.durMin,
+        // W trwającym tygodniu nie przesądzamy o skróceniu — dłuższy odpoczynek
+        // może dopiero nadejść. UI ma to pokazać jako „w toku", nie jako skrócony.
+        isReduced: wToku ? false : s.durMin < REGULATION.WEEKLY_REST_REGULAR, // < 45h
+        wToku,
+      };
+    });
 }
 
 // ── REGUŁY SKRÓCONYCH TYGODNIOWYCH (art. 8 ust. 6 i 6b) ──────────────────────
@@ -533,7 +554,7 @@ export function weeklyRestList(segments, nowMs) {
 //      Zwracamy WSZYSTKIE okna + minimum, decyzja należy do człowieka.
 // Dlatego pola nazywają się `...Info` / `minRegularIn4wk`, a nie `violation`.
 export function weeklyRestRules(segments, nowMs, { lookbackWeeks = 12, reportWeeks = 5 } = {}) {
-  const { byWeek } = _weeklyRestsByWeek(segments, nowMs, lookbackWeeks);
+  const { byWeek, biezacyTydzienMs } = _weeklyRestsByWeek(segments, nowMs, lookbackWeeks);
   const coalesced = coalesceRestGaps(segments);
   const target = REGULATION.WEEKLY_REST_REGULAR;
 
@@ -541,13 +562,24 @@ export function weeklyRestRules(segments, nowMs, { lookbackWeeks = 12, reportWee
   // 23 lub 25 godzin, a zmiana wypada 25.10.2026, czyli dokładnie teraz.
   const nextMonday = (ms) => { const d = new Date(ms); d.setDate(d.getDate() + 7); return d.getTime(); };
 
-  const weeks = [...byWeek.entries()].sort((a, b) => a[0] - b[0]).map(([wk, s]) => ({
-    weekStartMs: wk, startMs: s.startMs, endMs: s.endMs, durMin: s.durMin,
-    isReduced: s.durMin < target,
-  }));
+  // `wToku` = tydzień jeszcze trwa, więc jego najdłuższy odpoczynek NIE jest jeszcze
+  // tygodniowym. Taki tydzień pokazujemy, ale nie bierze udziału w żadnym werdykcie:
+  // nie tworzy pary skróconych, nie wymusza „następny musi być regularny" i nie liczy
+  // się jako pewny element okna 4 tygodni. Patrz komentarz w `_weeklyRestsByWeek`.
+  const weeks = [...byWeek.entries()].sort((a, b) => a[0] - b[0]).map(([wk, s]) => {
+    const wToku = wk === biezacyTydzienMs;
+    return {
+      weekStartMs: wk, startMs: s.startMs, endMs: s.endMs, durMin: s.durMin,
+      isReduced: wToku ? false : s.durMin < target,
+      wToku,
+    };
+  });
+  // Tygodnie zamknięte — tylko z nich wolno orzekać.
+  const zamkniete = weeks.filter(w => !w.wToku);
   // Kształt MUSI być identyczny jak w zwrotce na końcu — UI czyta olderPairsCount
   // wprost. Brak tego pola wyszedł w kontrakcie dla kierowcy z jednym segmentem.
-  if (!weeks.length) return { weeks: [], pairs: [], olderPairsCount: 0, nextMustBeRegular: false };
+  if (!weeks.length) return { weeks: [], pairs: [], olderPairsCount: 0, nextMustBeRegular: false,
+                              biezacyTydzienMs, tydzienWToku: false };
 
   // Ciągła lista tygodni kalendarzowych — tydzień BEZ odpoczynku ≥24h też się liczy
   // (jako zero tygodniowych w oknie), więc nie można iterować po samej tablicy `weeks`.
@@ -574,12 +606,15 @@ export function weeklyRestRules(segments, nowMs, { lookbackWeeks = 12, reportWee
       regularCount: rests.filter(r => !r.isReduced).length,
       // true gdy okno zaczyna się na pierwszym znanym tygodniu — dane mogą być ucięte
       truncated: win[0] === firstKnownWeek,
+      // true gdy okno obejmuje tydzień, który jeszcze trwa — jego odpoczynek może
+      // się jeszcze wydłużyć, więc liczba regularnych w tym oknie nie jest ostateczna
+      unfinished: win.includes(biezacyTydzienMs),
     };
   };
 
   const pairs = [];
-  for (let i = 1; i < weeks.length; i++) {
-    const a = weeks[i - 1], b = weeks[i];
+  for (let i = 1; i < zamkniete.length; i++) {
+    const a = zamkniete[i - 1], b = zamkniete[i];
     if (b.weekStartMs !== nextMonday(a.weekStartMs)) continue; // nie sąsiednie tygodnie
     if (!a.isReduced || !b.isReduced) continue;
 
@@ -595,12 +630,15 @@ export function weeklyRestRules(segments, nowMs, { lookbackWeeks = 12, reportWee
       if (idx <= 0) break;
       cursor = calendar[idx - 1];
     }
-    const solid = windows.filter(w => !w.truncated);
+    const solid = windows.filter(w => !w.truncated && !w.unfinished);
     const minRegularIn4wk = solid.length ? Math.min(...solid.map(w => w.regularCount)) : null;
     const maxRegularIn4wk = solid.length ? Math.max(...solid.map(w => w.regularCount)) : null;
 
     // ust. 6b akapit 2 — rekompensata za OBA skrócenia musi poprzedzać następny tygodniowy
-    const next = weeks.find(w => w.weekStartMs > b.weekStartMs) || null;
+    // Tylko tydzień ZAMKNIĘTY może być „następnym tygodniowym". Gdyby brać tydzień
+    // w toku, orzekalibyśmy o obowiązku z ust. 6b akapit 2 na podstawie odpoczynku,
+    // który jeszcze nie jest tygodniowym — a obowiązek jest wtedy po prostu OTWARTY.
+    const next = zamkniete.find(w => w.weekStartMs > b.weekStartMs) || null;
     const carrier = coalesced.find(s =>
       s.type === "rest" &&
       s.startMs >= b.endMs &&
@@ -627,12 +665,17 @@ export function weeklyRestRules(segments, nowMs, { lookbackWeeks = 12, reportWee
   const reportFromMs = nowMs - reportWeeks * 7 * 24 * 3600000;
   const recent = pairs.filter(p => p.secondWeekMs >= _mondayOf(reportFromMs));
 
-  const last = weeks[weeks.length - 1];
+  // „Następny musi być regularny" wynika z OSTATNIEGO ZAMKNIĘTEGO tygodnia. Tydzień
+  // w toku nie przesądza niczego — jego odpoczynek może jeszcze urosnąć do regularnego.
+  const last = zamkniete[zamkniete.length - 1];
   return {
     weeks,
     pairs: recent,
     olderPairsCount: pairs.length - recent.length,
     nextMustBeRegular: Boolean(last && last.isReduced),
+    // Tydzień, który jeszcze trwa — UI mówi wprost, że ocena jest niepełna.
+    biezacyTydzienMs,
+    tydzienWToku: weeks.some(w => w.wToku),
   };
 }
 
@@ -643,7 +686,7 @@ export function weeklyRestRules(segments, nowMs, { lookbackWeeks = 12, reportWee
 // wykorzystuje się JEDNORAZOWO (en bloc) dołączone do innego odpoczynku
 // trwającego co najmniej 9 godzin (art. 8 ust. 6b).
 export function weeklyRestCompensation(segments, nowMs) {
-  const { coalesced, inWindow, byWeek } = _weeklyRestsByWeek(segments, nowMs);
+  const { coalesced, inWindow, byWeek, biezacyTydzienMs } = _weeklyRestsByWeek(segments, nowMs);
   const weeklyStarts = new Set([...byWeek.values()].map(s => s.startMs));
 
   const targetMin = 45 * 60; // 2700 min = 45h regularny tygodniowy
@@ -653,6 +696,12 @@ export function weeklyRestCompensation(segments, nowMs) {
   // musi pokryć JEDEN odpoczynek z taką nadwyżką, a nie trzy po godzinie.
   const debts = [];
   for (const [wk, s] of [...byWeek.entries()].sort((a, b) => a[0] - b[0])) {
+    // Z tygodnia, który jeszcze trwa, NIE naliczamy długu — dopóki tydzień się nie
+    // skończył, najdłuższy dotychczasowy odpoczynek nie jest jeszcze tygodniowym
+    // i „skrócenie" bywa fikcją (u Mirka 23.10 dobowy z rekompensatą udawał skrócony
+    // tygodniowy i generował dług 30h41). Dług pojawi się po zamknięciu tygodnia,
+    // jeśli rzeczywiście zabraknie godzin.
+    if (wk === biezacyTydzienMs) continue;
     if (s.durMin < targetMin) {
       debts.push({
         owedMin: targetMin - s.durMin,
@@ -875,6 +924,9 @@ export function computeDriverCompliance(rawSegments = [], periodStart = null, no
         lastWasReduced: lw?.isReduced ?? false,
         lastRegularEnd: lw?.lastRegularEnd ?? null,
         nextMustBeRegular: lw ? lw.isReduced : false,
+        // Ostatni kandydat pochodzi z tygodnia, który jeszcze trwa — plan ma o tym
+        // powiedzieć wprost, zamiast twierdzić, że tygodniowy „był skrócony".
+        lastWToku: lw?.wToku ?? false,
       };
     })(),
     period28,
@@ -957,6 +1009,9 @@ export function computeDriverPlan(compliance, now = new Date()) {
       lastRegularEnd: wrStatus.lastRegularEnd ?? null,
       lastWasReduced: wrStatus.lastWasReduced || false,
       lastDurMin: wrStatus.lastDurMin ?? null,
+      // Ostatni odpoczynek ≥24h pochodzi z tygodnia, który jeszcze trwa — nie wiadomo
+      // jeszcze, czy to tygodniowy, więc nie żądamy pełnego 45h, ale mówimy wprost dlaczego.
+      lastWToku: wrStatus.lastWToku || false,
     },
     returnToBase,
   };

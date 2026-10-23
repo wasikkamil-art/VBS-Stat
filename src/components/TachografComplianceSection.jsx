@@ -513,29 +513,43 @@ export default function TachografComplianceSection({ device, position, driverAct
                   <div
                     key={w.startMs}
                     className={`flex items-baseline gap-1.5 rounded-lg px-2.5 py-1.5 border ${
-                      w.isReduced
-                        ? "bg-amber-50 border-amber-200"
-                        : "bg-emerald-50 border-emerald-200"
+                      w.wToku
+                        ? "bg-slate-50 border-slate-200 border-dashed"
+                        : w.isReduced
+                          ? "bg-amber-50 border-amber-200"
+                          : "bg-emerald-50 border-emerald-200"
                     }`}
                     title={
-                      w.durMin >= URLOP_HINT_MIN
-                        ? "Ponad 100h — prawdopodobnie urlop albo nieużywana karta kierowcy"
-                        : w.isReduced ? "Skrócony (poniżej 45h)" : "Regularny (45h lub więcej)"
+                      w.wToku
+                        ? "Tydzień jeszcze trwa — to najdłuższy odpoczynek DOTYCHCZAS. Dłuższy może dopiero nadejść, więc nie przesądzamy, czy jest skrócony, i nie liczymy z niego wyrównania."
+                        : w.durMin >= URLOP_HINT_MIN
+                          ? "Ponad 100h — prawdopodobnie urlop albo nieużywana karta kierowcy"
+                          : w.isReduced ? "Skrócony (poniżej 45h)" : "Regularny (45h lub więcej)"
                     }
                   >
                     <span className="text-[11px] text-gray-500">{i + 1}. pauza</span>
-                    <strong className={`text-sm font-bold tabular-nums ${w.isReduced ? "text-amber-800" : "text-emerald-800"}`}>
+                    <strong className={`text-sm font-bold tabular-nums ${
+                      w.wToku ? "text-slate-600" : w.isReduced ? "text-amber-800" : "text-emerald-800"
+                    }`}>
                       {fmtHM(w.durMin)}
                     </strong>
-                    {w.durMin >= URLOP_HINT_MIN && (
+                    {w.wToku && (
+                      <span className="text-[10px] text-slate-500 italic">w toku</span>
+                    )}
+                    {!w.wToku && w.durMin >= URLOP_HINT_MIN && (
                       <span className="text-[10px] text-gray-500 italic">urlop</span>
                     )}
                   </div>
                 ))}
               </div>
               <div className="text-[11px] text-gray-500 mt-2">
-                Zielone = regularny (≥45h) · bursztynowe = skrócony (&lt;45h) · „urlop" = ponad 100h, czyli urlop albo nieużywana karta. Jeden odpoczynek na tydzień kalendarzowy, najdłuższy ≥24h.
+                Zielone = regularny (≥45h) · bursztynowe = skrócony (&lt;45h) · szare przerywane = tydzień jeszcze trwa · „urlop" = ponad 100h, czyli urlop albo nieużywana karta. Jeden odpoczynek na tydzień kalendarzowy, najdłuższy ≥24h.
               </div>
+              {(compliance.weeklyRests || []).some(w => w.wToku) && (
+                <div className="text-[11px] text-slate-600 mt-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
+                  ⏳ <strong>Ostatni tydzień jeszcze się nie skończył.</strong> Pokazana pauza to najdłuższa <em>dotychczas</em> — kierowca może dopiero zaczynać tygodniowy odpoczynek, a ponaddobowy blok bywa dobowym z doczepioną rekompensatą. Dlatego ten tydzień nie tworzy skrócenia, wyrównania ani pary skróconych pod rząd.
+                </div>
+              )}
             </>
           ) : (
             <div className="text-[11px] text-gray-500">Brak odpoczynków ≥24h w ostatnich 4 tygodniach.</div>
@@ -705,6 +719,11 @@ export default function TachografComplianceSection({ device, position, driverAct
                 {plan.weeklyRest.mustBeRegular && (
                   <div className="text-[10px] text-amber-700 mt-0.5">
                     ⚠️ Ostatni tygodniowy był skrócony{plan.weeklyRest.lastDurMin != null ? ` (${fmtHM(plan.weeklyRest.lastDurMin)})` : ""} — następny MUSI być pełny ≥45h{plan.weeklyRest.lastRegularEnd ? ` · ostatni pełny: ${fmtTimeShort(plan.weeklyRest.lastRegularEnd)}` : ""}
+                  </div>
+                )}
+                {!plan.weeklyRest.mustBeRegular && plan.weeklyRest.lastWToku && (
+                  <div className="text-[10px] text-slate-600 mt-0.5">
+                    ⏳ Ostatni odpoczynek{plan.weeklyRest.lastDurMin != null ? ` (${fmtHM(plan.weeklyRest.lastDurMin)})` : ""} jest z tygodnia, który jeszcze trwa — nie wiadomo, czy to już tygodniowy, czy dobowy z rekompensatą. Nie przesądzamy, czy następny musi być pełny.
                   </div>
                 )}
               </div>
