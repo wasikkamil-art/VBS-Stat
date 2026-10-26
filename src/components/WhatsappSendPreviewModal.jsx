@@ -120,11 +120,11 @@ export default function WhatsappSendPreviewModal({ fracht, driver, dispatcherNam
             <h3 className="text-base font-bold text-gray-900">📱 Wyślij zlecenie na WhatsApp</h3>
             <p className="text-xs text-gray-500 mt-0.5">
               Do: <strong>{driver?.displayName || driver?.email || "?"}</strong>
-              {driver?.whatsappNumber && <span className="text-gray-400"> · +{driver.whatsappNumber}</span>}
+              {driver?.whatsappNumber && <span className="text-gray-500"> · +{driver.whatsappNumber}</span>}
               {" · "}Wiadomości: <strong>{totalMsgs}</strong>
             </p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-600 text-xl">×</button>
         </div>
 
         <div className="px-5 py-4 overflow-y-auto" style={{flex:"1 1 auto"}}>
@@ -172,7 +172,7 @@ export default function WhatsappSendPreviewModal({ fracht, driver, dispatcherNam
                 <span className="text-base">📍</span>
                 <div className="flex-1 text-xs">
                   <div className="font-semibold text-emerald-800">3️⃣ Pinezka załadunku</div>
-                  <div className="text-emerald-600">{order.pickup.lat.toFixed(5)}, {order.pickup.lng.toFixed(5)}</div>
+                  <div className="text-emerald-700">{order.pickup.lat.toFixed(5)}, {order.pickup.lng.toFixed(5)}</div>
                 </div>
               </div>
             )}

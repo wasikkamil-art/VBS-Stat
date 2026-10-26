@@ -169,13 +169,13 @@ export default function TripSummaryPanel({ fracht, vehicle, driverEvents = [], f
 
       {/* Dodatkowe info w wersji pełnej */}
       {!isCompact && !isDriver && spalanie && (
-        <div style={{ marginTop: 10, fontSize: 11, color: "#9ca3af" }}>
+        <div style={{ marginTop: 10, fontSize: 11, color: "#6b7280" }}>
           Spalanie wyliczone z {spalanie.tankings} pełnych tankowań pojazdu w okresie trasy (±3 dni).
           Porównanie: norma {Number(vehicle?.spalanieNorma) || SPALANIE_DEFAULT_NORMA} / alarm {Number(vehicle?.spalanieAlarm) || SPALANIE_DEFAULT_ALARM} l/100km.
         </div>
       )}
       {!isCompact && kmRzeczywiste == null && (
-        <div style={{ marginTop: 10, fontSize: 11, color: "#9ca3af" }}>
+        <div style={{ marginTop: 10, fontSize: 11, color: "#6b7280" }}>
           Km rzeczywiste: brak odczytu z CAN. Sprawdź konfigurację Atlas API dla tego pojazdu.
         </div>
       )}

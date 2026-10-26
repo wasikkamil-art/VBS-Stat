@@ -287,7 +287,7 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
     .sort((a, b) => Math.abs(b[1].dRachunek) - Math.abs(a[1].dRachunek))
     .slice(0, 3), [zmianyStawek]);
 
-  if (blad) return <div className="bg-white rounded-2xl border border-gray-100 p-6 text-sm text-red-600">
+  if (blad) return <div className="bg-white rounded-2xl border border-gray-100 p-6 text-sm text-red-700">
     Nie udało się wczytać analiz: {blad}
   </div>;
   if (!dane) return <div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-sm text-gray-500">Wczytywanie…</div>;
@@ -414,10 +414,10 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
             <div className="text-[10px] uppercase tracking-wide text-gray-500 font-semibold">{etykieta}</div>
             <div className="text-xl font-bold text-gray-900 mt-0.5">{wartosc}</div>
             {zmiana !== null && zmiana !== undefined && isFinite(zmiana) ? (
-              <div className="text-[11px] font-semibold mt-0.5" style={{ color: zmiana >= 0 ? "#dc2626" : "#16a34a" }}>
-                {zmiana >= 0 ? "▲ +" : "▼ "}{pl1(zmiana)}{jedn}{opis && <span className="text-gray-400 font-normal"> {opis}</span>}
+              <div className="text-[11px] font-semibold mt-0.5" style={{ color: zmiana >= 0 ? "#b91c1c" : "#15803d" }}>
+                {zmiana >= 0 ? "▲ +" : "▼ "}{pl1(zmiana)}{jedn}{opis && <span className="text-gray-500 font-normal"> {opis}</span>}
               </div>
-            ) : (opis && <div className="text-[11px] text-gray-400 mt-0.5">{opis}</div>)}
+            ) : (opis && <div className="text-[11px] text-gray-500 mt-0.5">{opis}</div>)}
           </div>
         ))}
       </div>
@@ -463,7 +463,7 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
                   <td className={"text-right py-1 px-1.5 tabular-nums " + (w.suma ? "font-bold" : "text-gray-900 font-semibold")}
                     style={kom(BLOK.biez)}>{eur0(w.b)}</td>
                   {poprz && <td className="text-right py-1 pl-2 tabular-nums font-semibold"
-                    style={{ borderTop: kreska, color: w.p === null ? "#cbd5e1" : w.suma ? "#1f2937" : w.b - w.p >= 0 ? "#dc2626" : "#16a34a" }}>
+                    style={{ borderTop: kreska, color: w.p === null ? "#cbd5e1" : w.suma ? "#1f2937" : w.b - w.p >= 0 ? "#b91c1c" : "#15803d" }}>
                     {w.p === null ? "–" : `${sgn(w.b - w.p)} €`}</td>}
                 </tr>
               );
@@ -480,7 +480,7 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
         <div className="text-xs text-gray-500 mb-2">
           Jeśli stawka stoi w miejscu, a rachunek rośnie, to zmieniły się kierunki — nie taryfa.
           Kolejność od najdroższego kierunku <b>{wMies(biez.month)}</b>;
-          <span style={{ color: "#dc2626" }} className="font-semibold"> na czerwono</span> stawki powyżej {pl2(PROG_DROGI)} €/km.
+          <span style={{ color: "#b91c1c" }} className="font-semibold"> na czerwono</span> stawki powyżej {pl2(PROG_DROGI)} €/km.
         </div>
         {/* separate + spacing 0, bo przy border-collapse zaokrąglenia rogów bloków nie działają */}
         <table className="w-full text-xs" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
@@ -536,10 +536,10 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
                   <td className="text-right py-1 px-1.5 tabular-nums text-gray-800"
                     style={kom(BLOK.biez)}>{num(biez.km?.[cc] || 0)}</td>
                   <td className={"text-right py-1 px-1.5 tabular-nums " + (drogi || wazny ? "font-bold" : "")}
-                    style={{ ...kom(BLOK.biez), color: sb === undefined ? "#9ca3af" : drogi ? "#dc2626" : "#1f2937" }}>
-                    {sb === undefined ? "–" : sb < 0.0005 ? <span style={{ color: "#16a34a" }}>bez opłat</span> : pl3(sb)}</td>
+                    style={{ ...kom(BLOK.biez), color: sb === undefined ? "#6b7280" : drogi ? "#b91c1c" : "#1f2937" }}>
+                    {sb === undefined ? "–" : sb < 0.0005 ? <span style={{ color: "#15803d" }}>bez opłat</span> : pl3(sb)}</td>
                   {poprz && <td className="text-right py-1 pl-2 tabular-nums font-semibold whitespace-nowrap"
-                    style={{ borderTop: "1px solid #f1f5f9", color: zm?.d == null ? "#cbd5e1" : Math.abs(zm.d) < 0.0005 ? "#9ca3af" : zm.d > 0 ? "#dc2626" : "#16a34a" }}>
+                    style={{ borderTop: "1px solid #f1f5f9", color: zm?.d == null ? "#cbd5e1" : Math.abs(zm.d) < 0.0005 ? "#6b7280" : zm.d > 0 ? "#b91c1c" : "#15803d" }}>
                     {zm?.d == null ? "–" : Math.abs(zm.d) < 0.0005 ? "bez zmian" : `${zm.d > 0 ? "▲ +" : "▼ "}${pl3(zm.d)}`}</td>}
                 </tr>
               );
@@ -573,7 +573,7 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
             {powody.map(([cc, z]) => (
               <div key={cc} className="mb-0.5">
                 <b>{KRAJ[cc] || cc}</b>{" "}
-                <span style={{ color: z.dRachunek >= 0 ? "#dc2626" : "#16a34a" }} className="font-semibold">
+                <span style={{ color: z.dRachunek >= 0 ? "#b91c1c" : "#15803d" }} className="font-semibold">
                   {sgn(z.dRachunek)} €
                 </span>
                 {/* Porównanie stawek ma sens tylko wtedy, gdy OBA miesiące ją mają.
@@ -588,7 +588,7 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
                 )}
               </div>
             ))}
-            <div className="text-gray-400 mt-1">
+            <div className="text-gray-500 mt-1">
               Taryfy zmieniają się rzadko, więc ruch samej stawki zwykle znaczy, że na tej samej trasie
               doszło albo ubyło dróg płatnych.
             </div>
@@ -605,7 +605,7 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
             Stawka <b>{pl3(biez.etoll.plnPerKm)} PLN/km</b> wobec taryfy urzędowej <b>{pl2(biez.etoll.taryfaPlnPerKm)} PLN/km</b> —
             {Math.abs(biez.etoll.plnPerKm - biez.etoll.taryfaPlnPerKm) < 0.01
               ? <b style={{ color: "#15803d" }}> zgodna</b>
-              : <b style={{ color: "#dc2626" }}> odbiega</b>}.
+              : <b style={{ color: "#b91c1c" }}> odbiega</b>}.
             Duplikatów: <b>{biez.etoll.duplikaty}</b>.
             {biez.etoll.nieuiszczonePLN > 0 && <> Nieuiszczone: <b>{pl2(biez.etoll.nieuiszczonePLN)} PLN</b>.</>}
           </div>
@@ -636,7 +636,7 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
                       {b}{i > 0 ? ` (${pl1(pb)}%)` : ""}</td>
                     {poprz && i > 0 && pp !== null && (
                       <td className="text-right py-1 px-1.5 tabular-nums font-semibold"
-                          style={{ color: pb - pp >= 0 ? "#dc2626" : "#16a34a" }}>
+                          style={{ color: pb - pp >= 0 ? "#b91c1c" : "#15803d" }}>
                         {(pb - pp >= 0 ? "+" : "") + pl1(pb - pp)} pkt%</td>
                     )}
                     {poprz && i === 0 && <td />}
@@ -648,7 +648,7 @@ export default function OplatyDrogoweAnaliza({ analizy = null, isAdmin = false, 
         </div>
       )}
 
-      <div className="text-[11px] text-gray-400 leading-relaxed">
+      <div className="text-[11px] text-gray-500 leading-relaxed">
         {biez.uwaga}
         {biez.frachtowPominietych > 0 && <> Pominięto {biez.frachtowPominietych} {biez.frachtowPominietych === 1 ? "fracht" : "frachty"},
           których trasa wychodzi poza zakres eksportu — ich kilometry nie weszłyby razem z odpowiadającymi im opłatami.</>}

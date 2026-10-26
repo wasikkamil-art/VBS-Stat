@@ -46,7 +46,7 @@ export default function RozliczenieTrasyPanel({ frachtId, canEdit = false, showT
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "© OpenStreetMap", maxZoom: 18 }).addTo(mapObjRef.current);
     }
     const map = mapObjRef.current;
-    const linia = L.polyline(dane.slad, { color: "#059669", weight: 4, opacity: 0.85 }).addTo(map);
+    const linia = L.polyline(dane.slad, { color: "#047857", weight: 4, opacity: 0.85 }).addTo(map);
     const grupa = L.layerGroup().addTo(map);
     for (const p of dane.fakt?.postoje || []) {
       if (!p.lat || !p.lng) continue;
@@ -78,7 +78,7 @@ export default function RozliczenieTrasyPanel({ frachtId, canEdit = false, showT
   if (!dane && !plan) {
     return canEdit ? (
       <div className="pt-2 border-t border-gray-100">
-        <div className="text-xs text-gray-400">
+        <div className="text-xs text-gray-500">
           📊 Plan kontra wykonanie — brak zapisanego planu dla tego zlecenia.
           Plan zapisuje się w Kalkulatorze tras (przycisk „Zaplanuj trasę" wyżej) PRZED wyjazdem.
         </div>
@@ -101,7 +101,7 @@ export default function RozliczenieTrasyPanel({ frachtId, canEdit = false, showT
       <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
         <h3 className="text-sm font-semibold text-gray-800">📊 Plan kontra wykonanie</h3>
         <div className="flex items-center gap-2">
-          {dane?.policzoneAt && <span className="text-[11px] text-gray-400">policzone {fmtCzas(dane.policzoneAt)}</span>}
+          {dane?.policzoneAt && <span className="text-[11px] text-gray-500">policzone {fmtCzas(dane.policzoneAt)}</span>}
           {canEdit && (
             <button type="button" onClick={przelicz} disabled={liczy}
               className="px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-xs disabled:opacity-50">
@@ -121,7 +121,7 @@ export default function RozliczenieTrasyPanel({ frachtId, canEdit = false, showT
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-xs text-gray-400 border-b border-gray-100">
+                <tr className="text-xs text-gray-500 border-b border-gray-100">
                   <th className="text-left font-medium py-1.5">Metryka</th>
                   <th className="text-right font-medium">Plan</th>
                   <th className="text-right font-medium">Wykonanie</th>
@@ -134,7 +134,7 @@ export default function RozliczenieTrasyPanel({ frachtId, canEdit = false, showT
                     <td className="py-1.5 text-gray-700">{w.etykieta}</td>
                     <td className="text-right text-gray-500">{w.plan}</td>
                     <td className="text-right font-medium text-gray-800">{w.fakt}</td>
-                    <td className="pl-3 text-[11px] text-gray-400">{w.zrodlo || ""}</td>
+                    <td className="pl-3 text-[11px] text-gray-500">{w.zrodlo || ""}</td>
                   </tr>
                 ))}
               </tbody>
@@ -159,7 +159,7 @@ export default function RozliczenieTrasyPanel({ frachtId, canEdit = false, showT
           {dane.slad?.length > 0 && (
             <div className="mt-3">
               <div ref={mapRef} className="w-full h-64 rounded-xl overflow-hidden border border-gray-100" />
-              <div className="mt-1 text-[11px] text-gray-400">
+              <div className="mt-1 text-[11px] text-gray-500">
                 Zielona linia — trasa faktycznie przejechana ({dane.punktowGps} punktów GPS).
                 Kropki — postoje dłuższe niż 20 min (fioletowe: ponad 3 h).
               </div>
@@ -171,7 +171,7 @@ export default function RozliczenieTrasyPanel({ frachtId, canEdit = false, showT
               {dane.braki.map((b, i) => <div key={i}>⚠️ {b}</div>)}
             </div>
           )}
-          <div className="mt-2 text-[11px] text-gray-400">
+          <div className="mt-2 text-[11px] text-gray-500">
             Zestawienie pokazuje różnice, nie ocenia kierowcy. Kilometry z licznika pojazdu, czas jazdy i pauzy
             z tachografu (albo z GPS, gdy karta jeszcze nie zgrana).
           </div>

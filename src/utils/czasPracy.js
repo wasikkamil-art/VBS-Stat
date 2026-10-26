@@ -42,7 +42,7 @@ export const REGULATION = {
 // Typy aktywności
 export const ACTIVITY_TYPES = {
   drive: { label: "Jazda",          icon: "🚛", color: "#2563eb", bg: "#eff6ff" },
-  work:  { label: "Inna praca",     icon: "🔧", color: "#f59e0b", bg: "#fffbeb" },
+  work:  { label: "Inna praca",     icon: "🔧", color: "#b45309", bg: "#fffbeb" },
   avail: { label: "Dyspozycyjność", icon: "⏱",  color: "#64748b", bg: "#f8fafc" },
   rest:  { label: "Odpoczynek",     icon: "🛏",  color: "#22c55e", bg: "#f0fdf4" },
 };

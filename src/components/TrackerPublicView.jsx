@@ -154,7 +154,7 @@ export default function TrackerPublicView({ token }) {
           <img src="/logodologowania.png" alt="FleetStat" style={{ width: 200, maxWidth: "70%" }} />
         </div>
         {children}
-        <div style={{ marginTop: 32, textAlign: "center", fontSize: 11, color: "#9ca3af" }}>
+        <div style={{ marginTop: 32, textAlign: "center", fontSize: 11, color: "#6b7280" }}>
           fleetstat.pl
         </div>
       </div>
@@ -199,7 +199,7 @@ export default function TrackerPublicView({ token }) {
     return (
       <Shell>
         <div style={{ background: "#fff", borderRadius: 16, padding: 32, textAlign: "center" }}>
-          <div style={{ fontSize: 18, fontWeight: 700, color: "#dc2626" }}>Nie udało się wczytać danych</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#b91c1c" }}>Nie udało się wczytać danych</div>
           <div style={{ fontSize: 13, color: "#64748b", marginTop: 8 }}>Spróbuj odświeżyć stronę za chwilę.</div>
         </div>
       </Shell>

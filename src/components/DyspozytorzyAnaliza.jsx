@@ -22,12 +22,12 @@ function Kpi({ etykieta, wartosc, zmiana, jednostka = "", calkowita = false, opi
       <div className="text-[10px] uppercase tracking-wide text-gray-500 font-semibold">{etykieta}</div>
       <div className="text-xl font-bold text-gray-900 mt-0.5">{wartosc}</div>
       {jest ? (
-        <div className="text-[11px] font-semibold mt-0.5" style={{ color: zmiana >= 0 ? "#16a34a" : "#dc2626" }}>
+        <div className="text-[11px] font-semibold mt-0.5" style={{ color: zmiana >= 0 ? "#15803d" : "#b91c1c" }}>
           {zmiana >= 0 ? "▲ +" : "▼ "}{calkowita ? Math.round(zmiana) : pl1(zmiana)}{jednostka}
-          {opis && <span className="text-gray-400 font-normal"> {opis}</span>}
+          {opis && <span className="text-gray-500 font-normal"> {opis}</span>}
         </div>
       ) : (
-        opis ? <div className="text-[11px] text-gray-400 mt-0.5">{opis}</div> : null
+        opis ? <div className="text-[11px] text-gray-500 mt-0.5">{opis}</div> : null
       )}
     </div>
   );
@@ -65,13 +65,13 @@ function TabelaOkresu({ stat, tytul, podtytul }) {
             const pod = String(nazwa).startsWith("└");
             return (
               <tr key={i} style={{ borderTop: "1px solid #f1f5f9" }}>
-                <td className={"py-1 " + (pod ? "pl-3 text-gray-400 text-[10px]" : "text-gray-700")}>{nazwa}</td>
+                <td className={"py-1 " + (pod ? "pl-3 text-gray-500 text-[10px]" : "text-gray-700")}>{nazwa}</td>
                 {kub.map(k => (
-                  <td key={k.id} className={"text-right py-1 px-1.5 tabular-nums " + (pod ? "text-gray-400 text-[10px]" : "text-gray-800")}>
+                  <td key={k.id} className={"text-right py-1 px-1.5 tabular-nums " + (pod ? "text-gray-500 text-[10px]" : "text-gray-800")}>
                     {fn(stat[k.id])}
                   </td>
                 ))}
-                <td className={"text-right py-1 px-1.5 tabular-nums font-semibold " + (pod ? "text-gray-400 text-[10px]" : "text-gray-900")}
+                <td className={"text-right py-1 px-1.5 tabular-nums font-semibold " + (pod ? "text-gray-500 text-[10px]" : "text-gray-900")}
                     style={{ background: "#f8fafc" }}>{tot}</td>
               </tr>
             );
@@ -141,7 +141,7 @@ export default function DyspozytorzyAnaliza({ frachtyList = [] }) {
           {[["miesiac", "Miesiąc"], ["ytd", "Narastająco"]].map(([id, label]) => (
             <button key={id} onClick={() => setTryb(id)}
               className="px-4 py-1.5 rounded-lg text-xs font-semibold transition-all"
-              style={{ background: tryb === id ? "#fff" : "transparent", color: tryb === id ? "#111827" : "#9ca3af",
+              style={{ background: tryb === id ? "#fff" : "transparent", color: tryb === id ? "#111827" : "#6b7280",
                        boxShadow: tryb === id ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }}>
               {label}
             </button>
@@ -237,7 +237,7 @@ export default function DyspozytorzyAnaliza({ frachtyList = [] }) {
         </>
       )}
 
-      <div className="text-[11px] text-gray-400 leading-relaxed">
+      <div className="text-[11px] text-gray-500 leading-relaxed">
         Źródło: frachty z bazy, kwoty netto EUR, przypisanie do miesiąca po dacie załadunku (zapasowo po dacie zlecenia).
         Kubełkowanie: warianty „Aga/Agnieszka" → AGA, „Aro/Arek/Arkadiusz" → ARO, pole z oboma nazwiskami → ARO-AGA.
       </div>

@@ -541,22 +541,22 @@ const SEED_VEHICLES = [
 ];
 
 const SEED_CATEGORIES = [
-  { id: "paliwo",        label: "Paliwo",             color: "#f59e0b", icon: "⛽" },
+  { id: "paliwo",        label: "Paliwo",             color: "#b45309", icon: "⛽" },
   { id: "leasing",       label: "Leasing",             color: "#6366f1", icon: "🏦" },
-  { id: "serwis",        label: "Serwis",              color: "#ef4444", icon: "🔧" },
-  { id: "ubezpieczenie", label: "Ubezpieczenie",       color: "#10b981", icon: "🛡️" },
+  { id: "serwis",        label: "Serwis",              color: "#b91c1c", icon: "🔧" },
+  { id: "ubezpieczenie", label: "Ubezpieczenie",       color: "#047857", icon: "🛡️" },
   { id: "opony",         label: "Opony",               color: "#3b82f6", icon: "🔄" },
-  { id: "oplaty",        label: "E-toll / Autostrady",  color: "#8b5cf6", icon: "🛣️" },
+  { id: "oplaty",        label: "E-toll / Autostrady",  color: "#6d28d9", icon: "🛣️" },
   { id: "wyplata",       label: "Wynagrodzenie",       color: "#f43f5e", icon: "👤" },
   { id: "zus",           label: "ZUS + podatki",       color: "#a855f7", icon: "📋" },
-  { id: "polisa",        label: "Polisa / OC / AC",    color: "#10b981", icon: "🛡️" },
-  { id: "hotele",        label: "Hotele",              color: "#f97316", icon: "🏨" },
-  { id: "mandaty",       label: "Mandaty",             color: "#dc2626", icon: "⚠️" },
+  { id: "polisa",        label: "Polisa / OC / AC",    color: "#047857", icon: "🛡️" },
+  { id: "hotele",        label: "Hotele",              color: "#c2410c", icon: "🏨" },
+  { id: "mandaty",       label: "Mandaty",             color: "#b91c1c", icon: "⚠️" },
   { id: "slickshift",    label: "SlickShift",          color: "#06b6d4", icon: "📡" },
-  { id: "telefon",       label: "Telefon",             color: "#8b5cf6", icon: "📱" },
+  { id: "telefon",       label: "Telefon",             color: "#6d28d9", icon: "📱" },
   { id: "uruchomienie",  label: "Koszt uruchomienia",  color: "#ec4899", icon: "🔑" },
   { id: "imi",           label: "IMI / SIPSI",         color: "#14b8a6", icon: "🌍" },
-  { id: "ocpd",          label: "OCPD (2x OC)",        color: "#f59e0b", icon: "🛡️" },
+  { id: "ocpd",          label: "OCPD (2x OC)",        color: "#b45309", icon: "🛡️" },
   { id: "przyczepa",     label: "Przyczepa",           color: "#78716c", icon: "🚛" },
   { id: "inne",          label: "Inne",                color: "#94a3b8", icon: "📋" },
 ];
@@ -590,12 +590,12 @@ function serviceStatusBadge(daysLeft, label) {
   const s = serviceStatus(daysLeft);
   if (!s) return null;
   const styles = {
-    expired:  { bg:"#fef2f2", color:"#dc2626", text:`⚠ ${label} — wygasło` },
-    critical: { bg:"#fef2f2", color:"#dc2626", text:`🔴 ${label} — ${daysLeft}d` },
-    warning:  { bg:"#fffbeb", color:"#d97706", text:`🟡 ${label} — ${daysLeft}d` },
-    ok:       { bg:"#f0fdf4", color:"#16a34a", text:`🟢 ${label} — ${daysLeft}d` },
+    expired:  { bg:"#fef2f2", color: "#b91c1c", text:`⚠ ${label} — wygasło` },
+    critical: { bg:"#fef2f2", color: "#b91c1c", text:`🔴 ${label} — ${daysLeft}d` },
+    warning:  { bg:"#fffbeb", color: "#d97706", text:`🟡 ${label} — ${daysLeft}d` },
+    ok:       { bg:"#f0fdf4", color: "#15803d", text:`🟢 ${label} — ${daysLeft}d` },
   }[s];
-  return <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background:styles.bg, color:styles.color }}>{styles.text}</span>;
+  return <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background:styles.bg, color: styles.color }}>{styles.text}</span>;
 }
 function kmStatus(kmLeft) {
   if (kmLeft === null) return null;
@@ -608,12 +608,12 @@ function kmStatusBadge(kmLeft, label) {
   const s = kmStatus(kmLeft);
   if (!s) return null;
   const styles = {
-    expired:  { bg:"#fef2f2", color:"#dc2626", text:`⚠ ${label} — przekroczono` },
-    critical: { bg:"#fef2f2", color:"#dc2626", text:`🔴 ${label} — ${kmLeft} km` },
-    warning:  { bg:"#fffbeb", color:"#d97706", text:`🟡 ${label} — ${kmLeft} km` },
-    ok:       { bg:"#f0fdf4", color:"#16a34a", text:`🟢 ${label} — ${kmLeft} km` },
+    expired:  { bg:"#fef2f2", color: "#b91c1c", text:`⚠ ${label} — przekroczono` },
+    critical: { bg:"#fef2f2", color: "#b91c1c", text:`🔴 ${label} — ${kmLeft} km` },
+    warning:  { bg:"#fffbeb", color: "#d97706", text:`🟡 ${label} — ${kmLeft} km` },
+    ok:       { bg:"#f0fdf4", color: "#15803d", text:`🟢 ${label} — ${kmLeft} km` },
   }[s];
-  return <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background:styles.bg, color:styles.color }}>{styles.text}</span>;
+  return <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background:styles.bg, color: styles.color }}>{styles.text}</span>;
 }
 
 const PALETTE = ["#f59e0b","#6366f1","#ef4444","#10b981","#3b82f6","#8b5cf6","#ec4899","#14b8a6","#f97316","#06b6d4"];
@@ -650,14 +650,14 @@ const VEHICLE_TYPES = [
 const DOC_TYPES = [
   { id: "oc",        label: "OC",               icon: "🛡️",  color: "#3b82f6", group: "Ubezpieczenia" },
   { id: "ac",        label: "AC",               icon: "🚗",  color: "#6366f1", group: "Ubezpieczenia" },
-  { id: "gap",       label: "GAP",              icon: "📊",  color: "#8b5cf6", group: "Ubezpieczenia" },
+  { id: "gap",       label: "GAP",              icon: "📊",  color: "#6d28d9", group: "Ubezpieczenia" },
   { id: "nnw",       label: "NNW",              icon: "🏥",  color: "#ec4899", group: "Ubezpieczenia" },
-  { id: "assistance",label: "Assistance",       icon: "🆘",  color: "#f97316", group: "Ubezpieczenia" },
+  { id: "assistance",label: "Assistance",       icon: "🆘",  color: "#c2410c", group: "Ubezpieczenia" },
   { id: "cargo",     label: "Ubezp. ładunku",   icon: "📦",  color: "#14b8a6", group: "Ubezpieczenia" },
-  { id: "licencja",  label: "Licencja transp.", icon: "📜",  color: "#f59e0b", group: "Licencje" },
-  { id: "zezwolenie",label: "Zezwolenie PL/EU", icon: "🌍",  color: "#10b981", group: "Licencje" },
+  { id: "licencja",  label: "Licencja transp.", icon: "📜",  color: "#b45309", group: "Licencje" },
+  { id: "zezwolenie",label: "Zezwolenie PL/EU", icon: "🌍",  color: "#047857", group: "Licencje" },
   { id: "przeglad",  label: "Przegląd tech.",   icon: "🔩",  color: "#6b7280", group: "Badania" },
-  { id: "tachlegalizacja", label: "Legalizacja tachografu", icon: "⏱️", color: "#ef4444", group: "Badania" },
+  { id: "tachlegalizacja", label: "Legalizacja tachografu", icon: "⏱️", color: "#b91c1c", group: "Badania" },
   { id: "prawo_jazdy",label: "Prawo jazdy",     icon: "🪪",  color: "#0ea5e9", group: "Kierowca" },
   { id: "karta_kierowcy",label: "Karta kierowcy",icon: "💳", color: "#64748b", group: "Kierowca" },
   { id: "umowa_leasing", label: "Umowa leasing",   icon: "📝",  color: "#0d9488", group: "Umowy" },
@@ -864,7 +864,7 @@ function LoginScreen() {
         .vbs-app-card { display:flex; align-items:center; gap:12px; width:100%; padding:14px 16px;
           border-radius:14px; border:1.5px solid #e5e7eb; background:#f9fafb; text-decoration:none;
           cursor:pointer; text-align:left; box-sizing:border-box; transition:border-color .15s, background .15s; }
-        @media (hover:hover) { .vbs-app-card:hover { border-color:#1d4ed8; background:#f5f8ff; } }
+        @media (hover:hover) { .vbs-app-card:hover { border-color: #1d4ed8; background:#f5f8ff; } }
       `}</style>
       <div style={{ background:"#fff", borderRadius:20, padding:"32px", width:360, maxWidth:"100%", boxShadow:"0 8px 32px rgba(0,0,0,0.08)" }}>
         <div style={{ display:"flex", justifyContent:"center", marginBottom:22 }}>
@@ -875,7 +875,7 @@ function LoginScreen() {
              żeby na telefonie logowanie było jednym tapem, nie dwoma. ── */}
         <form onSubmit={handleLogin}>
           <div style={{ marginBottom:14 }}>
-            <label style={{ display:"block", fontSize:12, fontWeight:600, color:"#6b7280", marginBottom:5, textTransform:"uppercase", letterSpacing:"0.5px" }}>Email</label>
+            <label style={{ display:"block", fontSize:12, fontWeight:600, color: "#6b7280", marginBottom:5, textTransform:"uppercase", letterSpacing:"0.5px" }}>Email</label>
             <input
               type="email" value={email} onChange={e => setEmail(e.target.value)} required
               autoComplete="email" autoCapitalize="off" autoCorrect="off" spellCheck="false" inputMode="email"
@@ -886,7 +886,7 @@ function LoginScreen() {
             />
           </div>
           <div style={{ marginBottom:20 }}>
-            <label style={{ display:"block", fontSize:12, fontWeight:600, color:"#6b7280", marginBottom:5, textTransform:"uppercase", letterSpacing:"0.5px" }}>Hasło</label>
+            <label style={{ display:"block", fontSize:12, fontWeight:600, color: "#6b7280", marginBottom:5, textTransform:"uppercase", letterSpacing:"0.5px" }}>Hasło</label>
             <input
               type="password" value={password} onChange={e => setPassword(e.target.value)} required
               autoComplete="current-password" autoCapitalize="off" autoCorrect="off" spellCheck="false"
@@ -896,24 +896,24 @@ function LoginScreen() {
               onBlur={e => e.target.style.borderColor="#e5e7eb"}
             />
           </div>
-          {error && <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:10, padding:"10px 14px", color:"#dc2626", fontSize:13, marginBottom:14 }}>{error}</div>}
+          {error && <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:10, padding:"10px 14px", color: "#b91c1c", fontSize:13, marginBottom:14 }}>{error}</div>}
           <button type="submit" disabled={loading}
-            style={{ width:"100%", padding:"12px", background:"#111827", border:"none", borderRadius:10, fontWeight:700, fontSize:15, color:"#fff", cursor:"pointer" }}>
+            style={{ width:"100%", padding:"12px", background:"#111827", border:"none", borderRadius:10, fontWeight:700, fontSize:15, color: "#fff", cursor:"pointer" }}>
             {loading ? "Logowanie..." : "Zaloguj się"}
           </button>
         </form>
 
         {/* ── Przełącznik do pozostałych aplikacji VBS (linki — nawigują pierwszym tapem) ── */}
         <div style={{ borderTop:"1px solid #f0f0f2", marginTop:22, paddingTop:16 }}>
-          <div style={{ fontSize:11, fontWeight:600, color:"#6b7280", textTransform:"uppercase", letterSpacing:"0.5px", marginBottom:10 }}>Inne aplikacje VBS</div>
+          <div style={{ fontSize:11, fontWeight:600, color: "#6b7280", textTransform:"uppercase", letterSpacing:"0.5px", marginBottom:10 }}>Inne aplikacje VBS</div>
           <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
             {APPS.filter(a => a.url).map(a => (
               <a key={a.key} href={a.url} className="vbs-app-card">
                 <div style={{ flex:1, minWidth:0, display:"flex", flexDirection:"column", alignItems:"flex-start", gap:5 }}>
                   {appLogo(a.key, 20)}
-                  <div style={{ fontSize:11.5, color:"#6b7280" }}>{a.desc}</div>
+                  <div style={{ fontSize:11.5, color: "#6b7280" }}>{a.desc}</div>
                 </div>
-                <span style={{ fontSize:18, color:"#d1d5db" }}>›</span>
+                <span style={{ fontSize:18, color: "#d1d5db" }}>›</span>
               </a>
             ))}
           </div>
@@ -938,7 +938,7 @@ export default function Root() {
   if (typeof window !== "undefined" && window.location.pathname.startsWith("/t/")) {
     const token = window.location.pathname.replace(/^\/t\//, "").replace(/\/$/, "");
     return (
-      <Suspense fallback={<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f8f9fb",fontSize:14,color:"#6b7280"}}>📦 Ładowanie statusu przesyłki…</div>}>
+      <Suspense fallback={<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f8f9fb",fontSize:14,color: "#6b7280"}}>📦 Ładowanie statusu przesyłki…</div>}>
         <TrackerPublicView token={token} />
       </Suspense>
     );
@@ -1159,13 +1159,13 @@ function ExportCostsModal({ costs, vehicles, categories, onClose }) {
   };
 
   const selStyle = {width:"100%", padding:"8px 10px", borderRadius:8, border:"1.5px solid #e5e7eb", fontSize:13, outline:"none", background:"#fff"};
-  const lbl = {display:"block", fontSize:12, fontWeight:600, color:"#6b7280", marginBottom:4};
+  const lbl = {display:"block", fontSize:12, fontWeight:600, color: "#6b7280", marginBottom:4};
 
   return (
     <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.35)",backdropFilter:"blur(4px)"}}>
       <div style={{background:"#fff",borderRadius:16,padding:28,width:440,maxWidth:"95vw",boxShadow:"0 8px 32px rgba(0,0,0,0.12)"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-          <h3 style={{fontWeight:700,fontSize:16,color:"#111827"}}>📊 Export kosztów</h3>
+          <h3 style={{fontWeight:700,fontSize:16,color: "#111827"}}>📊 Export kosztów</h3>
           <button onClick={onClose} style={{background:"#f3f4f6",border:"none",borderRadius:8,width:28,height:28,cursor:"pointer",fontSize:14}}>✕</button>
         </div>
 
@@ -1217,14 +1217,14 @@ function ExportCostsModal({ costs, vehicles, categories, onClose }) {
         </div>
 
         <div style={{background:"#f9fafb",borderRadius:10,padding:"10px 14px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <span style={{fontSize:13,color:"#6b7280"}}>{filtered.length} wpisów</span>
-          <span style={{fontSize:14,fontWeight:700,color:"#111827"}}>{totalEUR.toLocaleString("pl-PL",{minimumFractionDigits:2,maximumFractionDigits:2})} €</span>
+          <span style={{fontSize:13,color: "#6b7280"}}>{filtered.length} wpisów</span>
+          <span style={{fontSize:14,fontWeight:700,color: "#111827"}}>{totalEUR.toLocaleString("pl-PL",{minimumFractionDigits:2,maximumFractionDigits:2})} €</span>
         </div>
 
         <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-          <button onClick={onClose} style={{padding:"9px 18px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer",color:"#6b7280"}}>Anuluj</button>
+          <button onClick={onClose} style={{padding:"9px 18px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer",color: "#6b7280"}}>Anuluj</button>
           <button onClick={handleExport} disabled={filtered.length === 0}
-            style={{padding:"9px 18px",borderRadius:8,border:"none",background:filtered.length===0?"#d1d5db":"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:filtered.length===0?"not-allowed":"pointer"}}>
+            style={{padding:"9px 18px",borderRadius:8,border:"none",background:filtered.length===0?"#d1d5db":"#111827",color: "#fff",fontSize:13,fontWeight:700,cursor:filtered.length===0?"not-allowed":"pointer"}}>
             📊 Pobierz Excel ({filtered.length})
           </button>
         </div>
@@ -1635,16 +1635,16 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
         const loadedCats = data[SK.categories] || SEED_CATEGORIES;
         const REQUIRED_CATS = [
           { id: "wyplata",       label: "Wynagrodzenie", color: "#f43f5e", icon: "👤" },
-          { id: "ubezpieczenie", label: "Ubezpieczenie",  color: "#10b981", icon: "🛡️" },
+          { id: "ubezpieczenie", label: "Ubezpieczenie",  color: "#047857", icon: "🛡️" },
         ];
         const mergedCats = [...loadedCats].map(cat => {
           if (cat.id === "wyplata") return { ...cat, label: "Wynagrodzenie", icon: "👤", color: "#f43f5e" };
           // Migracja: naprawa → serwis
-          if (cat.id === "naprawa") return { ...cat, id: "serwis", label: "Serwis", icon: "🔧", color: "#ef4444" };
+          if (cat.id === "naprawa") return { ...cat, id: "serwis", label: "Serwis", icon: "🔧", color: "#b91c1c" };
           return cat;
         });
         // Dodaj serwis jeśli brak (ani naprawa ani serwis)
-        if (!mergedCats.find(c => c.id === "serwis")) mergedCats.push({ id: "serwis", label: "Serwis", color: "#ef4444", icon: "🔧" });
+        if (!mergedCats.find(c => c.id === "serwis")) mergedCats.push({ id: "serwis", label: "Serwis", color: "#b91c1c", icon: "🔧" });
         REQUIRED_CATS.forEach(req => {
           if (!mergedCats.find(c => c.id === req.id)) mergedCats.push(req);
         });
@@ -2596,25 +2596,25 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
   const CAT_FALLBACKS = {
     wyplata:       { label: "Wynagrodzenie",    color: "#f43f5e", icon: "👤" },
-    ubezpieczenie: { label: "Ubezpieczenie",    color: "#10b981", icon: "🛡️" },
+    ubezpieczenie: { label: "Ubezpieczenie",    color: "#047857", icon: "🛡️" },
     opony:         { label: "Opony",            color: "#3b82f6", icon: "🔄" },
-    oplaty:        { label: "E-toll / Autostrady",   color: "#8b5cf6", icon: "🛣️" },
-    myto:          { label: "E-toll / Autostrady",   color: "#8b5cf6", icon: "🛣️" },
-    nego:          { label: "E-toll / Autostrady",   color: "#8b5cf6", icon: "🛣️" },
-    etoll:         { label: "E-toll / Autostrady",   color: "#8b5cf6", icon: "🛣️" },
-    naprawa:       { label: "Serwis",           color: "#ef4444", icon: "🔧" },
-    serwis:        { label: "Serwis",           color: "#ef4444", icon: "🔧" },
-    paliwo:        { label: "Paliwo",           color: "#f59e0b", icon: "⛽" },
+    oplaty:        { label: "E-toll / Autostrady",   color: "#6d28d9", icon: "🛣️" },
+    myto:          { label: "E-toll / Autostrady",   color: "#6d28d9", icon: "🛣️" },
+    nego:          { label: "E-toll / Autostrady",   color: "#6d28d9", icon: "🛣️" },
+    etoll:         { label: "E-toll / Autostrady",   color: "#6d28d9", icon: "🛣️" },
+    naprawa:       { label: "Serwis",           color: "#b91c1c", icon: "🔧" },
+    serwis:        { label: "Serwis",           color: "#b91c1c", icon: "🔧" },
+    paliwo:        { label: "Paliwo",           color: "#b45309", icon: "⛽" },
     leasing:       { label: "Leasing",          color: "#6366f1", icon: "🏦" },
     zus:           { label: "ZUS + podatki",    color: "#a855f7", icon: "📋" },
-    polisa:        { label: "Polisa / OC / AC", color: "#10b981", icon: "🛡️" },
-    hotele:        { label: "Hotele",           color: "#f97316", icon: "🏨" },
-    mandaty:       { label: "Mandaty",          color: "#dc2626", icon: "⚠️" },
+    polisa:        { label: "Polisa / OC / AC", color: "#047857", icon: "🛡️" },
+    hotele:        { label: "Hotele",           color: "#c2410c", icon: "🏨" },
+    mandaty:       { label: "Mandaty",          color: "#b91c1c", icon: "⚠️" },
     slickshift:    { label: "SlickShift",       color: "#06b6d4", icon: "📡" },
-    telefon:       { label: "Telefon",          color: "#8b5cf6", icon: "📱" },
+    telefon:       { label: "Telefon",          color: "#6d28d9", icon: "📱" },
     uruchomienie:  { label: "Koszt uruchomienia", color: "#ec4899", icon: "🔑" },
     imi:           { label: "IMI / SIPSI",      color: "#14b8a6", icon: "🌍" },
-    ocpd:          { label: "OCPD (2x OC)",     color: "#f59e0b", icon: "🛡️" },
+    ocpd:          { label: "OCPD (2x OC)",     color: "#b45309", icon: "🛡️" },
     przyczepa:     { label: "Przyczepa",        color: "#78716c", icon: "🚛" },
     inne:          { label: "Inne",             color: "#94a3b8", icon: "📋" },
   };
@@ -2728,7 +2728,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     return (
       <>
         {updateBanner}
-        <Suspense fallback={<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f8f9fb",fontSize:14,color:"#6b7280"}}>🚛 Ładowanie panelu kierowcy…</div>}>
+        <Suspense fallback={<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f8f9fb",fontSize:14,color: "#6b7280"}}>🚛 Ładowanie panelu kierowcy…</div>}>
           <DriverPanel
             user={user}
             vehicle={myVehicle}
@@ -2863,13 +2863,13 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                     style={{
                       paddingLeft: indent ? "28px" : "12px", paddingRight: "12px",
                       background:  tab === id ? "#f3f4f6" : "transparent",
-                      color:       tab === id ? "#111827" : "#6b7280",
+                      color: tab === id ? "#111827" : "#4b5563",
                       fontWeight:  tab === id ? 600 : 400,
                       fontSize: indent ? "13px" : "14px",
                     }}>
                     <span className="w-5 flex items-center justify-center flex-shrink-0" style={{opacity: tab === id ? 0.9 : 0.5}}>{icon}</span>
                     {label}
-                    {badge ? <span className="ml-auto px-1.5 py-0.5 rounded-full text-xs font-bold" style={{background:"#ef4444",color:"#fff"}}>{badge}</span> : null}
+                    {badge ? <span className="ml-auto px-1.5 py-0.5 rounded-full text-xs font-bold" style={{background:"#ef4444",color: "#fff"}}>{badge}</span> : null}
                   </button>
                 );
               };
@@ -2934,7 +2934,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                   const mentions = sprawyList.reduce((acc, s) => {
                     return acc + (s.zdarzenia||[]).filter(z => z.mentions && z.mentions.includes(user?.email) && !z.seenBy?.includes(user?.email)).length;
                   }, 0);
-                  return mentions > 0 ? <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs font-bold" style={{background:"#ef4444",color:"#fff"}}>{mentions}</span> : null;
+                  return mentions > 0 ? <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs font-bold" style={{background:"#ef4444",color: "#fff"}}>{mentions}</span> : null;
                 })()}
               </div>
               <div className="px-1 mb-2">
@@ -2948,7 +2948,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               </div>
               <button onClick={() => { logAction("logout", "auth", { reason: "manual" }); signOut(auth); }}
                 className="w-full py-2 rounded-lg text-sm font-medium transition-all hover:bg-red-50"
-                style={{ color: "#ef4444", background: "transparent" }}>
+                style={{ color: "#b91c1c", background: "transparent" }}>
                 🚪 Wyloguj
               </button>
             </div>
@@ -2966,7 +2966,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 <span className="font-bold text-base text-gray-900">FleetStat</span>
               </div>
               <button onClick={() => { logAction("logout", "auth", { reason: "manual" }); signOut(auth); }}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 hover:bg-red-50 border border-red-100">
+                className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-700 hover:bg-red-50 border border-red-100">
                 Wyloguj
               </button>
             </div>
@@ -3272,7 +3272,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                                 <span className="text-gray-200">·</span>
                                 <div className="flex items-center gap-1">
                                   <span className="text-xs text-gray-500">Rozł.</span>
-                                  <span className={`text-xs font-semibold ${displayFRozladowany ? "text-green-600" : "text-gray-700"}`}>
+                                  <span className={`text-xs font-semibold ${displayFRozladowany ? "text-green-700" : "text-gray-700"}`}>
                                     {fmtD(dataRozl)}
                                     {displayFRozladowany && " ✓"}
                                   </span>
@@ -3385,7 +3385,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                           <div className="px-4 pb-3">
                             <button onClick={() => setCzasPracyVehicleId(v.id)}
                               className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all"
-                              style={{ background: "#f3f4f6", color: "#6b7280" }}>
+                              style={{ background: "#f3f4f6", color: "#4b5563" }}>
                               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                               Czas pracy
                             </button>
@@ -3443,7 +3443,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                     <div className="bg-white rounded-2xl border border-gray-100 p-4">
                       <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Wymaga uwagi</div>
                       {allAlerts.length === 0 ? (
-                        <div className="flex items-center gap-2 text-sm text-green-600">
+                        <div className="flex items-center gap-2 text-sm text-green-700">
                           <span>✅</span> Wszystko w porządku
                         </div>
                       ) : (
@@ -3628,7 +3628,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                       return (
                         <button key={mm} onClick={() => setFilterMonth(filterMonth===mm ? "all" : mm)}
                           className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
-                          style={{ background: filterMonth===mm ? "#111827" : "#f3f4f6", color: filterMonth===mm ? "#fff" : "#6b7280" }}>
+                          style={{ background: filterMonth===mm ? "#111827" : "#f3f4f6", color: filterMonth===mm ? "#fff" : "#4b5563" }}>
                           {m}
                         </button>
                       );
@@ -3655,9 +3655,9 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 })).filter(v => v.total > 0).sort((a,b) => b.total - a.total);
 
                 let allCats = [...categories];
-                if (!allCats.find(c => c.id === "wyplata")) allCats.push({ id:"wyplata", label:"Wynagrodzenie", color:"#f43f5e", icon:"👤" });
-                if (!allCats.find(c => c.id === "ubezpieczenie")) allCats.push({ id:"ubezpieczenie", label:"Ubezpieczenie", color:"#10b981", icon:"🛡️" });
-                if (!allCats.find(c => c.id === "oplaty")) allCats.push({ id:"oplaty", label:"E-toll / Autostrady", color:"#8b5cf6", icon:"🛣️" });
+                if (!allCats.find(c => c.id === "wyplata")) allCats.push({ id:"wyplata", label:"Wynagrodzenie", color: "#f43f5e", icon:"👤" });
+                if (!allCats.find(c => c.id === "ubezpieczenie")) allCats.push({ id:"ubezpieczenie", label:"Ubezpieczenie", color: "#047857", icon:"🛡️" });
+                if (!allCats.find(c => c.id === "oplaty")) allCats.push({ id:"oplaty", label:"E-toll / Autostrady", color: "#6d28d9", icon:"🛣️" });
                 allCats = allCats.filter(c => c.id !== "myto" && c.id !== "nego" && c.id !== "etoll");
                 const byCat = allCats.map(cat => ({
                   ...cat,
@@ -3868,7 +3868,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                             className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
                             style={{
                               background: isEditing ? "#111827" : "#f3f4f6",
-                              color: isEditing ? "#fff" : "#6b7280",
+                              color: isEditing ? "#fff" : "#4b5563",
                             }}>
                             {isEditing ? "Zamknij" : "✏️ Edytuj"}
                           </button>
@@ -4379,7 +4379,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                                 <td className="py-2 pr-3 text-gray-700">{fmtD(fe.date)}</td>
                                 <td className="py-2 pr-3 text-gray-600">{driverLabel(fe.driverEmail)}</td>
                                 <td className="py-2 pr-3 font-medium text-gray-800">{vehicleLabel(fe.vehicleId)}</td>
-                                <td className="py-2 pr-3 text-right font-semibold" style={{color: fe.isAdblue ? "#0284c7" : "#059669"}}>{(fe.liters||0).toLocaleString("pl-PL")} L</td>
+                                <td className="py-2 pr-3 text-right font-semibold" style={{color: fe.isAdblue ? "#0284c7" : "#047857"}}>{(fe.liters||0).toLocaleString("pl-PL")} L</td>
                                 <td className="py-2 pr-3 text-right text-gray-600">{fe.mileage ? fe.mileage.toLocaleString("pl-PL") : "—"}</td>
                                 <td className="py-2 pr-3 text-gray-500">{fe.station || "—"}</td>
                                 <td className="py-2 pr-3">{countryFlag(fe.country)}</td>
@@ -4664,7 +4664,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               style={{ color: tab === item.id ? "#111827" : "#6b7280", background: tab === item.id ? "#f3f4f6" : "transparent", fontWeight: tab === item.id ? 600 : 400 }}>
               <span className="leading-none relative">
                 {item.icon}
-                {item.badge ? <span className="absolute -top-1.5 -right-2.5 px-1 py-0 rounded-full text-[9px] font-bold leading-tight" style={{background:"#ef4444",color:"#fff",minWidth:"14px",textAlign:"center"}}>{item.badge}</span> : null}
+                {item.badge ? <span className="absolute -top-1.5 -right-2.5 px-1 py-0 rounded-full text-[9px] font-bold leading-tight" style={{background:"#ef4444",color: "#fff",minWidth:"14px",textAlign:"center"}}>{item.badge}</span> : null}
               </span>
               <span className="text-xs leading-none mt-0.5">{item.label}</span>
             </button>
@@ -5299,7 +5299,7 @@ function ChatTab({ currentUser, appUsers = [], vehicles = [], showToast, onActiv
         {/* Push status info */}
         {pushStatus && pushStatus !== "checking" && !pushStatus.success && (
           <div className="mx-3 mt-1 mb-1 px-4 py-2 rounded-xl text-xs" style={{ background: '#fef2f2' }}>
-            <div className="font-medium" style={{ color: '#dc2626' }}>Błąd: {pushStatus.error}</div>
+            <div className="font-medium" style={{ color: '#b91c1c' }}>Błąd: {pushStatus.error}</div>
             <div style={{ color: '#6b7280' }}>Krok: {pushStatus.step}</div>
             {pushDiag.isIOS && !pushDiag.isStandalone && (
               <div className="mt-1 text-amber-700 font-medium">📱 Dodaj stronę do ekranu głównego (Share → Dodaj do ekranu głównego)</div>
@@ -5319,7 +5319,7 @@ function ChatTab({ currentUser, appUsers = [], vehicles = [], showToast, onActiv
             )}
             {migrateStatus === "running" && <div className="text-amber-700 font-medium">⏳ Trwa migracja...</div>}
             {migrateStatus === "done" && <div className="text-green-700 font-medium">✅ Zakończono! <button onClick={() => { localStorage.setItem("tsMigrationDone","1"); setMigrateStatus("hidden"); }} className="underline ml-1">Ukryj</button></div>}
-            {migrateStatus === "error" && <div className="text-red-600 font-medium">❌ Błąd — sprawdź log</div>}
+            {migrateStatus === "error" && <div className="text-red-700 font-medium">❌ Błąd — sprawdź log</div>}
             {migrateLog && <pre className="mt-2 p-2 bg-gray-900 text-green-300 rounded-lg text-[10px] max-h-48 overflow-y-auto whitespace-pre-wrap">{migrateLog}</pre>}
           </div>
         )}
@@ -5444,7 +5444,7 @@ function ChatTab({ currentUser, appUsers = [], vehicles = [], showToast, onActiv
                           <span className="text-gray-700">{u?.email?.split("@")[0] || uid}</span>
                           {isCreator && <span className="text-xs bg-yellow-100 text-yellow-700 px-1.5 rounded">twórca</span>}
                           {!isCreator && activeRoom.createdBy === currentUser.uid && activeRoom.type !== "dm" && (
-                            <button onClick={() => removeMember(uid)} className="ml-auto text-xs text-red-400 hover:text-red-600">Usuń</button>
+                            <button onClick={() => removeMember(uid)} className="ml-auto text-xs text-red-400 hover:text-red-700">Usuń</button>
                           )}
                         </div>
                       );
@@ -5469,7 +5469,7 @@ function ChatTab({ currentUser, appUsers = [], vehicles = [], showToast, onActiv
                     <button onClick={leaveRoom} className="text-xs px-3 py-1.5 text-orange-600 hover:bg-orange-50 rounded">Opuść pokój</button>
                   )}
                   {activeRoom.createdBy === currentUser.uid && (
-                    <button onClick={deleteRoom} className="text-xs px-3 py-1.5 text-red-600 hover:bg-red-50 rounded">Usuń pokój</button>
+                    <button onClick={deleteRoom} className="text-xs px-3 py-1.5 text-red-700 hover:bg-red-50 rounded">Usuń pokój</button>
                   )}
                   <button onClick={() => setShowRoomSettings(false)} className="ml-auto text-xs px-3 py-1.5 text-gray-500 hover:bg-gray-100 rounded">Zamknij</button>
                 </div>
@@ -5561,7 +5561,7 @@ function ChatTab({ currentUser, appUsers = [], vehicles = [], showToast, onActiv
                           const ds = m.deliveryStatus;
                           if (ds === "failed") {
                             const err = m.deliveryError?.title || "Błąd dostarczenia";
-                            return <span title={err} className="cursor-help text-red-500">⚠️ failed</span>;
+                            return <span title={err} className="cursor-help text-red-700">⚠️ failed</span>;
                           }
                           if (ds === "read") return <span title="Przeczytano" className="cursor-default"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 6 7 17 2 12"/><polyline points="22 6 11 17"/></svg></span>;
                           if (ds === "delivered") return <span title="Dostarczono" className="cursor-default"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="18 6 7 17 2 12"/><polyline points="22 6 11 17"/></svg></span>;
@@ -5680,7 +5680,7 @@ function ChatTab({ currentUser, appUsers = [], vehicles = [], showToast, onActiv
           {/* Usuń (tylko swoje) */}
           {contextMenu.msg.senderId === currentUser.uid && !contextMenu.msg.deleted && (
             <button onClick={() => { deleteMessage(contextMenu.msg); setContextMenu(null); }}
-              className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2">
+              className="w-full text-left px-4 py-2 text-sm text-red-700 hover:bg-red-50 flex items-center gap-2">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
               Usuń
             </button>
@@ -5739,18 +5739,18 @@ function ChatTab({ currentUser, appUsers = [], vehicles = [], showToast, onActiv
 // SPRAWY TAB
 // ═══════════════════════════════════════════════════════════════════════════════
 const SPRAWA_TYPY = [
-  { id: "brak_zaplaty",  label: "Brak zapłaty",       icon: "💸", color: "#ef4444" },
-  { id: "nota",          label: "Nota obciążeniowa",  icon: "📋", color: "#f97316" },
+  { id: "brak_zaplaty",  label: "Brak zapłaty",       icon: "💸", color: "#b91c1c" },
+  { id: "nota",          label: "Nota obciążeniowa",  icon: "📋", color: "#c2410c" },
   { id: "reklamacja",    label: "Reklamacja",          icon: "⚠️", color: "#eab308" },
-  { id: "spor",          label: "Spór",               icon: "⚖️", color: "#8b5cf6" },
-  { id: "serwis",        label: "Serwis pojazdu",     icon: "🔧", color: "#ef4444" },
+  { id: "spor",          label: "Spór",               icon: "⚖️", color: "#6d28d9" },
+  { id: "serwis",        label: "Serwis pojazdu",     icon: "🔧", color: "#b91c1c" },
   { id: "inne",          label: "Inne",               icon: "📌", color: "#6b7280" },
 ];
 
 const SPRAWA_STATUSY = [
-  { id: "otwarta",    label: "Otwarta",    color: "#ef4444", bg: "#fef2f2" },
-  { id: "w_toku",     label: "W toku",     color: "#f97316", bg: "#fff7ed" },
-  { id: "zamknieta",  label: "Zamknięta",  color: "#10b981", bg: "#f0fdf4" },
+  { id: "otwarta",    label: "Otwarta",    color: "#b91c1c", bg: "#fef2f2" },
+  { id: "w_toku",     label: "W toku",     color: "#c2410c", bg: "#fff7ed" },
+  { id: "zamknieta",  label: "Zamknięta",  color: "#047857", bg: "#f0fdf4" },
   { id: "wygrana",    label: "Wygrana",    color: "#3b82f6", bg: "#eff6ff" },
   { id: "przegrana",  label: "Przegrana",  color: "#6b7280", bg: "#f9fafb" },
 ];
@@ -5777,7 +5777,7 @@ function NowaSprawaModal({ allTypy, vehicles, appUsers = [], onSave, onClose }) 
     <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.35)",backdropFilter:"blur(4px)"}}>
       <div style={{background:"#fff",borderRadius:16,width:520,maxWidth:"95vw",maxHeight:"90vh",overflow:"hidden",display:"flex",flexDirection:"column",boxShadow:"0 8px 32px rgba(0,0,0,0.12)"}}>
         <div style={{padding:"20px 24px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <h3 style={{fontWeight:700,fontSize:16,color:"#111827"}}>Nowa sprawa</h3>
+          <h3 style={{fontWeight:700,fontSize:16,color: "#111827"}}>Nowa sprawa</h3>
           <button onClick={onClose} style={{background:"#f3f4f6",border:"none",borderRadius:8,width:28,height:28,cursor:"pointer"}}>✕</button>
         </div>
         <div style={{padding:"20px 24px",overflowY:"auto",display:"flex",flexDirection:"column",gap:12}}>
@@ -5811,11 +5811,11 @@ function NowaSprawaModal({ allTypy, vehicles, appUsers = [], onSave, onClose }) 
                 </div>
               </div>
               {f.kwota && (
-                <div style={{fontSize:11,color:"#6b7280",marginTop:3}}>
+                <div style={{fontSize:11,color: "#6b7280",marginTop:3}}>
                   {f.waluta==="EUR"
                     ? `≈ ${(parseFloat(f.kwota)*4.27).toFixed(2)} zł`
                     : `≈ ${(parseFloat(f.kwota)/4.27).toFixed(2)} €`}
-                  <span style={{marginLeft:4,color:"#d1d5db"}}>· kurs ~4.27</span>
+                  <span style={{marginLeft:4,color: "#d1d5db"}}>· kurs ~4.27</span>
                 </div>
               )}
             </div>
@@ -5843,8 +5843,8 @@ function NowaSprawaModal({ allTypy, vehicles, appUsers = [], onSave, onClose }) 
             <label className={lbl}>Przypisani</label>
             <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
               {(f.przypisani||[]).map(m => (
-                <span key={m} style={{background:"#eff6ff",color:"#1d4ed8",padding:"2px 10px",borderRadius:99,fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:4}}>
-                  {m} <button type="button" onClick={() => set("przypisani",(f.przypisani||[]).filter(x=>x!==m))} style={{background:"none",border:"none",cursor:"pointer",color:"#6b7280",fontSize:11}}>x</button>
+                <span key={m} style={{background:"#eff6ff",color: "#1d4ed8",padding:"2px 10px",borderRadius:99,fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:4}}>
+                  {m} <button type="button" onClick={() => set("przypisani",(f.przypisani||[]).filter(x=>x!==m))} style={{background:"none",border:"none",cursor:"pointer",color: "#6b7280",fontSize:11}}>x</button>
                 </span>
               ))}
             </div>
@@ -5855,9 +5855,9 @@ function NowaSprawaModal({ allTypy, vehicles, appUsers = [], onSave, onClose }) 
           </div>
         </div>
         <div style={{padding:"14px 24px",borderTop:"1px solid #f3f4f6",display:"flex",justifyContent:"flex-end",gap:8}}>
-          <button onClick={onClose} style={{padding:"9px 18px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer",color:"#6b7280"}}>Anuluj</button>
+          <button onClick={onClose} style={{padding:"9px 18px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer",color: "#6b7280"}}>Anuluj</button>
           <button onClick={() => { if(!f.klient){alert("Podaj klienta");return;} onSave(f); }}
-            style={{padding:"9px 18px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Zapisz sprawę</button>
+            style={{padding:"9px 18px",borderRadius:8,border:"none",background:"#111827",color: "#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Zapisz sprawę</button>
         </div>
       </div>
     </div>
@@ -5923,7 +5923,7 @@ function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUse
             <span className="text-lg">{typ?.icon || "📌"}</span>
             <h2 className="text-lg font-bold text-gray-900">{sprawa.numer || "Sprawa"} · {sprawa.klient}</h2>
             {sprawa.podtyp && <span className="text-sm text-gray-500">({sprawa.podtyp})</span>}
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold" style={{background:status.bg,color:status.color}}>{status.label}</span>
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold" style={{background:status.bg,color: status.color}}>{status.label}</span>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -5934,7 +5934,7 @@ function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUse
           </select>
           <button onClick={() => setEditMode(!editMode)} className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 hover:bg-gray-50 whitespace-nowrap">✏️ Edytuj</button>
           <button onClick={async () => { if(window.confirm("Usunąć sprawę?")) onDelete(); }}
-            className="w-8 h-8 flex items-center justify-center rounded-lg border border-red-200 text-red-500 hover:bg-red-50 flex-shrink-0"
+            className="w-8 h-8 flex items-center justify-center rounded-lg border border-red-200 text-red-700 hover:bg-red-50 flex-shrink-0"
             title="Usuń sprawę">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
@@ -6022,7 +6022,7 @@ function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUse
               <div className="text-xs text-gray-500 mb-1">Przypisani</div>
               <div className="flex gap-2 flex-wrap">
                 {sprawa.przypisani.map(p => (
-                  <span key={p} style={{background:"#eff6ff",color:"#1d4ed8",padding:"3px 10px",borderRadius:99,fontSize:12,fontWeight:600}}>&#128100; {p}</span>
+                  <span key={p} style={{background:"#eff6ff",color: "#1d4ed8",padding:"3px 10px",borderRadius:99,fontSize:12,fontWeight:600}}>&#128100; {p}</span>
                 ))}
               </div>
             </div>
@@ -6058,18 +6058,18 @@ function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUse
                     <button key={w} type="button" onClick={() => setEditData(p=>({...p,waluta:w}))}
                       style={{padding:"0 10px",fontSize:12,fontWeight:600,border:"none",cursor:"pointer",
                         background:(editData.waluta||sprawa.waluta||"EUR")===w?"#111827":"#fff",
-                        color:(editData.waluta||sprawa.waluta||"EUR")===w?"#fff":"#6b7280"}}>
+                        color: (editData.waluta||sprawa.waluta||"EUR")===w?"#fff":"#6b7280"}}>
                       {w}
                     </button>
                   ))}
                 </div>
               </div>
               {(editData.kwota||sprawa.kwota) && (
-                <div style={{fontSize:11,color:"#6b7280",marginTop:3}}>
+                <div style={{fontSize:11,color: "#6b7280",marginTop:3}}>
                   {(editData.waluta||sprawa.waluta||"EUR")==="EUR"
                     ? `≈ ${(parseFloat(editData.kwota||sprawa.kwota)*4.27).toFixed(2)} zł`
                     : `≈ ${(parseFloat(editData.kwota||sprawa.kwota)/4.27).toFixed(2)} €`}
-                  <span style={{marginLeft:4,color:"#d1d5db"}}>· kurs ~4.27</span>
+                  <span style={{marginLeft:4,color: "#d1d5db"}}>· kurs ~4.27</span>
                 </div>
               )}
             </div>
@@ -6085,8 +6085,8 @@ function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUse
             <label className={lbl}>Przypisani</label>
             <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
               {(editData.przypisani||sprawa.przypisani||[]).map(m => (
-                <span key={m} style={{background:"#eff6ff",color:"#1d4ed8",padding:"2px 10px",borderRadius:99,fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:4}}>
-                  {m} <button type="button" onClick={() => setEditData(p=>({...p,przypisani:(p.przypisani||sprawa.przypisani||[]).filter(x=>x!==m)}))} style={{background:"none",border:"none",cursor:"pointer",color:"#6b7280",fontSize:11}}>✕</button>
+                <span key={m} style={{background:"#eff6ff",color: "#1d4ed8",padding:"2px 10px",borderRadius:99,fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:4}}>
+                  {m} <button type="button" onClick={() => setEditData(p=>({...p,przypisani:(p.przypisani||sprawa.przypisani||[]).filter(x=>x!==m)}))} style={{background:"none",border:"none",cursor:"pointer",color: "#6b7280",fontSize:11}}>✕</button>
                 </span>
               ))}
             </div>
@@ -6098,7 +6098,7 @@ function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUse
           <div className="flex gap-2 justify-end">
             <button onClick={() => setEditMode(false)} style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer"}}>Anuluj</button>
             <button onClick={() => { onUpdate(editData); setEditMode(false); showToast("✅ Zapisano"); }}
-              style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Zapisz</button>
+              style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color: "#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Zapisz</button>
           </div>
         </div>
       )}
@@ -6135,8 +6135,8 @@ function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUse
             <label className={lbl}>@ Oznacz osobę (przypomnienie)</label>
             <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:6}}>
               {zdMentions.map(m => (
-                <span key={m} style={{background:"#eff6ff",color:"#1d4ed8",padding:"2px 10px",borderRadius:99,fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:4}}>
-                  @{m} <button onClick={() => setZdMentions(p=>p.filter(x=>x!==m))} style={{background:"none",border:"none",cursor:"pointer",color:"#6b7280",fontSize:11}}>✕</button>
+                <span key={m} style={{background:"#eff6ff",color: "#1d4ed8",padding:"2px 10px",borderRadius:99,fontSize:12,fontWeight:600,display:"flex",alignItems:"center",gap:4}}>
+                  @{m} <button onClick={() => setZdMentions(p=>p.filter(x=>x!==m))} style={{background:"none",border:"none",cursor:"pointer",color: "#6b7280",fontSize:11}}>✕</button>
                 </span>
               ))}
             </div>
@@ -6174,7 +6174,7 @@ function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUse
           </div>
           <div className="flex gap-2 justify-end">
             <button onClick={() => setShowAddZdarzenie(false)} style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer"}}>Anuluj</button>
-            <button onClick={addZdarzenie} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Dodaj</button>
+            <button onClick={addZdarzenie} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color: "#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Dodaj</button>
           </div>
         </div>
       )}
@@ -6243,9 +6243,9 @@ function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUse
                           className="px-2 py-0.5 rounded text-xs text-gray-500 hover:bg-gray-100">✏️</button>
                         <button onClick={() => { setPrzypomnienieZdId(z.id); setPrzypomnienieData(z.przypomnienie||""); setPrzypomnienieOpis(z.przypomnienieOpis||""); }}
                           className="px-2 py-0.5 rounded text-xs hover:bg-orange-50 transition-all"
-                          style={{color: z.przypomnienie ? "#f97316" : "#d1d5db"}} title="Ustaw przypomnienie">⏰</button>
+                          style={{color: z.przypomnienie ? "#c2410c" : "#d1d5db"}} title="Ustaw przypomnienie">⏰</button>
                         <button onClick={() => { if(window.confirm("Usunąć zdarzenie?")) onUpdate({zdarzenia:(sprawa.zdarzenia||[]).filter(zd=>zd.id!==z.id)}); }}
-                          className="px-2 py-0.5 rounded text-xs hover:bg-red-50 transition-all" style={{color:"#ef4444"}}>
+                          className="px-2 py-0.5 rounded text-xs hover:bg-red-50 transition-all" style={{color: "#b91c1c"}}>
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
                         </button>
                       </div>
@@ -6264,7 +6264,7 @@ function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUse
                   <div className="text-xs text-gray-500 mt-1.5 flex items-center gap-2 flex-wrap">
                     <span>👤 {z.autor}</span>
                     {z.mentions && z.mentions.length > 0 && z.mentions.map(m => (
-                      <span key={m} style={{background:"#eff6ff",color:"#1d4ed8",padding:"1px 8px",borderRadius:99,fontSize:11,fontWeight:600}}>@{m}</span>
+                      <span key={m} style={{background:"#eff6ff",color: "#1d4ed8",padding:"1px 8px",borderRadius:99,fontSize:11,fontWeight:600}}>@{m}</span>
                     ))}
                   </div>
                 </div>
@@ -6278,14 +6278,14 @@ function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUse
       {przypomnienieZdId && (
         <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.35)"}}>
           <div style={{background:"#fff",borderRadius:16,padding:24,width:360,boxShadow:"0 8px 32px rgba(0,0,0,0.12)"}}>
-            <h3 style={{fontWeight:700,fontSize:15,marginBottom:16,color:"#111827"}}>Ustaw przypomnienie</h3>
+            <h3 style={{fontWeight:700,fontSize:15,marginBottom:16,color: "#111827"}}>Ustaw przypomnienie</h3>
             <div style={{marginBottom:12}}>
-              <label style={{display:"block",fontSize:12,fontWeight:600,color:"#6b7280",marginBottom:4}}>Data i godzina</label>
+              <label style={{display:"block",fontSize:12,fontWeight:600,color: "#6b7280",marginBottom:4}}>Data i godzina</label>
               <input type="datetime-local" value={przypomnienieData} onChange={e => setPrzypomnienieData(e.target.value)}
                 style={{width:"100%",padding:"8px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",boxSizing:"border-box"}} />
             </div>
             <div style={{marginBottom:16}}>
-              <label style={{display:"block",fontSize:12,fontWeight:600,color:"#6b7280",marginBottom:4}}>Krotki opis</label>
+              <label style={{display:"block",fontSize:12,fontWeight:600,color: "#6b7280",marginBottom:4}}>Krotki opis</label>
               <input value={przypomnienieOpis} onChange={e => setPrzypomnienieOpis(e.target.value)}
                 placeholder="np. Zadzwon do klienta..."
                 style={{width:"100%",padding:"8px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",boxSizing:"border-box"}} />
@@ -6296,7 +6296,7 @@ function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUse
                   const updated = (sprawa.zdarzenia||[]).map(zd => zd.id === przypomnienieZdId ? {...zd, przypomnienie:null, przypomnienieOpis:null} : zd);
                   onUpdate({zdarzenia: updated});
                   setPrzypomnienieZdId(null);
-                }} style={{padding:"8px 14px",borderRadius:8,border:"1.5px solid #fecaca",background:"#fff",fontSize:12,cursor:"pointer",color:"#ef4444"}}>Usun</button>
+                }} style={{padding:"8px 14px",borderRadius:8,border:"1.5px solid #fecaca",background:"#fff",fontSize:12,cursor:"pointer",color: "#b91c1c"}}>Usun</button>
               )}
               <button onClick={() => setPrzypomnienieZdId(null)}
                 style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"#fff",fontSize:13,cursor:"pointer"}}>Anuluj</button>
@@ -6305,7 +6305,7 @@ function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUse
                 onUpdate({zdarzenia: updated});
                 setPrzypomnienieZdId(null);
                 showToast("Przypomnienie ustawione");
-              }} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Zapisz</button>
+              }} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color: "#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Zapisz</button>
             </div>
           </div>
         </div>
@@ -6388,7 +6388,7 @@ function SprawyTab({ sprawyList, vehicles, costs, updateCost, currentUser, role,
         </div>
         <div className="flex items-center gap-2">
           <div className="px-3 py-2 rounded-xl text-sm flex items-center gap-1.5"
-            style={{background:"#fffbeb",border:"1px solid #fde68a",color:"#92400e"}}>
+            style={{background:"#fffbeb",border:"1px solid #fde68a",color: "#92400e"}}>
             <span>💱</span>
             <span className="font-semibold text-xs">1 € = {eurRate ? eurRate.toFixed(4) : "4.27"} zł</span>
             <span className="text-xs opacity-60">· NBP {eurRateDate || ""}</span>
@@ -6413,7 +6413,7 @@ function SprawyTab({ sprawyList, vehicles, costs, updateCost, currentUser, role,
                   className="flex items-center gap-3 cursor-pointer hover:bg-orange-100 px-3 py-2 rounded-lg transition-all">
                   <span>{typ?.icon || "📌"}</span>
                   <span className="text-sm font-medium text-orange-800">{s.numer} · {s.klient}</span>
-                  <span className="ml-auto text-xs text-orange-500">{s.kwota ? s.kwota+" €" : ""}</span>
+                  <span className="ml-auto text-xs text-orange-700">{s.kwota ? s.kwota+" €" : ""}</span>
                 </div>
               );
             })}
@@ -6493,7 +6493,7 @@ function SprawyTab({ sprawyList, vehicles, costs, updateCost, currentUser, role,
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-semibold text-sm text-gray-900">{s.numer || "—"}</span>
                       <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{background: status.bg, color: status.color}}>{status.label}</span>
-                      {isOverdue && <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{background:"#fef2f2",color:"#dc2626"}}>⚠ Przeterminowane</span>}
+                      {isOverdue && <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{background:"#fef2f2",color: "#b91c1c"}}>⚠ Przeterminowane</span>}
                     </div>
                     <div className="text-sm text-gray-600 mt-0.5 truncate">{s.klient || "—"}{s.podtyp ? <span className="text-xs text-gray-500 ml-1">· {s.podtyp}</span> : null}</div>
                     {s.uwagi && <div className="text-xs text-gray-500 mt-0.5 truncate">{s.uwagi}</div>}
@@ -6502,7 +6502,7 @@ function SprawyTab({ sprawyList, vehicles, costs, updateCost, currentUser, role,
                 <div className="text-right flex-shrink-0">
                   {s.kwota && <div className="font-bold text-sm text-gray-900">{s.kwota} {s.waluta||"EUR"}</div>}
                   {daysLeft !== null && (
-                    <div className="text-xs mt-0.5" style={{color: daysLeft < 0 ? "#dc2626" : daysLeft <= 7 ? "#f97316" : "#6b7280"}}>
+                    <div className="text-xs mt-0.5" style={{color: daysLeft < 0 ? "#b91c1c" : daysLeft <= 7 ? "#c2410c" : "#6b7280"}}>
                       {daysLeft < 0 ? `${Math.abs(daysLeft)}d po terminie` : daysLeft === 0 ? "Dziś!" : `${daysLeft}d do terminu`}
                     </div>
                   )}
@@ -6546,7 +6546,7 @@ function SprawyTab({ sprawyList, vehicles, costs, updateCost, currentUser, role,
                 setCustomTypy(p => [...p, { id, label: newTypLabel.trim(), icon: "📌", color: "#6b7280" }]);
                 setNewTypLabel("");
                 setShowNewTyp(false);
-              }} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Dodaj</button>
+              }} style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#111827",color: "#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Dodaj</button>
             </div>
           </div>
         </div>
@@ -6742,7 +6742,7 @@ function EmailStatusTab({ showToast }) {
                 <button onClick={() => toggleActive(r.id, r.active)}
                   className="w-5 h-5 rounded flex items-center justify-center border-2 transition-all"
                   style={{ borderColor: r.active ? "#22c55e" : "#d1d5db", background: r.active ? "#f0fdf4" : "#fff" }}>
-                  {r.active && <span className="text-green-600 text-xs">✓</span>}
+                  {r.active && <span className="text-green-700 text-xs">✓</span>}
                 </button>
                 <div>
                   <span className="text-sm font-semibold text-gray-800">{r.name || r.email.split("@")[0]}</span>
@@ -6750,7 +6750,7 @@ function EmailStatusTab({ showToast }) {
                 </div>
               </div>
               <button onClick={() => removeRecipient(r.id)}
-                className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50">
+                className="text-xs text-red-400 hover:text-red-700 px-2 py-1 rounded-lg hover:bg-red-50">
                 Usuń
               </button>
             </div>
@@ -6768,7 +6768,7 @@ function EmailStatusTab({ showToast }) {
                 <span className="text-gray-500">
                   {new Date(l.sentAt).toLocaleString("pl-PL", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })}
                 </span>
-                <span className={l.status === "sent" ? "text-green-600 font-semibold" : "text-red-500 font-semibold"}>
+                <span className={l.status === "sent" ? "text-green-700 font-semibold" : "text-red-700 font-semibold"}>
                   {l.status === "sent" ? `✅ Wysłano do ${l.recipients?.length || 0}` : `❌ ${l.error || "Błąd"}`}
                 </span>
               </div>
@@ -6999,8 +6999,8 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
   if (error && gpsDevices.length === 0) {
     return (
       <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-center">
-        <p className="text-red-600 font-semibold mb-2">Błąd połączenia z GPS</p>
-        <p className="text-sm text-red-500 mb-4">{error}</p>
+        <p className="text-red-700 font-semibold mb-2">Błąd połączenia z GPS</p>
+        <p className="text-sm text-red-700 mb-4">{error}</p>
         <button onClick={() => fetchGpsData(true)} className="px-4 py-2 rounded-xl text-sm font-bold text-white bg-violet-600 hover:bg-violet-700">
           Ponów próbę
         </button>
@@ -7918,7 +7918,7 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
           if (real) {
             // Zielona solidna linia = faktyczna trasa
             const polyline = L.polyline(real.coordinates, {
-              color: "#16a34a", weight: 5, opacity: 0.9,
+              color: "#15803d", weight: 5, opacity: 0.9,
             }).addTo(mapInstanceRef.current);
             routeLayerRef.current.push(polyline);
 
@@ -8535,7 +8535,7 @@ function VuReportView({ dddFile, onClose }) {
                 <div className="text-[11px] text-gray-500">zdarzeń</div>
               </div>
               <div className="bg-white rounded-xl border border-gray-200 p-3 text-center">
-                <div className="text-lg font-bold text-red-600">{ev.faults}</div>
+                <div className="text-lg font-bold text-red-700">{ev.faults}</div>
                 <div className="text-[11px] text-gray-500">usterek</div>
               </div>
               <div className="bg-white rounded-xl border border-gray-200 p-3 text-center">
@@ -9457,7 +9457,7 @@ function MultiDayActivityView({ vehicle, driverActivities = [], currentUser = nu
                     <div className="text-gray-500">przez {c.correctedByName || c.correctedBy || "—"}{c.correctedAt ? ` · ${fmtCorrTs(c.correctedAt)}` : ""}</div>
                   </div>
                   {isAdmin && (
-                    <button onClick={() => deleteCorrection(c.id)} className="shrink-0 text-red-600 hover:text-red-700 hover:underline font-semibold print:hidden">
+                    <button onClick={() => deleteCorrection(c.id)} className="shrink-0 text-red-700 hover:text-red-700 hover:underline font-semibold print:hidden">
                       Cofnij
                     </button>
                   )}
@@ -9626,12 +9626,12 @@ function AuditLogTab() {
   }, [limit]);
 
   const ACTION_LABELS = {
-    add: { label: "Dodanie", color: "#16a34a", bg: "#f0fdf4" },
+    add: { label: "Dodanie", color: "#15803d", bg: "#f0fdf4" },
     update: { label: "Edycja", color: "#2563eb", bg: "#eff6ff" },
-    delete: { label: "Usunięcie", color: "#dc2626", bg: "#fef2f2" },
+    delete: { label: "Usunięcie", color: "#b91c1c", bg: "#fef2f2" },
     toggleStatus: { label: "Zmiana statusu", color: "#9333ea", bg: "#faf5ff" },
     bulkAdd: { label: "Import zbiorczy", color: "#0891b2", bg: "#ecfeff" },
-    login: { label: "Logowanie", color: "#059669", bg: "#ecfdf5" },
+    login: { label: "Logowanie", color: "#047857", bg: "#ecfdf5" },
     logout: { label: "Wylogowanie", color: "#6b7280", bg: "#f9fafb" },
   };
 
@@ -10211,7 +10211,7 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
                       </div>
                       <div>
                         <div className="text-sm font-medium text-gray-800 truncate max-w-48">{u.email || "—"}</div>
-                        {isMe && <div className="text-xs text-amber-500 font-medium">to Ty</div>}
+                        {isMe && <div className="text-xs text-amber-700 font-medium">to Ty</div>}
                       </div>
                     </div>
                     <div className="col-span-3">
@@ -10237,7 +10237,7 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
                       {!isAdminUser && (
                         <button onClick={() => setExpandedUid(isExpanded ? null : u.uid)}
                           className="px-2.5 py-1 rounded-lg text-xs font-medium border transition-all hover:bg-gray-100"
-                          style={{ borderColor:"#e5e7eb", color:"#374151", background:"#fff" }}
+                          style={{ borderColor:"#e5e7eb", color: "#374151", background:"#fff" }}
                           title="Zakładki dostępne dla tego użytkownika">
                           {isExpanded ? "▲" : "▼"} Zakładki ({effectiveAllowed.length})
                         </button>
@@ -10308,7 +10308,7 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
               <span className="text-lg">🧑‍✈️</span>
               <span className="font-semibold text-emerald-800 text-sm">Kierowcy</span>
             </div>
-            <p className="text-xs text-emerald-600">
+            <p className="text-xs text-emerald-700">
               Kierowca widzi osobny panel mobile-first: zlecenia (bez cen), pojazd, serwis, spalanie i czas pracy.
               Przypisz kierowcę do pojazdu żeby widział swoje dane.
             </p>
@@ -10388,7 +10388,7 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
                   {/* Kierowca info */}
                   <div className="col-span-4 flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full flex items-center justify-center text-base font-bold flex-shrink-0"
-                      style={{ background: "#ecfdf5", color: "#059669" }}>
+                      style={{ background: "#ecfdf5", color: "#047857" }}>
                       {(u.email||"?")[0].toUpperCase()}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -10419,7 +10419,7 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
                       <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-100">
                         <span className="text-sm">🚛</span>
                         <span className="text-sm font-semibold text-emerald-800">{assignedVehicle.plate}</span>
-                        {assignedVehicle.brand && <span className="text-xs text-emerald-600">{assignedVehicle.brand}</span>}
+                        {assignedVehicle.brand && <span className="text-xs text-emerald-700">{assignedVehicle.brand}</span>}
                       </div>
                     ) : (
                       <span className="text-sm text-gray-500 italic">Brak pojazdu</span>
@@ -10430,7 +10430,7 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
                   <div className="col-span-4 flex gap-2 flex-wrap items-center">
                     {assignedVehicle ? (
                       <button onClick={() => unassignDriver(u.email)}
-                        className="px-3 py-1.5 rounded-lg text-xs font-medium border border-red-100 bg-red-50 text-red-600 hover:bg-red-100 transition-colors">
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium border border-red-100 bg-red-50 text-red-700 hover:bg-red-100 transition-colors">
                         Odpisz od auta
                       </button>
                     ) : (
@@ -10471,7 +10471,7 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
                           className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs"
                           style={{
                             background: !d.to ? "#ecfdf5" : "#f3f4f6",
-                            color: !d.to ? "#059669" : "#6b7280",
+                            color: !d.to ? "#047857" : "#4b5563",
                             fontWeight: !d.to ? 600 : 400,
                           }}>
                           {d.name || d.email} · {d.from}{d.to ? ` → ${d.to}` : " → teraz"}
@@ -10693,11 +10693,11 @@ function ImiCard({ record: r, vehicles, onPreview, onDelete }) {
             <span className="text-sm font-bold text-gray-900">{r.driverName || "—"}</span>
             {r.country && (
               <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
-                style={{ background:"#eff6ff", color:"#1a3c8f" }}>🏳️ {r.country}</span>
+                style={{ background:"#eff6ff", color: "#1a3c8f" }}>🏳️ {r.country}</span>
             )}
             {isActive
-              ? <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background:"#f0fdf4", color:"#16a34a" }}>● Aktywne</span>
-              : r.dateTo && <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background:"#f3f4f6", color:"#6b7280" }}>Zakończone</span>
+              ? <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background:"#f0fdf4", color: "#15803d" }}>● Aktywne</span>
+              : r.dateTo && <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background:"#f3f4f6", color: "#4b5563" }}>Zakończone</span>
             }
           </div>
           <div className="text-xs text-gray-500 mt-0.5">
@@ -10707,7 +10707,7 @@ function ImiCard({ record: r, vehicles, onPreview, onDelete }) {
         <div className="flex gap-1">
           <button onClick={onPreview}
             className="px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all hover:bg-gray-100"
-            style={{ borderColor:"#e5e7eb", color:"#374151" }}>👁 Podgląd / Drukuj</button>
+            style={{ borderColor:"#e5e7eb", color: "#374151" }}>👁 Podgląd / Drukuj</button>
           <button onClick={onDelete}
             className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-all text-xs">✕</button>
         </div>
@@ -10752,17 +10752,17 @@ function buildImiHtml(r) {
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
   body { font-family: Arial, sans-serif; font-size: 11px; color: #000; background:#fff; padding:24px; max-width:780px; margin:0 auto; }
-  h1 { color:#1a3c8f; font-size:20px; font-weight:bold; text-align:center; margin-bottom:18px; line-height:1.3; }
+  h1 { color: #1a3c8f; font-size:20px; font-weight:bold; text-align:center; margin-bottom:18px; line-height:1.3; }
   .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:0 24px; }
   .section { margin-bottom:10px; }
   .section-title { font-weight:bold; font-size:12px; text-align:center; border-bottom:2px solid #1a3c8f; padding-bottom:4px; margin-bottom:8px; }
   .row { display:flex; align-items:flex-start; margin-bottom:5px; gap:4px; }
-  .lbl { color:#555; min-width:140px; flex-shrink:0; font-size:10.5px; }
-  .val { color:#1a3c8f; font-size:10.5px; font-weight:500; }
+  .lbl { color: #555; min-width:140px; flex-shrink:0; font-size:10.5px; }
+  .val { color: #1a3c8f; font-size:10.5px; font-weight:500; }
   .plates-section { margin-top:14px; border-top:2px solid #1a3c8f; padding-top:8px; }
   .plates-title { font-weight:bold; font-size:12px; margin-bottom:5px; }
-  .plates-val { color:#1a3c8f; font-size:10.5px; }
-  .footer { margin-top:18px; font-size:9px; color:#666; border-top:1px solid #ddd; padding-top:6px; }
+  .plates-val { color: #1a3c8f; font-size:10.5px; }
+  .footer { margin-top:18px; font-size:9px; color: #666; border-top:1px solid #ddd; padding-top:6px; }
   @media print { body { padding:12px; } }
 </style>
 </head>
@@ -11124,7 +11124,7 @@ Extract ALL fields exactly as they appear. Return ONLY clean JSON, no text befor
                   <div className="flex-1 min-w-0">
                     <div className="text-xs font-semibold text-gray-800 truncate">{item.fileName}</div>
                     <div className="text-xs mt-0.5" style={{
-                      color: item.status==="saved"?"#16a34a": item.status==="duplicate"?"#d97706": item.status==="error"?"#dc2626":"#6b7280"
+                      color: item.status==="saved"?"#15803d": item.status==="duplicate"?"#d97706": item.status==="error"?"#b91c1c":"#6b7280"
                     }}>
                       {item.status==="pending"   && "Oczekuje…"}
                       {item.status==="analyzing" && "🤖 AI analizuje…"}
@@ -11144,7 +11144,7 @@ Extract ALL fields exactly as they appear. Return ONLY clean JSON, no text befor
               <div className="text-sm font-bold text-green-800">✅ Przetwarzanie zakończone</div>
               {savedCount>0 && <div className="text-xs text-green-700">• {savedCount} {savedCount===1?"dokument zapisany":"dokumenty zapisane"}</div>}
               {dupCount>0   && <div className="text-xs text-amber-600">• {dupCount} duplikat{dupCount===1?"":"y"} pominięt{dupCount===1?"y":"e"}</div>}
-              {errCount>0   && <div className="text-xs text-red-500">• {errCount} błąd{errCount===1?"":"y"} — wgraj ręcznie</div>}
+              {errCount>0   && <div className="text-xs text-red-700">• {errCount} błąd{errCount===1?"":"y"} — wgraj ręcznie</div>}
             </div>
           )}
         </div>
@@ -11173,10 +11173,10 @@ function daysUntil(dateStr) {
 function DocStatusBadge({ expiryDate }) {
   const d = daysUntil(expiryDate);
   if (d === null) return null;
-  if (d < 0)   return <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background:"#fef2f2",color:"#dc2626" }}>⚠ Wygasło</span>;
-  if (d <= 30) return <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background:"#fef2f2",color:"#dc2626" }}>🔴 {d} dni</span>;
-  if (d <= 60) return <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background:"#fffbeb",color:"#d97706" }}>🟡 {d} dni</span>;
-  return <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ background:"#f0fdf4",color:"#16a34a" }}>🟢 {d} dni</span>;
+  if (d < 0)   return <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background:"#fef2f2",color: "#b91c1c" }}>⚠ Wygasło</span>;
+  if (d <= 30) return <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background:"#fef2f2",color: "#b91c1c" }}>🔴 {d} dni</span>;
+  if (d <= 60) return <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background:"#fffbeb",color: "#d97706" }}>🟡 {d} dni</span>;
+  return <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ background:"#f0fdf4",color: "#15803d" }}>🟢 {d} dni</span>;
 }
 
 function FilePreviewModal({ file, onClose }) {
@@ -11267,7 +11267,7 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
             {hasFile && (
               <button onClick={() => setPreview(doc)}
                 className="px-2 py-0.5 rounded-full text-xs font-medium flex items-center gap-1 hover:opacity-80 transition-all"
-                style={{ background:"#eff6ff", color:"#3b82f6" }}>
+                style={{ background:"#eff6ff", color: "#3b82f6" }}>
                 {doc.fileType==="application/pdf" ? "📄" : "🖼️"} {doc.fileName || "Plik"}
               </button>
             )}
@@ -11288,14 +11288,14 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
                 const cov = COVERAGE_OPTIONS.find(c => c.id === covId);
                 return cov ? (
                   <span key={covId} className="px-1.5 py-0.5 rounded text-xs font-medium"
-                    style={{ background:"#dbeafe", color:"#1e40af", fontSize:"10px" }}>
+                    style={{ background:"#dbeafe", color: "#1e40af", fontSize:"10px" }}>
                     {cov.icon} {cov.label}
                   </span>
                 ) : null;
               })}
               {(doc.customCoverage||[]).map(tag => (
                 <span key={tag} className="px-1.5 py-0.5 rounded text-xs font-medium"
-                  style={{ background:"#f0fdf4", color:"#166534", fontSize:"10px" }}>
+                  style={{ background:"#f0fdf4", color: "#166534", fontSize:"10px" }}>
                   🏷️ {tag}
                 </span>
               ))}
@@ -11318,7 +11318,7 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
             <div className="flex flex-wrap gap-1 mt-1.5">
               {doc.reminders.map((r,i) => (
                 <span key={i} className="px-2 py-0.5 rounded-full text-xs font-medium flex items-center gap-1"
-                  style={{ background:"#f5f3ff", color:"#7c3aed" }}>
+                  style={{ background:"#f5f3ff", color: "#7c3aed" }}>
                   🔔 {r.daysBefore} dni przed
                   {r.note && <span className="text-purple-300 font-normal">· {r.note}</span>}
                 </span>
@@ -11348,12 +11348,12 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
         <div className="flex gap-2 flex-wrap">
           <button onClick={() => setShowBulkUpload(true)}
             className="px-3 py-2 rounded-xl text-sm font-semibold border transition-all hover:bg-gray-50 flex items-center gap-1.5"
-            style={{ borderColor:"#e5e7eb", color:"#374151" }}>
+            style={{ borderColor:"#e5e7eb", color: "#374151" }}>
             🤖 Wgraj z AI
           </button>
           <button onClick={() => setShowReminders(true)}
             className="relative px-3 py-2 rounded-xl text-sm font-semibold border transition-all hover:bg-gray-50"
-            style={{ borderColor:"#e5e7eb", color:"#374151" }}>
+            style={{ borderColor:"#e5e7eb", color: "#374151" }}>
             🔔 Przypomnienia
             {(expiredCount+soon30) > 0 && (
               <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full text-white text-xs flex items-center justify-center font-bold"
@@ -11371,9 +11371,9 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
       {/* ALERT STRIP */}
       {(expiredCount>0||soon30>0||soon60>0) && (
         <div className="flex flex-wrap gap-2 mb-5">
-          {expiredCount>0 && <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium" style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626"}}>⚠️ <strong>{expiredCount}</strong> {expiredCount===1?"dokument wygasł":"dokumenty wygasły"}</div>}
-          {soon30>0      && <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium" style={{background:"#fef9c3",border:"1px solid #fde047",color:"#854d0e"}}>🔴 <strong>{soon30}</strong> wygasa w ciągu 30 dni</div>}
-          {soon60>0      && <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium" style={{background:"#fffbeb",border:"1px solid #fde68a",color:"#92400e"}}>🟡 <strong>{soon60}</strong> wygasa w ciągu 60 dni</div>}
+          {expiredCount>0 && <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium" style={{background:"#fef2f2",border:"1px solid #fecaca",color: "#b91c1c"}}>⚠️ <strong>{expiredCount}</strong> {expiredCount===1?"dokument wygasł":"dokumenty wygasły"}</div>}
+          {soon30>0      && <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium" style={{background:"#fef9c3",border:"1px solid #fde047",color: "#854d0e"}}>🔴 <strong>{soon30}</strong> wygasa w ciągu 30 dni</div>}
+          {soon60>0      && <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium" style={{background:"#fffbeb",border:"1px solid #fde68a",color: "#92400e"}}>🟡 <strong>{soon60}</strong> wygasa w ciągu 60 dni</div>}
         </div>
       )}
 
@@ -11452,7 +11452,7 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
                     <div className="text-sm font-semibold text-gray-900 truncate">{r.dt.label}{r.label?` · ${r.label}`:""}</div>
                     <div className="text-xs text-gray-500">{r.vehicle?.plate||"—"} · ważny do {fmtDate(r.expiryDate)}</div>
                     {r.reminders?.map((rem,i) => (
-                      <div key={i} className="text-xs mt-0.5" style={{color:"#7c3aed"}}>🔔 {rem.daysBefore} dni przed{rem.note?` · ${rem.note}`:""}</div>
+                      <div key={i} className="text-xs mt-0.5" style={{color: "#7c3aed"}}>🔔 {rem.daysBefore} dni przed{rem.note?` · ${rem.note}`:""}</div>
                     ))}
                   </div>
                   <DocStatusBadge expiryDate={r.expiryDate} />
@@ -11702,9 +11702,9 @@ Szukaj numerow rejestracyjnych pojazdow w dokumencie.`;
                     <div className="text-sm font-semibold text-gray-800 truncate">{item.fileName}</div>
                     <div className="text-xs mt-0.5">
                       {item.status==="pending"   && <span className="text-gray-500">Oczekuje…</span>}
-                      {item.status==="analyzing" && <span style={{color:"#7c3aed"}}>🤖 AI analizuje…</span>}
-                      {item.status==="done"      && <span style={{color:"#16a34a"}}>✓ Odczytano · pewność: <strong>{item.extracted?.confidence}</strong></span>}
-                      {item.status==="error"     && <span style={{color:"#dc2626"}}>⚠ Błąd — wypełnij ręcznie</span>}
+                      {item.status==="analyzing" && <span style={{color: "#7c3aed"}}>🤖 AI analizuje…</span>}
+                      {item.status==="done"      && <span style={{color: "#15803d"}}>✓ Odczytano · pewność: <strong>{item.extracted?.confidence}</strong></span>}
+                      {item.status==="error"     && <span style={{color: "#b91c1c"}}>⚠ Błąd — wypełnij ręcznie</span>}
                     </div>
                   </div>
                   <button onClick={() => removeItem(item.id)} className="w-6 h-6 rounded-lg flex items-center justify-center text-gray-300 hover:text-red-400 text-xs">✕</button>
@@ -11748,7 +11748,7 @@ Szukaj numerow rejestracyjnych pojazdow w dokumencie.`;
 
                     {/* Vehicle plate auto-match info */}
                     {item.edited.vehiclePlate && (
-                      <div className="col-span-2 text-xs px-2 py-1.5 rounded-lg" style={{background:"#eff6ff",color:"#1e40af"}}>
+                      <div className="col-span-2 text-xs px-2 py-1.5 rounded-lg" style={{background:"#eff6ff",color: "#1e40af"}}>
                         🔍 Znaleziono nr rej.: <strong>{item.edited.vehiclePlate}</strong>
                       </div>
                     )}
@@ -11989,7 +11989,7 @@ function AddDocModal({ vehicles, doc, onSave, onClose }) {
                 <div className="flex flex-wrap gap-1.5 mb-2">
                   {form.customCoverage.map(tag => (
                     <span key={tag} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium"
-                      style={{ background:"#f0fdf4", border:"1.5px solid #86efac", color:"#166534" }}>
+                      style={{ background:"#f0fdf4", border:"1.5px solid #86efac", color: "#166534" }}>
                       🏷️ {tag}
                       <button onClick={() => removeCustomCoverage(tag)} className="text-green-400 hover:text-red-400 ml-0.5">✕</button>
                     </span>
@@ -12040,14 +12040,14 @@ function AddDocModal({ vehicles, doc, onSave, onClose }) {
                   <div className="text-xs text-gray-500">{form.fileType}</div>
                 </div>
                 <button onClick={() => { set("fileData",null); set("fileName",""); set("fileType",""); }}
-                  className="text-xs text-red-400 hover:text-red-600 font-medium">Usuń</button>
+                  className="text-xs text-red-400 hover:text-red-700 font-medium">Usuń</button>
               </div>
             ) : (
               <div>
                 <input ref={fileRef} type="file" accept=".pdf,image/*" onChange={handleFile} className="hidden" />
                 <button onClick={() => fileRef.current?.click()}
                   className="w-full py-8 rounded-xl border-2 border-dashed flex flex-col items-center gap-2 transition-all hover:bg-gray-50"
-                  style={{ borderColor:"#d1d5db", color:"#6b7280" }}>
+                  style={{ borderColor:"#d1d5db", color: "#6b7280" }}>
                   {uploading
                     ? <><span className="text-2xl">⏳</span><span className="text-sm">Ładowanie…</span></>
                     : <><span className="text-2xl">📂</span><span className="text-sm font-medium text-gray-500">Kliknij aby wybrać plik</span><span className="text-xs">PDF, JPG, PNG · maks. 5 MB</span></>
@@ -12249,7 +12249,7 @@ function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, 
               <div className="text-xs mt-2 text-gray-600 break-words">
                 ✓ {file.fileName}{hotel?.name ? ` — ${hotel.name}` : ""}
                 {hotel?._match
-                  ? <span style={{ color: "#059669" }}> · pojazd z gościa: {vehicles.find(v => v.id === hotel._match.vehicleId)?.plate} ({hotel._match.driverName})</span>
+                  ? <span style={{ color: "#047857" }}> · pojazd z gościa: {vehicles.find(v => v.id === hotel._match.vehicleId)?.plate} ({hotel._match.driverName})</span>
                   : hotel?.guest ? <span style={{ color: "#b45309" }}> · gość „{hotel.guest}" — wybierz pojazd ręcznie</span> : null}
                 {file.fileUrl && <> · <a href={safeHref(file.fileUrl)} target="_blank" rel="noreferrer" style={{ color: "#0284c7" }}>podgląd</a></>}
               </div>
@@ -12275,7 +12275,7 @@ function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, 
                 className="px-3 py-2.5 rounded-lg border text-xs font-semibold transition-all whitespace-nowrap"
                 style={{
                   border:     `1px solid ${showNewCat ? "#111827" : "#e5e7eb"}`,
-                  color:      showNewCat ? "#fff" : "#6b7280",
+                  color: showNewCat ? "#fff" : "#6b7280",
                   background: showNewCat ? "#111827" : "#fff",
                 }}>
                 {showNewCat ? "Anuluj" : "+ Nowa"}
@@ -12327,7 +12327,7 @@ function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, 
                   className="flex-1 py-2.5 rounded-lg text-sm font-semibold border transition-all"
                   style={{
                     background: form.currency === cur ? "#111827" : "#fff",
-                    color:      form.currency === cur ? "#fff" : "#6b7280",
+                    color: form.currency === cur ? "#fff" : "#6b7280",
                     border:     `1px solid ${form.currency === cur ? "#111827" : "#e5e7eb"}`,
                   }}>
                   {cur === "PLN" ? "🇵🇱 PLN (zł)" : "🇪🇺 EUR (€)"}
@@ -12661,7 +12661,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
             generateFromData(selYear, mi);
           }}
             className="px-4 py-2 rounded-xl text-sm font-bold hover:opacity-90 transition-all border border-gray-200"
-            style={{ background: "#f0fdf4", color: "#16a34a" }}>
+            style={{ background: "#f0fdf4", color: "#15803d" }}>
             ⚡ Generuj z danych
           </button>
         </div>
@@ -12885,7 +12885,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
                   </div>
                   <div className="bg-white rounded-2xl px-4 py-3 border border-gray-100">
                     <div className="text-xs text-gray-500 mb-1">Koszty {selYear}</div>
-                    <div className="text-lg font-bold text-red-500">{fmt(annualK)}</div>
+                    <div className="text-lg font-bold text-red-700">{fmt(annualK)}</div>
                   </div>
                   <div className="bg-white rounded-2xl px-4 py-3 border border-gray-100">
                     <div className="text-xs text-gray-500 mb-1">Zysk {selYear}</div>
@@ -13115,10 +13115,10 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
 function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne, selYear, getRecord, isSettled }) {
   const METRYKI = [
     { id: "frachty",  label: "Frachty €",      color: "#3b82f6" },
-    { id: "koszty",   label: "Koszty €",       color: "#ef4444" },
-    { id: "zysk",     label: "Zysk €",         color: "#16a34a" },
-    { id: "kmLicznik",label: "KM licznik",     color: "#8b5cf6" },
-    { id: "paliwoL",  label: "Paliwo L",       color: "#f59e0b" },
+    { id: "koszty",   label: "Koszty €",       color: "#b91c1c" },
+    { id: "zysk",     label: "Zysk €",         color: "#15803d" },
+    { id: "kmLicznik",label: "KM licznik",     color: "#6d28d9" },
+    { id: "paliwoL",  label: "Paliwo L",       color: "#b45309" },
     { id: "spalanie", label: "Spalanie L/100", color: "#06b6d4" },
     { id: "eurKm",    label: "€/km paliwo",     color: "#ec4899" },
     { id: "dni",      label: "Dni w trasie",   color: "#64748b" },
@@ -13528,7 +13528,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                   {/* Nagłówek miesięcy */}
                   <div style={{display:"grid", gridTemplateColumns:`repeat(12,1fr) ${TOTAL_COL}px`,
                     textAlign:"center", padding:"2px 0 4px"}}>
-                    {MS.map(m=><div key={m} style={{fontSize:11,color:"#94a3b8",fontWeight:500}}>{m}</div>)}
+                    {MS.map(m=><div key={m} style={{fontSize:11,color: "#94a3b8",fontWeight:500}}>{m}</div>)}
                     <div/>
                   </div>
 
@@ -13553,12 +13553,12 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                         {MS.map((_,mi)=>{
                           const v = yearTotals[yr]?.[mi]||0;
                           return (
-                            <div key={mi} style={{color:v===0?"#d1d5db":col, fontWeight:isCur?700:400, fontSize:11}}>
+                            <div key={mi} style={{color: v===0?"#d1d5db":col, fontWeight:isCur?700:400, fontSize:11}}>
                               {fmtTk(v)}
                             </div>
                           );
                         })}
-                        <div style={{paddingLeft:8,paddingRight:4,color:col,fontSize:10,whiteSpace:"nowrap",
+                        <div style={{paddingLeft:8,paddingRight:4,color: col,fontSize:10,whiteSpace:"nowrap",
                           borderLeft:"1px solid "+(isCur?"#dbeafe":"#e5e7eb"), lineHeight:1.25}}>
                           <div style={{fontWeight:700}}>{yr}{isRate?" ⌀":""}: {fmtTk(yrTotal)}</div>
                           {yrAvg !== null && (
@@ -13597,12 +13597,12 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                           const d = (ytCur[mi]||0)-(ytPrev[mi]||0);
                           const c = d===0?"#6b7280":d>0?"#15803d":"#dc2626";
                           return (
-                            <div key={mi} style={{fontWeight:700,fontSize:10,color:c}}>
+                            <div key={mi} style={{fontWeight:700,fontSize:10,color: c}}>
                               {d===0?"—":(d>0?"+":"")+fmtTk(d)}
                             </div>
                           );
                         })}
-                        <div style={{paddingLeft:8,paddingRight:4,fontWeight:700,color:totalC,fontSize:10,whiteSpace:"nowrap",
+                        <div style={{paddingLeft:8,paddingRight:4,fontWeight:700,color: totalC,fontSize:10,whiteSpace:"nowrap",
                           borderLeft:"1px solid #e5e7eb"}}>
                           Δ: {totalDiff>0?"+":""}{fmtTk(totalDiff)}
                           {pct !== null && (
@@ -13737,7 +13737,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
 
               return (
                 <div key={ri} style={{marginBottom: rows.length>1?24:0}}>
-                  {rows.length>1&&<div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:8,paddingBottom:4,borderBottom:"1px solid #f1f5f9"}}>{row.label}</div>}
+                  {rows.length>1&&<div style={{fontSize:11,fontWeight:700,color: "#475569",marginBottom:8,paddingBottom:4,borderBottom:"1px solid #f1f5f9"}}>{row.label}</div>}
 
                   {/* KPI Strip */}
                   <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
@@ -13748,9 +13748,9 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                       {label:"PROJEKCJA ROCZNA",value:fmtFull(projection)+" €",sub:"vs "+fmtFull(full25)+" € w 2025",vc:"#6366f1",bg:"#f5f3ff",bc:"#ddd6fe"},
                     ].map((c,i)=>(
                       <div key={i} style={{background:c.bg,borderRadius:10,padding:"10px 14px",border:"1px solid "+c.bc}}>
-                        <div style={{fontSize:9,fontWeight:600,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4}}>{c.label}</div>
-                        <div style={{fontSize:20,fontWeight:800,color:c.vc,lineHeight:1.2}}>{c.value}</div>
-                        <div style={{fontSize:10,color:"#94a3b8",marginTop:3}}>{c.sub}</div>
+                        <div style={{fontSize:9,fontWeight:600,color: "#94a3b8",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4}}>{c.label}</div>
+                        <div style={{fontSize:20,fontWeight:800,color: c.vc,lineHeight:1.2}}>{c.value}</div>
+                        <div style={{fontSize:10,color: "#94a3b8",marginTop:3}}>{c.sub}</div>
                       </div>
                     ))}
                   </div>
@@ -13758,7 +13758,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                   {/* Table header */}
                   <div style={{display:"grid",gridTemplateColumns:"44px 1fr 68px 68px 52px",gap:8,padding:"7px 12px",borderBottom:"1px solid #e5e7eb",background:"#f8fafc",borderRadius:"8px 8px 0 0"}}>
                     {["",yoyCumul?"NARASTAJĄCO":"PORÓWNANIE","2026","2025","YoY"].map((h,i)=>(
-                      <div key={i} style={{fontSize:9,fontWeight:600,color:i===2?"#1d4ed8":"#94a3b8",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:i>=2?"right":"left"}}>{h}</div>
+                      <div key={i} style={{fontSize:9,fontWeight:600,color: i===2?"#1d4ed8":"#94a3b8",textTransform:"uppercase",letterSpacing:"0.06em",textAlign:i>=2?"right":"left"}}>{h}</div>
                     ))}
                   </div>
 
@@ -13775,7 +13775,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                     return (
                       <div key={mi}>
                         <div style={{display:"grid",gridTemplateColumns:"44px 1fr 68px 68px 52px",gap:8,padding:"5px 12px",alignItems:"center",opacity:isFut?0.28:1,background:mi%2===0?"#fff":"#fafbfc",borderBottom:isQEnd?"none":"1px solid #f3f4f6",transition:"background 0.15s"}}>
-                          <div style={{fontSize:11,fontWeight:600,color:"#334155"}}>{m}</div>
+                          <div style={{fontSize:11,fontWeight:600,color: "#334155"}}>{m}</div>
                           <div style={{display:"flex",flexDirection:"column",gap:2}}>
                             {/* Bar 2026 — niezamknięte miesiące dostają jaśniejszy odcień (user 2026-05-13)
                                 żeby wizualnie odróżnić od zamkniętych. Open = mi >= compareMaxMi. */}
@@ -13787,10 +13787,10 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                               borderRadius:4,transition:"width 0.4s ease",minWidth:v26?3:0}}/>
                             <div style={{width:bW25+"%",height:5,background:isOpen?"#f1f5f9":"#e2e8f0",borderRadius:3}}/>
                           </div>
-                          <div style={{fontSize:12,fontWeight:700,color:"#1d4ed8",textAlign:"right"}}>{fmtV(v26)}</div>
-                          <div style={{fontSize:11,color:"#94a3b8",textAlign:"right"}}>{fmtV(v25)}</div>
+                          <div style={{fontSize:12,fontWeight:700,color: "#1d4ed8",textAlign:"right"}}>{fmtV(v26)}</div>
+                          <div style={{fontSize:11,color: "#94a3b8",textAlign:"right"}}>{fmtV(v25)}</div>
                           <div style={{textAlign:"right"}}>
-                            {pct!==null?<span style={{fontSize:10,fontWeight:700,color:isGoodChange(pct,met.lowerIsBetter)?"#15803d":"#dc2626"}}>{pct>=0?"▲":"▼"}{Math.abs(pct).toFixed(0)}%</span>:<span style={{color:"#d1d5db",fontSize:10}}>—</span>}
+                            {pct!==null?<span style={{fontSize:10,fontWeight:700,color: isGoodChange(pct,met.lowerIsBetter)?"#15803d":"#dc2626"}}>{pct>=0?"▲":"▼"}{Math.abs(pct).toFixed(0)}%</span>:<span style={{color: "#d1d5db",fontSize:10}}>—</span>}
                           </div>
                         </div>
                         {!yoyCumul&&isQEnd&&(()=>{
@@ -13804,12 +13804,12 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                           const isPartial = monthsInQ < 3 && monthsInQ > 0;
                           return (
                             <div style={{display:"grid",gridTemplateColumns:"44px 1fr 68px 68px 52px",gap:8,padding:"5px 12px",background:"#f0f4ff",borderTop:"1px solid #e0e7ff",borderBottom:"1px solid #e0e7ff",alignItems:"center",opacity:hasQ?1:0.3,marginBottom:2}}>
-                              <div style={{fontSize:11,fontWeight:800,color:"#4338ca"}}>Q{q+1}{isPartial && <span style={{fontSize:9,fontWeight:600,color:"#7c3aed",marginLeft:4}}>({monthsInQ}/3)</span>}</div>
+                              <div style={{fontSize:11,fontWeight:800,color: "#4338ca"}}>Q{q+1}{isPartial && <span style={{fontSize:9,fontWeight:600,color: "#7c3aed",marginLeft:4}}>({monthsInQ}/3)</span>}</div>
                               <div/>
-                              <div style={{fontSize:12,fontWeight:700,color:"#1d4ed8",textAlign:"right"}}>{fmtV(q26)}</div>
-                              <div style={{fontSize:11,fontWeight:500,color:"#94a3b8",textAlign:"right"}}>{fmtV(q25)}</div>
+                              <div style={{fontSize:12,fontWeight:700,color: "#1d4ed8",textAlign:"right"}}>{fmtV(q26)}</div>
+                              <div style={{fontSize:11,fontWeight:500,color: "#94a3b8",textAlign:"right"}}>{fmtV(q25)}</div>
                               <div style={{textAlign:"right"}}>
-                                {qPct!==null?<span style={{fontSize:10,fontWeight:800,color:isGoodChange(qPct,met.lowerIsBetter)?"#15803d":"#dc2626"}}>{qPct>=0?"+":""}{qPct.toFixed(1)}%</span>:<span style={{color:"#d1d5db",fontSize:10}}>—</span>}
+                                {qPct!==null?<span style={{fontSize:10,fontWeight:800,color: isGoodChange(qPct,met.lowerIsBetter)?"#15803d":"#dc2626"}}>{qPct>=0?"+":""}{qPct.toFixed(1)}%</span>:<span style={{color: "#d1d5db",fontSize:10}}>—</span>}
                               </div>
                             </div>
                           );
@@ -13831,13 +13831,13 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                       return (
                         <div key={h} style={{background:"#f8fafc",borderRadius:10,padding:"10px 14px",border:"1px solid #e5e7eb",opacity:hasH?1:0.3,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                           <div>
-                            <div style={{fontSize:10,fontWeight:700,color:"#64748b",marginBottom:2}}>H{h+1}{isPartial && <span style={{fontSize:9,fontWeight:600,color:"#7c3aed",marginLeft:4}}>({monthsInH}/6)</span>}</div>
+                            <div style={{fontSize:10,fontWeight:700,color: "#64748b",marginBottom:2}}>H{h+1}{isPartial && <span style={{fontSize:9,fontWeight:600,color: "#7c3aed",marginLeft:4}}>({monthsInH}/6)</span>}</div>
                             <div style={{display:"flex",gap:12}}>
-                              <span style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{fmtV(h26)}</span>
-                              <span style={{fontSize:13,color:"#94a3b8"}}>vs {fmtV(h25)}</span>
+                              <span style={{fontSize:14,fontWeight:700,color: "#1d4ed8"}}>{fmtV(h26)}</span>
+                              <span style={{fontSize:13,color: "#94a3b8"}}>vs {fmtV(h25)}</span>
                             </div>
                           </div>
-                          {hPct!==null?<span style={{fontSize:13,fontWeight:800,padding:"3px 10px",borderRadius:8,background:isGoodChange(hPct,met.lowerIsBetter)?"#f0fdf4":"#fef2f2",color:isGoodChange(hPct,met.lowerIsBetter)?"#15803d":"#dc2626",border:"1px solid "+(isGoodChange(hPct,met.lowerIsBetter)?"#bbf7d0":"#fecaca")}}>{hPct>=0?"+":""}{hPct.toFixed(1)}%</span>:<span style={{color:"#d1d5db"}}>—</span>}
+                          {hPct!==null?<span style={{fontSize:13,fontWeight:800,padding:"3px 10px",borderRadius:8,background:isGoodChange(hPct,met.lowerIsBetter)?"#f0fdf4":"#fef2f2",color: isGoodChange(hPct,met.lowerIsBetter)?"#15803d":"#dc2626",border:"1px solid "+(isGoodChange(hPct,met.lowerIsBetter)?"#bbf7d0":"#fecaca")}}>{hPct>=0?"+":""}{hPct.toFixed(1)}%</span>:<span style={{color: "#d1d5db"}}>—</span>}
                         </div>
                       );
                     })}
@@ -13847,13 +13847,13 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                   {/* Year total — apples-to-apples: sum closed months in both years (ytd26 vs ytd25) */}
                   <div style={{marginTop:8,background:"#f8fafc",borderRadius:10,padding:"10px 14px",border:"1px solid #e5e7eb",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                     <div>
-                      <div style={{fontSize:10,fontWeight:700,color:"#64748b",marginBottom:2}}>ROK TOTAL{closedMonths<12 && <span style={{fontSize:9,fontWeight:600,color:"#7c3aed",marginLeft:4}}>(do {MS[Math.max(0,closedMonths-1)]} — {closedMonths}/12 mies.)</span>}</div>
+                      <div style={{fontSize:10,fontWeight:700,color: "#64748b",marginBottom:2}}>ROK TOTAL{closedMonths<12 && <span style={{fontSize:9,fontWeight:600,color: "#7c3aed",marginLeft:4}}>(do {MS[Math.max(0,closedMonths-1)]} — {closedMonths}/12 mies.)</span>}</div>
                       <div style={{display:"flex",gap:12,alignItems:"baseline"}}>
-                        <span style={{fontSize:16,fontWeight:800,color:"#1d4ed8"}}>{fmtV(ytd26)} <span style={{fontSize:10,fontWeight:500}}>({closedMonths} mies. zamknięte)</span></span>
-                        <span style={{fontSize:14,color:"#94a3b8"}}>vs {fmtV(ytd25)} (te same mies.)</span>
+                        <span style={{fontSize:16,fontWeight:800,color: "#1d4ed8"}}>{fmtV(ytd26)} <span style={{fontSize:10,fontWeight:500}}>({closedMonths} mies. zamknięte)</span></span>
+                        <span style={{fontSize:14,color: "#94a3b8"}}>vs {fmtV(ytd25)} (te same mies.)</span>
                       </div>
                     </div>
-                    {pctYtd?<span style={{fontSize:14,fontWeight:800,padding:"4px 12px",borderRadius:8,background:isGoodChange(pctYtd,met.lowerIsBetter)?"#f0fdf4":"#fef2f2",color:isGoodChange(pctYtd,met.lowerIsBetter)?"#15803d":"#dc2626",border:"1px solid "+(isGoodChange(pctYtd,met.lowerIsBetter)?"#bbf7d0":"#fecaca")}}>{pctYtd>=0?"+":""}{pctYtd.toFixed(1)}% YTD</span>:<span style={{color:"#d1d5db"}}>—</span>}
+                    {pctYtd?<span style={{fontSize:14,fontWeight:800,padding:"4px 12px",borderRadius:8,background:isGoodChange(pctYtd,met.lowerIsBetter)?"#f0fdf4":"#fef2f2",color: isGoodChange(pctYtd,met.lowerIsBetter)?"#15803d":"#dc2626",border:"1px solid "+(isGoodChange(pctYtd,met.lowerIsBetter)?"#bbf7d0":"#fecaca")}}>{pctYtd>=0?"+":""}{pctYtd.toFixed(1)}% YTD</span>:<span style={{color: "#d1d5db"}}>—</span>}
                   </div>
                 </div>
               );
@@ -13970,7 +13970,7 @@ function RentFormModal({ vehicles, record, initVehicle, initYear, initMonth, onS
         <div className="px-5 py-4 border-t border-gray-100">
           <div className="flex items-center justify-between mb-3 px-3 py-2 rounded-xl" style={{ background:"#f9fafb" }}>
             <span className="text-xs text-gray-500">Frachty: <strong className="text-blue-600">{Number(frachty||0).toLocaleString("pl-PL")} €</strong></span>
-            <span className="text-xs text-gray-500">Koszty: <strong className="text-red-500">{totalKoszty.toLocaleString("pl-PL")} €</strong></span>
+            <span className="text-xs text-gray-500">Koszty: <strong className="text-red-700">{totalKoszty.toLocaleString("pl-PL")} €</strong></span>
             <span className="text-xs font-bold" style={{ color: zyskColor(zysk) }}>
               Zysk: {zysk >= 0 ? "+" : ""}{zysk.toLocaleString("pl-PL")} €
             </span>
@@ -13983,7 +13983,7 @@ function RentFormModal({ vehicles, record, initVehicle, initYear, initMonth, onS
             </button>
             <button onClick={onClose}
               className="px-5 py-3 rounded-xl text-sm font-medium hover:bg-gray-200 transition-all"
-              style={{ background:"#e5e7eb", color:"#374151" }}>
+              style={{ background:"#e5e7eb", color: "#374151" }}>
               Anuluj
             </button>
           </div>
@@ -14067,7 +14067,7 @@ function ServisTab({ vehicles, onUpdateVehicle }) {
         </div>
         {totalAlerts > 0 && (
           <div className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold"
-            style={{ background:"#fef2f2", border:"1px solid #fecaca", color:"#dc2626" }}>
+            style={{ background:"#fef2f2", border:"1px solid #fecaca", color: "#b91c1c" }}>
             ⚠️ {totalAlerts} {totalAlerts===1?"pilny termin":"pilne terminy"}
           </div>
         )}
@@ -14103,7 +14103,7 @@ function ServisTab({ vehicles, onUpdateVehicle }) {
                 </div>
                 <button onClick={() => setEditId(isEdit ? null : v.id)}
                   className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-                  style={{ background: isEdit?"#111827":"#f3f4f6", color: isEdit?"#fff":"#6b7280" }}>
+                  style={{ background: isEdit?"#111827":"#f3f4f6", color: isEdit?"#fff":"#4b5563" }}>
                   {isEdit ? "Zamknij" : "✏️ Edytuj"}
                 </button>
               </div>
@@ -14181,12 +14181,12 @@ function ServiceEditForm({ vehicle, onSave, onClose }) {
           <MF label="Data dołączenia do floty">
             <input type="date" value={v.fleetJoinDate||""} onChange={e => set("fleetJoinDate", e.target.value)}
               className="w-full px-3.5 py-2.5 rounded-lg text-sm outline-none"
-              style={{ background:"#f9fafb", border:"1.5px solid #e5e7eb", fontFamily:"'DM Sans',sans-serif", color:"#111827" }} />
+              style={{ background:"#f9fafb", border:"1.5px solid #e5e7eb", fontFamily:"'DM Sans',sans-serif", color: "#111827" }} />
           </MF>
           <MF label="Data opuszczenia floty">
             <input type="date" value={v.fleetLeaveDate||""} onChange={e => set("fleetLeaveDate", e.target.value)}
               className="w-full px-3.5 py-2.5 rounded-lg text-sm outline-none"
-              style={{ background:"#f9fafb", border:"1.5px solid #e5e7eb", fontFamily:"'DM Sans',sans-serif", color:"#111827" }} />
+              style={{ background:"#f9fafb", border:"1.5px solid #e5e7eb", fontFamily:"'DM Sans',sans-serif", color: "#111827" }} />
           </MF>
         </div>
       </div>
@@ -14228,7 +14228,7 @@ function ServiceEditForm({ vehicle, onSave, onClose }) {
           <div className="text-xs font-bold text-green-700 uppercase tracking-wider">🔑 Serwis gwarancyjny</div>
           <button onClick={() => set("warrantyActive", !v.warrantyActive)}
             className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all"
-            style={{ background: v.warrantyActive?"#dcfce7":"#f3f4f6", color: v.warrantyActive?"#16a34a":"#6b7280", border:`1.5px solid ${v.warrantyActive?"#86efac":"#e5e7eb"}` }}>
+            style={{ background: v.warrantyActive?"#dcfce7":"#f3f4f6", color: v.warrantyActive?"#15803d":"#4b5563", border:`1.5px solid ${v.warrantyActive?"#86efac":"#e5e7eb"}` }}>
             {v.warrantyActive ? "✓ Aktywna" : "Nieaktywna"}
           </button>
         </div>
@@ -14276,7 +14276,7 @@ function ServiceEditForm({ vehicle, onSave, onClose }) {
         </button>
         <button onClick={onClose}
           className="px-5 py-3 rounded-xl text-sm font-medium hover:bg-gray-200 transition-all"
-          style={{ background:"#e5e7eb", color:"#374151" }}>
+          style={{ background:"#e5e7eb", color: "#374151" }}>
           Anuluj
         </button>
       </div>
@@ -14351,7 +14351,7 @@ function VehicleServicePanel({ vehicle: v }) {
         {warActive && warLeft !== null && (
           <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
             style={{ background: warLeft<=0?"#fef2f2": warLeft<=5000?"#fffbeb":"#f0fdf4",
-                     color:      warLeft<=0?"#dc2626": warLeft<=5000?"#d97706":"#16a34a" }}>
+                     color: warLeft<=0?"#b91c1c": warLeft<=5000?"#d97706":"#15803d" }}>
             {warLeft<=0 ? "⚠ Gwarancja — wygasła KM" : `🔑 Gwarancja — ${warLeft.toLocaleString("pl-PL")} km do końca`}
           </span>
         )}
@@ -14359,7 +14359,7 @@ function VehicleServicePanel({ vehicle: v }) {
         {ownKmLeft !== null && kmStatusBadge(ownKmLeft, "Serwis olej.")}
         {monthsDays !== null && serviceStatusBadge(monthsDays, "Serwis mies.")}
         {currKm > 0 && (
-          <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ background:"#f3f4f6", color:"#6b7280" }}>
+          <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ background:"#f3f4f6", color: "#4b5563" }}>
             🏁 {Number(currKm).toLocaleString("pl-PL")} km
           </span>
         )}
@@ -14455,7 +14455,7 @@ function DriverCopyRow({ vehicle: v, active }) {
             className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:opacity-90 active:scale-95"
             style={{
               background: copied ? "#f0fdf4" : "#f3f4f6",
-              color:      copied ? "#16a34a" : "#374151",
+              color: copied ? "#15803d" : "#374151",
               border:     `1.5px solid ${copied ? "#86efac" : "#e5e7eb"}`,
             }}>
             {copied ? "✓ Skopiowano!" : "📋 Kopiuj ofertę"}
@@ -14498,7 +14498,7 @@ const CZAS_STATUSY = [
   { id: "jazda",    label: "Jazda",       color: "#15803d", bg: "#f0fdf4", border: "#bbf7d0", hours: 0 },
   { id: "pauza9",   label: "Pauza 9h",    color: "#b45309", bg: "#fffbeb", border: "#fde68a", hours: 9 },
   { id: "pauza11",  label: "Pauza 11h",   color: "#c2410c", bg: "#fff7ed", border: "#fed7aa", hours: 11 },
-  { id: "pauza24",  label: "Pauza 24h",   color: "#dc2626", bg: "#fef2f2", border: "#fecaca", hours: 24 },
+  { id: "pauza24",  label: "Pauza 24h",   color: "#b91c1c", bg: "#fef2f2", border: "#fecaca", hours: 24 },
   { id: "pauza45",  label: "Pauza 45h",   color: "#9333ea", bg: "#faf5ff", border: "#e9d5ff", hours: 45 },
   { id: "pauzaInne", label: "Pauza inne", color: "#0369a1", bg: "#f0f9ff", border: "#bae6fd", hours: 0, custom: true },
   { id: "baza",     label: "Baza",        color: "#6b7280", bg: "#f3f4f6", border: "#d1d5db", hours: 0 },
@@ -15046,7 +15046,7 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
                 <div className="flex items-center justify-between mb-2.5">
                   <div className="flex items-center gap-1.5">
                     <div className={`w-2 h-2 rounded-full ${isActive ? "bg-emerald-400" : "bg-gray-300"}`} />
-                    <span className="text-xs font-medium" style={{ color: isActive ? "#059669" : "#6b7280" }}>
+                    <span className="text-xs font-medium" style={{ color: isActive ? "#047857" : "#6b7280" }}>
                       {isActive ? "Aktualny kierowca" : `Poprzedni (${idx + 1})`}
                     </span>
                   </div>
@@ -15194,7 +15194,7 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
           <button onClick={()=>{ if(!v.plate.trim()) return; onSave(v); }}
             className="flex-1 py-2 rounded-xl text-sm font-bold text-white hover:opacity-90"
             style={{ background:"#111827" }}>Zapisz zmiany</button>
-          <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium hover:bg-gray-200" style={{ background:"#e5e7eb", color:"#374151" }}>Anuluj</button>
+          <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium hover:bg-gray-200" style={{ background:"#e5e7eb", color: "#374151" }}>Anuluj</button>
         </div>
       </div>
 
@@ -15220,7 +15220,7 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
             <button onClick={()=>{ if(!v.plate.trim()) return; onSave(v); }}
               className="flex-1 py-2 rounded-xl text-sm font-bold text-white hover:opacity-90"
               style={{ background:"#111827" }}>Zapisz zmiany</button>
-            <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium hover:bg-gray-200" style={{ background:"#e5e7eb", color:"#374151" }}>Anuluj</button>
+            <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium hover:bg-gray-200" style={{ background:"#e5e7eb", color: "#374151" }}>Anuluj</button>
           </div>
         </div>
       )}
@@ -15231,7 +15231,7 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
           <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">🔧 Serwis olejowy — Gwarancja</div>
           <button onClick={()=>setF("warrantyActive",!v.warrantyActive)}
             className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all"
-            style={{ background: v.warrantyActive?"#f0fdf4":"#f3f4f6", color: v.warrantyActive?"#16a34a":"#6b7280", border:`1.5px solid ${v.warrantyActive?"#86efac":"#e5e7eb"}` }}>
+            style={{ background: v.warrantyActive?"#f0fdf4":"#f3f4f6", color: v.warrantyActive?"#15803d":"#4b5563", border:`1.5px solid ${v.warrantyActive?"#86efac":"#e5e7eb"}` }}>
             {v.warrantyActive ? "✓ Aktywna" : "Nieaktywna"}
           </button>
         </div>
@@ -15252,7 +15252,7 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
           <button onClick={()=>{ if(!v.plate.trim()) return; onSave(v); }}
             className="flex-1 py-2 rounded-xl text-sm font-bold text-white hover:opacity-90"
             style={{ background:"#111827" }}>Zapisz zmiany</button>
-          <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium hover:bg-gray-200" style={{ background:"#e5e7eb", color:"#374151" }}>Anuluj</button>
+          <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium hover:bg-gray-200" style={{ background:"#e5e7eb", color: "#374151" }}>Anuluj</button>
         </div>
       </div>
 
@@ -15280,7 +15280,7 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
           <button onClick={()=>{ if(!v.plate.trim()) return; onSave(v); }}
             className="flex-1 py-2 rounded-xl text-sm font-bold text-white hover:opacity-90"
             style={{ background:"#111827" }}>Zapisz zmiany</button>
-          <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium hover:bg-gray-200" style={{ background:"#e5e7eb", color:"#374151" }}>Anuluj</button>
+          <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium hover:bg-gray-200" style={{ background:"#e5e7eb", color: "#374151" }}>Anuluj</button>
         </div>
       </div>
     </div>
@@ -15317,7 +15317,7 @@ function DeleteVehicleModal({ plate, onConfirm, onClose }) {
                   style={{
                     background: reason === r ? "#fef2f2" : "#f9fafb",
                     border: `1.5px solid ${reason === r ? "#fca5a5" : "#e5e7eb"}`,
-                    color: reason === r ? "#dc2626" : "#374151",
+                    color: reason === r ? "#b91c1c" : "#374151",
                     fontWeight: reason === r ? 600 : 400,
                   }}>
                   {reason === r ? "✓ " : ""}{r}
@@ -15655,16 +15655,16 @@ Jeśli nie możesz odczytać danego pola, wpisz null.`,
       {status === "idle" && (
         <button onClick={() => fileRef.current?.click()}
           className="text-xs px-2 py-1 rounded-lg border border-dashed transition-all font-medium"
-          style={{ borderColor: isFV ? "#86efac" : "#93c5fd", color: isFV ? "#16a34a" : "#2563eb", background: "white" }}>
+          style={{ borderColor: isFV ? "#86efac" : "#93c5fd", color: isFV ? "#15803d" : "#2563eb", background: "white" }}>
           {isFV ? "+ FV" : "+ Zlec."}
         </button>
       )}
       {status === "uploading" && <span className="text-xs text-gray-500 animate-pulse">⬆️ wysyłam…</span>}
-      {status === "reading"   && <span className="text-xs text-amber-500 animate-pulse">🤖 AI czyta…</span>}
-      {status === "done"      && <span className="text-xs text-green-600">✅ zapisano</span>}
+      {status === "reading"   && <span className="text-xs text-amber-700 animate-pulse">🤖 AI czyta…</span>}
+      {status === "done"      && <span className="text-xs text-green-700">✅ zapisano</span>}
       {status === "error"     && (
         <button onClick={() => setStatus("idle")} title={errorMsg}
-          className="text-xs text-red-500 hover:underline">⚠️ błąd</button>
+          className="text-xs text-red-700 hover:underline">⚠️ błąd</button>
       )}
       <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" className="hidden" onChange={handleFile} />
     </div>
@@ -15811,7 +15811,7 @@ function CostsImportModal({ vehicles, categories, onImport, onClose }) {
                 <input ref={fileRef} type="file" accept=".xlsx" className="hidden" onChange={handleFile} />
               </div>
               {status === "error" && (
-                <div className="mt-4 px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-red-600 text-sm">⚠️ {errorMsg}</div>
+                <div className="mt-4 px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-red-700 text-sm">⚠️ {errorMsg}</div>
               )}
             </div>
           )}
@@ -15969,7 +15969,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                   return (
                     <button key={mm} onClick={() => setFilterMonth(filterMonth===mm ? "all" : mm)}
                       className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
-                      style={{ background: filterMonth===mm ? "#111827" : "#f3f4f6", color: filterMonth===mm ? "#fff" : "#6b7280" }}>
+                      style={{ background: filterMonth===mm ? "#111827" : "#f3f4f6", color: filterMonth===mm ? "#fff" : "#4b5563" }}>
                       {m}
                     </button>
                   );
@@ -15991,7 +15991,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
           </div>
           <div className="rounded-xl p-3 border border-red-100 bg-red-50">
             <div className="text-xs text-red-700 mb-1">🔴 Przeterminowane</div>
-            <div className="text-lg font-bold text-red-600">{fmt(kpiAll.przeterminowane)}</div>
+            <div className="text-lg font-bold text-red-700">{fmt(kpiAll.przeterminowane)}</div>
             <div className="text-xs text-red-400">{kpiAll.przeterminowane_count} faktur</div>
           </div>
           <div className="rounded-xl p-3 border border-yellow-100 bg-yellow-50">
@@ -16001,7 +16001,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
           </div>
           <div className="rounded-xl p-3 border border-green-100 bg-green-50">
             <div className="text-xs text-green-700 mb-1">🟢 Zapłacone</div>
-            <div className="text-lg font-bold text-green-600">{fmt(kpiAll.zaplacone)}</div>
+            <div className="text-lg font-bold text-green-700">{fmt(kpiAll.zaplacone)}</div>
             <div className="text-xs text-green-400">{kpiAll.zaplacone_count} faktur</div>
           </div>
         </div>
@@ -16024,7 +16024,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                   style={{ borderColor: hasPrzet ? "#fca5a5" : "#f3f4f6", background: hasPrzet ? "#fff7f7" : "#fff" }}>
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0"
-                      style={{ background: hasPrzet ? "#fef2f2" : "#f0fdf4", color: hasPrzet ? "#dc2626" : "#15803d" }}>
+                      style={{ background: hasPrzet ? "#fef2f2" : "#f0fdf4", color: hasPrzet ? "#b91c1c" : "#15803d" }}>
                       {initials}
                     </div>
                     <div>
@@ -16035,7 +16035,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                   <div className="text-right">
                     <div className="text-sm font-semibold text-green-700">{fmt(suma)}</div>
                     {hasPrzet
-                      ? <div className="text-xs text-red-500">{przet.length} przeterminowane</div>
+                      ? <div className="text-xs text-red-700">{przet.length} przeterminowane</div>
                       : <div className="text-xs text-gray-300">ok</div>}
                   </div>
                 </div>
@@ -16088,7 +16088,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
               return (
                 <button key={mm} onClick={() => setFilterMonth(filterMonth===mm ? "all" : mm)}
                   className="px-2 py-1.5 rounded-lg text-xs font-medium transition-all"
-                  style={{ background: filterMonth===mm ? "#111827" : "#f3f4f6", color: filterMonth===mm ? "#fff" : "#6b7280" }}>
+                  style={{ background: filterMonth===mm ? "#111827" : "#f3f4f6", color: filterMonth===mm ? "#fff" : "#4b5563" }}>
                   {m}
                 </button>
               );
@@ -16164,11 +16164,11 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                   <td className="px-3 py-2.5 whitespace-nowrap text-gray-500 font-mono text-xs text-center">{r.nrZlecenia||"-"}</td>
                   <td className="px-3 py-2.5 whitespace-nowrap text-gray-500 text-center">{r.dataWyslania||"-"}</td>
                   <td className="px-3 py-2.5 whitespace-nowrap text-center">
-                    <span style={{ color: isOverdue ? "#dc2626" : "#6b7280", fontWeight: isOverdue ? 700 : 400 }}>
+                    <span style={{ color: isOverdue ? "#b91c1c" : "#6b7280", fontWeight: isOverdue ? 700 : 400 }}>
                       {r.terminPlatnosci||"-"}
                     </span>
                     {daysOverdue !== null && (
-                      <span className="ml-1.5 text-xs px-1.5 py-0.5 rounded-full font-bold" style={{background:"#fef2f2",color:"#dc2626"}}>
+                      <span className="ml-1.5 text-xs px-1.5 py-0.5 rounded-full font-bold" style={{background:"#fef2f2",color: "#b91c1c"}}>
                         +{daysOverdue}d
                       </span>
                     )}
@@ -16248,7 +16248,7 @@ function KomentarzBaner({ frachtyList, eventsByFracht = {}, vehicleId, onUpdate 
           <div className="text-xs font-semibold text-amber-800">
             Poproś o komentarz ({doRemind.length})
           </div>
-          <div className="text-xs text-amber-500 truncate">
+          <div className="text-xs text-amber-700 truncate">
             {doRemind.map(r => r.klient || r.dataZlecenia).filter(Boolean).slice(0, 2).join(", ")}
             {doRemind.length > 2 ? ` +${doRemind.length - 2}` : ""}
           </div>
@@ -16407,7 +16407,7 @@ function FrachtTollCell({ fracht, onUpdate }) {
   );
   if (!fromJuly) return <span className="text-gray-300">—</span>;
   return (
-    <button onClick={run} title={err || "Policz myto (nego/e-toll) z trasy"} className={"text-xs px-1.5 py-0.5 rounded " + (err ? "bg-red-50 text-red-500" : "bg-blue-50 text-blue-600 hover:bg-blue-100")}>
+    <button onClick={run} title={err || "Policz myto (nego/e-toll) z trasy"} className={"text-xs px-1.5 py-0.5 rounded " + (err ? "bg-red-50 text-red-700" : "bg-blue-50 text-blue-600 hover:bg-blue-100")}>
       {err ? "błąd" : "🧮 licz"}
     </button>
   );
@@ -16579,7 +16579,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                   return (
                     <button key={mm} onClick={() => setOverviewMonth(overviewMonth===mm ? "all" : mm)}
                       className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
-                      style={{ background: overviewMonth===mm ? "#111827" : "#f3f4f6", color: overviewMonth===mm ? "#fff" : "#6b7280" }}>
+                      style={{ background: overviewMonth===mm ? "#111827" : "#f3f4f6", color: overviewMonth===mm ? "#fff" : "#4b5563" }}>
                       {m}
                     </button>
                   );
@@ -16622,7 +16622,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                 <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-gray-50">
                   <div><div className="text-xs text-gray-500">Frachtów</div><div className="font-bold text-gray-900">{vf.length}</div></div>
                   <div><div className="text-xs text-gray-500">Przychód</div><div className="font-bold text-green-700 text-sm">{fmt(suma)}</div></div>
-                  <div><div className="text-xs text-gray-500">Śr. €/km</div><div className="font-bold text-amber-500 text-sm">{km > 0 ? (suma/km).toFixed(2) : "—"}</div></div>
+                  <div><div className="text-xs text-gray-500">Śr. €/km</div><div className="font-bold text-amber-700 text-sm">{km > 0 ? (suma/km).toFixed(2) : "—"}</div></div>
                 </div>
                 <KomentarzBaner
                   frachtyList={frachtyList}
@@ -16685,7 +16685,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
           {[2026,2025,2024].map(y => (
             <button key={y} onClick={() => setFilterYear(y)}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-              style={{ background: filterYear===y ? "#111827" : "#f3f4f6", color: filterYear===y ? "#fff" : "#6b7280" }}>
+              style={{ background: filterYear===y ? "#111827" : "#f3f4f6", color: filterYear===y ? "#fff" : "#4b5563" }}>
               {y}
             </button>
           ))}
@@ -16693,11 +16693,11 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
         <div className="flex gap-1 flex-wrap">
           <button onClick={() => setFilterMonth(null)}
             className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
-            style={{ background: filterMonth===null ? "#111827" : "#f3f4f6", color: filterMonth===null ? "#fff" : "#6b7280" }}>
+            style={{ background: filterMonth===null ? "#111827" : "#f3f4f6", color: filterMonth===null ? "#fff" : "#4b5563" }}>
             Wszystkie
           </button>
           {["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paz","Lis","Gru"].map((m,i) => (
-            <button key={i} onClick={() => setFilterMonth(i)} className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all" style={{background:filterMonth===i?"#111827":"#f3f4f6",color:filterMonth===i?"#fff":"#6b7280"}}>{m}</button>
+            <button key={i} onClick={() => setFilterMonth(i)} className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all" style={{background:filterMonth===i?"#111827":"#f3f4f6",color: filterMonth===i?"#fff":"#4b5563"}}>{m}</button>
           ))}
         </div>
       </div>
@@ -16738,7 +16738,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                   {r.urlZlecenie && <ZlecenieLinki fracht={r} label="📄 Zlecenie" compact />}
                   {r.urlFV && (
                     <a href={safeHref(r.urlFV)} target="_blank" rel="noopener noreferrer"
-                      className="h-8 px-2 rounded-lg flex items-center justify-center bg-green-50 text-green-600 text-xs font-semibold hover:bg-green-100">🧾 FV</a>
+                      className="h-8 px-2 rounded-lg flex items-center justify-center bg-green-50 text-green-700 text-xs font-semibold hover:bg-green-100">🧾 FV</a>
                   )}
                   <button onClick={() => { setEditId(r.id); setShowForm(true); }}
                     className="w-8 h-8 rounded-lg flex items-center justify-center bg-gray-100 hover:bg-gray-200">✏️</button>
@@ -16784,9 +16784,9 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                       // Computed status (events > legacy field > manual override)
                       const s = computeFrachtStatus(r, evts);
                       const cfg = {
-                        rozladowano: { emoji:"✅", label:"rozł", bg:"#f0fdf4", color:"#166534" },
-                        w_trasie:    { emoji:"→", label:"w trasie", bg:"#f0f9ff", color:"#0369a1" },
-                        problem:     { emoji:"⚠️", label:"problem", bg:"#fef2f2", color:"#991b1b" },
+                        rozladowano: { emoji:"✅", label:"rozł", bg:"#f0fdf4", color: "#166534" },
+                        w_trasie:    { emoji:"→", label:"w trasie", bg:"#f0f9ff", color: "#0369a1" },
+                        problem:     { emoji:"⚠️", label:"problem", bg:"#fef2f2", color: "#991b1b" },
                       };
                       const c = cfg[s] || cfg.w_trasie;
                       // hasZal: po refactorze 2026-04-28 driver nie emit'uje `zaladowano` —
@@ -16919,11 +16919,11 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                     towar_photo: { icon: "📸", label: "Zdjęcie towaru", color: "#7c3aed" },
                     cmr_zaladunek_photo: { icon: "📄", label: "CMR załadunek", color: "#6366f1" },
                     start_rozladunek: { icon: "🚛", label: "Start do rozładunku", color: "#0891b2" },
-                    dotarcie_rozladunek: { icon: "📍", label: "Dotarcie na rozładunek", color: "#059669" },
+                    dotarcie_rozladunek: { icon: "📍", label: "Dotarcie na rozładunek", color: "#047857" },
                     rozladowano: { icon: "✅", label: "Rozładunek potwierdzony", color: "#15803d" },
                     cmr_rozladunek_photo: { icon: "📄", label: "CMR rozładunek", color: "#6366f1" },
                     cmr_photo: { icon: "📄", label: "CMR", color: "#6366f1" },
-                    towar_damage_photo: { icon: "⚠️", label: "Zdjęcie uszkodzenia", color: "#dc2626" },
+                    towar_damage_photo: { icon: "⚠️", label: "Zdjęcie uszkodzenia", color: "#b91c1c" },
                     uwagi_zaladunek: { icon: "📝", label: "Uwagi — załadunek", color: "#6b7280" },
                     uwagi_rozladunek: { icon: "📝", label: "Uwagi — rozładunek", color: "#6b7280" },
                   };
@@ -17091,7 +17091,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                                       {!isLastSection && <div style={{ width: 1, height: 20, background: "#d1d5db" }}></div>}
                                     </div>
                                     <div style={{ flex: 1 }}>
-                                      <div style={{ fontSize: 13, fontWeight: 600, color: "#059669", marginBottom: 3 }}>📦 {label}</div>
+                                      <div style={{ fontSize: 13, fontWeight: 600, color: "#047857", marginBottom: 3 }}>📦 {label}</div>
                                       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                                         <span style={{ fontSize: 12, color: "#6b7280" }}>Plan: {dataDate?.slice(5)}{dataGodz ? ` · ${dataGodz}` : ""}</span>
                                         {dotStr && <span style={{ fontSize: 12, fontWeight: 700, color: dotColor }}>→ Dotarł: {dotStr}</span>}
@@ -17355,7 +17355,7 @@ function FrachtyImportModal({ vehicles, onImport, onClose }) {
                 <input ref={fileRef} type="file" accept=".xlsx" className="hidden" onChange={handleFile} />
               </div>
               {status === "error" && (
-                <div className="mt-4 px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-red-600 text-sm">
+                <div className="mt-4 px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-red-700 text-sm">
                   ⚠️ {errorMsg}
                 </div>
               )}
