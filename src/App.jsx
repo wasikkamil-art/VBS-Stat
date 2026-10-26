@@ -664,7 +664,7 @@ const DOC_TYPES = [
   { id: "umowa_gps",     label: "Umowa GPS/monitoring", icon: "📡", color: "#7c3aed", group: "Umowy" },
   { id: "umowa_serwis",  label: "Umowa serwisowa", icon: "🔧",  color: "#ea580c", group: "Umowy" },
   { id: "umowa_inna",    label: "Inna umowa",      icon: "📄",  color: "#64748b", group: "Umowy" },
-  { id: "inne",      label: "Inne",             icon: "📋",  color: "#9ca3af", group: "Inne" },
+  { id: "inne",      label: "Inne",             icon: "📋",  color: "#6b7280", group: "Inne" },
 ];
 
 // ─── COVERAGE OPTIONS (zakres ubezpieczenia) ─────────────────────────────────
@@ -905,13 +905,13 @@ function LoginScreen() {
 
         {/* ── Przełącznik do pozostałych aplikacji VBS (linki — nawigują pierwszym tapem) ── */}
         <div style={{ borderTop:"1px solid #f0f0f2", marginTop:22, paddingTop:16 }}>
-          <div style={{ fontSize:11, fontWeight:600, color:"#9ca3af", textTransform:"uppercase", letterSpacing:"0.5px", marginBottom:10 }}>Inne aplikacje VBS</div>
+          <div style={{ fontSize:11, fontWeight:600, color:"#6b7280", textTransform:"uppercase", letterSpacing:"0.5px", marginBottom:10 }}>Inne aplikacje VBS</div>
           <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
             {APPS.filter(a => a.url).map(a => (
               <a key={a.key} href={a.url} className="vbs-app-card">
                 <div style={{ flex:1, minWidth:0, display:"flex", flexDirection:"column", alignItems:"flex-start", gap:5 }}>
                   {appLogo(a.key, 20)}
-                  <div style={{ fontSize:11.5, color:"#9ca3af" }}>{a.desc}</div>
+                  <div style={{ fontSize:11.5, color:"#6b7280" }}>{a.desc}</div>
                 </div>
                 <span style={{ fontSize:18, color:"#d1d5db" }}>›</span>
               </a>
@@ -2694,7 +2694,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
   // ── LOADING ──
   if (!loaded) return (
-    <div className="min-h-screen bg-white flex items-center justify-center text-gray-400 text-base">
+    <div className="min-h-screen bg-white flex items-center justify-center text-gray-500 text-base">
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
       Ładowanie danych…
     </div>
@@ -2846,7 +2846,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               <img src="/icon-192.png" alt="FS" className="w-10 h-10 rounded-xl" />
               <div>
                 <div className="font-bold text-base text-gray-900 leading-tight">FleetStat</div>
-                <div className="text-xs text-gray-400">Zarządzanie flotą</div>
+                <div className="text-xs text-gray-500">Zarządzanie flotą</div>
               </div>
             </div>
           </div>
@@ -2928,7 +2928,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
           <div className="space-y-2 px-1">
             <div style={{ borderTop:"1px solid #f3f4f6", paddingTop:8, marginTop:4 }}>
-              <div className="text-xs text-gray-400 px-1 mb-0.5 truncate flex items-center gap-1">
+              <div className="text-xs text-gray-500 px-1 mb-0.5 truncate flex items-center gap-1">
                 {user?.email}
                 {(() => {
                   const mentions = sprawyList.reduce((acc, s) => {
@@ -2966,7 +2966,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 <span className="font-bold text-base text-gray-900">FleetStat</span>
               </div>
               <button onClick={() => { logAction("logout", "auth", { reason: "manual" }); signOut(auth); }}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-500 hover:bg-red-50 border border-red-100">
+                className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 hover:bg-red-50 border border-red-100">
                 Wyloguj
               </button>
             </div>
@@ -2979,7 +2979,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
                 <div>
                   <div className="font-bold text-gray-900 text-lg leading-tight">Przegląd</div>
-                  <div className="text-xs text-gray-400">{new Date().toLocaleDateString("pl-PL",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>
+                  <div className="text-xs text-gray-500">{new Date().toLocaleDateString("pl-PL",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>
                 </div>
                 {!eurLoading && (
                   <div className="px-3 py-2 rounded-xl text-sm flex items-center gap-2"
@@ -3240,7 +3240,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                               </div>
                               <div>
                                 <div className="font-semibold text-gray-900 text-sm">{v.plate}</div>
-                                <div className="text-xs text-gray-400">{v.brand} · {driverName}</div>
+                                <div className="text-xs text-gray-500">{v.brand} · {driverName}</div>
                               </div>
                             </div>
                             <span className="text-xs px-2.5 py-1 rounded-full font-semibold flex items-center gap-1"
@@ -3261,17 +3261,17 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                               </div>
 
                               {/* Klient */}
-                              <div className="text-xs text-gray-500 mb-2 truncate">👤 {klient}{displayF?.dyspozytor ? <span className="text-gray-300 ml-2">· {displayF.dyspozytor}</span> : null}</div>
+                              <div className="text-xs text-gray-500 mb-2 truncate">👤 {klient}{displayF?.dyspozytor ? <span className="text-gray-500 ml-2">· {displayF.dyspozytor}</span> : null}</div>
 
                               {/* Daty */}
                               <div className="flex items-center gap-3 mb-2.5">
                                 <div className="flex items-center gap-1">
-                                  <span className="text-xs text-gray-400">Zał.</span>
+                                  <span className="text-xs text-gray-500">Zał.</span>
                                   <span className="text-xs font-semibold text-gray-700">{fmtD(dataZal)}</span>
                                 </div>
                                 <span className="text-gray-200">·</span>
                                 <div className="flex items-center gap-1">
-                                  <span className="text-xs text-gray-400">Rozł.</span>
+                                  <span className="text-xs text-gray-500">Rozł.</span>
                                   <span className={`text-xs font-semibold ${displayFRozladowany ? "text-green-600" : "text-gray-700"}`}>
                                     {fmtD(dataRozl)}
                                     {displayFRozladowany && " ✓"}
@@ -3311,7 +3311,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                                     <div className="mb-2">
                                       <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg"
                                         style={{ background: "#f3f4f6", border: "1.5px dashed #d1d5db" }}>
-                                        <span className="text-xs text-gray-400 flex-shrink-0">⏱️ Start tacho:</span>
+                                        <span className="text-xs text-gray-600 flex-shrink-0">⏱️ Start tacho:</span>
                                         <input type="date"
                                           onChange={e => handleTachoChange(e.target.value)}
                                           className="flex-1 text-xs outline-none bg-transparent text-gray-600"
@@ -3347,14 +3347,14 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                                     </div>
                                     <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg"
                                       style={{ background: "#f9fafb", border: "1px solid #e5e7eb" }}>
-                                      <span className="text-xs text-gray-400 flex-shrink-0">⏱️ Start:</span>
+                                      <span className="text-xs text-gray-500 flex-shrink-0">⏱️ Start:</span>
                                       <input type="date"
                                         value={startStr}
                                         onChange={e => handleTachoChange(e.target.value)}
                                         className="flex-1 text-xs outline-none bg-transparent text-gray-700"
                                         style={{ fontFamily: "'DM Sans', sans-serif" }} />
                                       <button onClick={() => handleTachoChange("")}
-                                        className="text-xs text-gray-400 hover:text-red-400 transition-all flex-shrink-0">
+                                        className="text-xs text-gray-500 hover:text-red-400 transition-all flex-shrink-0">
                                         Reset
                                       </button>
                                     </div>
@@ -3369,14 +3369,14 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                                   {cena ? `${cena.toLocaleString("pl-PL")} €` : "—"}
                                 </span>
                                 {eurKm && km && (
-                                  <span className="text-xs text-gray-400">
+                                  <span className="text-xs text-gray-500">
                                     {eurKm} €/km · {km?.toLocaleString("pl-PL")} km
                                   </span>
                                 )}
                               </div>
                             </div>
                           ) : (
-                            <div className="px-4 py-5 text-center text-gray-400 text-xs">
+                            <div className="px-4 py-5 text-center text-gray-500 text-xs">
                               Brak zleceń w systemie
                             </div>
                           )}
@@ -3441,7 +3441,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
                   return (
                     <div className="bg-white rounded-2xl border border-gray-100 p-4">
-                      <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Wymaga uwagi</div>
+                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Wymaga uwagi</div>
                       {allAlerts.length === 0 ? (
                         <div className="flex items-center gap-2 text-sm text-green-600">
                           <span>✅</span> Wszystko w porządku
@@ -3466,7 +3466,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
                 {/* Szybkie akcje */}
                 <div className="bg-white rounded-2xl border border-gray-100 p-4">
-                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Szybkie akcje</div>
+                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Szybkie akcje</div>
                   <div className="space-y-2">
                     <button onClick={() => setTab("frachty")}
                       className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-gray-700 border border-gray-200 bg-white hover:bg-gray-50 transition-all">
@@ -3524,7 +3524,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
                 return (
                   <div className="bg-white rounded-2xl border border-gray-100 p-4 mt-4">
-                    <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Czas pracy — statusy kierowców</div>
+                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Czas pracy — statusy kierowców</div>
                     <div className="space-y-2">
                       {activePauzy.map(p => (
                         <div key={p.id} className="flex items-center justify-between px-3 py-2.5 rounded-xl text-sm"
@@ -3550,7 +3550,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                               <span className="font-semibold text-blue-700">{p.plate}</span>
                               <span className="text-blue-600">{p.driver}</span>
                             </div>
-                            <div className="text-xs text-blue-500">
+                            <div className="text-xs text-blue-700">
                               {getStatusLabel(p.status)} · za {daysUntil} {daysUntil === 1 ? "dzień" : "dni"} ({startD.toLocaleDateString("pl-PL", { day:"numeric", month:"short" })})
                             </div>
                           </div>
@@ -3615,7 +3615,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                     return (
                       <button key={key} onClick={() => { setCostFilterYear(key); setFilterMonth("all"); }}
                         className="rounded-xl px-3 py-1.5 transition-all whitespace-nowrap"
-                        style={{ background: active ? bg : "#fff", border: `2px solid ${active ? border : "#f3f4f6"}`, color: active ? color : "#9ca3af", fontWeight: active ? 700 : 500, fontSize: "13px" }}>
+                        style={{ background: active ? bg : "#fff", border: `2px solid ${active ? border : "#f3f4f6"}`, color: active ? color : "#6b7280", fontWeight: active ? 700 : 500, fontSize: "13px" }}>
                         {active && "✓ "}{label}
                       </button>
                     );
@@ -3698,30 +3698,30 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                     {/* KPI */}
                     <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                       <div className="bg-white rounded-xl p-3 border border-gray-100">
-                        <div className="text-xs text-gray-400 mb-1">Łącznie EUR</div>
+                        <div className="text-xs text-gray-500 mb-1">Łącznie EUR</div>
                         <div className="text-lg font-bold text-gray-900">{totalEUR.toLocaleString("pl-PL",{minimumFractionDigits:2,maximumFractionDigits:2})} €</div>
                       </div>
                       <div className="bg-white rounded-xl p-3 border border-gray-100">
-                        <div className="text-xs text-gray-400 mb-1">Wpisów</div>
+                        <div className="text-xs text-gray-500 mb-1">Wpisów</div>
                         <div className="text-lg font-bold text-gray-900">{filteredCosts.length}</div>
                       </div>
                       <div className="bg-white rounded-xl p-3 border border-gray-100">
-                        <div className="text-xs text-gray-400 mb-1">Najdroższe auto</div>
+                        <div className="text-xs text-gray-500 mb-1">Najdroższe auto</div>
                         <div className="text-sm font-bold text-gray-900 truncate">{byVehicle[0] ? `${vehicles.find(v=>v.id===byVehicle[0].id)?.plate} · ${byVehicle[0].total.toLocaleString("pl-PL",{maximumFractionDigits:0})} €` : "—"}</div>
                       </div>
                       <div className="bg-white rounded-xl p-3 border border-gray-100">
-                        <div className="text-xs text-gray-400 mb-1">Główna kategoria</div>
+                        <div className="text-xs text-gray-500 mb-1">Główna kategoria</div>
                         <div className="text-sm font-bold text-gray-900 truncate">{byCat[0] ? `${byCat[0].icon} ${byCat[0].label}` : "—"}</div>
                       </div>
                       <div className="bg-white rounded-xl p-3 border border-gray-100">
-                        <div className="text-xs text-gray-400 mb-1">Śr. cena paliwa</div>
+                        <div className="text-xs text-gray-500 mb-1">Śr. cena paliwa</div>
                         <div className="text-lg font-bold text-gray-900">{avgEurPerL > 0 ? avgEurPerL.toFixed(3) : "—"} €/L</div>
                       </div>
                     </div>
 
                     {/* Paski per pojazd */}
                     <div className="bg-white rounded-xl p-4 border border-gray-100">
-                      <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Koszty per pojazd</div>
+                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Koszty per pojazd</div>
                       <div className="space-y-2">
                         {byVehicle.map(v => {
                           const pct = totalEUR > 0 ? (v.total / totalEUR * 100) : 0;
@@ -3732,7 +3732,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                                 <div className="h-full rounded-full" style={{ width:`${pct}%`, background:"#111827" }} />
                               </div>
                               <div className="text-xs font-semibold text-gray-700 w-20 text-right">{v.total.toLocaleString("pl-PL",{maximumFractionDigits:0})} €</div>
-                              <div className="text-xs text-gray-400 w-10 text-right">{pct.toFixed(0)}%</div>
+                              <div className="text-xs text-gray-500 w-10 text-right">{pct.toFixed(0)}%</div>
                             </div>
                           );
                         })}
@@ -3741,7 +3741,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
                     {/* Paski per kategoria */}
                     <div className="bg-white rounded-xl p-4 border border-gray-100">
-                      <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Struktura kosztów</div>
+                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Struktura kosztów</div>
                       <div className="space-y-2">
                         {byCat.map(cat => {
                           const pct = totalEUR > 0 ? (cat.total / totalEUR * 100) : 0;
@@ -3752,7 +3752,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                                 <div className="h-full rounded-full" style={{ width:`${pct}%`, background: cat.color || "#111827" }} />
                               </div>
                               <div className="text-xs font-semibold text-gray-700 w-20 text-right">{cat.total.toLocaleString("pl-PL",{maximumFractionDigits:0})} €</div>
-                              <div className="text-xs text-gray-400 w-10 text-right">{pct.toFixed(0)}%</div>
+                              <div className="text-xs text-gray-500 w-10 text-right">{pct.toFixed(0)}%</div>
                             </div>
                           );
                         })}
@@ -3763,7 +3763,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               })()}
 
               <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-                <div className="hidden md:grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-medium text-gray-400 uppercase tracking-wider">
+                <div className="hidden md:grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-medium text-gray-500 uppercase tracking-wider">
                   <span className="col-span-2">Data</span>
                   <span className="col-span-2">Pojazd</span>
                   <span className="col-span-2">Kategoria</span>
@@ -3779,7 +3779,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                     <div key={c.id}
                       className="md:grid md:grid-cols-12 flex flex-wrap gap-y-1 px-5 py-3.5 items-center border-b border-gray-50 hover:bg-gray-50 transition-colors text-sm"
                       style={{ borderBottomColor: i === filteredCosts.length - 1 ? "transparent" : undefined }}>
-                      <span className="col-span-2 text-gray-400 text-xs w-full md:w-auto" style={{ fontFamily: "'DM Mono', monospace" }}>{fmtDate(c.date)}</span>
+                      <span className="col-span-2 text-gray-500 text-xs w-full md:w-auto" style={{ fontFamily: "'DM Mono', monospace" }}>{fmtDate(c.date)}</span>
                       <span className="col-span-2 font-medium text-gray-800 text-xs">{v?.plate || "?"}</span>
                       <div className="col-span-2">
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
@@ -3787,13 +3787,13 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                           {catLabel(c.category)}
                         </span>
                       </div>
-                      <div className="col-span-3 text-gray-400 text-xs flex items-center gap-1 min-w-0">
+                      <div className="col-span-3 text-gray-500 text-xs flex items-center gap-1 min-w-0">
                         <span className="truncate">{c.note || "—"}{c.liters ? ` · ${c.liters} L` : ""}</span>
                         {c.fileUrl && <a href={safeHref(c.fileUrl)} target="_blank" rel="noopener noreferrer" title="Podgląd rachunku" className="shrink-0 hover:text-blue-500">📎</a>}
                       </div>
                       <div className="col-span-2 text-right">
                         <div className="font-semibold text-gray-900 text-sm">{fmtEUR(getEUR(c))}</div>
-                        {amtEUR != null && <div className="text-xs text-gray-400">{fmtPLN(amtPLN)}</div>}
+                        {amtEUR != null && <div className="text-xs text-gray-500">{fmtPLN(amtPLN)}</div>}
                       </div>
                       <div className="col-span-1 flex justify-end gap-1">
                         {canEdit && (
@@ -3809,7 +3809,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                   );
                 })}
                 {filteredCosts.length === 0 && (
-                  <div className="px-5 py-10 text-center text-gray-400 text-sm">Brak wyników dla wybranych filtrów</div>
+                  <div className="px-5 py-10 text-center text-gray-500 text-sm">Brak wyników dla wybranych filtrów</div>
                 )}
               </div>
             </div>
@@ -3859,7 +3859,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                                 </>
                               )}
                             </div>
-                            <div className="text-xs text-gray-400">{v.brand} · {v.year} · {v.type}{activeDriverName(v) ? ` · ${activeDriverName(v)}` : ""}</div>
+                            <div className="text-xs text-gray-500">{v.brand} · {v.year} · {v.type}{activeDriverName(v) ? ` · ${activeDriverName(v)}` : ""}</div>
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -3880,12 +3880,12 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                       {/* ── STATS ROW ── */}
                       <div className="grid grid-cols-2 divide-x divide-gray-50 border-b border-gray-50">
                         <div className="px-4 py-3">
-                          <div className="text-xs text-gray-400 mb-0.5">We flocie od</div>
+                          <div className="text-xs text-gray-500 mb-0.5">We flocie od</div>
                           <div className="font-bold text-gray-900 text-sm">{v.fleetJoinDate ? new Date(v.fleetJoinDate).toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric"}) : "—"}</div>
                           {v.fleetLeaveDate && <div className="text-xs text-red-400">do {new Date(v.fleetLeaveDate).toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric"})}</div>}
                         </div>
                         <div className="px-4 py-3">
-                          <div className="text-xs text-gray-400 mb-0.5">Rodzaj</div>
+                          <div className="text-xs text-gray-500 mb-0.5">Rodzaj</div>
                           <div className="text-xs font-medium text-gray-700 leading-tight">
                             {v.type}{v.plate2 ? " + Przyczepa" : ""}
                             {(v.equipment||[]).includes("winda") ? " + winda" : ""}
@@ -3902,13 +3902,13 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pb-1.5 mb-0.5 border-b border-dashed border-gray-100">
                               {v.vin && (
                                 <div className="col-span-2 flex items-center gap-2">
-                                  <span className="text-xs text-gray-400 w-20 flex-shrink-0">VIN</span>
+                                  <span className="text-xs text-gray-500 w-20 flex-shrink-0">VIN</span>
                                   <span className="text-xs font-medium text-gray-700" style={{ fontFamily: "'DM Mono', monospace" }}>{v.vin}</span>
                                 </div>
                               )}
                               {v.wartoscNet && (
                                 <div className="flex items-center gap-2">
-                                  <span className="text-xs text-gray-400 w-20 flex-shrink-0">Wartość</span>
+                                  <span className="text-xs text-gray-500 w-20 flex-shrink-0">Wartość</span>
                                   <span className="text-xs font-medium text-gray-700">{Number(v.wartoscNet).toLocaleString("pl-PL")} zł</span>
                                 </div>
                               )}
@@ -3917,13 +3917,13 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                           <div className={`grid gap-x-4 gap-y-1.5 ${v.plate2 ? "grid-cols-2" : "grid-cols-2"}`}>
                             {v.dimensions && (
                               <div className="flex items-center gap-2">
-                                <span className="text-xs text-gray-400 w-20 flex-shrink-0">{v.plate2 ? `${v.plate} wym.` : "Wymiary"}</span>
+                                <span className="text-xs text-gray-500 w-20 flex-shrink-0">{v.plate2 ? `${v.plate} wym.` : "Wymiary"}</span>
                                 <span className="text-xs font-medium text-gray-700" style={{ fontFamily: "'DM Mono', monospace" }}>{v.dimensions}</span>
                               </div>
                             )}
                             {v.maxWeight && (
                               <div className="flex items-center gap-2">
-                                <span className="text-xs text-gray-400 w-20 flex-shrink-0">{v.plate2 ? `${v.plate} waga` : "Max waga"}</span>
+                                <span className="text-xs text-gray-500 w-20 flex-shrink-0">{v.plate2 ? `${v.plate} waga` : "Max waga"}</span>
                                 <span className="text-xs font-medium text-gray-700">{v.maxWeight} kg</span>
                               </div>
                             )}
@@ -3931,16 +3931,16 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                           {/* Ubezpieczenia */}
                           {(v.ocNumber || v.ocAmount || v.acNumber || v.acAmount || v.caloscPolis || v.gap || v.assistance || v.autoszyba || v.nnw) && (
                             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-1.5 mt-0.5 border-t border-dashed border-gray-100">
-                              {v.ocNumber && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">OC nr</span><span className="text-xs font-medium text-gray-700" style={{fontFamily:"'DM Mono',monospace"}}>{v.ocNumber}</span></div>}
-                              {v.ocAmount && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">OC składka</span><span className="text-xs font-medium text-gray-700">{v.ocAmount} zł</span></div>}
-                              {v.acNumber && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">AC nr</span><span className="text-xs font-medium text-gray-700" style={{fontFamily:"'DM Mono',monospace"}}>{v.acNumber}</span></div>}
-                              {v.acAmount && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">AC składka</span><span className="text-xs font-medium text-gray-700">{v.acAmount} zł</span></div>}
-                              {v.assistance && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">Assistance</span><span className="text-xs font-medium text-gray-700">{v.assistance} zł</span></div>}
-                              {v.autoszyba && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">Autoszyba</span><span className="text-xs font-medium text-gray-700">{v.autoszyba} zł</span></div>}
-                              {v.nnw && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">NNW</span><span className="text-xs font-medium text-gray-700">{v.nnw} zł</span></div>}
-                              {v.ochronaZnizki && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">Ochr. zniżki</span><span className="text-xs font-medium text-gray-700">{v.ochronaZnizki} zł</span></div>}
-                              {v.caloscPolis && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">Polisy łącznie</span><span className="text-xs font-semibold text-gray-900">{v.caloscPolis} zł</span></div>}
-                              {v.gap && <div className="flex items-center gap-2"><span className="text-xs text-gray-400 w-20 flex-shrink-0">GAP</span><span className="text-xs font-medium text-gray-700">{v.gap} zł{v.gapExpiry ? ` · do ${new Date(v.gapExpiry).toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric"})}` : ""}</span></div>}
+                              {v.ocNumber && <div className="flex items-center gap-2"><span className="text-xs text-gray-500 w-20 flex-shrink-0">OC nr</span><span className="text-xs font-medium text-gray-700" style={{fontFamily:"'DM Mono',monospace"}}>{v.ocNumber}</span></div>}
+                              {v.ocAmount && <div className="flex items-center gap-2"><span className="text-xs text-gray-500 w-20 flex-shrink-0">OC składka</span><span className="text-xs font-medium text-gray-700">{v.ocAmount} zł</span></div>}
+                              {v.acNumber && <div className="flex items-center gap-2"><span className="text-xs text-gray-500 w-20 flex-shrink-0">AC nr</span><span className="text-xs font-medium text-gray-700" style={{fontFamily:"'DM Mono',monospace"}}>{v.acNumber}</span></div>}
+                              {v.acAmount && <div className="flex items-center gap-2"><span className="text-xs text-gray-500 w-20 flex-shrink-0">AC składka</span><span className="text-xs font-medium text-gray-700">{v.acAmount} zł</span></div>}
+                              {v.assistance && <div className="flex items-center gap-2"><span className="text-xs text-gray-500 w-20 flex-shrink-0">Assistance</span><span className="text-xs font-medium text-gray-700">{v.assistance} zł</span></div>}
+                              {v.autoszyba && <div className="flex items-center gap-2"><span className="text-xs text-gray-500 w-20 flex-shrink-0">Autoszyba</span><span className="text-xs font-medium text-gray-700">{v.autoszyba} zł</span></div>}
+                              {v.nnw && <div className="flex items-center gap-2"><span className="text-xs text-gray-500 w-20 flex-shrink-0">NNW</span><span className="text-xs font-medium text-gray-700">{v.nnw} zł</span></div>}
+                              {v.ochronaZnizki && <div className="flex items-center gap-2"><span className="text-xs text-gray-500 w-20 flex-shrink-0">Ochr. zniżki</span><span className="text-xs font-medium text-gray-700">{v.ochronaZnizki} zł</span></div>}
+                              {v.caloscPolis && <div className="flex items-center gap-2"><span className="text-xs text-gray-500 w-20 flex-shrink-0">Polisy łącznie</span><span className="text-xs font-semibold text-gray-900">{v.caloscPolis} zł</span></div>}
+                              {v.gap && <div className="flex items-center gap-2"><span className="text-xs text-gray-500 w-20 flex-shrink-0">GAP</span><span className="text-xs font-medium text-gray-700">{v.gap} zł{v.gapExpiry ? ` · do ${new Date(v.gapExpiry).toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric"})}` : ""}</span></div>}
                             </div>
                           )}
                           {v.plate2 && (
@@ -3961,7 +3961,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                           )}
                           {v.loadingType && (
                             <div className="flex items-center gap-2 pt-1">
-                              <span className="text-xs text-gray-400 w-20 flex-shrink-0">Załadunek</span>
+                              <span className="text-xs text-gray-500 w-20 flex-shrink-0">Załadunek</span>
                               <span className="text-xs font-medium text-gray-700">{v.loadingType}</span>
                             </div>
                           )}
@@ -3969,7 +3969,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                         {/* WYPOSAŻENIE */}
                         {((v.equipment?.length > 0) || (v.customEquipment?.length > 0)) && (
                           <div className="mt-2.5 pt-2.5 border-t border-gray-50">
-                            <div className="text-xs text-gray-400 mb-1.5">Wyposażenie</div>
+                            <div className="text-xs text-gray-500 mb-1.5">Wyposażenie</div>
                             <div className="flex flex-wrap gap-1.5">
                               {(v.equipment || []).map((id) => {
                                 const eq = DEFAULT_EQUIPMENT.find((e) => e.id === id);
@@ -4015,7 +4015,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 <div className="mt-8">
                   <div className="flex items-center gap-2 mb-3">
                     <div className="h-px flex-1 bg-gray-100" />
-                    <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-2">Archiwum pojazdów</span>
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-2">Archiwum pojazdów</span>
                     <div className="h-px flex-1 bg-gray-100" />
                   </div>
                   <div className="space-y-2">
@@ -4024,8 +4024,8 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                         <div className="flex items-center gap-3">
                           <span className="opacity-30"><VehicleIcon v={v} size={20}/></span>
                           <div>
-                            <div className="text-sm font-semibold text-gray-400">{v.plate}{v.plate2 ? ` / ${v.plate2}` : ""}</div>
-                            <div className="text-xs text-gray-400">{vehicleSubtitle(v)}</div>
+                            <div className="text-sm font-semibold text-gray-500">{v.plate}{v.plate2 ? ` / ${v.plate2}` : ""}</div>
+                            <div className="text-xs text-gray-500">{vehicleSubtitle(v)}</div>
                           </div>
                         </div>
                         <div className="flex-1 mx-4 text-right">
@@ -4041,7 +4041,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                             showToast("❌ Błąd zapisu: " + (e?.message || e));
                           }
                         }}
-                          className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-400 hover:text-gray-700 hover:border-gray-300 transition-all flex-shrink-0">
+                          className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-500 hover:text-gray-700 hover:border-gray-300 transition-all flex-shrink-0">
                           Przywróć
                         </button>
                       </div>
@@ -4100,7 +4100,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
           {tab === "gps" && canSeeTab("gps") && (
             <div>
               <h2 className="text-xl font-bold text-gray-900 mb-1">GPS / Monitoring</h2>
-              <p className="text-sm text-gray-400 mb-5">Atlas API · widziszwszystko.eu</p>
+              <p className="text-sm text-gray-500 mb-5">Atlas API · widziszwszystko.eu</p>
               <GpsTab vehicles={vehicles} frachtyList={frachtyList} driverEvents={driverEvents} driverActivities={driverActivities} fuelEntries={fuelEntries} showToast={showToast} currentUser={user} isAdmin={isAdmin} />
             </div>
           )}
@@ -4356,7 +4356,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 {/* ── TANKOWANIA ── */}
                 {dkSection === "tankowania" && (
                   <div className="space-y-2">
-                    {filteredFuel.length === 0 && <div className="text-center py-8 text-gray-400">Brak tankowań</div>}
+                    {filteredFuel.length === 0 && <div className="text-center py-8 text-gray-500">Brak tankowań</div>}
                     <div className="overflow-x-auto">
                       {filteredFuel.length > 0 && (
                         <table className="w-full text-sm">
@@ -4414,13 +4414,13 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 {/* ── DOKUMENTY ── */}
                 {dkSection === "dokumenty" && (
                   <div className="space-y-2">
-                    {filteredDocs.length === 0 && <div className="text-center py-8 text-gray-400">Brak dokumentów</div>}
+                    {filteredDocs.length === 0 && <div className="text-center py-8 text-gray-500">Brak dokumentów</div>}
                     {[...filteredDocs].sort((a,b) => (b.createdAt||"").localeCompare(a.createdAt||"")).map(dd => (
                       <div key={dd.id} className="bg-white rounded-xl border border-gray-100 p-4 flex items-start gap-3">
                         <div className="text-2xl">{DOC_TYPES[dd.type] || "📋"}</div>
                         <div className="flex-1 min-w-0">
                           <div className="font-semibold text-gray-800 text-sm">{dd.description}</div>
-                          <div className="text-xs text-gray-400 mt-1">
+                          <div className="text-xs text-gray-500 mt-1">
                             <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">{dd.type}</span>
                             <span className="ml-2">{driverLabel(dd.driverEmail)}</span>
                             <span className="ml-2">{fmtD(dd.createdAt)}</span>
@@ -4440,7 +4440,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 {/* ── STATUSY (driverEvents) ── */}
                 {dkSection === "statusy" && (
                   <div className="space-y-2">
-                    {filteredEvents.length === 0 && <div className="text-center py-8 text-gray-400">Brak zdarzeń</div>}
+                    {filteredEvents.length === 0 && <div className="text-center py-8 text-gray-500">Brak zdarzeń</div>}
                     <div className="overflow-x-auto">
                       {filteredEvents.length > 0 && (
                         <table className="w-full text-sm">
@@ -4567,7 +4567,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 {/* Przełącznik rozmiaru */}
                 {!isMobile && (
                   <button onClick={() => setChatSize(chatSize === "normal" ? "large" : "normal")}
-                    className="p-1.5 rounded-lg transition-colors text-gray-400 hover:bg-gray-200 hover:text-gray-600"
+                    className="p-1.5 rounded-lg transition-colors text-gray-500 hover:bg-gray-200 hover:text-gray-600"
                     title={chatSize === "normal" ? "Powiększ" : "Pomniejsz"}>
                     {chatSize === "normal"
                       ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/></svg>
@@ -4576,11 +4576,11 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                   </button>
                 )}
                 {/* Pełny ekran */}
-                <button onClick={() => { setTab("chat"); setChatFloat(false); }} className="p-1.5 rounded-lg transition-colors text-gray-400 hover:bg-gray-200 hover:text-gray-600" title="Pełny ekran">
+                <button onClick={() => { setTab("chat"); setChatFloat(false); }} className="p-1.5 rounded-lg transition-colors text-gray-500 hover:bg-gray-200 hover:text-gray-600" title="Pełny ekran">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
                 </button>
                 {/* Zamknij */}
-                <button onClick={() => setChatFloat(false)} className="p-1.5 rounded-lg transition-colors text-gray-400 hover:bg-gray-200 hover:text-gray-600" title="Zamknij">
+                <button onClick={() => setChatFloat(false)} className="p-1.5 rounded-lg transition-colors text-gray-500 hover:bg-gray-200 hover:text-gray-600" title="Zamknij">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
               </div>
@@ -4661,7 +4661,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
           ].map((item) => (
             <button key={item.id} onClick={() => setTab(item.id)}
               className="flex-shrink-0 flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all min-w-14"
-              style={{ color: tab === item.id ? "#111827" : "#9ca3af", background: tab === item.id ? "#f3f4f6" : "transparent", fontWeight: tab === item.id ? 600 : 400 }}>
+              style={{ color: tab === item.id ? "#111827" : "#6b7280", background: tab === item.id ? "#f3f4f6" : "transparent", fontWeight: tab === item.id ? 600 : 400 }}>
               <span className="leading-none relative">
                 {item.icon}
                 {item.badge ? <span className="absolute -top-1.5 -right-2.5 px-1 py-0 rounded-full text-[9px] font-bold leading-tight" style={{background:"#ef4444",color:"#fff",minWidth:"14px",textAlign:"center"}}>{item.badge}</span> : null}
@@ -5314,7 +5314,7 @@ function ChatTab({ currentUser, appUsers = [], vehicles = [], showToast, onActiv
               <div className="flex gap-2">
                 <button onClick={() => runTimestampMigration(true)} className="px-3 py-1.5 rounded-lg bg-amber-500 text-white font-medium hover:bg-amber-600 transition-colors">Dry Run</button>
                 <button onClick={() => { if(confirm("Uruchomić migrację? Zmieni dane w Firestore.")) runTimestampMigration(false); }} className="px-3 py-1.5 rounded-lg bg-green-500 text-white font-medium hover:bg-green-600 transition-colors">Migruj</button>
-                <button onClick={() => { localStorage.setItem("tsMigrationDone","1"); setMigrateStatus("hidden"); }} className="px-2 py-1.5 rounded-lg text-gray-400 hover:text-gray-600" title="Ukryj">✕</button>
+                <button onClick={() => { localStorage.setItem("tsMigrationDone","1"); setMigrateStatus("hidden"); }} className="px-2 py-1.5 rounded-lg text-gray-500 hover:text-gray-600" title="Ukryj">✕</button>
               </div>
             )}
             {migrateStatus === "running" && <div className="text-amber-700 font-medium">⏳ Trwa migracja...</div>}
@@ -5324,7 +5324,7 @@ function ChatTab({ currentUser, appUsers = [], vehicles = [], showToast, onActiv
           </div>
         )}
         <div className="flex-1 overflow-y-auto">
-          {rooms.length === 0 && <div className="p-6 text-center text-sm text-gray-400">Brak pokojów. Utwórz pierwszy!</div>}
+          {rooms.length === 0 && <div className="p-6 text-center text-sm text-gray-500">Brak pokojów. Utwórz pierwszy!</div>}
           {rooms.map((r, ri) => {
             const myRead = r.lastRead?.[currentUser.uid];
             // Aktywny pokój = czytany (nie czekamy na serverTimestamp round-trip)
@@ -5352,11 +5352,11 @@ function ChatTab({ currentUser, appUsers = [], vehicles = [], showToast, onActiv
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between">
                     <span className={`text-sm truncate ${hasUnread ? "font-bold text-gray-900" : "font-semibold text-gray-700"}`}>{roomDisplayName(r)}</span>
-                    <span className="text-xs flex-shrink-0 ml-2 text-gray-400">{fmtTime(r.lastMessageAt)}</span>
+                    <span className="text-xs flex-shrink-0 ml-2 text-gray-500">{fmtTime(r.lastMessageAt)}</span>
                   </div>
                   {lastPreview && (
                     <div className="mt-0.5 flex items-center gap-1">
-                      <span className={`text-xs truncate max-w-[160px] ${hasUnread ? "text-gray-600 font-medium" : "text-gray-400"}`}>
+                      <span className={`text-xs truncate max-w-[160px] ${hasUnread ? "text-gray-600 font-medium" : "text-gray-500"}`}>
                         {r.lastSender && !isWhatsapp ? `${r.lastSender.split("@")[0]}: ` : ""}{lastPreview}
                       </span>
                       {hasUnread && <span className="ml-auto px-1.5 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0" style={{ background: isWhatsapp ? '#25D366' : '#3b82f6', color: '#fff' }}>1</span>}
@@ -5526,7 +5526,7 @@ function ChatTab({ currentUser, appUsers = [], vehicles = [], showToast, onActiv
                         {isDeleted ? "Wiadomość usunięta" : (
                           <>
                             {m.text && <div style={{whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{m.text}</div>}
-                            {m.edited && <span className={`text-xs ${isMine ? "text-blue-200" : "text-gray-400"}`}> (edytowano)</span>}
+                            {m.edited && <span className={`text-xs ${isMine ? "text-blue-200" : "text-gray-500"}`}> (edytowano)</span>}
                             {m.fileUrl && (
                               <a href={safeHref(m.fileUrl)} target="_blank" rel="noopener noreferrer"
                                 className={`flex items-center gap-1.5 mt-1 text-xs ${isMine ? "text-blue-100 hover:text-white" : "text-blue-600 hover:text-blue-700"}`}>
@@ -5586,7 +5586,7 @@ function ChatTab({ currentUser, appUsers = [], vehicles = [], showToast, onActiv
 
             {/* Typing indicator */}
             {activeTypers.length > 0 && (
-              <div className="px-4 py-1 text-xs text-gray-400 italic">
+              <div className="px-4 py-1 text-xs text-gray-500 italic">
                 {activeTypers.join(", ")} {activeTypers.length === 1 ? "pisze" : "piszą"}...
               </div>
             )}
@@ -5685,7 +5685,7 @@ function ChatTab({ currentUser, appUsers = [], vehicles = [], showToast, onActiv
               Usuń
             </button>
           )}
-          <button onClick={() => setContextMenu(null)} className="w-full text-left px-4 py-2 text-xs text-gray-400 hover:bg-gray-50">Zamknij</button>
+          <button onClick={() => setContextMenu(null)} className="w-full text-left px-4 py-2 text-xs text-gray-500 hover:bg-gray-50">Zamknij</button>
         </div>
       )}
 
@@ -5704,7 +5704,7 @@ function ChatTab({ currentUser, appUsers = [], vehicles = [], showToast, onActiv
               {[{ id: "self", label: "Notatki", desc: "Do siebie" }, { id: "channel", label: "Kanał", desc: "Wszyscy" }, { id: "group", label: "Grupa", desc: "Wybrane osoby" }, { id: "dm", label: "Prywatna", desc: "1 na 1" }].map(t => (
                 <button key={t.id} onClick={() => { setNewRoomType(t.id); setNewRoomMembers([]); }}
                   className={`flex-1 p-2 rounded-lg border text-xs text-center transition-colors ${newRoomType === t.id ? "border-blue-400 bg-blue-50 text-blue-700" : "border-gray-200 text-gray-500 hover:bg-gray-50"}`}>
-                  <div className="font-medium">{t.label}</div><div className="text-gray-400 mt-0.5">{t.desc}</div>
+                  <div className="font-medium">{t.label}</div><div className="text-gray-500 mt-0.5">{t.desc}</div>
                 </button>
               ))}
             </div>
@@ -5718,7 +5718,7 @@ function ChatTab({ currentUser, appUsers = [], vehicles = [], showToast, onActiv
                         onChange={() => newRoomType === "dm" ? setNewRoomMembers([u.uid]) : setNewRoomMembers(prev => prev.includes(u.uid) ? prev.filter(id => id !== u.uid) : [...prev, u.uid])}
                         className="accent-blue-500" />
                       <span className="text-sm text-gray-700">{u.email}</span>
-                      <span className="text-xs text-gray-400 ml-auto">{u.role || "user"}</span>
+                      <span className="text-xs text-gray-500 ml-auto">{u.role || "user"}</span>
                     </label>
                   ))}
                 </div>
@@ -5811,7 +5811,7 @@ function NowaSprawaModal({ allTypy, vehicles, appUsers = [], onSave, onClose }) 
                 </div>
               </div>
               {f.kwota && (
-                <div style={{fontSize:11,color:"#9ca3af",marginTop:3}}>
+                <div style={{fontSize:11,color:"#6b7280",marginTop:3}}>
                   {f.waluta==="EUR"
                     ? `≈ ${(parseFloat(f.kwota)*4.27).toFixed(2)} zł`
                     : `≈ ${(parseFloat(f.kwota)/4.27).toFixed(2)} €`}
@@ -6007,19 +6007,19 @@ function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUse
             ["Przypomnienie", sprawa.przypomnienie || "—"],
           ].map(([label,value]) => (
             <div key={label}>
-              <div className="text-xs text-gray-400 mb-0.5">{label}</div>
+              <div className="text-xs text-gray-500 mb-0.5">{label}</div>
               <div className="text-sm font-semibold text-gray-800">{value}</div>
             </div>
           ))}
           {sprawa.uwagi && (
             <div className="col-span-2 md:col-span-4">
-              <div className="text-xs text-gray-400 mb-0.5">Uwagi</div>
+              <div className="text-xs text-gray-500 mb-0.5">Uwagi</div>
               <div className="text-sm text-gray-700">{sprawa.uwagi}</div>
             </div>
           )}
           {sprawa.przypisani && sprawa.przypisani.length > 0 && (
             <div className="col-span-2 md:col-span-4">
-              <div className="text-xs text-gray-400 mb-1">Przypisani</div>
+              <div className="text-xs text-gray-500 mb-1">Przypisani</div>
               <div className="flex gap-2 flex-wrap">
                 {sprawa.przypisani.map(p => (
                   <span key={p} style={{background:"#eff6ff",color:"#1d4ed8",padding:"3px 10px",borderRadius:99,fontSize:12,fontWeight:600}}>&#128100; {p}</span>
@@ -6028,7 +6028,7 @@ function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUse
             </div>
           )}
           <div className="col-span-2 md:col-span-4">
-            <div className="text-xs text-gray-400 mb-2">Załączniki sprawy</div>
+            <div className="text-xs text-gray-500 mb-2">Załączniki sprawy</div>
             <AttachmentList files={sprawa.zalaczniki || []} onDelete={(i) => {
               const nowe = [...(sprawa.zalaczniki||[])];
               nowe.splice(i,1);
@@ -6065,7 +6065,7 @@ function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUse
                 </div>
               </div>
               {(editData.kwota||sprawa.kwota) && (
-                <div style={{fontSize:11,color:"#9ca3af",marginTop:3}}>
+                <div style={{fontSize:11,color:"#6b7280",marginTop:3}}>
                   {(editData.waluta||sprawa.waluta||"EUR")==="EUR"
                     ? `≈ ${(parseFloat(editData.kwota||sprawa.kwota)*4.27).toFixed(2)} zł`
                     : `≈ ${(parseFloat(editData.kwota||sprawa.kwota)/4.27).toFixed(2)} €`}
@@ -6161,7 +6161,7 @@ function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUse
               <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-xs">
                 <span>{zdFile.type === "application/pdf" ? "📄" : "🖼️"}</span>
                 <span className="text-gray-700 truncate max-w-48">{zdFile.name}</span>
-                <button onClick={() => setZdFile(null)} className="ml-auto text-gray-400 hover:text-red-400">✕</button>
+                <button onClick={() => setZdFile(null)} className="ml-auto text-gray-500 hover:text-red-400">✕</button>
               </div>
             ) : (
               <SprawaFileUpload
@@ -6180,7 +6180,7 @@ function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUse
       )}
 
       {zdarzenia.length === 0 && !showAddZdarzenie && (
-        <div className="text-center py-8 text-gray-400 text-sm">Brak zdarzeń — kliknij "+ Dodaj zdarzenie"</div>
+        <div className="text-center py-8 text-gray-500 text-sm">Brak zdarzeń — kliknij "+ Dodaj zdarzenie"</div>
       )}
 
       <div className="space-y-3">
@@ -6206,7 +6206,7 @@ function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUse
                       <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-200 bg-gray-50 text-xs">
                         <span>{(editZdData.zalacznik||z.zalacznik).type === "application/pdf" ? "📄" : "🖼️"}</span>
                         <a href={safeHref((editZdData.zalacznik||z.zalacznik).url)} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate max-w-48">{(editZdData.zalacznik||z.zalacznik).name}</a>
-                        <button onClick={() => setEditZdData(p=>({...p,zalacznik:null}))} className="ml-auto text-gray-400 hover:text-red-400">✕</button>
+                        <button onClick={() => setEditZdData(p=>({...p,zalacznik:null}))} className="ml-auto text-gray-500 hover:text-red-400">✕</button>
                       </div>
                     ) : (
                       <SprawaFileUpload
@@ -6234,13 +6234,13 @@ function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUse
                   <div className="flex items-start justify-between gap-2 mb-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs font-semibold text-gray-700">{zt.label}</span>
-                      {z.ktoDoKogo && <span className="text-xs text-gray-400">· {z.ktoDoKogo}</span>}
+                      {z.ktoDoKogo && <span className="text-xs text-gray-500">· {z.ktoDoKogo}</span>}
                     </div>
                     <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                      <span className="text-xs text-gray-400">{dt.toLocaleDateString("pl-PL")} {dt.toLocaleTimeString("pl-PL",{hour:"2-digit",minute:"2-digit"})}</span>
+                      <span className="text-xs text-gray-500">{dt.toLocaleDateString("pl-PL")} {dt.toLocaleTimeString("pl-PL",{hour:"2-digit",minute:"2-digit"})}</span>
                       <div className="flex gap-1">
                         <button onClick={() => { setEditZdarzenieId(z.id); setEditZdData({typ:z.typ,tresc:z.tresc,ktoDoKogo:z.ktoDoKogo}); }}
-                          className="px-2 py-0.5 rounded text-xs text-gray-400 hover:bg-gray-100">✏️</button>
+                          className="px-2 py-0.5 rounded text-xs text-gray-500 hover:bg-gray-100">✏️</button>
                         <button onClick={() => { setPrzypomnienieZdId(z.id); setPrzypomnienieData(z.przypomnienie||""); setPrzypomnienieOpis(z.przypomnienieOpis||""); }}
                           className="px-2 py-0.5 rounded text-xs hover:bg-orange-50 transition-all"
                           style={{color: z.przypomnienie ? "#f97316" : "#d1d5db"}} title="Ustaw przypomnienie">⏰</button>
@@ -6261,7 +6261,7 @@ function SprawaDetail({ sprawa, vehicles, costs, updateCost, allTypy, currentUse
                       </a>
                     </div>
                   )}
-                  <div className="text-xs text-gray-400 mt-1.5 flex items-center gap-2 flex-wrap">
+                  <div className="text-xs text-gray-500 mt-1.5 flex items-center gap-2 flex-wrap">
                     <span>👤 {z.autor}</span>
                     {z.mentions && z.mentions.length > 0 && z.mentions.map(m => (
                       <span key={m} style={{background:"#eff6ff",color:"#1d4ed8",padding:"1px 8px",borderRadius:99,fontSize:11,fontWeight:600}}>@{m}</span>
@@ -6381,7 +6381,7 @@ function SprawyTab({ sprawyList, vehicles, costs, updateCost, currentUser, role,
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-900">Sprawy</h2>
-          <p className="text-sm text-gray-400 mt-0.5">
+          <p className="text-sm text-gray-500 mt-0.5">
             {sprawyList.filter(s => !CLOSED_STATUSES.includes(s.status)).length} aktywnych
             {archivedFiltered.length > 0 && ` · ${archivedFiltered.length} w archiwum`}
           </p>
@@ -6458,7 +6458,7 @@ function SprawyTab({ sprawyList, vehicles, costs, updateCost, currentUser, role,
       {/* LISTA SPRAW */}
       <div className="space-y-2">
         {filtered.length === 0 && (
-          <div className="text-center py-16 text-gray-400">
+          <div className="text-center py-16 text-gray-500">
             <div className="text-4xl mb-3">⚡</div>
             <div className="font-medium">{showArchive ? "Brak spraw w archiwum" : "Brak aktywnych spraw"}</div>
             <div className="text-sm mt-1">{showArchive ? "" : "Kliknij \"+ Nowa sprawa\" aby dodać"}</div>
@@ -6479,7 +6479,7 @@ function SprawyTab({ sprawyList, vehicles, costs, updateCost, currentUser, role,
             {showSeparator && (
               <div className="flex items-center gap-3 py-3">
                 <div className="flex-1 h-px bg-gray-200"></div>
-                <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">🗄️ Archiwum</div>
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">🗄️ Archiwum</div>
                 <div className="flex-1 h-px bg-gray-200"></div>
               </div>
             )}
@@ -6495,8 +6495,8 @@ function SprawyTab({ sprawyList, vehicles, costs, updateCost, currentUser, role,
                       <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{background: status.bg, color: status.color}}>{status.label}</span>
                       {isOverdue && <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{background:"#fef2f2",color:"#dc2626"}}>⚠ Przeterminowane</span>}
                     </div>
-                    <div className="text-sm text-gray-600 mt-0.5 truncate">{s.klient || "—"}{s.podtyp ? <span className="text-xs text-gray-400 ml-1">· {s.podtyp}</span> : null}</div>
-                    {s.uwagi && <div className="text-xs text-gray-400 mt-0.5 truncate">{s.uwagi}</div>}
+                    <div className="text-sm text-gray-600 mt-0.5 truncate">{s.klient || "—"}{s.podtyp ? <span className="text-xs text-gray-500 ml-1">· {s.podtyp}</span> : null}</div>
+                    {s.uwagi && <div className="text-xs text-gray-500 mt-0.5 truncate">{s.uwagi}</div>}
                   </div>
                 </div>
                 <div className="text-right flex-shrink-0">
@@ -6506,7 +6506,7 @@ function SprawyTab({ sprawyList, vehicles, costs, updateCost, currentUser, role,
                       {daysLeft < 0 ? `${Math.abs(daysLeft)}d po terminie` : daysLeft === 0 ? "Dziś!" : `${daysLeft}d do terminu`}
                     </div>
                   )}
-                  <div className="text-xs text-gray-400 mt-0.5">{s.zdarzenia?.length || 0} zdarzeń</div>
+                  <div className="text-xs text-gray-500 mt-0.5">{s.zdarzenia?.length || 0} zdarzeń</div>
                 </div>
               </div>
             </div>
@@ -6679,7 +6679,7 @@ function EmailStatusTab({ showToast }) {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-xl font-bold text-gray-900">Email — Statusy floty</h2>
-          <p className="text-sm text-gray-400 mt-0.5">Automatyczna wysyłka 3x dziennie (8:00, 14:00, 20:00)</p>
+          <p className="text-sm text-gray-500 mt-0.5">Automatyczna wysyłka 3x dziennie (8:00, 14:00, 20:00)</p>
         </div>
         <button onClick={sendTestEmail} disabled={sending}
           className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all"
@@ -6733,7 +6733,7 @@ function EmailStatusTab({ showToast }) {
         {/* Lista odbiorców */}
         <div className="space-y-2">
           {recipients.length === 0 && (
-            <p className="text-sm text-gray-400 text-center py-4">Brak odbiorców — dodaj pierwszy email powyżej</p>
+            <p className="text-sm text-gray-500 text-center py-4">Brak odbiorców — dodaj pierwszy email powyżej</p>
           )}
           {recipients.map(r => (
             <div key={r.id} className="flex items-center justify-between px-3 py-2.5 rounded-xl border border-gray-100"
@@ -6746,7 +6746,7 @@ function EmailStatusTab({ showToast }) {
                 </button>
                 <div>
                   <span className="text-sm font-semibold text-gray-800">{r.name || r.email.split("@")[0]}</span>
-                  <span className="text-xs text-gray-400 ml-2">{r.email}</span>
+                  <span className="text-xs text-gray-500 ml-2">{r.email}</span>
                 </div>
               </div>
               <button onClick={() => removeRecipient(r.id)}
@@ -7018,7 +7018,7 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
         <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Pojazdy GPS</span>
-            <span className="text-xs text-gray-400">{gpsDevices.length}</span>
+            <span className="text-xs text-gray-500">{gpsDevices.length}</span>
           </div>
           {/* Na telefonie lista pojazdów nie może zająć całego ekranu — niska
               maksymalna wysokość, żeby treść pod spodem była od razu widoczna. */}
@@ -7051,13 +7051,13 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
                     <span className={`text-sm font-semibold ${isActive ? "text-violet-700" : "text-gray-800"}`}>{plate}</span>
                   </div>
                   {dev.fleetVehicle && (
-                    <div className="text-xs text-gray-400 ml-4 mt-0.5">
+                    <div className="text-xs text-gray-500 ml-4 mt-0.5">
                       {dev.fleetVehicle.brand} {dev.fleetVehicle.model}
                       {activeDriverName(dev.fleetVehicle) && <span> · {activeDriverName(dev.fleetVehicle)}</span>}
                     </div>
                   )}
                   {pos && (
-                    <div className="text-xs text-gray-400 ml-4 mt-0.5">
+                    <div className="text-xs text-gray-500 ml-4 mt-0.5">
                       {pos.speed != null && <span>{Math.round(pos.speed)} km/h · </span>}
                       {formatDate(pos.dateTime || pos.timestamp)}
                     </div>
@@ -7066,7 +7066,7 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
               );
             })}
             {gpsDevices.length === 0 && (
-              <div className="px-4 py-6 text-center text-xs text-gray-400">Brak urządzeń GPS</div>
+              <div className="px-4 py-6 text-center text-xs text-gray-500">Brak urządzeń GPS</div>
             )}
           </div>
         </div>
@@ -7096,7 +7096,7 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
                   </div>
                   <div>
                     <h3 className="font-bold text-gray-900">{selectedDev.plate || selectedDev.deviceName || selectedDev.name || `Device #${selectedDevice}`}</h3>
-                    <div className="flex items-center gap-3 text-xs text-gray-400">
+                    <div className="flex items-center gap-3 text-xs text-gray-500">
                       {selectedDev.fleetVehicle && <span>{selectedDev.fleetVehicle.brand} {selectedDev.fleetVehicle.model}</span>}
                       <span>ID: {selectedDevice}</span>
                       {selectedPos && selectedPos.speed != null && (
@@ -7106,7 +7106,7 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
                   </div>
                 </div>
                 {selectedPos && (
-                  <div className="text-right text-xs text-gray-400">
+                  <div className="text-right text-xs text-gray-500">
                     <div>Ostatnia pozycja</div>
                     <div className="font-semibold text-gray-600">{formatDate(selectedPos.dateTime || selectedPos.timestamp)}</div>
                   </div>
@@ -7210,7 +7210,7 @@ function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fu
   if (!vehicle?.id) {
     return (
       <div className="bg-white rounded-2xl border border-gray-100 p-6 mt-4 text-center">
-        <div className="text-xs text-gray-400">Brak przypisanego pojazdu do tego urządzenia — nie mogę wyświetlić zleceń.</div>
+        <div className="text-xs text-gray-500">Brak przypisanego pojazdu do tego urządzenia — nie mogę wyświetlić zleceń.</div>
       </div>
     );
   }
@@ -7310,7 +7310,7 @@ function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fu
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div>
           <h3 className="text-sm font-bold text-gray-900">Zlecenia pojazdu {vehicle.plate}</h3>
-          <div className="text-xs text-gray-400 mt-0.5">
+          <div className="text-xs text-gray-500 mt-0.5">
             {effectiveMonth === "all" ? `Łącznie: ${orders.length}` : `${fmtMonth(effectiveMonth)}: ${ordersInMonth.length} z ${orders.length}`}
           </div>
         </div>
@@ -7336,7 +7336,7 @@ function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fu
             ].map(b => (
               <button key={b.id} onClick={() => setFilter(b.id)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${filter === b.id ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"}`}>
-                {b.label} <span className="text-[10px] text-gray-400 ml-1">{b.count}</span>
+                {b.label} <span className="text-[10px] text-gray-500 ml-1">{b.count}</span>
               </button>
             ))}
           </div>
@@ -7344,7 +7344,7 @@ function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fu
       </div>
 
       {filtered.length === 0 && (
-        <div className="text-center py-8 text-gray-400 text-sm">Brak zleceń w tym filtrze</div>
+        <div className="text-center py-8 text-gray-500 text-sm">Brak zleceń w tym filtrze</div>
       )}
 
       <div className="space-y-2">
@@ -7374,9 +7374,9 @@ function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fu
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="flex items-center gap-2" style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>
                     <span>{kody.zal}</span>
-                    <span style={{ color: "#9ca3af" }}>→</span>
+                    <span style={{ color: "#6b7280" }}>→</span>
                     <span>{kody.roz}</span>
-                    {f.nrRef && <span style={{ fontSize: 11, color: "#9ca3af", fontWeight: 400, marginLeft: "auto" }}>REF: {f.nrRef}</span>}
+                    {f.nrRef && <span style={{ fontSize: 11, color: "#6b7280", fontWeight: 400, marginLeft: "auto" }}>REF: {f.nrRef}</span>}
                   </div>
                   <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2, display: "flex", gap: 10, flexWrap: "wrap" }}>
                     <span>📅 {fmt(f.dataZaladunku)} → {fmt(f.dataRozladunku)}</span>
@@ -7389,7 +7389,7 @@ function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fu
                 {/* Ocena + strzałka */}
                 <div className="flex items-center gap-2 flex-shrink-0">
                   {ocenaPill(f)}
-                  <span style={{ fontSize: 12, color: "#9ca3af" }}>{isExpanded ? "▲" : "▼"}</span>
+                  <span style={{ fontSize: 12, color: "#6b7280" }}>{isExpanded ? "▲" : "▼"}</span>
                 </div>
               </button>
 
@@ -7402,27 +7402,27 @@ function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fu
                     gap: 10, marginBottom: 12,
                   }}>
                     <div style={{ padding: 10, borderRadius: 10, background: "#f8fafc", border: "1px solid #f1f5f9" }}>
-                      <div style={{ fontSize: 10, color: "#9ca3af", fontWeight: 600, textTransform: "uppercase" }}>Załadunek</div>
+                      <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 600, textTransform: "uppercase" }}>Załadunek</div>
                       <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", marginTop: 2 }}>{kody.zal}</div>
                       <div style={{ fontSize: 11, color: "#6b7280" }}>{fmt(f.dataZaladunku)}{f.godzZaladunku ? ` · ${f.godzZaladunku}` : ""}</div>
-                      {f.zaladunekAdres && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>{f.zaladunekAdres}</div>}
+                      {f.zaladunekAdres && <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{f.zaladunekAdres}</div>}
                     </div>
                     <div style={{ padding: 10, borderRadius: 10, background: "#f8fafc", border: "1px solid #f1f5f9" }}>
-                      <div style={{ fontSize: 10, color: "#9ca3af", fontWeight: 600, textTransform: "uppercase" }}>Rozładunek</div>
+                      <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 600, textTransform: "uppercase" }}>Rozładunek</div>
                       <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", marginTop: 2 }}>{kody.roz}</div>
                       <div style={{ fontSize: 11, color: "#6b7280" }}>{fmt(f.dataRozladunku)}{f.godzRozladunku ? ` · ${f.godzRozladunku}` : ""}</div>
-                      {f.rozladunekAdres && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>{f.rozladunekAdres}</div>}
+                      {f.rozladunekAdres && <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{f.rozladunekAdres}</div>}
                     </div>
                     {(f.klient || f.dyspozytor) && (
                       <div style={{ padding: 10, borderRadius: 10, background: "#f8fafc", border: "1px solid #f1f5f9" }}>
-                        <div style={{ fontSize: 10, color: "#9ca3af", fontWeight: 600, textTransform: "uppercase" }}>Strony</div>
+                        <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 600, textTransform: "uppercase" }}>Strony</div>
                         {f.klient && <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", marginTop: 2 }}>🏢 {f.klient}</div>}
                         {f.dyspozytor && <div style={{ fontSize: 11, color: "#6b7280" }}>👤 {f.dyspozytor}</div>}
                       </div>
                     )}
                     {(f.cenaEur || f.kmWszystkie || f.wagaLadunku) && (
                       <div style={{ padding: 10, borderRadius: 10, background: "#f8fafc", border: "1px solid #f1f5f9" }}>
-                        <div style={{ fontSize: 10, color: "#9ca3af", fontWeight: 600, textTransform: "uppercase" }}>Finanse / Ładunek</div>
+                        <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 600, textTransform: "uppercase" }}>Finanse / Ładunek</div>
                         {f.cenaEur && <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", marginTop: 2 }}>{Number(f.cenaEur).toFixed(2)} €</div>}
                         <div style={{ fontSize: 11, color: "#6b7280" }}>
                           {f.kmWszystkie ? `${f.kmWszystkie} km` : ""}
@@ -7464,7 +7464,7 @@ function VehicleOrdersSection({ vehicle, frachtyList = [], driverEvents = [], fu
                       variant="full"
                     />
                   ) : (
-                    <div style={{ fontSize: 11, color: "#9ca3af", fontStyle: "italic", textAlign: "center", padding: 8 }}>
+                    <div style={{ fontSize: 11, color: "#6b7280", fontStyle: "italic", textAlign: "center", padding: 8 }}>
                       Podsumowanie trasy pojawi się po rozładunku
                     </div>
                   )}
@@ -8155,7 +8155,7 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
                 <span className="text-xs bg-white px-2 py-1 rounded-lg text-gray-600 font-medium">
                   🚩 {routeInfo.loadLabel}
                 </span>
-                <span className="text-xs text-gray-400">→</span>
+                <span className="text-xs text-gray-500">→</span>
                 <span className="text-xs bg-white px-2 py-1 rounded-lg text-gray-600 font-medium">
                   📦 {routeInfo.unloadLabel}
                 </span>
@@ -8163,8 +8163,8 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
               <div className="flex items-center gap-4 text-sm">
                 <span style={{ fontWeight: 700, color: palette.text }}>{routeInfo.distance} km</span>
                 <span className="text-gray-500">{Math.floor(routeInfo.duration / 60)}h {routeInfo.duration % 60}min</span>
-                {routeInfo.pointsCount != null && <span className="text-xs text-gray-400">{routeInfo.pointsCount} punktów</span>}
-                {routeInfo.fracht?.dataZaladunku && <span className="text-xs text-gray-400">Załadunek: {routeInfo.fracht.dataZaladunku}</span>}
+                {routeInfo.pointsCount != null && <span className="text-xs text-gray-500">{routeInfo.pointsCount} punktów</span>}
+                {routeInfo.fracht?.dataZaladunku && <span className="text-xs text-gray-500">Załadunek: {routeInfo.fracht.dataZaladunku}</span>}
               </div>
             </div>
           </div>
@@ -8202,12 +8202,12 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
         const spd = position.speed;
         return (
           <div className="flex flex-wrap gap-6 px-5 py-3 bg-gray-50 border-t border-gray-100">
-            {spd != null && <div className="text-center"><div className="text-lg font-bold text-gray-800">{Math.round(spd)}</div><div className="text-xs text-gray-400">km/h</div></div>}
-            {mileage != null && <div className="text-center"><div className="text-lg font-bold text-gray-800">{Math.round(mileage).toLocaleString("pl-PL")}</div><div className="text-xs text-gray-400">km przebieg</div></div>}
-            {fuel != null && <div className="text-center"><div className="text-lg font-bold text-gray-800">{fuel}%</div><div className="text-xs text-gray-400">paliwo</div></div>}
-            {volt != null && <div className="text-center"><div className="text-lg font-bold text-gray-800">{volt}V</div><div className="text-xs text-gray-400">napięcie</div></div>}
-            {rpm != null && <div className="text-center"><div className="text-lg font-bold text-gray-800">{rpm}</div><div className="text-xs text-gray-400">RPM</div></div>}
-            {engTemp != null && <div className="text-center"><div className="text-lg font-bold text-gray-800">{engTemp}°C</div><div className="text-xs text-gray-400">temp. silnika</div></div>}
+            {spd != null && <div className="text-center"><div className="text-lg font-bold text-gray-800">{Math.round(spd)}</div><div className="text-xs text-gray-500">km/h</div></div>}
+            {mileage != null && <div className="text-center"><div className="text-lg font-bold text-gray-800">{Math.round(mileage).toLocaleString("pl-PL")}</div><div className="text-xs text-gray-500">km przebieg</div></div>}
+            {fuel != null && <div className="text-center"><div className="text-lg font-bold text-gray-800">{fuel}%</div><div className="text-xs text-gray-500">paliwo</div></div>}
+            {volt != null && <div className="text-center"><div className="text-lg font-bold text-gray-800">{volt}V</div><div className="text-xs text-gray-500">napięcie</div></div>}
+            {rpm != null && <div className="text-center"><div className="text-lg font-bold text-gray-800">{rpm}</div><div className="text-xs text-gray-500">RPM</div></div>}
+            {engTemp != null && <div className="text-center"><div className="text-lg font-bold text-gray-800">{engTemp}°C</div><div className="text-xs text-gray-500">temp. silnika</div></div>}
           </div>
         );
       })()}
@@ -8309,7 +8309,7 @@ function GpsDddSection({ device, showToast }) {
         <div className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center">
           <span className="text-3xl mb-3 block">💾</span>
           <p className="text-sm text-gray-500 mb-2">Wgraj plik DDD z tachografu cyfrowego lub karty kierowcy</p>
-          <p className="text-xs text-gray-400 mb-4">Format binarny TLV · rozporządzenie EU 2016/799 · Gen1/Gen2 · parser readesm-js</p>
+          <p className="text-xs text-gray-500 mb-4">Format binarny TLV · rozporządzenie EU 2016/799 · Gen1/Gen2 · parser readesm-js</p>
           <label className={`inline-block px-4 py-2 rounded-xl text-sm font-bold text-white cursor-pointer transition-all ${uploading ? "bg-gray-400" : "bg-violet-600 hover:bg-violet-700"}`}>
             {uploading ? (parsingId ? "Parsuję..." : "Wgrywanie...") : "Wybierz plik DDD / ESM"}
             <input type="file" accept=".ddd,.DDD,.esm,.ESM,.tgd,.v1b" className="hidden" disabled={uploading}
@@ -8326,7 +8326,7 @@ function GpsDddSection({ device, showToast }) {
       <div className="bg-white rounded-2xl border border-gray-100 p-5">
         <h4 className="text-sm font-semibold text-gray-800 mb-3">Pliki wgrane ({dddFiles.length})</h4>
         {dddFiles.length === 0 ? (
-          <div className="text-xs text-gray-400 italic text-center py-6">
+          <div className="text-xs text-gray-500 italic text-center py-6">
             Brak wgranych plików DDD. Pierwszy odczyt karty kierowcy dla WGM 0475M oczekiwany za ~28 dni od startu trasy.
           </div>
         ) : (
@@ -8357,7 +8357,7 @@ function GpsDddSection({ device, showToast }) {
                           {f.periodStart && f.periodEnd && <span>📅 {fmtDate(f.periodStart)} → {fmtDate(f.periodEnd)} · </span>}
                           <span>{Math.round((f.fileSize || 0) / 1024)} KB</span>
                         </div>
-                        <div className="text-[10px] text-gray-400 mt-1">
+                        <div className="text-[10px] text-gray-500 mt-1">
                           Wgrany: {fmtTs(f.uploadedAt)} przez {f.uploadedBy || "—"}
                         </div>
                       </div>
@@ -8384,7 +8384,7 @@ function GpsDddSection({ device, showToast }) {
               );
             })}
             {dddFiles.length > 20 && (
-              <div className="text-[11px] text-gray-400 italic text-center pt-2">
+              <div className="text-[11px] text-gray-500 italic text-center pt-2">
                 + {dddFiles.length - 20} starszych plików
               </div>
             )}
@@ -8413,7 +8413,7 @@ function GpsDddSection({ device, showToast }) {
 const DDD_COLORS = {
   drive: "#16a34a", // zielony
   work:  "#f59e0b", // amber
-  avail: "#9ca3af", // gray
+  avail: "#6b7280", // gray
   rest:  "#3b82f6", // blue
 };
 const DDD_TYPE_LABEL = { drive: "Jazda", work: "Praca", avail: "Dyspozycyjność", rest: "Odpoczynek" };
@@ -8475,7 +8475,7 @@ function VuReportView({ dddFile, onClose }) {
     <div className="p-4 md:p-6">
       <div className="flex items-center justify-between mb-5">
         <div>
-          <button onClick={onClose} className="text-xs text-gray-400 hover:text-gray-600 mb-1">‹ Wróć do listy plików</button>
+          <button onClick={onClose} className="text-xs text-gray-500 hover:text-gray-600 mb-1">‹ Wróć do listy plików</button>
           <h2 className="text-xl font-bold text-gray-800">🚚 Pamięć pojazdu (VU) — {f.vehicleVrn || "?"}</h2>
           <p className="text-sm text-gray-500 mt-0.5">
             VIN {f.vin || "—"} · pobrano {fmtDT(f.downloadTime || f.downloadDate)}
@@ -8493,22 +8493,22 @@ function VuReportView({ dddFile, onClose }) {
           {/* Kafelki podsumowania */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
             <div className="bg-white rounded-xl border border-gray-200 p-3">
-              <div className="text-[11px] uppercase tracking-wide text-gray-400">Dni z danymi</div>
+              <div className="text-[11px] uppercase tracking-wide text-gray-500">Dni z danymi</div>
               <div className="text-lg font-bold text-gray-800">{sum.daysWithData ?? days.length}</div>
             </div>
             <div className="bg-white rounded-xl border border-gray-200 p-3">
-              <div className="text-[11px] uppercase tracking-wide text-gray-400">Suma jazdy</div>
+              <div className="text-[11px] uppercase tracking-wide text-gray-500">Suma jazdy</div>
               <div className="text-lg font-bold text-gray-800">{hm(sum.totalDriveMin)}</div>
             </div>
             <div className="bg-white rounded-xl border border-gray-200 p-3">
-              <div className="text-[11px] uppercase tracking-wide text-gray-400">Przebieg</div>
+              <div className="text-[11px] uppercase tracking-wide text-gray-500">Przebieg</div>
               <div className="text-lg font-bold text-gray-800">{sum.totalKm != null ? `${sum.totalKm} km` : "—"}</div>
-              {sum.odoStart != null && <div className="text-[10px] text-gray-400">{sum.odoStart}→{sum.odoEnd}</div>}
+              {sum.odoStart != null && <div className="text-[10px] text-gray-500">{sum.odoStart}→{sum.odoEnd}</div>}
             </div>
             <div className="bg-white rounded-xl border border-gray-200 p-3">
-              <div className="text-[11px] uppercase tracking-wide text-gray-400">Zdarzenia / usterki</div>
+              <div className="text-[11px] uppercase tracking-wide text-gray-500">Zdarzenia / usterki</div>
               <div className="text-lg font-bold text-gray-800">{ev.events + ev.faults}</div>
-              <div className="text-[10px] text-gray-400">{ev.overspeed} przekr. prędkości</div>
+              <div className="text-[10px] text-gray-500">{ev.overspeed} przekr. prędkości</div>
             </div>
           </div>
 
@@ -8516,11 +8516,11 @@ function VuReportView({ dddFile, onClose }) {
           <div className="bg-white rounded-xl border border-gray-200 p-4 mb-5">
             <h3 className="font-semibold text-gray-800 mb-2 text-sm">🧑‍✈️ Kierowcy używający pojazdu</h3>
             <div className="flex flex-wrap gap-2">
-              {drivers.length === 0 && <span className="text-sm text-gray-400">brak danych o kartach</span>}
+              {drivers.length === 0 && <span className="text-sm text-gray-500">brak danych o kartach</span>}
               {drivers.map((d, i) => (
                 <span key={i} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gray-50 border border-gray-200 text-sm">
                   <span className="font-medium text-gray-800">{d.name || "(nieznany)"}</span>
-                  <span className="text-[11px] text-gray-400 font-mono">{d.cardNumber}</span>
+                  <span className="text-[11px] text-gray-500 font-mono">{d.cardNumber}</span>
                   <span className="text-[11px] text-violet-600">{d.insertions}×</span>
                 </span>
               ))}
@@ -8556,7 +8556,7 @@ function VuReportView({ dddFile, onClose }) {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-400 bg-gray-50">
+                  <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500 bg-gray-50">
                     <th className="px-4 py-2.5 font-medium">Dzień</th>
                     <th className="px-4 py-2.5 font-medium">Licznik</th>
                     <th className="px-4 py-2.5 font-medium">Jazda</th>
@@ -8571,18 +8571,18 @@ function VuReportView({ dddFile, onClose }) {
                     <tr key={i} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
                       <td className="px-4 py-2.5 whitespace-nowrap font-medium text-gray-800">{fmtD(d.date)}</td>
                       <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{d.odometer != null ? `${d.odometer} km` : "—"}</td>
-                      <td className="px-4 py-2.5 whitespace-nowrap font-medium" style={{ color: d.driveMin > 0 ? "#7c3aed" : "#9ca3af" }}>{hm(d.driveMin)}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap font-medium" style={{ color: d.driveMin > 0 ? "#7c3aed" : "#6b7280" }}>{hm(d.driveMin)}</td>
                       <td className="px-4 py-2.5 whitespace-nowrap text-gray-600">{hm(d.workMin)}</td>
                       <td className="px-4 py-2.5 whitespace-nowrap text-gray-500">{hm(d.restMin)}</td>
                       <td className="px-4 py-2.5 whitespace-nowrap text-gray-500">{hm(d.availMin)}</td>
-                      <td className="px-4 py-2.5 whitespace-nowrap text-gray-400 text-xs">{d.cards || 0}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap text-gray-500 text-xs">{d.cards || 0}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           </div>
-          <p className="text-[11px] text-gray-400 mt-3">
+          <p className="text-[11px] text-gray-500 mt-3">
             Aktywność liczona dla slotu kierowcy. Zdarzenia/usterki/przekroczenia = liczniki z pliku (szczegóły w surowym pliku dla ITD).
           </p>
         </>
@@ -8691,7 +8691,7 @@ function DddReportView({ dddFile, onClose }) {
       <div className="bg-white rounded-2xl border border-gray-100 p-6 mb-4">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <div className="text-xs uppercase tracking-wide text-gray-400 mb-1">
+            <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">
               {f.fileType === "card" ? "Karta kierowcy" : f.fileType === "vu" ? "Pamięć tachografu" : "Plik DDD"}
             </div>
             <h2 className="text-2xl font-bold text-gray-900">{f.driverName || "—"}</h2>
@@ -8735,7 +8735,7 @@ function DddReportView({ dddFile, onClose }) {
             <div className="text-xs text-gray-500">Dni z jazdą</div>
             <div className="font-bold text-lg">
               {rangeSummary.daysWorked}
-              <span className="text-gray-400 text-sm font-normal"> / {rangeSummary.daysWithCard}</span>
+              <span className="text-gray-500 text-sm font-normal"> / {rangeSummary.daysWithCard}</span>
             </div>
           </div>
           <div>
@@ -8749,7 +8749,7 @@ function DddReportView({ dddFile, onClose }) {
       <div className="bg-white rounded-2xl border border-gray-100 p-6 mb-4">
         <h3 className="text-sm font-bold text-gray-800 mb-4">🚛 Pojazdy używane</h3>
         {vehicleStats.length === 0 ? (
-          <div className="text-xs italic text-gray-400">Brak danych pojazdów w pliku.</div>
+          <div className="text-xs italic text-gray-500">Brak danych pojazdów w pliku.</div>
         ) : (
           <div className="space-y-3">
             {vehicleStats.map((vs, i) => (
@@ -8810,7 +8810,7 @@ function DddReportView({ dddFile, onClose }) {
             onChange={e => setDateFrom(e.target.value)}
             className="px-2 py-1 border border-gray-200 rounded-lg text-xs"
           />
-          <span className="text-gray-400">→</span>
+          <span className="text-gray-500">→</span>
           <input
             type="date"
             value={dateTo}
@@ -8859,11 +8859,11 @@ function DddReportView({ dddFile, onClose }) {
               </div>
             ))}
           </div>
-          <div className="text-gray-400 italic">Skala: czas lokalny PL (UTC+1 zima / UTC+2 lato)</div>
+          <div className="text-gray-500 italic">Skala: czas lokalny PL (UTC+1 zima / UTC+2 lato)</div>
         </div>
 
         {visibleDays.length === 0 ? (
-          <div className="text-xs italic text-gray-400 text-center py-6">
+          <div className="text-xs italic text-gray-500 text-center py-6">
             Brak dni do wyświetlenia.
           </div>
         ) : (
@@ -8893,7 +8893,7 @@ function DddDailyRow({ day, data }) {
           {d.vehicleVrn && (
             <span className="ml-2 text-violet-700">
               · {d.vehicleVrn}
-              {d.vehicleId && <span className="text-gray-400 ml-1">[{d.vehicleId}]</span>}
+              {d.vehicleId && <span className="text-gray-500 ml-1">[{d.vehicleId}]</span>}
             </span>
           )}
         </div>
@@ -8930,7 +8930,7 @@ function DddDailyRow({ day, data }) {
           // — wizualnie odróżnialna od zwykłego odpoczynku, nigdy niewidoczna cicho.
           const background = s.corrected
             ? "repeating-linear-gradient(45deg, #2563eb, #2563eb 5px, #60a5fa 5px, #60a5fa 10px)"
-            : (s._color || DDD_COLORS[s.type] || "#9ca3af");
+            : (s._color || DDD_COLORS[s.type] || "#6b7280");
           const title = s.corrected
             ? `✏️ Skorygowano (dyspozycyjność → odpoczynek): ${startStr} → ${endStr} (${fmtHM(s.durMin)})${s.reason ? ` · ${s.reason}` : ""}`
             : `${label}: ${startStr} → ${endStr} (${fmtHM(s.durMin)})${s.address ? ` · ${s.address}` : ""}`;
@@ -8966,7 +8966,7 @@ function DddDailyRow({ day, data }) {
       </div>
 
       {/* Skala godzinowa */}
-      <div className="flex justify-between text-[9px] text-gray-400 mt-0.5 px-0.5 select-none">
+      <div className="flex justify-between text-[9px] text-gray-500 mt-0.5 px-0.5 select-none">
         <span>00</span>
         <span>06</span>
         <span>12</span>
@@ -9361,7 +9361,7 @@ function MultiDayActivityView({ vehicle, driverActivities = [], currentUser = nu
 
   if (!vehicle?.id) {
     return (
-      <div className="bg-white rounded-2xl border border-gray-100 p-6 text-center text-xs text-gray-400">
+      <div className="bg-white rounded-2xl border border-gray-100 p-6 text-center text-xs text-gray-500">
         Brak przypisanego pojazdu do tego urządzenia.
       </div>
     );
@@ -9372,7 +9372,7 @@ function MultiDayActivityView({ vehicle, driverActivities = [], currentUser = nu
       <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center">
         <span className="text-4xl mb-4 block">📅</span>
         <p className="text-gray-500 text-sm font-semibold">Brak aktywności dla {vehicle.plate}</p>
-        <p className="text-xs text-gray-400 mt-2 max-w-md mx-auto">
+        <p className="text-xs text-gray-500 mt-2 max-w-md mx-auto">
           Dane pochodzą z driverActivities (auto_gps + ww_csv). Codzienny raport CSV widziszwszystko trafia ~02:04 PL na <code>imports@inbox.fleetstat.pl</code>.
         </p>
       </div>
@@ -9454,7 +9454,7 @@ function MultiDayActivityView({ vehicle, driverActivities = [], currentUser = nu
                   <div className="min-w-0">
                     <div className="font-semibold">{fmtCorrTs(c.startTs)} → {fmtCorrTs(c.endTs)}</div>
                     <div className="text-gray-500">dyspozycyjność → odpoczynek · „{c.correctionReason || "—"}"</div>
-                    <div className="text-gray-400">przez {c.correctedByName || c.correctedBy || "—"}{c.correctedAt ? ` · ${fmtCorrTs(c.correctedAt)}` : ""}</div>
+                    <div className="text-gray-500">przez {c.correctedByName || c.correctedBy || "—"}{c.correctedAt ? ` · ${fmtCorrTs(c.correctedAt)}` : ""}</div>
                   </div>
                   {isAdmin && (
                     <button onClick={() => deleteCorrection(c.id)} className="shrink-0 text-red-600 hover:text-red-700 hover:underline font-semibold print:hidden">
@@ -9514,7 +9514,7 @@ function MultiDayActivityView({ vehicle, driverActivities = [], currentUser = nu
             onChange={e => setDateFrom(e.target.value)}
             className="px-2 py-1 border border-gray-200 rounded-lg text-xs"
           />
-          <span className="text-gray-400">→</span>
+          <span className="text-gray-500">→</span>
           <input
             type="date"
             value={dateTo}
@@ -9560,11 +9560,11 @@ function MultiDayActivityView({ vehicle, driverActivities = [], currentUser = nu
               </div>
             ))}
           </div>
-          <div className="text-gray-400 italic">Skala: czas lokalny PL (UTC+1 zima / UTC+2 lato)</div>
+          <div className="text-gray-500 italic">Skala: czas lokalny PL (UTC+1 zima / UTC+2 lato)</div>
         </div>
 
         {visibleDays.length === 0 ? (
-          <div className="text-xs italic text-gray-400 text-center py-6">
+          <div className="text-xs italic text-gray-500 text-center py-6">
             Brak dni do wyświetlenia.
           </div>
         ) : (
@@ -9717,7 +9717,7 @@ function AuditLogTab() {
           <input type="text" value={searchQ} onChange={e => setSearchQ(e.target.value)}
             placeholder="Szukaj w logach…"
             className="pl-8 pr-3 py-2 rounded-lg text-sm border border-gray-200 bg-white w-56" />
-          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>
+          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 text-sm">🔍</span>
         </div>
         {(filterModule !== "all" || filterAction !== "all" || filterUser !== "all" || searchQ) && (
           <button onClick={() => { setFilterModule("all"); setFilterAction("all"); setFilterUser("all"); setSearchQ(""); }}
@@ -9729,9 +9729,9 @@ function AuditLogTab() {
 
       {/* TABELA */}
       {loading ? (
-        <div className="p-8 text-center text-gray-400 text-sm">Ładowanie logów…</div>
+        <div className="p-8 text-center text-gray-500 text-sm">Ładowanie logów…</div>
       ) : filtered.length === 0 ? (
-        <div className="p-8 text-center text-gray-400 text-sm">Brak wpisów pasujących do filtrów</div>
+        <div className="p-8 text-center text-gray-500 text-sm">Brak wpisów pasujących do filtrów</div>
       ) : (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
           <table className="w-full text-sm">
@@ -9824,7 +9824,7 @@ function LoginHistoryTab() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-400 bg-gray-50">
+              <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500 bg-gray-50">
                 <th className="px-4 py-3 font-medium">Kiedy</th>
                 <th className="px-4 py-3 font-medium">Kto</th>
                 <th className="px-4 py-3 font-medium">Skąd</th>
@@ -9834,10 +9834,10 @@ function LoginHistoryTab() {
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">Ładowanie…</td></tr>
+                <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">Ładowanie…</td></tr>
               )}
               {!loading && events.length === 0 && (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">Brak zapisanych logowań (pojawią się po następnym logowaniu przez produkcję).</td></tr>
+                <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">Brak zapisanych logowań (pojawią się po następnym logowaniu przez produkcję).</td></tr>
               )}
               {events.map((e) => (
                 <tr key={e.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
@@ -9845,7 +9845,7 @@ function LoginHistoryTab() {
                   <td className="px-4 py-3 text-gray-800 font-medium">{e.email || e.uid || "—"}</td>
                   <td className="px-4 py-3 whitespace-nowrap text-gray-700">{place(e)}</td>
                   <td className="px-4 py-3 whitespace-nowrap text-gray-700">{e.device || "—"}</td>
-                  <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-400 font-mono">{e.ip || "—"}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-500 font-mono">{e.ip || "—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -9930,7 +9930,7 @@ function TerminyPobranTab({ vehicles }) {
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-400 bg-gray-50">
+            <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500 bg-gray-50">
               <th className="px-4 py-2.5 font-medium">{colName}</th>
               <th className="px-4 py-2.5 font-medium">Dane do</th>
               <th className="px-4 py-2.5 font-medium">Termin</th>
@@ -9939,7 +9939,7 @@ function TerminyPobranTab({ vehicles }) {
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td colSpan={4} className="px-4 py-6 text-center text-gray-400">Brak danych.</td></tr>
+              <tr><td colSpan={4} className="px-4 py-6 text-center text-gray-500">Brak danych.</td></tr>
             )}
             {rows.map((r, i) => {
               const s = statusOf(r);
@@ -9947,7 +9947,7 @@ function TerminyPobranTab({ vehicles }) {
                 <tr key={i} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
                   <td className="px-4 py-3">
                     <div className="font-medium text-gray-800">{r.name}</div>
-                    {r.sub && <div className="text-xs text-gray-400 font-mono">{r.sub}</div>}
+                    {r.sub && <div className="text-xs text-gray-500 font-mono">{r.sub}</div>}
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap text-gray-600">{r.through ? new Date(r.through).toLocaleDateString("pl-PL") : "—"}</td>
                   <td className="px-4 py-3 whitespace-nowrap text-gray-600">{fmtD(r.deadline)}</td>
@@ -9972,7 +9972,7 @@ function TerminyPobranTab({ vehicles }) {
         </p>
       </div>
       {loading ? (
-        <div className="text-gray-400 py-8 text-center">Ładowanie…</div>
+        <div className="text-gray-500 py-8 text-center">Ładowanie…</div>
       ) : (
         <>
           <Table title="🧑‍✈️ Karty kierowców" subtitle="Pobranie co max 28 dni. Termin = ostatnie dane + 28 dni." rows={cardRows} colName="Kierowca" />
@@ -10137,7 +10137,7 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-xl font-bold text-gray-900">Użytkownicy</h2>
-          <p className="text-sm text-gray-400 mt-0.5">Zarządzanie dostępem do FleetStat</p>
+          <p className="text-sm text-gray-500 mt-0.5">Zarządzanie dostępem do FleetStat</p>
         </div>
       </div>
 
@@ -10172,24 +10172,24 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
                   <span className="ml-auto px-2 py-0.5 rounded-full text-xs font-semibold"
                     style={{ background: r.bg, color: r.color }}>{r.id}</span>
                 </div>
-                <p className="text-xs text-gray-400">{r.desc}</p>
+                <p className="text-xs text-gray-500">{r.desc}</p>
               </div>
             ))}
           </div>
 
           {/* BIURO USERS LIST */}
           <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-            <div className="hidden md:grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-medium text-gray-400 uppercase tracking-wider">
+            <div className="hidden md:grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-medium text-gray-500 uppercase tracking-wider">
               <span className="col-span-5">Email</span>
               <span className="col-span-3">Aktualna rola</span>
               <span className="col-span-4">Zmień rolę</span>
             </div>
 
             {loading && (
-              <div className="px-5 py-10 text-center text-gray-400 text-sm">Ładowanie użytkowników…</div>
+              <div className="px-5 py-10 text-center text-gray-500 text-sm">Ładowanie użytkowników…</div>
             )}
             {!loading && biuroUsers.length === 0 && (
-              <div className="px-5 py-10 text-center text-gray-400 text-sm">Brak użytkowników biurowych</div>
+              <div className="px-5 py-10 text-center text-gray-500 text-sm">Brak użytkowników biurowych</div>
             )}
 
             {!loading && biuroUsers.map((u, i) => {
@@ -10253,7 +10253,7 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
                           {hasCustom ? (
                             <span className="ml-2 text-xs font-normal text-blue-600">· własne ustawienia</span>
                           ) : (
-                            <span className="ml-2 text-xs font-normal text-gray-400">· domyślne dla roli "{u.role}"</span>
+                            <span className="ml-2 text-xs font-normal text-gray-500">· domyślne dla roli "{u.role}"</span>
                           )}
                         </div>
                         {hasCustom && (
@@ -10283,7 +10283,7 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
                           );
                         })}
                       </div>
-                      <div className="mt-3 text-xs text-gray-400">
+                      <div className="mt-3 text-xs text-gray-500">
                         💡 Zakładki <strong>Użytkownicy</strong> i <strong>Email statusy</strong> są zawsze admin-only i nie można ich przyznać tutaj.
                       </div>
                     </div>
@@ -10293,7 +10293,7 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
             })}
           </div>
 
-          <div className="mt-4 px-1 text-xs text-gray-400">
+          <div className="mt-4 px-1 text-xs text-gray-500">
             💡 Nowy użytkownik pojawi się na liście po pierwszym zalogowaniu. Domyślnie otrzymuje rolę <strong>Podgląd</strong>.
           </div>
         </div>
@@ -10355,25 +10355,25 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
                 + Dodaj kierowcę
               </button>
             </div>
-            <div className="text-xs text-gray-400 mt-2">
+            <div className="text-xs text-gray-500 mt-2">
               Kierowca musi mieć konto w Firebase Auth (założone w konsoli lub przez rejestrację). Po dodaniu tutaj i pierwszym zalogowaniu — zobaczy panel kierowcy.
             </div>
           </div>
 
           {/* DRIVERS LIST */}
           <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-            <div className="hidden md:grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-medium text-gray-400 uppercase tracking-wider">
+            <div className="hidden md:grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-medium text-gray-500 uppercase tracking-wider">
               <span className="col-span-4">Kierowca</span>
               <span className="col-span-4">Przypisany pojazd</span>
               <span className="col-span-4">Akcje</span>
             </div>
 
             {loading && (
-              <div className="px-5 py-10 text-center text-gray-400 text-sm">Ładowanie…</div>
+              <div className="px-5 py-10 text-center text-gray-500 text-sm">Ładowanie…</div>
             )}
 
             {!loading && driverUsers.length === 0 && (
-              <div className="px-5 py-10 text-center text-gray-400 text-sm">
+              <div className="px-5 py-10 text-center text-gray-500 text-sm">
                 Brak kierowców. Zmień rolę użytkownika na <strong>Kierowca</strong> w zakładce Biuro, aby dodać go tutaj.
               </div>
             )}
@@ -10393,7 +10393,7 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium text-gray-800">{u.displayName || u.email?.split("@")[0] || "—"}</div>
-                      <div className="text-xs text-gray-400 truncate">{u.email}</div>
+                      <div className="text-xs text-gray-500 truncate">{u.email}</div>
                       <div className="flex items-center gap-1 mt-1">
                         <span className="text-xs">📱</span>
                         <input
@@ -10422,7 +10422,7 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
                         {assignedVehicle.brand && <span className="text-xs text-emerald-600">{assignedVehicle.brand}</span>}
                       </div>
                     ) : (
-                      <span className="text-sm text-gray-400 italic">Brak pojazdu</span>
+                      <span className="text-sm text-gray-500 italic">Brak pojazdu</span>
                     )}
                   </div>
 
@@ -10471,7 +10471,7 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
                           className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs"
                           style={{
                             background: !d.to ? "#ecfdf5" : "#f3f4f6",
-                            color: !d.to ? "#059669" : "#9ca3af",
+                            color: !d.to ? "#059669" : "#6b7280",
                             fontWeight: !d.to ? 600 : 400,
                           }}>
                           {d.name || d.email} · {d.from}{d.to ? ` → ${d.to}` : " → teraz"}
@@ -10625,7 +10625,7 @@ function ImiTab({ imiRecords, vehicles, onAdd, onDelete }) {
       <div className="flex items-start justify-between mb-5 gap-3 flex-wrap">
         <div>
           <h2 className="text-xl font-bold text-gray-900">IMI / SIPSI</h2>
-          <p className="text-sm text-gray-400 mt-0.5">Delegowanie kierowców do krajów UE · {imiRecords.length} wpisów</p>
+          <p className="text-sm text-gray-500 mt-0.5">Delegowanie kierowców do krajów UE · {imiRecords.length} wpisów</p>
         </div>
         <button onClick={() => setShowUpload(true)}
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold text-white hover:opacity-90 transition-all"
@@ -10656,7 +10656,7 @@ function ImiTab({ imiRecords, vehicles, onAdd, onDelete }) {
       </div>
 
       {imiRecords.length === 0 && (
-        <div className="text-center py-20 text-gray-400">
+        <div className="text-center py-20 text-gray-500">
           <div className="text-5xl mb-4">🌍</div>
           <div className="font-semibold text-gray-500 mb-1">Brak wpisów IMI/SIPSI</div>
           <div className="text-sm">Wgraj dokument — AI odczyta wszystkie dane automatycznie</div>
@@ -10697,10 +10697,10 @@ function ImiCard({ record: r, vehicles, onPreview, onDelete }) {
             )}
             {isActive
               ? <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background:"#f0fdf4", color:"#16a34a" }}>● Aktywne</span>
-              : r.dateTo && <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background:"#f3f4f6", color:"#9ca3af" }}>Zakończone</span>
+              : r.dateTo && <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background:"#f3f4f6", color:"#6b7280" }}>Zakończone</span>
             }
           </div>
-          <div className="text-xs text-gray-400 mt-0.5">
+          <div className="text-xs text-gray-500 mt-0.5">
             {r.dateFrom && r.dateTo ? `${fmtDate(r.dateFrom)} — ${fmtDate(r.dateTo)}` : r.dateFrom ? `od ${fmtDate(r.dateFrom)}` : ""}
           </div>
         </div>
@@ -10715,15 +10715,15 @@ function ImiCard({ record: r, vehicles, onPreview, onDelete }) {
       {/* info row — tylko kierowca, kraj, daty */}
       <div className="grid grid-cols-3 divide-x divide-gray-50 text-xs">
         <div className="px-4 py-2.5">
-          <div className="text-gray-400 mb-0.5">Kierowca</div>
+          <div className="text-gray-500 mb-0.5">Kierowca</div>
           <div className="font-medium text-gray-700">{r.driverName||"—"}</div>
         </div>
         <div className="px-4 py-2.5">
-          <div className="text-gray-400 mb-0.5">Kraj delegowania</div>
+          <div className="text-gray-500 mb-0.5">Kraj delegowania</div>
           <div className="font-medium text-gray-700">{r.country||"—"}</div>
         </div>
         <div className="px-4 py-2.5">
-          <div className="text-gray-400 mb-0.5">Okres</div>
+          <div className="text-gray-500 mb-0.5">Okres</div>
           <div className="font-medium text-gray-700">
             {r.dateFrom && r.dateTo ? `${fmtDate(r.dateFrom)} — ${fmtDate(r.dateTo)}` : "—"}
           </div>
@@ -10897,7 +10897,7 @@ function ImiPreviewModal({ record: r, vehicles, onClose }) {
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
           <div>
             <div className="text-sm font-bold text-gray-900">Road Transport - Posting Declaration</div>
-            <div className="text-xs text-gray-400">{r.driverName} · {r.country} · {r.dateFrom && r.dateTo ? `${fmtDate(r.dateFrom)} — ${fmtDate(r.dateTo)}` : ""}</div>
+            <div className="text-xs text-gray-500">{r.driverName} · {r.country} · {r.dateFrom && r.dateTo ? `${fmtDate(r.dateFrom)} — ${fmtDate(r.dateTo)}` : ""}</div>
           </div>
           <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs ml-3 flex-shrink-0">✕</button>
         </div>
@@ -10918,7 +10918,7 @@ function ImiPreviewModal({ record: r, vehicles, onClose }) {
             🖨 Otwórz widok drukowania → Ctrl+P / PDF
           </button>
           {opened && (
-            <p className="text-xs text-center text-gray-400 mt-2">
+            <p className="text-xs text-center text-gray-500 mt-2">
               Użyj <strong>Ctrl+P</strong> (lub ⌘P) i wybierz <strong>„Zapisz jako PDF"</strong>
             </p>
           )}
@@ -11073,7 +11073,7 @@ Extract ALL fields exactly as they appear. Return ONLY clean JSON, no text befor
   const errCount   = queue.filter(x => x.status==="error").length;
 
   const StatusIcon = ({ status }) => {
-    if (status==="pending")   return <span className="text-gray-400 text-lg">⏸</span>;
+    if (status==="pending")   return <span className="text-gray-500 text-lg">⏸</span>;
     if (status==="analyzing") return <span className="text-lg animate-spin inline-block">⏳</span>;
     if (status==="saved")     return <span className="text-lg">✅</span>;
     if (status==="duplicate") return <span className="text-lg">♻️</span>;
@@ -11091,7 +11091,7 @@ Extract ALL fields exactly as they appear. Return ONLY clean JSON, no text befor
         <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100">
           <div>
             <h3 className="text-base font-bold text-gray-900">🌍 Import IMI/SIPSI</h3>
-            <p className="text-xs text-gray-400 mt-0.5">Wiele plików naraz · AI odczytuje i zapisuje automatycznie</p>
+            <p className="text-xs text-gray-500 mt-0.5">Wiele plików naraz · AI odczytuje i zapisuje automatycznie</p>
           </div>
           <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs">✕</button>
         </div>
@@ -11107,7 +11107,7 @@ Extract ALL fields exactly as they appear. Return ONLY clean JSON, no text befor
               onChange={e=>addFiles(e.target.files)} className="hidden" />
             <span className="text-3xl">📂</span>
             <span className="text-sm font-semibold text-gray-600">Przeciągnij pliki lub kliknij</span>
-            <span className="text-xs text-gray-400">PDF, JPG, PNG · wiele plików naraz · maks. 15 MB/plik</span>
+            <span className="text-xs text-gray-500">PDF, JPG, PNG · wiele plików naraz · maks. 15 MB/plik</span>
             <span className="text-xs text-gray-300">RAR/ZIP: wypakuj najpierw i wrzuć pliki PDF</span>
           </div>
 
@@ -11124,7 +11124,7 @@ Extract ALL fields exactly as they appear. Return ONLY clean JSON, no text befor
                   <div className="flex-1 min-w-0">
                     <div className="text-xs font-semibold text-gray-800 truncate">{item.fileName}</div>
                     <div className="text-xs mt-0.5" style={{
-                      color: item.status==="saved"?"#16a34a": item.status==="duplicate"?"#d97706": item.status==="error"?"#dc2626":"#9ca3af"
+                      color: item.status==="saved"?"#16a34a": item.status==="duplicate"?"#d97706": item.status==="error"?"#dc2626":"#6b7280"
                     }}>
                       {item.status==="pending"   && "Oczekuje…"}
                       {item.status==="analyzing" && "🤖 AI analizuje…"}
@@ -11262,7 +11262,7 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold text-gray-900">{dt.label}</span>
-            {doc.label && <span className="text-xs text-gray-400">· {doc.label}</span>}
+            {doc.label && <span className="text-xs text-gray-500">· {doc.label}</span>}
             <DocStatusBadge expiryDate={doc.expiryDate} />
             {hasFile && (
               <button onClick={() => setPreview(doc)}
@@ -11273,13 +11273,13 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
             )}
           </div>
           <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
-            {doc.issueDate && <span className="text-xs text-gray-400">Zawarcie: {fmtDate(doc.issueDate)}</span>}
+            {doc.issueDate && <span className="text-xs text-gray-500">Zawarcie: {fmtDate(doc.issueDate)}</span>}
             {doc.coverageStart
               ? <span className="text-xs font-medium text-gray-600">Ważna: {fmtDate(doc.coverageStart)} – {doc.expiryDate ? fmtDate(doc.expiryDate) : "?"}{d!==null && (d>=0 ? ` (${d} dni do wygaśnięcia)` : " (wygasła)")}</span>
               : doc.expiryDate && <span className="text-xs font-medium text-gray-600">Ważny do: {fmtDate(doc.expiryDate)}{d!==null && (d>=0 ? ` (${d} dni)` : " (wygasła)")}</span>}
-            {doc.insurer     && <span className="text-xs text-gray-400">🏢 {doc.insurer}</span>}
-            {doc.policyNumber&& <span className="text-xs text-gray-400" style={{fontFamily:"'DM Mono',monospace"}}>#{doc.policyNumber}</span>}
-            {doc.cost        && <span className="text-xs text-gray-400">💰 {Number(doc.cost).toLocaleString("pl-PL")} zł</span>}
+            {doc.insurer     && <span className="text-xs text-gray-500">🏢 {doc.insurer}</span>}
+            {doc.policyNumber&& <span className="text-xs text-gray-500" style={{fontFamily:"'DM Mono',monospace"}}>#{doc.policyNumber}</span>}
+            {doc.cost        && <span className="text-xs text-gray-500">💰 {Number(doc.cost).toLocaleString("pl-PL")} zł</span>}
           </div>
           {/* Coverage tags */}
           {((doc.coverage && doc.coverage.length > 0) || (doc.customCoverage && doc.customCoverage.length > 0)) && (
@@ -11304,15 +11304,15 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
           {/* Contract info */}
           {(doc.kontrahent || doc.kwotaMiesieczna || doc.nrUmowy) && (
             <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
-              {doc.kontrahent && <span className="text-xs text-gray-400">🤝 {doc.kontrahent}</span>}
-              {doc.nrUmowy && <span className="text-xs text-gray-400" style={{fontFamily:"'DM Mono',monospace"}}>📝 {doc.nrUmowy}</span>}
+              {doc.kontrahent && <span className="text-xs text-gray-500">🤝 {doc.kontrahent}</span>}
+              {doc.nrUmowy && <span className="text-xs text-gray-500" style={{fontFamily:"'DM Mono',monospace"}}>📝 {doc.nrUmowy}</span>}
               {doc.kwotaMiesieczna && <span className="text-xs text-gray-500 font-medium">💳 {Number(doc.kwotaMiesieczna).toLocaleString("pl-PL")} zł/mies.</span>}
-              {doc.minOkres && <span className="text-xs text-gray-400">⏳ min. {doc.minOkres} mies.</span>}
-              {doc.okresWypowiedzenia && <span className="text-xs text-gray-400">📅 wypow. {doc.okresWypowiedzenia} mies.</span>}
+              {doc.minOkres && <span className="text-xs text-gray-500">⏳ min. {doc.minOkres} mies.</span>}
+              {doc.okresWypowiedzenia && <span className="text-xs text-gray-500">📅 wypow. {doc.okresWypowiedzenia} mies.</span>}
             </div>
           )}
-          {doc.warunki && <div className="text-xs text-gray-400 mt-0.5 truncate">📋 {doc.warunki}</div>}
-          {doc.notes && <div className="text-xs text-gray-400 mt-0.5 truncate italic">{doc.notes}</div>}
+          {doc.warunki && <div className="text-xs text-gray-500 mt-0.5 truncate">📋 {doc.warunki}</div>}
+          {doc.notes && <div className="text-xs text-gray-500 mt-0.5 truncate italic">{doc.notes}</div>}
           {/* reminders */}
           {doc.reminders?.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-1.5">
@@ -11329,7 +11329,7 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
         {/* actions */}
         <div className="flex flex-col gap-1 flex-shrink-0">
           <button onClick={() => setEditDoc(doc)}
-            className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-all text-xs">✏️</button>
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-all text-xs">✏️</button>
           <button onClick={() => onDelete(doc.id)}
             className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-all text-xs">✕</button>
         </div>
@@ -11343,7 +11343,7 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-900">Dokumenty & Ubezpieczenia</h2>
-          <p className="text-sm text-gray-400 mt-0.5">{docs.length} dokumentów · {docs.filter(d=>d.fileUrl||d.fileData).length} z plikiem</p>
+          <p className="text-sm text-gray-500 mt-0.5">{docs.length} dokumentów · {docs.filter(d=>d.fileUrl||d.fileData).length} z plikiem</p>
         </div>
         <div className="flex gap-2 flex-wrap">
           <button onClick={() => setShowBulkUpload(true)}
@@ -11401,7 +11401,7 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
               <span className="text-xs font-bold text-gray-500 uppercase tracking-wider" style={{fontFamily:"'DM Mono',monospace"}}>
                 {v.plate}{v.plate2?` / ${v.plate2}`:""}
               </span>
-              <span className="text-xs text-gray-400">· {v.brand} {v.year}{activeDriverName(v) ? ` · ${activeDriverName(v)}` : ""}</span>
+              <span className="text-xs text-gray-500">· {v.brand} {v.year}{activeDriverName(v) ? ` · ${activeDriverName(v)}` : ""}</span>
               <span className="text-xs text-gray-300">({vDocs.length})</span>
             </div>
             <div className="space-y-2">
@@ -11424,7 +11424,7 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
       })()}
 
       {docs.length === 0 && (
-        <div className="text-center py-20 text-gray-400">
+        <div className="text-center py-20 text-gray-500">
           <div className="text-5xl mb-4">🛡️</div>
           <div className="font-semibold text-gray-500 mb-1">Brak dokumentów</div>
           <div className="text-sm">Kliknij „Dodaj dokument" — możesz też wgrać plik PDF lub zdjęcie</div>
@@ -11442,7 +11442,7 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
               <button onClick={() => setShowReminders(false)} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs">✕</button>
             </div>
             <div className="px-6 py-4 space-y-3">
-              {reminders.length === 0 && <p className="text-sm text-gray-400 text-center py-8">Brak dokumentów z datą ważności</p>}
+              {reminders.length === 0 && <p className="text-sm text-gray-500 text-center py-8">Brak dokumentów z datą ważności</p>}
               {reminders.map(r => (
                 <div key={r.id} className="flex items-center gap-3 p-3 rounded-xl"
                   style={{ background: r.days<0?"#fef2f2": r.days<=30?"#fef9c3": r.days<=60?"#fffbeb":"#f9fafb",
@@ -11670,7 +11670,7 @@ Szukaj numerow rejestracyjnych pojazdow w dokumencie.`;
         <div className="flex justify-between items-center px-6 pt-5 pb-4 border-b border-gray-100">
           <div>
             <h3 className="text-base font-bold text-gray-900">🤖 Wgraj dokumenty z AI</h3>
-            <p className="text-xs text-gray-400 mt-0.5">AI automatycznie odczyta dane — Ty potwierdzasz przed zapisem</p>
+            <p className="text-xs text-gray-500 mt-0.5">AI automatycznie odczyta dane — Ty potwierdzasz przed zapisem</p>
           </div>
           <button onClick={handleClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs">✕</button>
         </div>
@@ -11686,7 +11686,7 @@ Szukaj numerow rejestracyjnych pojazdow w dokumencie.`;
             <input ref={fileRef} type="file" accept=".pdf,image/*" multiple onChange={e => addFiles(e.target.files)} className="hidden" />
             <span className="text-4xl">📂</span>
             <span className="text-sm font-semibold text-gray-600">Przeciągnij pliki tutaj lub kliknij</span>
-            <span className="text-xs text-gray-400">PDF, JPG, PNG · maks. 8 MB / plik · wiele plików naraz</span>
+            <span className="text-xs text-gray-500">PDF, JPG, PNG · maks. 8 MB / plik · wiele plików naraz</span>
           </div>
 
           {/* QUEUE */}
@@ -11701,7 +11701,7 @@ Szukaj numerow rejestracyjnych pojazdow w dokumencie.`;
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-semibold text-gray-800 truncate">{item.fileName}</div>
                     <div className="text-xs mt-0.5">
-                      {item.status==="pending"   && <span className="text-gray-400">Oczekuje…</span>}
+                      {item.status==="pending"   && <span className="text-gray-500">Oczekuje…</span>}
                       {item.status==="analyzing" && <span style={{color:"#7c3aed"}}>🤖 AI analizuje…</span>}
                       {item.status==="done"      && <span style={{color:"#16a34a"}}>✓ Odczytano · pewność: <strong>{item.extracted?.confidence}</strong></span>}
                       {item.status==="error"     && <span style={{color:"#dc2626"}}>⚠ Błąd — wypełnij ręcznie</span>}
@@ -11769,7 +11769,7 @@ Szukaj numerow rejestracyjnych pojazdow w dokumencie.`;
                                 style={{
                                   background: active ? "#dbeafe" : "#f9fafb",
                                   border: `1px solid ${active ? "#3b82f6" : "#e5e7eb"}`,
-                                  color: active ? "#1d4ed8" : "#9ca3af",
+                                  color: active ? "#1d4ed8" : "#6b7280",
                                 }}>
                                 <span style={{fontSize:"10px"}}>{cov.icon}</span>{cov.label}{active && <span className="text-blue-500">✓</span>}
                               </button>
@@ -11805,7 +11805,7 @@ Szukaj numerow rejestracyjnych pojazdow w dokumencie.`;
         {/* FOOTER */}
         {queue.length > 0 && (
           <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between gap-3">
-            <span className="text-xs text-gray-400">
+            <span className="text-xs text-gray-500">
               {readyItems.length} z {queue.length} gotowych do zapisu
             </span>
             <button
@@ -11927,7 +11927,7 @@ function AddDocModal({ vehicles, doc, onSave, onClose }) {
             <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Typ dokumentu</div>
             {groups.map(group => (
               <div key={group} className="mb-3">
-                <div className="text-xs text-gray-400 mb-1.5">{group}</div>
+                <div className="text-xs text-gray-500 mb-1.5">{group}</div>
                 <div className="grid grid-cols-2 gap-1.5">
                   {DOC_TYPES.filter(t => t.group === group).map(dt => (
                     <button key={dt.id} onClick={() => set("type", dt.id)}
@@ -12037,7 +12037,7 @@ function AddDocModal({ vehicles, doc, onSave, onClose }) {
                 <span className="text-2xl">{form.fileType==="application/pdf" ? "📄" : "🖼️"}</span>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-gray-800 truncate">{form.fileName}</div>
-                  <div className="text-xs text-gray-400">{form.fileType}</div>
+                  <div className="text-xs text-gray-500">{form.fileType}</div>
                 </div>
                 <button onClick={() => { set("fileData",null); set("fileName",""); set("fileType",""); }}
                   className="text-xs text-red-400 hover:text-red-600 font-medium">Usuń</button>
@@ -12047,7 +12047,7 @@ function AddDocModal({ vehicles, doc, onSave, onClose }) {
                 <input ref={fileRef} type="file" accept=".pdf,image/*" onChange={handleFile} className="hidden" />
                 <button onClick={() => fileRef.current?.click()}
                   className="w-full py-8 rounded-xl border-2 border-dashed flex flex-col items-center gap-2 transition-all hover:bg-gray-50"
-                  style={{ borderColor:"#d1d5db", color:"#9ca3af" }}>
+                  style={{ borderColor:"#d1d5db", color:"#6b7280" }}>
                   {uploading
                     ? <><span className="text-2xl">⏳</span><span className="text-sm">Ładowanie…</span></>
                     : <><span className="text-2xl">📂</span><span className="text-sm font-medium text-gray-500">Kliknij aby wybrać plik</span><span className="text-xs">PDF, JPG, PNG · maks. 5 MB</span></>
@@ -12090,7 +12090,7 @@ function AddDocModal({ vehicles, doc, onSave, onClose }) {
                 + Dodaj
               </button>
             </div>
-            <p className="text-xs text-gray-400 mt-1">Przypomnienia widoczne w panelu 🔔 gdy zbliża się termin.</p>
+            <p className="text-xs text-gray-500 mt-1">Przypomnienia widoczne w panelu 🔔 gdy zbliża się termin.</p>
           </div>
         </div>
 
@@ -12350,7 +12350,7 @@ function AddCostModal({ vehicles, categories, eurRate, eurRateDate, eurLoading, 
             </MF>
           </div>
           {!eurLoading && (
-            <p className="text-xs text-gray-400 -mt-2">
+            <p className="text-xs text-gray-500 -mt-2">
               💱 Kurs NBP z dnia {eurRateDate} · przeliczanie obustronnie automatyczne
             </p>
           )}
@@ -12624,7 +12624,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
     setShowForm(true);
   };
 
-  const zyskColor = (z) => z > 0 ? "#16a34a" : z < 0 ? "#dc2626" : "#9ca3af";
+  const zyskColor = (z) => z > 0 ? "#16a34a" : z < 0 ? "#dc2626" : "#6b7280";
   const zyskBg   = (z) => z > 0 ? "#f0fdf4" : z < 0 ? "#fef2f2" : "#f9fafb";
   const fmt      = (n) => (n||0).toLocaleString("pl-PL", { minimumFractionDigits:0, maximumFractionDigits:0 }) + " €";
   const fmtS     = (n) => (n > 0 ? "+" : "") + fmt(n);
@@ -12635,7 +12635,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-900">📊 Rentowność floty</h2>
-          <p className="text-sm text-gray-400 mt-0.5">Przychody · Koszty · Zysk per pojazd</p>
+          <p className="text-sm text-gray-500 mt-0.5">Przychody · Koszty · Zysk per pojazd</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {/* Year selector */}
@@ -12672,7 +12672,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
         {[["flota","Flota — przegląd"],["pojazd","Pojazd — dane operacyjne"],["trendy","Trendy"]].map(([id,label]) => (
           <button key={id} onClick={() => setView(id)}
             className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all"
-            style={{ background: view===id ? "#fff" : "transparent", color: view===id ? "#111827" : "#9ca3af",
+            style={{ background: view===id ? "#fff" : "transparent", color: view===id ? "#111827" : "#6b7280",
                      boxShadow: view===id ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }}>
             {label}
           </button>
@@ -12689,7 +12689,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
               ["Zysk floty",     fleetZysk(selYear),    zyskColor(fleetZysk(selYear))]
             ].map(([lbl, val, color]) => (
               <div key={lbl} className="bg-white rounded-2xl px-4 py-3 border border-gray-100">
-                <div className="text-xs text-gray-400 mb-1">{lbl} {selYear}</div>
+                <div className="text-xs text-gray-500 mb-1">{lbl} {selYear}</div>
                 <div className="text-lg font-bold" style={{ color }}>{fmt(val)}</div>
               </div>
             ))}
@@ -12702,9 +12702,9 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
               <table className="w-full text-xs" style={{ minWidth: 700 }}>
                 <thead>
                   <tr className="border-b border-gray-50">
-                    <th className="text-left px-4 py-2.5 font-semibold text-gray-400 w-28">Pojazd</th>
-                    {MONTHS_PL.map(m => <th key={m} className="text-center py-2.5 font-semibold text-gray-400 px-1" style={{ minWidth:60 }}>{m.slice(0,3)}</th>)}
-                    <th className="text-right px-4 py-2.5 font-semibold text-gray-400">Rok</th>
+                    <th className="text-left px-4 py-2.5 font-semibold text-gray-500 w-28">Pojazd</th>
+                    {MONTHS_PL.map(m => <th key={m} className="text-center py-2.5 font-semibold text-gray-500 px-1" style={{ minWidth:60 }}>{m.slice(0,3)}</th>)}
+                    <th className="text-right px-4 py-2.5 font-semibold text-gray-500">Rok</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -12787,7 +12787,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
 
           {/* Per-vehicle table */}
           <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-            <div className="grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+            <div className="grid grid-cols-12 px-5 py-3 border-b border-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wider">
               <span className="col-span-3">Pojazd</span>
               <span className="col-span-2 text-right">Frachty</span>
               <span className="col-span-2 text-right">Koszty</span>
@@ -12805,7 +12805,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
                 <div key={v.id} className="grid grid-cols-12 px-5 py-3.5 border-b border-gray-50 items-center hover:bg-gray-50 transition-colors">
                   <div className="col-span-3">
                     <div className="font-semibold text-sm text-gray-900" style={{ fontFamily:"'DM Mono',monospace" }}>{v.plate}</div>
-                    <div className="text-xs text-gray-400">{v.brand}</div>
+                    <div className="text-xs text-gray-500">{v.brand}</div>
                   </div>
                   <div className="col-span-2 text-right text-sm font-medium text-gray-700">{f > 0 ? fmt(f) : <span className="text-gray-300">—</span>}</div>
                   <div className="col-span-2 text-right text-sm font-medium text-gray-700">{k > 0 ? fmt(k) : <span className="text-gray-300">—</span>}</div>
@@ -12880,15 +12880,15 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
                 {/* KPI cards */}
                 <div className="grid grid-cols-3 gap-3">
                   <div className="bg-white rounded-2xl px-4 py-3 border border-gray-100">
-                    <div className="text-xs text-gray-400 mb-1">Frachty {selYear}</div>
+                    <div className="text-xs text-gray-500 mb-1">Frachty {selYear}</div>
                     <div className="text-lg font-bold text-blue-600">{fmt(annualF)}</div>
                   </div>
                   <div className="bg-white rounded-2xl px-4 py-3 border border-gray-100">
-                    <div className="text-xs text-gray-400 mb-1">Koszty {selYear}</div>
+                    <div className="text-xs text-gray-500 mb-1">Koszty {selYear}</div>
                     <div className="text-lg font-bold text-red-500">{fmt(annualK)}</div>
                   </div>
                   <div className="bg-white rounded-2xl px-4 py-3 border border-gray-100">
-                    <div className="text-xs text-gray-400 mb-1">Zysk {selYear}</div>
+                    <div className="text-xs text-gray-500 mb-1">Zysk {selYear}</div>
                     <div className="text-lg font-bold" style={{ color: zyskColor(annualZ) }}>{fmtS(annualZ)}</div>
                   </div>
                 </div>
@@ -12911,7 +12911,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
                             <div className="w-full rounded-t border-2 border-dashed border-gray-200 group-hover:border-amber-300 transition-all" style={{ height:"100%" }} />
                           )}
                         </div>
-                        <div className="text-xs text-gray-400" style={{ fontSize:9 }}>{d.lbl}</div>
+                        <div className="text-xs text-gray-500" style={{ fontSize:9 }}>{d.lbl}</div>
                         {d.hasData && !d.isCurrent && (
                           <div className="text-xs font-bold" style={{ color: zyskColor(d.zysk), fontSize:9 }}>
                             {d.zysk >= 0 ? "+" : ""}{Math.round(d.zysk).toLocaleString("pl-PL")}
@@ -12923,7 +12923,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
                       </div>
                     ))}
                   </div>
-                  <div className="flex items-center gap-4 mt-2 text-xs text-gray-400">
+                  <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
                     <span><span className="inline-block w-3 h-2 rounded mr-1" style={{ background:"#3b82f6" }}></span>Frachty</span>
                     <span><span className="inline-block w-3 h-2 rounded mr-1" style={{ background:"#ef444460" }}></span>Koszty</span>
                     <span className="text-gray-300 text-xs ml-2">Kliknij miesiąc aby dodać/edytować</span>
@@ -12943,7 +12943,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
                             <div className="h-2 rounded-full transition-all" style={{ width: Math.max(2, c.total/annualK*100)+'%', background:"#6366f1" }} />
                           </div>
                           <span className="text-xs font-semibold text-gray-700 w-20 text-right">{fmt(c.total)}</span>
-                          <span className="text-xs text-gray-400 w-10 text-right">{annualK>0?(c.total/annualK*100).toFixed(0):"0"}%</span>
+                          <span className="text-xs text-gray-500 w-10 text-right">{annualK>0?(c.total/annualK*100).toFixed(0):"0"}%</span>
                         </div>
                       ))}
                     </div>
@@ -12956,17 +12956,17 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="border-b border-gray-50">
-                        <th className="text-left px-5 py-2 font-semibold text-gray-400">Miesiąc</th>
-                        <th className="text-right px-3 py-2 font-semibold text-gray-400">Frachty</th>
-                        <th className="text-right px-3 py-2 font-semibold text-gray-400">Koszty</th>
-                        <th className="text-right px-3 py-2 font-semibold text-gray-400">Zysk</th>
-                        <th className="text-right px-3 py-2 font-semibold text-gray-400">KM licznik</th>
-                        <th className="text-right px-3 py-2 font-semibold text-gray-400">Dni</th>
-                        <th className="text-right px-3 py-2 font-semibold text-gray-400">Paliwo L</th>
-                        <th className="text-right px-3 py-2 font-semibold text-gray-400">Spalanie</th>
-                        <th className="text-right px-3 py-2 font-semibold text-gray-400">€/L</th>
-                        <th className="text-right px-3 py-2 font-semibold text-gray-400">€/km</th>
-                        <th className="text-right px-3 py-2 font-semibold text-gray-400">Śr. waga</th>
+                        <th className="text-left px-5 py-2 font-semibold text-gray-500">Miesiąc</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-500">Frachty</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-500">Koszty</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-500">Zysk</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-500">KM licznik</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-500">Dni</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-500">Paliwo L</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-500">Spalanie</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-500">€/L</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-500">€/km</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-500">Śr. waga</th>
                         <th className="px-3 py-2 w-8"></th>
                       </tr>
                     </thead>
@@ -12990,13 +12990,13 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
                               const koszt_km = op?.kmLicznik && r?.costs ? (Object.values(r.costs||{}).reduce((s,v)=>s+v,0) / op.kmLicznik).toFixed(2) : null;
                               const _wagi = frachtyList.filter(f => f.vehicleId === selVehicle && (f.dataZaladunku||f.dataZlecenia||'').startsWith(`${selYear}-${String(mi+1).padStart(2,'0')}`) && parseFloat(f.wagaLadunku) > 0); const sr_waga = (_wagi.length > 0 && f > 0) ? _wagi.reduce((s,f,_,arr) => s + (parseFloat(f.wagaLadunku)||0)/arr.length, 0) : (op?.srWaga || 0);
                               return (<>
-                                <td className="text-right px-3 py-2.5 text-gray-400">{op?.kmLicznik ? op.kmLicznik.toLocaleString("pl-PL") : <span className="text-gray-200">—</span>}</td>
-                                <td className="text-right px-3 py-2.5 text-gray-400">{op?.dni ? op.dni : <span className="text-gray-200">—</span>}</td>
-                                <td className="text-right px-3 py-2.5 text-gray-400">{op?.paliwoL ? op.paliwoL.toLocaleString("pl-PL",{maximumFractionDigits:0})+" L" : <span className="text-gray-200">—</span>}</td>
-                                <td className="text-right px-3 py-2.5 text-gray-400">{op?.spalanie ? op.spalanie.toFixed(1)+" L/100" : <span className="text-gray-200">—</span>}</td>
-                                <td className="text-right px-3 py-2.5 text-gray-400">{op?.cenaPaliwa ? op.cenaPaliwa.toFixed(2)+" €/L" : <span className="text-gray-200">—</span>}</td>
-                                <td className="text-right px-3 py-2.5 text-gray-400">{koszt_km ? koszt_km+" €/km" : <span className="text-gray-200">—</span>}</td>
-                                <td className="text-right px-3 py-2.5 text-gray-400">{sr_waga > 0 ? Math.round(sr_waga)+" kg" : <span className="text-gray-200">—</span>}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-500">{op?.kmLicznik ? op.kmLicznik.toLocaleString("pl-PL") : <span className="text-gray-200">—</span>}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-500">{op?.dni ? op.dni : <span className="text-gray-200">—</span>}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-500">{op?.paliwoL ? op.paliwoL.toLocaleString("pl-PL",{maximumFractionDigits:0})+" L" : <span className="text-gray-200">—</span>}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-500">{op?.spalanie ? op.spalanie.toFixed(1)+" L/100" : <span className="text-gray-200">—</span>}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-500">{op?.cenaPaliwa ? op.cenaPaliwa.toFixed(2)+" €/L" : <span className="text-gray-200">—</span>}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-500">{koszt_km ? koszt_km+" €/km" : <span className="text-gray-200">—</span>}</td>
+                                <td className="text-right px-3 py-2.5 text-gray-500">{sr_waga > 0 ? Math.round(sr_waga)+" kg" : <span className="text-gray-200">—</span>}</td>
                               </>);
                             })()}
                             <td className="px-3 py-2.5 flex gap-1 items-center justify-end">
@@ -13071,7 +13071,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
             </div>
           )}
           {!selVehicle && (
-            <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center text-gray-400 text-sm">
+            <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center text-gray-500 text-sm">
               Wybierz pojazd powyżej
             </div>
           )}
@@ -13308,7 +13308,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
             </button>
           )}
           {tMode==="yoy" && closedMi < 12 && (
-            <span className="text-[11px] text-gray-400 ml-1">
+            <span className="text-[11px] text-gray-500 ml-1">
               porównanie Sty–{MS[closedMi-1]} (miesiące rozliczone)
             </span>
           )}
@@ -13398,7 +13398,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
             </div>
           ))}
           {tMode==="yoy" && (
-            <span className="text-[11px] text-gray-400 ml-auto">
+            <span className="text-[11px] text-gray-500 ml-auto">
               {tVehicles.length <= 1
                 ? "kolor = rok · przerywana = poza oknem porównania"
                 : `gruba = ${[...tYears].sort().slice(-1)[0]} · cienka = lata wcześniejsze · przerywana = poza oknem`}
@@ -13587,7 +13587,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                     }
                     // Procent obok kwoty — sama różnica nie mówi, czy to dużo (user 2026-09-11).
                     const pct = basePrev ? (totalDiff / Math.abs(basePrev)) * 100 : null;
-                    const totalC = totalDiff>0?"#15803d":totalDiff<0?"#dc2626":"#9ca3af";
+                    const totalC = totalDiff>0?"#15803d":totalDiff<0?"#dc2626":"#6b7280";
                     return (
                       <div style={{display:"grid", gridTemplateColumns:`repeat(12,1fr) ${TOTAL_COL}px`,
                         borderTop:"1px solid #e5e7eb", marginTop:4, paddingTop:4, textAlign:"center", alignItems:"center",
@@ -13595,7 +13595,7 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
                         title={`Różnica ${_diffYrs[1]} − ${_diffYrs[0]}`}>
                         {MS.map((_,mi)=>{
                           const d = (ytCur[mi]||0)-(ytPrev[mi]||0);
-                          const c = d===0?"#9ca3af":d>0?"#15803d":"#dc2626";
+                          const c = d===0?"#6b7280":d>0?"#15803d":"#dc2626";
                           return (
                             <div key={mi} style={{fontWeight:700,fontSize:10,color:c}}>
                               {d===0?"—":(d>0?"+":"")+fmtTk(d)}
@@ -13892,7 +13892,7 @@ function RentFormModal({ vehicles, record, initVehicle, initYear, initMonth, onS
              iloscFr: Number(iloscFr)||undefined, note });
   };
 
-  const zyskColor = (z) => z > 0 ? "#16a34a" : z < 0 ? "#dc2626" : "#9ca3af";
+  const zyskColor = (z) => z > 0 ? "#16a34a" : z < 0 ? "#dc2626" : "#6b7280";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background:"rgba(0,0,0,0.5)", backdropFilter:"blur(4px)" }}>
@@ -14063,7 +14063,7 @@ function ServisTab({ vehicles, onUpdateVehicle }) {
       <div className="flex items-center justify-between mb-5">
         <div>
           <h2 className="text-xl font-bold text-gray-900">🔧 Serwis & Terminarz</h2>
-          <p className="text-sm text-gray-400 mt-0.5">OC · AC · Przeglądy · UDT · Olej</p>
+          <p className="text-sm text-gray-500 mt-0.5">OC · AC · Przeglądy · UDT · Olej</p>
         </div>
         {totalAlerts > 0 && (
           <div className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold"
@@ -14093,7 +14093,7 @@ function ServisTab({ vehicles, onUpdateVehicle }) {
                     <span className="font-bold text-sm text-gray-900" style={{ fontFamily:"'DM Mono',monospace" }}>
                       {v.plate}{v.plate2 ? ` / ${v.plate2}` : ""}
                     </span>
-                    <div className="text-xs text-gray-400">{vehicleSubtitle(v)}</div>
+                    <div className="text-xs text-gray-500">{vehicleSubtitle(v)}</div>
                   </div>
                   {urgent > 0 && (
                     <span className="px-2 py-0.5 rounded-full text-xs font-bold text-white" style={{ background:"#dc2626" }}>
@@ -14111,7 +14111,7 @@ function ServisTab({ vehicles, onUpdateVehicle }) {
               {!isEdit && (
                 <div className="px-5 py-4">
                   {alerts.length === 0 ? (
-                    <div className="text-xs text-gray-400 text-center py-4">
+                    <div className="text-xs text-gray-500 text-center py-4">
                       Brak danych serwisowych — kliknij ✏️ Edytuj aby uzupełnić
                     </div>
                   ) : (
@@ -14228,7 +14228,7 @@ function ServiceEditForm({ vehicle, onSave, onClose }) {
           <div className="text-xs font-bold text-green-700 uppercase tracking-wider">🔑 Serwis gwarancyjny</div>
           <button onClick={() => set("warrantyActive", !v.warrantyActive)}
             className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all"
-            style={{ background: v.warrantyActive?"#dcfce7":"#f3f4f6", color: v.warrantyActive?"#16a34a":"#9ca3af", border:`1.5px solid ${v.warrantyActive?"#86efac":"#e5e7eb"}` }}>
+            style={{ background: v.warrantyActive?"#dcfce7":"#f3f4f6", color: v.warrantyActive?"#16a34a":"#6b7280", border:`1.5px solid ${v.warrantyActive?"#86efac":"#e5e7eb"}` }}>
             {v.warrantyActive ? "✓ Aktywna" : "Nieaktywna"}
           </button>
         </div>
@@ -14437,17 +14437,17 @@ function DriverCopyRow({ vehicle: v, active }) {
     <>
       <div className="px-5 py-3 border-b border-gray-50 flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-xs text-gray-400 mb-0.5">Aktualny kierowca</div>
+          <div className="text-xs text-gray-500 mb-0.5">Aktualny kierowca</div>
           {active
             ? <div className="flex items-center gap-2 flex-wrap">
                 <div className="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0" />
                 <span className="text-sm font-semibold text-gray-900">{active.name}</span>
                 {active.phone && (
-                  <span className="text-xs text-gray-400" style={{ fontFamily: "'DM Mono', monospace" }}>{active.phone}</span>
+                  <span className="text-xs text-gray-500" style={{ fontFamily: "'DM Mono', monospace" }}>{active.phone}</span>
                 )}
-                <span className="text-xs text-gray-400">podjął {fmtDate(active.from)}</span>
+                <span className="text-xs text-gray-500">podjął {fmtDate(active.from)}</span>
               </div>
-            : <div className="text-sm text-gray-400 italic">Brak przypisanego kierowcy</div>
+            : <div className="text-sm text-gray-500 italic">Brak przypisanego kierowcy</div>
           }
         </div>
         {active && (
@@ -14479,7 +14479,7 @@ function DriverCopyRow({ vehicle: v, active }) {
                 onFocus={(e) => e.target.select()}
                 className="w-full text-xs rounded-xl p-3 outline-none resize-none"
                 style={{ background: "#f9fafb", border: "1.5px solid #e5e7eb", fontFamily: "'DM Mono', monospace", color: "#111827", lineHeight: "1.7" }} />
-              <p className="text-xs text-gray-400 mt-2 text-center">Kliknij w pole → Ctrl+A → Ctrl+C</p>
+              <p className="text-xs text-gray-500 mt-2 text-center">Kliknij w pole → Ctrl+A → Ctrl+C</p>
             </div>
           </div>
         </div>
@@ -14624,7 +14624,7 @@ function CzasPracyModal({ vehicle, entries, onSave, onDelete, onClose }) {
             <VehicleIcon v={vehicle} size={24} />
             <div>
               <div className="font-bold text-gray-900">{vehicle.plate} — Czas pracy</div>
-              <div className="text-xs text-gray-400">{vehicle.brand} · {driverName}</div>
+              <div className="text-xs text-gray-500">{vehicle.brand} · {driverName}</div>
             </div>
           </div>
           <button onClick={onClose} className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 text-sm">✕</button>
@@ -14658,7 +14658,7 @@ function CzasPracyModal({ vehicle, entries, onSave, onDelete, onClose }) {
 
           {/* KALENDARZ */}
           <div className="grid grid-cols-7 gap-1 mb-4">
-            {dayNames.map(d => <div key={d} className="text-center text-xs font-semibold text-gray-400 py-1">{d}</div>)}
+            {dayNames.map(d => <div key={d} className="text-center text-xs font-semibold text-gray-500 py-1">{d}</div>)}
             {Array.from({ length: firstDow }, (_, i) => <div key={`e${i}`} />)}
             {Array.from({ length: daysInMonth }, (_, i) => {
               const day = i + 1;
@@ -14762,9 +14762,9 @@ function CzasPracyModal({ vehicle, entries, onSave, onDelete, onClose }) {
           </div>
 
           {/* WPISY Z BIEŻĄCEGO MIESIĄCA */}
-          <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Wpisy w tym miesiącu</div>
+          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Wpisy w tym miesiącu</div>
           {monthEntries.length === 0 ? (
-            <div className="text-xs text-gray-400 italic py-2">Brak wpisów</div>
+            <div className="text-xs text-gray-500 italic py-2">Brak wpisów</div>
           ) : (
             <div className="space-y-1.5">
               {monthEntries.sort((a,b) => b.start.localeCompare(a.start)).map(e => {
@@ -14785,7 +14785,7 @@ function CzasPracyModal({ vehicle, entries, onSave, onDelete, onClose }) {
                         {e.endTime ? ` ${e.endTime}` : ""}
                         {days > 1 ? ` (${days} dni)` : " (1 dzień)"}
                       </span>
-                      {e.note && <span className="text-gray-400 italic truncate" title={e.note}>· {e.note}</span>}
+                      {e.note && <span className="text-gray-500 italic truncate" title={e.note}>· {e.note}</span>}
                     </div>
                     <button onClick={() => {
                       const startStr = startD.toLocaleDateString("pl-PL", { day: "numeric", month: "short" });
@@ -14980,7 +14980,7 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
             + Dodaj
           </button>
         </div>
-        <p className="text-xs text-gray-400 mt-1.5">Możesz też wpisać i nacisnąć Enter</p>
+        <p className="text-xs text-gray-500 mt-1.5">Możesz też wpisać i nacisnąć Enter</p>
       </div>
 
       {/* ── DANE TECHNICZNE ── */}
@@ -15015,7 +15015,7 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
           <MF label="Spalanie — alarm (l/100km)">
             <MInput type="number" step="0.1" value={v.spalanieAlarm} onChange={(val) => setF("spalanieAlarm", val)} placeholder="np. 38" />
           </MF>
-          <div className="col-span-2 text-[11px] text-gray-400 -mt-1">
+          <div className="col-span-2 text-[11px] text-gray-500 -mt-1">
             Progi używane w podsumowaniu trasy. Poniżej normy = OK, między normą a alarmem = uwaga, powyżej alarmu = przekroczenie.
           </div>
         </div>
@@ -15033,7 +15033,7 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
         </div>
 
         {v.driverHistory.length === 0 && (
-          <div className="text-xs text-gray-400 italic py-2">Brak kierowców — dodaj pierwszego</div>
+          <div className="text-xs text-gray-500 italic py-2">Brak kierowców — dodaj pierwszego</div>
         )}
 
         <div className="space-y-3">
@@ -15046,7 +15046,7 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
                 <div className="flex items-center justify-between mb-2.5">
                   <div className="flex items-center gap-1.5">
                     <div className={`w-2 h-2 rounded-full ${isActive ? "bg-emerald-400" : "bg-gray-300"}`} />
-                    <span className="text-xs font-medium" style={{ color: isActive ? "#059669" : "#9ca3af" }}>
+                    <span className="text-xs font-medium" style={{ color: isActive ? "#059669" : "#6b7280" }}>
                       {isActive ? "Aktualny kierowca" : `Poprzedni (${idx + 1})`}
                     </span>
                   </div>
@@ -15231,7 +15231,7 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
           <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">🔧 Serwis olejowy — Gwarancja</div>
           <button onClick={()=>setF("warrantyActive",!v.warrantyActive)}
             className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all"
-            style={{ background: v.warrantyActive?"#f0fdf4":"#f3f4f6", color: v.warrantyActive?"#16a34a":"#9ca3af", border:`1.5px solid ${v.warrantyActive?"#86efac":"#e5e7eb"}` }}>
+            style={{ background: v.warrantyActive?"#f0fdf4":"#f3f4f6", color: v.warrantyActive?"#16a34a":"#6b7280", border:`1.5px solid ${v.warrantyActive?"#86efac":"#e5e7eb"}` }}>
             {v.warrantyActive ? "✓ Aktywna" : "Nieaktywna"}
           </button>
         </div>
@@ -15305,7 +15305,7 @@ function DeleteVehicleModal({ plate, onConfirm, onClose }) {
         style={{ fontFamily: "'DM Sans', sans-serif" }}>
         <div className="px-6 pt-5 pb-4 border-b border-gray-100">
           <h3 className="text-base font-bold text-gray-900">Usuń pojazd</h3>
-          <p className="text-sm text-gray-400 mt-0.5">{plate}</p>
+          <p className="text-sm text-gray-500 mt-0.5">{plate}</p>
         </div>
         <div className="px-6 py-5 space-y-4">
           <div>
@@ -15399,7 +15399,7 @@ function AddVehicleModal({ onSave, onClose }) {
           </div>
           <MF label="Marka / Model"><MInput placeholder="np. MAN TGX" value={form.brand} onChange={(v) => set("brand", v)} /></MF>
           <div className="pt-2 border-t border-gray-100">
-            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Wyposażenie</div>
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Wyposażenie</div>
             <div className="grid grid-cols-2 gap-2 mb-3">
               {DEFAULT_EQUIPMENT.map((eq) => {
                 const checked = form.equipment.includes(eq.id);
@@ -15442,7 +15442,7 @@ function AddVehicleModal({ onSave, onClose }) {
             </div>
           </div>
           <div className="pt-2 border-t border-gray-100">
-            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Dane techniczne (opcjonalnie)</div>
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Dane techniczne (opcjonalnie)</div>
             <div className="grid grid-cols-2 gap-3">
               <MF label="Wymiary — pojazd (cm)"><MInput placeholder="607x243x245" value={form.dimensions} onChange={(v) => set("dimensions", v)} /></MF>
               <MF label="Max waga — pojazd (kg)"><MInput type="number" placeholder="3000" value={form.maxWeight} onChange={(v) => set("maxWeight", v)} /></MF>
@@ -15458,7 +15458,7 @@ function AddVehicleModal({ onSave, onClose }) {
             </div>
           </div>
           <div className="pt-2 border-t border-gray-100">
-            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Daty we flocie</div>
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Daty we flocie</div>
             <div className="grid grid-cols-2 gap-3 mb-4">
               <MF label="Data dołączenia">
                 <MInput type="date" value={form.fleetJoinDate} onChange={(v) => set("fleetJoinDate", v)} />
@@ -15470,7 +15470,7 @@ function AddVehicleModal({ onSave, onClose }) {
           </div>
 
           <div className="pt-2 border-t border-gray-100">
-            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Kierowca startowy (opcjonalnie)</div>
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Kierowca startowy (opcjonalnie)</div>
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <MF label="Imię i nazwisko kierowcy">
@@ -15505,9 +15505,9 @@ function PageTitle({ children }) {
 function KpiCard({ label, value, sub, accent }) {
   return (
     <div className="bg-white rounded-2xl border border-gray-100 p-4">
-      <div className="text-xs text-gray-400 font-medium mb-1.5">{label}</div>
+      <div className="text-xs text-gray-500 font-medium mb-1.5">{label}</div>
       <div className="font-bold text-gray-900 text-lg leading-tight">{value}</div>
-      <div className="text-xs text-gray-400 mt-0.5">{sub}</div>
+      <div className="text-xs text-gray-500 mt-0.5">{sub}</div>
       <div className="h-0.5 mt-3 rounded-full" style={{ background: accent, width: "36%", opacity: 0.7 }} />
     </div>
   );
@@ -15659,7 +15659,7 @@ Jeśli nie możesz odczytać danego pola, wpisz null.`,
           {isFV ? "+ FV" : "+ Zlec."}
         </button>
       )}
-      {status === "uploading" && <span className="text-xs text-gray-400 animate-pulse">⬆️ wysyłam…</span>}
+      {status === "uploading" && <span className="text-xs text-gray-500 animate-pulse">⬆️ wysyłam…</span>}
       {status === "reading"   && <span className="text-xs text-amber-500 animate-pulse">🤖 AI czyta…</span>}
       {status === "done"      && <span className="text-xs text-green-600">✅ zapisano</span>}
       {status === "error"     && (
@@ -15795,7 +15795,7 @@ function CostsImportModal({ vehicles, categories, onImport, onClose }) {
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
           <div>
             <h3 className="text-base font-bold text-gray-900">Import kosztów z Excel</h3>
-            <p className="text-xs text-gray-400 mt-0.5">Wgraj plik VBS-Stat_Koszty_2025_EUR.xlsx</p>
+            <p className="text-xs text-gray-500 mt-0.5">Wgraj plik VBS-Stat_Koszty_2025_EUR.xlsx</p>
           </div>
           <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200">✕</button>
         </div>
@@ -15807,7 +15807,7 @@ function CostsImportModal({ vehicles, categories, onImport, onClose }) {
                 className="border-2 border-dashed border-gray-200 rounded-xl p-10 text-center cursor-pointer hover:border-gray-400 hover:bg-gray-50 transition-all">
                 <div className="text-4xl mb-3">📂</div>
                 <div className="font-semibold text-gray-700 mb-1">Kliknij aby wybrać plik</div>
-                <div className="text-xs text-gray-400">Obsługiwane: .xlsx (szablon VBS-Stat_Koszty)</div>
+                <div className="text-xs text-gray-500">Obsługiwane: .xlsx (szablon VBS-Stat_Koszty)</div>
                 <input ref={fileRef} type="file" accept=".xlsx" className="hidden" onChange={handleFile} />
               </div>
               {status === "error" && (
@@ -15817,7 +15817,7 @@ function CostsImportModal({ vehicles, categories, onImport, onClose }) {
           )}
 
           {status === "parsing" && (
-            <div className="text-center py-16 text-gray-400">
+            <div className="text-center py-16 text-gray-500">
               <div className="text-3xl mb-4">⏳</div>
               <div className="font-medium">Parsowanie pliku…</div>
             </div>
@@ -15828,15 +15828,15 @@ function CostsImportModal({ vehicles, categories, onImport, onClose }) {
               {/* KPI */}
               <div className="grid grid-cols-3 gap-3 mb-5">
                 <div className="rounded-xl p-3 bg-gray-50 border border-gray-100">
-                  <div className="text-xs text-gray-400 mb-1">Wpisów</div>
+                  <div className="text-xs text-gray-500 mb-1">Wpisów</div>
                   <div className="text-xl font-bold text-gray-900">{rows.length}</div>
                 </div>
                 <div className="rounded-xl p-3 bg-green-50 border border-green-100">
-                  <div className="text-xs text-gray-400 mb-1">Łącznie {currency0}</div>
+                  <div className="text-xs text-gray-500 mb-1">Łącznie {currency0}</div>
                   <div className="text-xl font-bold text-green-700">{fmt(totalAmt)}</div>
                 </div>
                 <div className="rounded-xl p-3 bg-blue-50 border border-blue-100">
-                  <div className="text-xs text-gray-400 mb-1">Pojazdów</div>
+                  <div className="text-xs text-gray-500 mb-1">Pojazdów</div>
                   <div className="text-xl font-bold text-blue-700">{Object.keys(byVehicle).length}</div>
                 </div>
               </div>
@@ -15897,7 +15897,7 @@ function CostsImportModal({ vehicles, categories, onImport, onClose }) {
 // FV / PŁATNOŚCI TAB
 // ═══════════════════════════════════════════════════════════════════════════════
 const FV_STATUSES = [
-  { id: "nie_wyslana",     label: "Nie wysłana",     bg: "#f3f4f6", color: "#6b7280", dot: "#9ca3af", emoji: "⚪" },
+  { id: "nie_wyslana",     label: "Nie wysłana",     bg: "#f3f4f6", color: "#6b7280", dot: "#6b7280", emoji: "⚪" },
   { id: "wyslana",         label: "Wysłana / czeka", bg: "#fefce8", color: "#92400e", dot: "#f59e0b", emoji: "🟡" },
   { id: "przeterminowana", label: "Przeterminowana", bg: "#fef2f2", color: "#991b1b", dot: "#ef4444", emoji: "🔴" },
   { id: "zaplacona",       label: "Zapłacona",       bg: "#f0fdf4", color: "#166534", dot: "#22c55e", emoji: "🟢" },
@@ -15956,7 +15956,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                 return (
                   <button key={key} onClick={() => { setFilterYear(key); setFilterMonth("all"); }}
                     className="rounded-xl px-3 py-1.5 transition-all whitespace-nowrap"
-                    style={{ background: active ? bg : "#fff", border: `2px solid ${active ? border : "#f3f4f6"}`, color: active ? color : "#9ca3af", fontWeight: active ? 700 : 500, fontSize: "13px" }}>
+                    style={{ background: active ? bg : "#fff", border: `2px solid ${active ? border : "#f3f4f6"}`, color: active ? color : "#6b7280", fontWeight: active ? 700 : 500, fontSize: "13px" }}>
                     {active && "✓ "}{label}
                   </button>
                 );
@@ -15976,7 +15976,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                 })}
               </div>
             )}
-            <div className="ml-auto text-xs text-gray-400">
+            <div className="ml-auto text-xs text-gray-500">
               {filtered.length} faktur · {filterYear === "all" ? "wszystkie lata" : filterMonth === "all" ? filterYear : `${MONTHS[parseInt(filterMonth)-1]} ${filterYear}`}
             </div>
           </div>
@@ -15987,7 +15987,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
           <div className="rounded-xl p-3 border border-gray-100 bg-gray-50">
             <div className="text-xs text-gray-500 mb-1">Łącznie EUR</div>
             <div className="text-lg font-bold text-gray-900">{fmt(kpiAll.total)}</div>
-            <div className="text-xs text-gray-400">{kpiAll.count} faktur</div>
+            <div className="text-xs text-gray-500">{kpiAll.count} faktur</div>
           </div>
           <div className="rounded-xl p-3 border border-red-100 bg-red-50">
             <div className="text-xs text-red-700 mb-1">🔴 Przeterminowane</div>
@@ -16008,7 +16008,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
 
         {/* KARTY KIEROWCÓW — wysłane/przeterminowane */}
         <div className="mb-4">
-          <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Per pojazd / kierowca</div>
+          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Per pojazd / kierowca</div>
           <div className="space-y-2">
             {vehicles.filter(v => !v.archived).map(v => {
               const vf = filtered.filter(r => r.vehicleId === v.id);
@@ -16029,7 +16029,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                     </div>
                     <div>
                       <div className="text-sm font-semibold text-gray-900">{driver !== "—" ? driver : v.plate} · {v.plate}</div>
-                      <div className="text-xs text-gray-400">{vf.length} faktur</div>
+                      <div className="text-xs text-gray-500">{vf.length} faktur</div>
                     </div>
                   </div>
                   <div className="text-right">
@@ -16066,7 +16066,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
         <button onClick={() => setSelectedVehicle(null)} className="px-3 py-1.5 rounded-lg text-sm text-gray-500 hover:bg-gray-100 border border-gray-200">← Powrót</button>
         <div className="flex-1">
           <h2 className="text-xl font-bold text-gray-900">{v?.plate} · FV / Płatności</h2>
-          <p className="text-sm text-gray-400">{v?.brand}</p>
+          <p className="text-sm text-gray-500">{v?.brand}</p>
         </div>
       </div>
 
@@ -16130,7 +16130,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
       <div className="overflow-x-auto rounded-xl border border-gray-100 bg-white">
         <table className="w-full text-xs">
           <thead>
-            <tr className="border-b border-gray-100 text-gray-400 uppercase bg-gray-50 text-xs">
+            <tr className="border-b border-gray-100 text-gray-500 uppercase bg-gray-50 text-xs">
               <th className="px-3 py-2.5 text-center whitespace-nowrap font-semibold">Data zlec.</th>
               <th className="px-3 py-2.5 text-left whitespace-nowrap font-semibold">Klient</th>
               <th className="px-3 py-2.5 text-center whitespace-nowrap font-semibold">Cena EUR</th>
@@ -16145,7 +16145,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td colSpan={11} className="text-center py-10 text-gray-400">Brak faktur dla wybranych filtrów</td></tr>
+              <tr><td colSpan={11} className="text-center py-10 text-gray-500">Brak faktur dla wybranych filtrów</td></tr>
             )}
             {rows.map(r => {
               const st = getStatus(r);
@@ -16233,7 +16233,7 @@ function KomentarzBaner({ frachtyList, eventsByFracht = {}, vehicleId, onUpdate 
   );
 
   if (!doRemind.length) {
-    return <div className="mt-3 text-xs text-gray-400 text-right">kliknij aby zobaczyc frachty →</div>;
+    return <div className="mt-3 text-xs text-gray-500 text-right">kliknij aby zobaczyc frachty →</div>;
   }
 
   return (
@@ -16278,7 +16278,7 @@ function KomentarzBaner({ frachtyList, eventsByFracht = {}, vehicleId, onUpdate 
                   <div className="text-xs font-semibold text-gray-800 truncate">
                     {r.klient || "—"}
                   </div>
-                  <div className="text-xs text-gray-400">
+                  <div className="text-xs text-gray-500">
                     {r.dataZlecenia} · {r.dokod || r.zaladunekKod || "—"}
                   </div>
                 </div>
@@ -16399,7 +16399,7 @@ function FrachtTollCell({ fracht, onUpdate }) {
     if (r?.error) { setErr(r.error); return; }
     onUpdate(fracht.id, { tollEstimate: r.toll, tollEstimateAt: new Date().toISOString(), tollEstimatePer: r.perCountry });
   };
-  if (busy) return <span className="text-gray-400">…</span>;
+  if (busy) return <span className="text-gray-500">…</span>;
   if (val != null) return (
     <button onClick={run} title={`Przelicz myto${fracht.tollEstimateAt ? " · " + ddmm(fracht.tollEstimateAt.slice(0,10)) : ""}`} className="text-gray-700 hover:text-blue-600 font-medium">
       {Number(val).toLocaleString("pl-PL", { maximumFractionDigits: 0 })} €
@@ -16546,7 +16546,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
 
         {/* HEADER */}
         <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-          <div><h2 className="text-xl font-bold text-gray-900">Frachty</h2><p className="text-sm text-gray-400 mt-0.5">{frachtyList.length} wpisów łącznie</p></div>
+          <div><h2 className="text-xl font-bold text-gray-900">Frachty</h2><p className="text-sm text-gray-500 mt-0.5">{frachtyList.length} wpisów łącznie</p></div>
           <button onClick={() => setShowImport(true)} className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 flex items-center gap-2">
             📥 Importuj z Excel
           </button>
@@ -16566,7 +16566,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                 return (
                   <button key={key} onClick={() => { setOverviewYear(key); setOverviewMonth("all"); }}
                     className="rounded-xl px-3 py-1.5 transition-all whitespace-nowrap"
-                    style={{ background: active ? bg : "#fff", border: `2px solid ${active ? border : "#f3f4f6"}`, color: active ? color : "#9ca3af", fontWeight: active ? 700 : 500, fontSize: "13px" }}>
+                    style={{ background: active ? bg : "#fff", border: `2px solid ${active ? border : "#f3f4f6"}`, color: active ? color : "#6b7280", fontWeight: active ? 700 : 500, fontSize: "13px" }}>
                     {active && "✓ "}{label}
                   </button>
                 );
@@ -16598,7 +16598,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                 ["Śr. €/km", avgKm !== "—" ? avgKm+" €" : "—", "#f59e0b"],
               ].map(([label, value, color]) => (
                 <div key={label} className="rounded-xl p-3 border border-gray-100 bg-white flex flex-col justify-center">
-                  <div className="text-xs text-gray-400 mb-1">{label}</div>
+                  <div className="text-xs text-gray-500 mb-1">{label}</div>
                   <div className="text-lg font-bold leading-tight" style={{color}}>{value}</div>
                 </div>
               ));
@@ -16616,13 +16616,13 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
             return (
               <div key={v.id} onClick={() => setSelectedVehicle(v.id)} className="bg-white rounded-2xl border border-gray-100 p-4 cursor-pointer hover:border-gray-300 hover:shadow-sm transition-all">
                 <div className="flex items-center justify-between mb-3">
-                  <div><div className="font-bold text-gray-900 text-base">{v.plate}</div><div className="text-xs text-gray-400">{vehicleSubtitle(v)}</div></div>
+                  <div><div className="font-bold text-gray-900 text-base">{v.plate}</div><div className="text-xs text-gray-500">{vehicleSubtitle(v)}</div></div>
                   <VehicleIcon v={v} size={20}/>
                 </div>
                 <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-gray-50">
-                  <div><div className="text-xs text-gray-400">Frachtów</div><div className="font-bold text-gray-900">{vf.length}</div></div>
-                  <div><div className="text-xs text-gray-400">Przychód</div><div className="font-bold text-green-700 text-sm">{fmt(suma)}</div></div>
-                  <div><div className="text-xs text-gray-400">Śr. €/km</div><div className="font-bold text-amber-500 text-sm">{km > 0 ? (suma/km).toFixed(2) : "—"}</div></div>
+                  <div><div className="text-xs text-gray-500">Frachtów</div><div className="font-bold text-gray-900">{vf.length}</div></div>
+                  <div><div className="text-xs text-gray-500">Przychód</div><div className="font-bold text-green-700 text-sm">{fmt(suma)}</div></div>
+                  <div><div className="text-xs text-gray-500">Śr. €/km</div><div className="font-bold text-amber-500 text-sm">{km > 0 ? (suma/km).toFixed(2) : "—"}</div></div>
                 </div>
                 <KomentarzBaner
                   frachtyList={frachtyList}
@@ -16653,7 +16653,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
     <div className="p-4 md:p-6">
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <button onClick={() => setSelectedVehicle(null)} className="px-3 py-1.5 rounded-lg text-sm text-gray-500 hover:bg-gray-100 border border-gray-200">← Powrot</button>
-        <div className="flex-1"><h2 className="text-xl font-bold text-gray-900">{v?.plate} · Frachty</h2><p className="text-sm text-gray-400">{vehicleSubtitle(v)}</p></div>
+        <div className="flex-1"><h2 className="text-xl font-bold text-gray-900">{v?.plate} · Frachty</h2><p className="text-sm text-gray-500">{vehicleSubtitle(v)}</p></div>
         {(() => {
           const need = rows.filter(r => r.tollEstimate == null && String(r.dataZaladunku || r.dataZlecenia || "") >= "2026-07");
           if (!need.length && !tollBatch) return null;
@@ -16703,12 +16703,12 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         {[["Frachtow",rows.length,"#6366f1"],["Przychod EUR",fmt(totalCena),"#16a34a"],["KM wszystkie",totalKmWszAll.toLocaleString("pl-PL"),"#0ea5e9"],["Sr. EUR/km",avgEurKm,"#f59e0b"]].map(([label,value,color]) => (
-          <div key={label} className="rounded-xl p-3 border border-gray-100 bg-white"><div className="text-xs text-gray-400 mb-1">{label}</div><div className="text-lg font-bold" style={{color}}>{value}</div></div>
+          <div key={label} className="rounded-xl p-3 border border-gray-100 bg-white"><div className="text-xs text-gray-500 mb-1">{label}</div><div className="text-lg font-bold" style={{color}}>{value}</div></div>
         ))}
       </div>
       {/* MOBILE — widok kartkowy */}
       <div className="md:hidden space-y-3 mb-4">
-        {rows.length === 0 && <div className="text-center py-8 text-gray-400 text-sm">Brak frachtów w tym miesiącu</div>}
+        {rows.length === 0 && <div className="text-center py-8 text-gray-500 text-sm">Brak frachtów w tym miesiącu</div>}
         {rows.map((r, idx) => {
           const eurKmLad = (r.kmWszystkie||r.kmLadowne) && r.cenaEur ? (parseFloat(r.cenaEur)/(parseInt(r.kmWszystkie)||parseInt(r.kmLadowne))).toFixed(2) : null;
           const stRozl = computeFrachtStatus(r, eventsByFracht[r.id] || []);
@@ -16719,7 +16719,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
               <div className="flex items-start justify-between mb-3">
                 <div>
                   <div className="font-bold text-gray-900">{r.klient || "—"}</div>
-                  <div className="text-xs text-gray-400 mt-0.5">{r.dataZlecenia} · #{idx+1}</div>
+                  <div className="text-xs text-gray-500 mt-0.5">{r.dataZlecenia} · #{idx+1}</div>
                 </div>
                 <div className="text-right">
                   <div className="font-bold text-green-700 text-lg">{r.cenaEur ? `${parseFloat(r.cenaEur).toLocaleString("pl-PL",{minimumFractionDigits:2})} €` : "—"}</div>
@@ -16732,7 +16732,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                 <span className="text-xs px-2 py-1 rounded-lg font-semibold" style={{background: stBg, color: stColor}}>{stEmoji} {stRozl === "rozladowano" ? "Rozładowano" : stRozl === "w_trasie" ? "W trasie" : "Problem"}</span>
               </div>
               <div className="flex items-center justify-between pt-2 border-t border-gray-50">
-                <div className="text-xs text-gray-400">{r.dyspozytor || "—"} · {r.nrFV || "brak FV"}</div>
+                <div className="text-xs text-gray-500">{r.dyspozytor || "—"} · {r.nrFV || "brak FV"}</div>
                 <div className="flex gap-1 flex-wrap">
                   {r.trackerToken && <TrackerPill fracht={r} onUpdate={onUpdate} />}
                   {r.urlZlecenie && <ZlecenieLinki fracht={r} label="📄 Zlecenie" compact />}
@@ -16755,24 +16755,24 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
       <div className="hidden md:block overflow-x-auto rounded-xl border border-gray-100 bg-white">
         <table className="w-full text-xs">
           <thead>
-            <tr className="border-b border-gray-100 text-gray-400 uppercase bg-gray-50">
+            <tr className="border-b border-gray-100 text-gray-500 uppercase bg-gray-50">
               {["#","Zlec.","Zał.","Rozł.","Załadunek","Rozładunek","Status","Klient","EUR","KM p.","KM ł.","KM w.","€/km ł.","€/km w.","nego/e-toll","Waga","Dysp.","FV","Uwagi",""].map(h => <th key={h} className="px-1.5 py-2 text-left whitespace-nowrap" style={{fontSize:11}}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && <tr><td colSpan={20} className="text-center py-10 text-gray-400">Brak frachtow w {miesiaceL[filterMonth]} {filterYear}</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={20} className="text-center py-10 text-gray-500">Brak frachtow w {miesiaceL[filterMonth]} {filterYear}</td></tr>}
             {rows.map((r,idx) => {
               const eurKmLad = r.kmLadowne && r.cenaEur ? (parseFloat(r.cenaEur)/parseInt(r.kmLadowne)).toFixed(2) : "-";
               const eurKmWsz = r.kmWszystkie && r.cenaEur ? (parseFloat(r.cenaEur)/parseInt(r.kmWszystkie)).toFixed(2) : "-";
               const FV_STATUSES = [
-                { id: "nie_wyslana",  label: "Nie wysłana",    bg: "#f3f4f6", color: "#6b7280", dot: "#9ca3af" },
+                { id: "nie_wyslana",  label: "Nie wysłana",    bg: "#f3f4f6", color: "#6b7280", dot: "#6b7280" },
                 { id: "wyslana",      label: "Wysłana / czeka", bg: "#fefce8", color: "#92400e", dot: "#f59e0b" },
                 { id: "przeterminowana", label: "Przeterminowana", bg: "#fef2f2", color: "#991b1b", dot: "#ef4444" },
                 { id: "zaplacona",    label: "Zapłacona",      bg: "#f0fdf4", color: "#166534", dot: "#22c55e" },
               ];
               return [
                 <tr key={r.id} className="border-b border-gray-50 hover:bg-blue-50 transition-colors" style={{fontSize: 12}}>
-                  <td className="px-1.5 py-1.5 text-gray-400">{idx+1}</td>
+                  <td className="px-1.5 py-1.5 text-gray-500">{idx+1}</td>
                   <td className="px-1.5 py-1.5 whitespace-nowrap" title={r.dataZlecenia||""}>{ddmm(r.dataZlecenia)}</td>
                   <td className="px-1.5 py-1.5 whitespace-nowrap text-gray-500" title={r.dataZaladunku||""}>{ddmm(r.dataZaladunku)}</td>
                   <td className="px-1.5 py-1.5 whitespace-nowrap text-gray-500" title={r.dataRozladunku||""}>{ddmm(r.dataRozladunku)}</td>
@@ -16829,7 +16829,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                               {hasRoz && <span className="text-[10px]">✅</span>}
                               {evts.some(e=>e.type?.includes("cmr")) && <span className="text-[10px]">📄</span>}
                               {evts.some(e=>e.type?.includes("photo")) && <span className="text-[10px]">📸</span>}
-                              <span className="text-[10px] text-gray-400">{driverStatusId === r.id ? "▲" : "▼"}</span>
+                              <span className="text-[10px] text-gray-500">{driverStatusId === r.id ? "▲" : "▼"}</span>
                             </button>
                           )}
                           {/* Round-trip badge: gdy fracht jest powrotny LUB ma swój powrotny */}
@@ -16948,7 +16948,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
                                   <div style={{ flex: 1, minWidth: 0 }}>
                                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                                       <span style={{ fontSize: 12, fontWeight: 500, color: meta.color }}>{meta.icon} {meta.label}</span>
-                                      <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: "auto", flexShrink: 0 }}>{timeStr}</span>
+                                      <span style={{ fontSize: 11, color: "#6b7280", marginLeft: "auto", flexShrink: 0 }}>{timeStr}</span>
                                       {ev.id && (
                                         <button onClick={async () => {
                                           if (!window.confirm("Usunąć ten wpis?")) return;
@@ -17335,7 +17335,7 @@ function FrachtyImportModal({ vehicles, onImport, onClose }) {
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
           <div>
             <h3 className="text-base font-bold text-gray-900">Import frachtów z Excel</h3>
-            <p className="text-xs text-gray-400 mt-0.5">Wgraj plik .xlsx ze szablonu VBS-Stat</p>
+            <p className="text-xs text-gray-500 mt-0.5">Wgraj plik .xlsx ze szablonu VBS-Stat</p>
           </div>
           <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs hover:bg-gray-200">✕</button>
         </div>
@@ -17351,7 +17351,7 @@ function FrachtyImportModal({ vehicles, onImport, onClose }) {
               >
                 <div className="text-4xl mb-3">📂</div>
                 <div className="font-semibold text-gray-700 mb-1">Kliknij aby wybrać plik</div>
-                <div className="text-xs text-gray-400">Obsługiwane: .xlsx (szablon VBS-Stat_Frachty_Import)</div>
+                <div className="text-xs text-gray-500">Obsługiwane: .xlsx (szablon VBS-Stat_Frachty_Import)</div>
                 <input ref={fileRef} type="file" accept=".xlsx" className="hidden" onChange={handleFile} />
               </div>
               {status === "error" && (
@@ -17364,7 +17364,7 @@ function FrachtyImportModal({ vehicles, onImport, onClose }) {
 
           {/* PARSING */}
           {status === "parsing" && (
-            <div className="text-center py-16 text-gray-400">
+            <div className="text-center py-16 text-gray-500">
               <div className="text-3xl mb-4 animate-spin">⏳</div>
               <div className="font-medium">Parsowanie pliku…</div>
             </div>
@@ -17405,14 +17405,14 @@ function FrachtyImportModal({ vehicles, onImport, onClose }) {
                         <td className="px-3 py-1.5 text-gray-500">{r.dokod || "-"}</td>
                         <td className="px-3 py-1.5 text-right font-semibold text-green-700">{fmt(r.cenaEur)}</td>
                         <td className="px-3 py-1.5 text-right text-gray-500">{r.kmLadowne || "-"}</td>
-                        <td className="px-3 py-1.5 text-gray-400">{r.nrFV || "-"}</td>
-                        <td className="px-3 py-1.5 text-gray-400">{r.dyspozytor || "-"}</td>
+                        <td className="px-3 py-1.5 text-gray-500">{r.nrFV || "-"}</td>
+                        <td className="px-3 py-1.5 text-gray-500">{r.dyspozytor || "-"}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
                 {rows.length > 50 && (
-                  <div className="text-xs text-gray-400 text-center py-2">… i {rows.length - 50} więcej wierszy</div>
+                  <div className="text-xs text-gray-500 text-center py-2">… i {rows.length - 50} więcej wierszy</div>
                 )}
               </div>
             </div>
@@ -17420,7 +17420,7 @@ function FrachtyImportModal({ vehicles, onImport, onClose }) {
 
           {/* IMPORTING */}
           {status === "importing" && (
-            <div className="text-center py-16 text-gray-400">
+            <div className="text-center py-16 text-gray-500">
               <div className="text-3xl mb-4">💾</div>
               <div className="font-medium">Zapisywanie do Firebase…</div>
             </div>
@@ -17431,7 +17431,7 @@ function FrachtyImportModal({ vehicles, onImport, onClose }) {
             <div className="text-center py-16">
               <div className="text-4xl mb-4">✅</div>
               <div className="font-bold text-gray-900 text-lg mb-1">Import zakończony!</div>
-              <div className="text-sm text-gray-400">Zaimportowano {rows.length} frachtów</div>
+              <div className="text-sm text-gray-500">Zaimportowano {rows.length} frachtów</div>
             </div>
           )}
         </div>
@@ -17491,7 +17491,7 @@ function FVEditModal({ record, onSave, onClose }) {
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
           <div>
             <h3 className="text-base font-bold text-gray-900">Edycja FV / Płatności</h3>
-            <p className="text-xs text-gray-400 mt-0.5">{record?.dataZlecenia} · {record?.skad} → {record?.dokod}</p>
+            <p className="text-xs text-gray-500 mt-0.5">{record?.dataZlecenia} · {record?.skad} → {record?.dokod}</p>
           </div>
           <button onClick={onClose} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs hover:bg-gray-200">✕</button>
         </div>
