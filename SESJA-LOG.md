@@ -14,6 +14,66 @@ Append-only dziennik. Każda sesja = nowa sekcja z datą i opisem.
 
 ---
 
+## 2026-10-26 (cd.) — Ocena skilli + poprawka kontrastu WCAG AA
+
+**Kontekst**: Po domknięciu ikon user wrócił do pierwotnego pytania — co dają zainstalowane skille. Tym razem je faktycznie uruchomiłem.
+
+### Ocena skilli — wnioski
+
+- **`design-taste-frontend`**: `draw.mjs` rozdaje kierunki z biblioteki 247 stron w 0,1 s. Pełny kierunek = 158 linii: idea, kompozycja, font z `<link>`, `clamp()`, paleta, blueprinty sekcji. Domena: **strony do czytania** (landing, portfolio), nie dashboardy. `assets.mjs` szuka i pobiera legalne zdjęcia/filmy z Openverse, Wikimedia, Met, AIC, Archive.org, NASA z zapisem licencji — przyda się przy VBS Rental i FreeTruck.
+- **`impeccable`**: 24 komendy to **instrukcje sterujące modelem**, nie skrypty. Jedyny realny kod to `detect` — skanuje pliki, URL-e i działające apki przez CDP. Wartość playbooka `audit.md` (139 linii) nie leży w automatyzacji, tylko w **kompletności**: wymusza przejście 5 wymiarów i nie pozwala napisać „dobrze" bez liczby.
+- **Pułapka**: `lint.mjs` z taste puszczony na `src/` dał 1466 FAIL — ale to reguły dla **landingów**. Ciche obramowania, małe etykiety i monospace są w regułach taste dla ekranów aplikacji **wprost dozwolone**. Właściwe narzędzie dla dashboardu to `inspect.mjs --app`.
+
+### `impeccable audit` na Przeglądzie — wynik 9/20
+
+| Wymiar | Wynik | Znalezisko |
+|---|---|---|
+| Dostępność | 1/4 | 47 ze 109 tekstów poniżej WCAG AA |
+| Wydajność | 2/4 | bundle 1,74 MB, `transition-all` 147× |
+| Motywy | 1/4 | 117 hexów, **zero** zmiennych CSS |
+| Responsywność | 3/4 | zero złamanych układów, 16/50 celów dotykowych <44 px |
+| Spójność | 2/4 | dwa ramp'y neutralne, emoji obok SVG |
+
+Dodatkowo: **zero nagłówków h1–h6** na całym ekranie, 4/4 pola bez etykiety, `focus:outline-none` 10× bez `focus-visible`.
+
+### Poprawka kontrastu — commity `044b1b1`, `c14459b`, merge `74cd05b`
+
+- `text-gray-400` (#9ca3af, **2,54:1**) → `text-gray-500` (#6b7280, 4,83:1): 431 klas + 75 hexów w 16 plikach
+- kolory semantyczne o stopień ciemniej **wyłącznie w pozycji `color:` i klasach `text-*`**, nigdy w `background`/`border`/`fill`: zielony → #15803d, bursztyn → #b45309, czerwienie → #b91c1c, pomarańcz → #c2410c, emerald → #047857, fiolet → #6d28d9
+- 19 par „tło gray-100 + tekst gray-500" (chipy miesięcy, przyciski Edytuj) → tekst gray-600, bo gray-500 daje tam tylko **4,39:1**
+
+**Wynik mierzony na 7 ekranach z prawdziwymi danymi: 122 oblane z 1666 (7%). Przegląd: 0.**
+
+### Dwa błędy, które sam popełniłem i złapałem pomiarem
+
+1. **Pierwszy commit dotykał tylko `src/App.jsx`.** Pomiar po nim pokazał, że `#9ca3af` wraca w 229 miejscach — bo 15 ekranów siedzi w osobnych plikach komponentów. Nie regresja, przeoczenie.
+2. **Emoji liczone jako tekst.** 53 „naruszenia" to były fałszywe alarmy — emoji renderują się własnymi kolorami, `color` CSS ich nie dotyczy. Poprawiłem pomiar.
+
+### Chronione przed zamianą, celowo
+
+- 5× `#9ca3af` jako `background` wyłączonych przycisków i kropki statusu
+- **`src/utils/fuelParsers.js` cofnięty w całości** — `CARDS[].color` to kolor marki karty paliwowej, używany i jako tekst, i jako tło pinu na mapie. Zmiana koloru marki to decyzja biznesowa.
+- separatory w `text-gray-300` (strzałki, kropki, plusy) — dekoracja, zwolniona z WCAG 1.4.3
+
+### Zweryfikowane wizualnie
+
+Przegląd (desktop + mobile), Frachty, Koszty, Paliwo, Rentowność, Flota + Archiwum — na localhoście, obok otwartej produkcji do porównania. Piny mapy paliwowej zachowały kolory marek.
+
+### NIE zweryfikowane
+
+- **DriverPanel** — 9 klas + 28 hexów zmienione, ale renderuje się tylko dla roli `kierowca`; z konta admina nieosiągalny
+- **Druk raportów DDD** — firanka 0,55 to ~0,77 px przy małej ikonie, może przepaść na papierze
+- **Zapis typu „TIR"** przez formularz — brak takiego auta we flocie
+
+### Otwarte
+
+- **122 teksty nadal poniżej AA** — głównie zielone/czerwone liczby na Rentowności (#16a34a 52×, #f59e0b 19×, #dc2626 17×). Kolory biorą się z funkcji typu `zyskColor()` i tablic `PALETTE`, używanych też do słupków wykresów i pinów mapy. Naprawa wymaga **rozdzielenia palety na tekstową i wykresową**, nie regexa.
+- Z audytu, nietknięte: brak nagłówków h1–h6, 4 pola bez etykiety, brak `focus-visible`, 16 celów dotykowych <44 px, zero zmiennych CSS
+- Ocena skilli zrobiona; `impeccable detect` jest kandydatem do `.husky/pre-push` (2 s, zero zależności)
+- W `public/` leży 14 gitignorowanych makiet `mockup_*.html` z tej sesji
+
+---
+
 ## 2026-10-26 — Ikony pojazdów: od emoji do rodziny sterowanej danymi
 
 **Kontekst startu**: Sesja zaczęła się od instalacji dwóch skilli agentowych (`design-taste-frontend`, `impeccable`) i miała być ich oceną. Zjechała w przebudowę ikon pojazdów. **Żaden skill nie został faktycznie użyty** — cała robota to ręczne projektowanie; ocena skilli pozostaje niezrobiona.
