@@ -743,8 +743,11 @@ const vehicleShape = (v) => {
 };
 
 const ICON_SVG = { fill: "none", stroke: "currentColor", strokeWidth: 1.3, strokeLinecap: "round", strokeLinejoin: "round" };
-const ICON_RATIO = { solo: 1.8, zestaw: 2.5, tir: 2.3, bus: 1.3 };
-const ICON_VBOX  = { solo: "0 0 36 20", zestaw: "0 0 50 20", tir: "0 0 46 20", bus: "0 0 26 20" };
+// Winda wystaje za obrys auta, więc solo z windą ma własny, szerszy viewBox —
+// inaczej L zostałoby przycięte. Wysokość viewBoxa jest wszędzie 20, więc samo
+// auto renderuje się w identycznej skali; szerszy box dokłada tylko miejsce z tyłu.
+const ICON_RATIO = { solo: 1.8, soloWinda: 2.0, zestaw: 2.5, tir: 2.3, bus: 1.3 };
+const ICON_VBOX  = { solo: "0 0 36 20", soloWinda: "0 0 40 20", zestaw: "0 0 50 20", tir: "0 0 46 20", bus: "0 0 26 20" };
 
 const VehicleIcon = ({ v, size = 20, className = "" }) => {
   const { chassis, body, winda } = vehicleShape(v);
@@ -755,7 +758,7 @@ const VehicleIcon = ({ v, size = 20, className = "" }) => {
     <>
       <path d="M2 14.5V6.4a1.4 1.4 0 0 1 1.4-1.4h5.2"/>
       <rect x="8.6" y="2.8" width="34" height="10.8" rx=".8"/>
-      {curtain && <path d="M12.6 3.7v9M16.6 3.7v9M20.6 3.7v9M24.6 3.7v9M28.6 3.7v9M32.6 3.7v9M36.6 3.7v9" opacity=".4"/>}
+      {curtain && <path d="M12.6 3.7v9M16.6 3.7v9M20.6 3.7v9M24.6 3.7v9M28.6 3.7v9M32.6 3.7v9M36.6 3.7v9" opacity=".4" strokeWidth=".55"/>}
       {fridge && <><rect x="9.8" y=".5" width="5.4" height="2.3" rx=".5"/><path d="M11 1.3h3M11 2h3" opacity=".5"/></>}
       <path d="M21 13.6v2.2"/>
       <circle cx="5" cy="16" r="1.9"/><circle cx="11.5" cy="16" r="1.9"/>
@@ -766,10 +769,10 @@ const VehicleIcon = ({ v, size = 20, className = "" }) => {
     <>
       <path d="M2 14.5V9.2l2.4-2.6h3.2"/><path d="M6.1 6.6 8.8 4"/>
       <rect x="8.8" y="4" width="15.2" height="10.5" rx=".8"/>
-      {curtain && <path d="M12.2 4.9v8.7M15.6 4.9v8.7M19 4.9v8.7M22.4 4.9v8.7" opacity=".45"/>}
+      {curtain && <path d="M12.2 4.9v8.7M15.6 4.9v8.7M19 4.9v8.7M22.4 4.9v8.7" opacity=".45" strokeWidth=".55"/>}
       <path d="M24 13.2h3.4"/>
       <rect x="27.4" y="4.6" width="17.6" height="9.9" rx=".8"/>
-      {curtain && <path d="M30.8 5.5v8.1M34.2 5.5v8.1M37.6 5.5v8.1M41 5.5v8.1" opacity=".45"/>}
+      {curtain && <path d="M30.8 5.5v8.1M34.2 5.5v8.1M37.6 5.5v8.1M41 5.5v8.1" opacity=".45" strokeWidth=".55"/>}
       <circle cx="5" cy="16" r="1.9"/><circle cx="19" cy="16" r="1.9"/>
       <circle cx="34" cy="16" r="1.9"/><circle cx="38.6" cy="16" r="1.9"/>
       <path d="M6.9 16h10.2M29 16h3.1M40.5 16h4.5M2 14.5h4.4"/>
@@ -785,17 +788,23 @@ const VehicleIcon = ({ v, size = 20, className = "" }) => {
     <>
       <path d="M2 14.5V9.2l2.4-2.6h3.2"/><path d="M6.1 6.6 8.8 4"/>
       <rect x="8.8" y="4" width="21.2" height="10.5" rx=".8"/>
-      {curtain && <path d="M12.5 4.9v8.7M16.3 4.9v8.7M20.1 4.9v8.7M23.9 4.9v8.7M27.7 4.9v8.7" opacity=".45"/>}
+      {curtain && <path d="M12.5 4.9v8.7M16.3 4.9v8.7M20.1 4.9v8.7M23.9 4.9v8.7M27.7 4.9v8.7" opacity=".45" strokeWidth=".55"/>}
       {fridge && <><rect x="9.9" y="1.6" width="5.6" height="2.4" rx=".5"/><path d="M11.2 2.4h3M11.2 3.2h3" opacity=".5"/></>}
-      {winda && <><path d="M30 12.6h4.4"/><path d="M34.4 12.6v2.3"/></>}
+      {/* Winda: pionowe ramię + płyta oparta o ziemię = litera L (jak "lift").
+          Odstęp 1,5 od tylnej ściany, żeby nie zlewała się z karoserią; kreska 1,1,
+          czyli lżejsza od auta. Ustalone z userem 2026-10-26 po pięciu podejściach —
+          wcześniejsza pozioma kreska z zadziorem czytała się jak ogon. */}
+      {winda && <path d="M31.5 12.6V17.9H37.7" strokeWidth="1.1"/>}
       <circle cx="5" cy="16" r="1.9"/><circle cx="22" cy="16" r="1.9"/>
       <path d="M6.9 16h13.2M23.9 16h6.1M2 14.5h4.4"/>
     </>
   );
 
+  const shape = chassis === "solo" && winda ? "soloWinda" : chassis;
+
   return (
     <span className={className} style={{ display: "inline-flex", alignItems: "center" }}>
-      <svg width={size * ICON_RATIO[chassis]} height={size} viewBox={ICON_VBOX[chassis]} {...ICON_SVG}>{parts}</svg>
+      <svg width={size * ICON_RATIO[shape]} height={size} viewBox={ICON_VBOX[shape]} {...ICON_SVG}>{parts}</svg>
     </span>
   );
 };
@@ -3221,8 +3230,12 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                           <div className="px-4 pt-4 pb-3 flex items-start justify-between"
                             style={{ borderBottom: "1px solid #f9fafb" }}>
                             <div className="flex items-center gap-2.5">
-                              <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0"
-                                style={{ background: "#f3f4f6" }}>
+                              {/* Bez szarego kafelka: sylwetki są szersze niż wyższe (1,3–2,5),
+                                  więc w kwadracie 36×36 zestaw z przyczepą wychodził poza obrys
+                                  i nachodził na rejestrację. Stała szerokość 52 px trzyma
+                                  rejestracje w jednej pionowej osi. Ustalone 2026-10-26. */}
+                              <div className="flex items-center flex-shrink-0 text-gray-500"
+                                style={{ width: 52, height: 32 }}>
                                 <VehicleIcon v={v} size={20}/>
                               </div>
                               <div>
@@ -3831,7 +3844,8 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                       {/* ── VEHICLE HEADER ── */}
                       <div className="flex items-center justify-between px-5 py-4 border-b border-gray-50">
                         <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center text-lg">
+                          {/* Bez kafelka — spójnie z kartą na Przeglądzie, patrz komentarz tam. */}
+                          <div className="flex items-center flex-shrink-0 text-gray-500" style={{ width: 52, height: 32 }}>
                             <VehicleIcon v={v} size={20}/>
                           </div>
                           <div>
@@ -4008,7 +4022,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                     {vehicles.filter(v => v.archived).map(v => (
                       <div key={v.id} className="flex items-center justify-between px-4 py-3 rounded-xl border border-dashed border-gray-200 bg-gray-50">
                         <div className="flex items-center gap-3">
-                          <span className="text-xl opacity-30"><VehicleIcon v={v} size={20}/></span>
+                          <span className="opacity-30"><VehicleIcon v={v} size={20}/></span>
                           <div>
                             <div className="text-sm font-semibold text-gray-400">{v.plate}{v.plate2 ? ` / ${v.plate2}` : ""}</div>
                             <div className="text-xs text-gray-400">{vehicleSubtitle(v)}</div>
@@ -14074,7 +14088,7 @@ function ServisTab({ vehicles, onUpdateVehicle }) {
               <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-50"
                 style={{ background: urgent > 0 ? "#fef9f9" : "#fafafa" }}>
                 <div className="flex items-center gap-3">
-                  <span className="text-xl"><VehicleIcon v={v} size={20}/></span>
+                  <VehicleIcon v={v} size={20}/>
                   <div>
                     <span className="font-bold text-sm text-gray-900" style={{ fontFamily:"'DM Mono',monospace" }}>
                       {v.plate}{v.plate2 ? ` / ${v.plate2}` : ""}
@@ -16011,7 +16025,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0"
                       style={{ background: hasPrzet ? "#fef2f2" : "#f0fdf4", color: hasPrzet ? "#dc2626" : "#15803d" }}>
-                      {initials || <VehicleIcon v={v} size={16}/>}
+                      {initials}
                     </div>
                     <div>
                       <div className="text-sm font-semibold text-gray-900">{driver !== "—" ? driver : v.plate} · {v.plate}</div>
@@ -16603,7 +16617,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
               <div key={v.id} onClick={() => setSelectedVehicle(v.id)} className="bg-white rounded-2xl border border-gray-100 p-4 cursor-pointer hover:border-gray-300 hover:shadow-sm transition-all">
                 <div className="flex items-center justify-between mb-3">
                   <div><div className="font-bold text-gray-900 text-base">{v.plate}</div><div className="text-xs text-gray-400">{vehicleSubtitle(v)}</div></div>
-                  <div className="text-2xl"><VehicleIcon v={v} size={20}/></div>
+                  <VehicleIcon v={v} size={20}/>
                 </div>
                 <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-gray-50">
                   <div><div className="text-xs text-gray-400">Frachtów</div><div className="font-bold text-gray-900">{vf.length}</div></div>
