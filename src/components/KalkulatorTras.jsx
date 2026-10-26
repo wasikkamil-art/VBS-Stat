@@ -681,7 +681,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
   return (
     <div>
       <h2 className="text-xl font-bold text-gray-900 mb-1">Kalkulator tras</h2>
-      <p className="text-sm text-gray-400 mb-5">Szacunkowy koszt trasy — paliwo per kraj + myto. Wynik orientacyjny, nie 1:1.</p>
+      <p className="text-sm text-gray-500 mb-5">Szacunkowy koszt trasy — paliwo per kraj + myto. Wynik orientacyjny, nie 1:1.</p>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* ── Panel wejścia ── */}
@@ -705,10 +705,10 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
               <div key={w.id} className="flex items-center gap-2 text-sm">
                 <span className="w-6 h-6 flex items-center justify-center rounded-full bg-blue-50 text-blue-600 text-xs font-semibold shrink-0">{i + 1}</span>
                 <span className="flex-1 truncate text-gray-700" title={w.label}>{w.label}</span>
-                <button onClick={() => removeWaypoint(w.id)} className="text-gray-300 hover:text-red-500 shrink-0" title="Usuń">✕</button>
+                <button onClick={() => removeWaypoint(w.id)} className="text-gray-300 hover:text-red-700 shrink-0" title="Usuń">✕</button>
               </div>
             ))}
-            {waypoints.length === 0 && <p className="text-xs text-gray-400">Brak punktów. Dodaj miasto/adres albo „lat, lon".</p>}
+            {waypoints.length === 0 && <p className="text-xs text-gray-500">Brak punktów. Dodaj miasto/adres albo „lat, lon".</p>}
           </div>
 
           <div className="flex gap-2 mb-4">
@@ -740,10 +740,10 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
 
           <div className="mt-4 pt-4 border-t border-gray-100">
             <h3 className="text-sm font-semibold text-gray-700 mb-3">Plan czasu (tachograf)</h3>
-            <label className="block text-xs text-gray-400">Wyjazd</label>
+            <label className="block text-xs text-gray-500">Wyjazd</label>
             <input type="datetime-local" value={startAt} onChange={(e) => setStartAt(e.target.value)}
               className="mt-1 w-full px-2 py-2 rounded-lg border border-gray-200 text-sm text-gray-700" />
-            <label className="block text-xs text-gray-400 mt-2">Kierowca</label>
+            <label className="block text-xs text-gray-500 mt-2">Kierowca</label>
             <select value={driverEmail} onChange={(e) => setDriverEmail(e.target.value)}
               className="mt-1 w-full px-2 py-2 rounded-lg border border-gray-200 text-sm text-gray-700">
               <option value="">— wypoczęty (bez stanu z tachografu) —</option>
@@ -751,12 +751,12 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
             </select>
             <div className="mt-2 grid grid-cols-2 gap-2">
               <div>
-                <label className="block text-xs text-gray-400">Rozładunek do (opcjonalnie)</label>
+                <label className="block text-xs text-gray-500">Rozładunek do (opcjonalnie)</label>
                 <input type="date" value={oknoData} onChange={(e) => setOknoData(e.target.value)}
                   className="mt-1 w-full px-2 py-2 rounded-lg border border-gray-200 text-sm text-gray-700" />
               </div>
               <div>
-                <label className="block text-xs text-gray-400">godz.</label>
+                <label className="block text-xs text-gray-500">godz.</label>
                 <input type="time" value={oknoGodz} onChange={(e) => setOknoGodz(e.target.value)}
                   className="mt-1 w-full px-2 py-2 rounded-lg border border-gray-200 text-sm text-gray-700" />
               </div>
@@ -772,7 +772,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
               : !vehicleId ? "Wybierz pojazd, żeby policzyć"
               : "Oblicz koszt trasy"}
           </button>
-          {computing && progress && <p className="text-[11px] text-gray-400 mt-2 text-center">Reverse-geocode punktów trasy (Nominatim, ~1/s)</p>}
+          {computing && progress && <p className="text-[11px] text-gray-500 mt-2 text-center">Reverse-geocode punktów trasy (Nominatim, ~1/s)</p>}
         </div>
 
         {/* ── Mapa ── */}
@@ -787,8 +787,8 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
           <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 mb-4">
             <div>
               <span className="text-2xl font-bold text-gray-900">{fmtEUR(result.grand)}</span>
-              {grandPLN != null && <span className="text-sm text-gray-400 ml-2">≈ {grandPLN.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} zł</span>}
-              <span className="text-xs text-gray-400 ml-2">szacunek</span>
+              {grandPLN != null && <span className="text-sm text-gray-500 ml-2">≈ {grandPLN.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} zł</span>}
+              <span className="text-xs text-gray-500 ml-2">szacunek</span>
             </div>
             <div className="text-sm text-gray-500">
               {result.distanceKm.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} km · {result.durationH.toFixed(1)} h · {result.cons} L/100
@@ -808,12 +808,12 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
                 <div className="grid grid-cols-2 text-sm">
                   <div className="p-3 bg-green-50/40 border-r border-gray-100">
                     <div className="text-[11px] text-gray-500 mb-0.5">🌿 Wg Waszej zasady</div>
-                    <div className="font-bold text-gray-800">{fmtEUR2(result.tollTotal)} <span className="font-normal text-gray-400 text-xs">myto</span></div>
+                    <div className="font-bold text-gray-800">{fmtEUR2(result.tollTotal)} <span className="font-normal text-gray-500 text-xs">myto</span></div>
                     <div className="text-[11px] text-gray-500">płatne: {payCC.join(" · ") || "—"}</div>
                   </div>
                   <div className="p-3 bg-gray-50/60">
                     <div className="text-[11px] text-gray-500 mb-0.5">🛣️ Gdyby wszędzie płatnymi</div>
-                    <div className="font-bold text-gray-500">{fmtEUR2(result.allTollTotal)} <span className="font-normal text-gray-400 text-xs">myto</span></div>
+                    <div className="font-bold text-gray-500">{fmtEUR2(result.allTollTotal)} <span className="font-normal text-gray-500 text-xs">myto</span></div>
                     <div className="text-[11px] text-gray-500">landem w: {landCC.length ? landCC.join(" · ") : "—"}</div>
                   </div>
                 </div>
@@ -828,7 +828,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-xs text-gray-400 border-b border-gray-100">
+                <tr className="text-xs text-gray-500 border-b border-gray-100">
                   <th className="text-left font-medium py-1.5">Kraj</th>
                   <th className="text-right font-medium">km</th>
                   <th className="text-right font-medium">Litry</th>
@@ -843,9 +843,9 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
                     <td className="py-1.5 text-gray-700">{flag(r.cc)} {cName(r.cc)}</td>
                     <td className="text-right text-gray-600">{r.km.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}</td>
                     <td className="text-right text-gray-600">{r.liters.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}</td>
-                    <td className="text-right text-gray-400">{r.price.toFixed(2)}</td>
+                    <td className="text-right text-gray-500">{r.price.toFixed(2)}</td>
                     <td className="text-right text-gray-700">{fmtEUR2(r.fuelCost)}</td>
-                    <td className="text-right text-gray-700">{r.tollCost > 0 ? fmtEUR2(r.tollCost) : (r.land ? <span className="text-green-600 text-xs">landem</span> : "—")}</td>
+                    <td className="text-right text-gray-700">{r.tollCost > 0 ? fmtEUR2(r.tollCost) : (r.land ? <span className="text-green-700 text-xs">landem</span> : "—")}</td>
                   </tr>
                 ))}
               </tbody>
@@ -860,7 +860,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
               </tfoot>
             </table>
           </div>
-          {result.hasUnknown && <p className="text-[11px] text-amber-500 mt-2">⚠️ Część trasy bez rozpoznanego kraju — wyceniona średnią ceną paliwa, bez myta.</p>}
+          {result.hasUnknown && <p className="text-[11px] text-amber-700 mt-2">⚠️ Część trasy bez rozpoznanego kraju — wyceniona średnią ceną paliwa, bez myta.</p>}
 
           {/* ── Plan przejazdu wg tachografu ── */}
           {plan && (
@@ -882,24 +882,24 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
               )}
 
               <div className="px-4 py-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center border-b border-gray-100">
-                <div><div className="text-[11px] text-gray-400">Jazda</div><div className="text-sm font-semibold text-gray-800">{fmtHm(plan.jazdaMin)}</div></div>
-                <div><div className="text-[11px] text-gray-400">Pauzy 45 min</div><div className="text-sm font-semibold text-gray-800">{plan.przerwyMin ? fmtHm(plan.przerwyMin) : "—"}</div></div>
-                <div><div className="text-[11px] text-gray-400">Odpoczynki</div><div className="text-sm font-semibold text-gray-800">{plan.odpoczynkiMin ? fmtHm(plan.odpoczynkiMin) : "—"}</div></div>
-                <div><div className="text-[11px] text-gray-400">Od wyjazdu do dojazdu</div><div className="text-sm font-semibold text-gray-800">{fmtHm(Math.round((plan.etaMs - new Date(startAt).getTime()) / 60000))}</div></div>
+                <div><div className="text-[11px] text-gray-500">Jazda</div><div className="text-sm font-semibold text-gray-800">{fmtHm(plan.jazdaMin)}</div></div>
+                <div><div className="text-[11px] text-gray-500">Pauzy 45 min</div><div className="text-sm font-semibold text-gray-800">{plan.przerwyMin ? fmtHm(plan.przerwyMin) : "—"}</div></div>
+                <div><div className="text-[11px] text-gray-500">Odpoczynki</div><div className="text-sm font-semibold text-gray-800">{plan.odpoczynkiMin ? fmtHm(plan.odpoczynkiMin) : "—"}</div></div>
+                <div><div className="text-[11px] text-gray-500">Od wyjazdu do dojazdu</div><div className="text-sm font-semibold text-gray-800">{fmtHm(Math.round((plan.etaMs - new Date(startAt).getTime()) / 60000))}</div></div>
               </div>
 
               <div className="max-h-64 overflow-y-auto divide-y divide-gray-50">
                 {plan.odcinki.map((o, i) => (
                   <div key={i} className="px-4 py-2 flex items-center gap-3 text-sm">
-                    <span className="w-28 shrink-0 text-xs text-gray-400">{fmtKiedy(o.odMs)}</span>
+                    <span className="w-28 shrink-0 text-xs text-gray-500">{fmtKiedy(o.odMs)}</span>
                     <span className="w-6 text-center">{o.typ === "jazda" ? "🚚" : o.typ === "pauza" ? "⏸️" : o.typ === "odpoczynek" ? "🛌" : "📦"}</span>
                     <span className="flex-1 text-gray-700">
-                      {o.typ === "jazda" ? <>jazda {fmtHm(Math.round(o.minut))} <span className="text-gray-400">· km {o.kmOd}–{o.kmDo}</span></>
-                        : o.typ === "pauza" ? <>pauza 45 min <span className="text-gray-400">· ok. {o.kmOd} km · {o.powod}</span></>
-                        : o.typ === "odpoczynek" ? <>odpoczynek {fmtHm(Math.round(o.minut))} <span className="text-gray-400">· ok. {o.kmOd} km · {o.powod}</span></>
+                      {o.typ === "jazda" ? <>jazda {fmtHm(Math.round(o.minut))} <span className="text-gray-500">· km {o.kmOd}–{o.kmDo}</span></>
+                        : o.typ === "pauza" ? <>pauza 45 min <span className="text-gray-500">· ok. {o.kmOd} km · {o.powod}</span></>
+                        : o.typ === "odpoczynek" ? <>odpoczynek {fmtHm(Math.round(o.minut))} <span className="text-gray-500">· ok. {o.kmOd} km · {o.powod}</span></>
                         : <>{o.powod} {fmtHm(Math.round(o.minut))}</>}
                     </span>
-                    <span className="text-xs text-gray-400 shrink-0">do {fmtKiedy(o.doMs)}</span>
+                    <span className="text-xs text-gray-500 shrink-0">do {fmtKiedy(o.doMs)}</span>
                   </div>
                 ))}
               </div>
@@ -970,10 +970,10 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
       <div className="mt-5 bg-white rounded-2xl border border-gray-100 p-5">
         <button onClick={() => setRatesOpen((o) => !o)} className="w-full flex items-center justify-between text-sm font-semibold text-gray-700">
           <span>Stawki (ceny diesla €/L · myto €/km per kraj){auto?.policzoneAt
-            ? <span className="ml-2 font-normal text-emerald-600">· z naszych danych, {fmtDatePL(auto.policzoneAt)}</span>
-            : ratesUpdatedAt ? <span className="ml-2 font-normal text-gray-400">· stan {fmtDatePL(ratesUpdatedAt)}</span>
-            : <span className="ml-2 font-normal text-gray-400">· wartości domyślne</span>}</span>
-          <span className="text-gray-400">{ratesOpen ? "▲" : "▼"}</span>
+            ? <span className="ml-2 font-normal text-emerald-700">· z naszych danych, {fmtDatePL(auto.policzoneAt)}</span>
+            : ratesUpdatedAt ? <span className="ml-2 font-normal text-gray-500">· stan {fmtDatePL(ratesUpdatedAt)}</span>
+            : <span className="ml-2 font-normal text-gray-500">· wartości domyślne</span>}</span>
+          <span className="text-gray-500">{ratesOpen ? "▲" : "▼"}</span>
         </button>
         {ratesOpen && (
           <div className="mt-4">
@@ -990,13 +990,13 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
                     {savingKey ? "…" : "Zapisz klucz"}
                   </button>
                 </div>
-                <p className="text-[11px] text-gray-400 mt-2">Poniższe stawki €/km działają jako <b>fallback</b>, gdy PTV jest niedostępne.</p>
+                <p className="text-[11px] text-gray-500 mt-2">Poniższe stawki €/km działają jako <b>fallback</b>, gdy PTV jest niedostępne.</p>
               </div>
             )}
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-xs text-gray-400 border-b border-gray-100">
+                  <tr className="text-xs text-gray-500 border-b border-gray-100">
                     <th className="text-left font-medium py-1.5">Kraj</th>
                     <th className="text-right font-medium">Diesel €/L</th>
                     <th className="text-right font-medium">Myto €/km (fallback)</th>
@@ -1010,17 +1010,17 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
                       <td className="text-right">
                         <input type="number" step="0.01" disabled={!canEdit} value={rates.fuelPrice[cc] ?? ""}
                           onChange={(e) => setRates((r) => ({ ...r, fuelPrice: { ...r.fuelPrice, [cc]: parseFloat(e.target.value) || 0 } }))}
-                          className="w-20 px-2 py-1 rounded border border-gray-200 text-right text-sm disabled:bg-gray-50 disabled:text-gray-400" />
+                          className="w-20 px-2 py-1 rounded border border-gray-200 text-right text-sm disabled:bg-gray-50 disabled:text-gray-500" />
                       </td>
                       <td className="text-right">
                         <input type="number" step="0.01" disabled={!canEdit} value={rates.tollPerKm[cc] ?? ""}
                           onChange={(e) => setRates((r) => ({ ...r, tollPerKm: { ...r.tollPerKm, [cc]: parseFloat(e.target.value) || 0 } }))}
-                          className="w-20 px-2 py-1 rounded border border-gray-200 text-right text-sm disabled:bg-gray-50 disabled:text-gray-400" />
+                          className="w-20 px-2 py-1 rounded border border-gray-200 text-right text-sm disabled:bg-gray-50 disabled:text-gray-500" />
                       </td>
-                      <td className="pl-3 text-[11px] text-gray-400 whitespace-nowrap">
-                        <span className={auto?.fuelMeta?.[cc] ? "text-emerald-600" : ""}>⛽ {zrodloPaliwa(cc)}</span>
+                      <td className="pl-3 text-[11px] text-gray-500 whitespace-nowrap">
+                        <span className={auto?.fuelMeta?.[cc] ? "text-emerald-700" : ""}>⛽ {zrodloPaliwa(cc)}</span>
                         <span className="mx-1 text-gray-300">·</span>
-                        <span className={auto?.tollMeta?.[cc] ? "text-emerald-600" : ""}>🛣️ {zrodloMyta(cc)}</span>
+                        <span className={auto?.tollMeta?.[cc] ? "text-emerald-700" : ""}>🛣️ {zrodloMyta(cc)}</span>
                       </td>
                     </tr>
                   ))}
@@ -1038,8 +1038,8 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
                 </button>
               </div>
             )}
-            <p className="text-[11px] text-gray-400 mt-3">
-              Na <b className="text-emerald-600">zielono</b> — policzone z naszych danych: cena diesla z tankowań kartami (netto, po rabatach),
+            <p className="text-[11px] text-gray-500 mt-3">
+              Na <b className="text-emerald-700">zielono</b> — policzone z naszych danych: cena diesla z tankowań kartami (netto, po rabatach),
               myto z faktur NegoMetal i e-TOLL podzielonych przez kilometry w danym kraju. Odświeżane automatycznie 5. dnia miesiąca
               {auto?.policzoneAt ? <> (ostatnio {fmtDatePL(auto.policzoneAt)})</> : null}. Reszta to szacunki — popraw ręcznie, a Twoja wartość
               przebije wyliczoną. Myto z faktur jest lekko zawyżone, bo kilometry pochodzą z tras zleceń, bez pustych przebiegów.

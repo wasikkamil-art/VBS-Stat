@@ -38,7 +38,7 @@ export default function CopyOrderPreviewModal({ fracht, vehicles = [], showToast
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl flex flex-col" style={{maxHeight: "90vh"}}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <h3 className="text-base font-bold text-gray-900">📋 Skopiuj dane zlecenia</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-600 text-xl">×</button>
         </div>
         <div className="px-5 pt-3 pb-1 text-[11px] text-gray-500">
           Sprawdź / edytuj treść przed kopiowaniem. Po skopiowaniu możesz wkleić np. w Signal, SMS, email.

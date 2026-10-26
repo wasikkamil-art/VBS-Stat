@@ -110,7 +110,7 @@ function FilterRow({ label, action, children }) {
   return (
     <div className="px-4 py-2.5">
       <div className="flex items-center justify-between mb-1.5">
-        <span className="text-[10.5px] uppercase tracking-wide text-gray-400 font-semibold">{label}</span>
+        <span className="text-[10.5px] uppercase tracking-wide text-gray-500 font-semibold">{label}</span>
         {action || null}
       </div>
       <div className="flex flex-wrap gap-1.5">{children}</div>
@@ -591,24 +591,24 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
       const naj = [...g.tx].sort((a, b) => String(b.ts).localeCompare(String(a.ts)));
       const td = "padding:3px 6px;border-top:1px solid #f2f2f7;white-space:nowrap";
       const wiersze = naj.map(t => `<tr>`
-        + `<td style="${td};color:#6e6e73">${String(t.ts).slice(8, 10)}.${String(t.ts).slice(5, 7)}${rokTryb ? "." + String(t.ts).slice(2, 4) : ""}</td>`
-        + `<td style="${td}"><b>${esc(t.plate)}</b><div style="font-size:11px;color:#86868b">${esc(driverAt(t.vehicleId, t.ts))}</div></td>`
+        + `<td style="${td};color: #6e6e73">${String(t.ts).slice(8, 10)}.${String(t.ts).slice(5, 7)}${rokTryb ? "." + String(t.ts).slice(2, 4) : ""}</td>`
+        + `<td style="${td}"><b>${esc(t.plate)}</b><div style="font-size:11px;color: #86868b">${esc(driverAt(t.vehicleId, t.ts))}</div></td>`
         + `<td style="${td};text-align:right">${Math.round(t.liters)} L</td>`
-        + `<td style="${td};text-align:right"><b>${eur(t.netEUR)}</b><div style="font-size:11px;color:#86868b">${p3(t.pricePerLNet)} €/L</div></td>`
+        + `<td style="${td};text-align:right"><b>${eur(t.netEUR)}</b><div style="font-size:11px;color: #86868b">${p3(t.pricePerLNet)} €/L</div></td>`
         + `</tr>`).join("");
       mk.bindPopup(
         `<div style="font:13px/1.45 -apple-system,sans-serif">`
         + `<div style="font-weight:600;font-size:14px">${FLAG[g.country] || ""} ${esc(g.station)}</div>`
-        + `<div style="color:#6e6e73;font-size:12px;margin:2px 0 8px">`
+        + `<div style="color: #6e6e73;font-size:12px;margin:2px 0 8px">`
         + `${[...g.karty].map(k2 => CARDS[k2]?.name || k2).join(", ")} · ${[...g.produkty].join(", ")}</div>`
         + `<div style="display:flex;gap:14px;margin-bottom:8px;font-size:12.5px">`
-        + `<div><b>${g.n}×</b> <span style="color:#86868b">tankowań</span></div>`
+        + `<div><b>${g.n}×</b> <span style="color: #86868b">tankowań</span></div>`
         + `<div><b>${Math.round(g.l).toLocaleString("pl-PL")} L</b></div>`
         + `<div><b>${eur(g.e)}</b></div>`
-        + `<div style="color:#86868b">śr. <b style="color:#1d1d1f">${p3(g.cena)}</b> €/L</div></div>`
+        + `<div style="color: #86868b">śr. <b style="color:#1d1d1f">${p3(g.cena)}</b> €/L</div></div>`
         + `<div style="max-height:260px;overflow-y:auto;border:1px solid #f2f2f7;border-radius:8px">`
         + `<table style="width:100%;border-collapse:collapse;font-size:12.5px">`
-        + `<thead><tr style="position:sticky;top:0;background:#f9f9fb;color:#86868b;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em">`
+        + `<thead><tr style="position:sticky;top:0;background:#f9f9fb;color: #86868b;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em">`
         + `<th style="padding:4px 6px;text-align:left">Data</th><th style="padding:4px 6px;text-align:left">Kto</th>`
         + `<th style="padding:4px 6px;text-align:right">Litry</th><th style="padding:4px 6px;text-align:right">Za ile</th></tr></thead>`
         + `<tbody>${wiersze}</tbody></table></div>`
@@ -621,8 +621,8 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
         const txt = labelMode === "price" ? p3(g.cena) : `${Math.round(g.l)} L`;
         mk.bindTooltip(
           `<span style="background:#fff;border:1.5px solid ${color};border-radius:8px;padding:1px 5px;`
-          + `font:600 11px/1.5 -apple-system,sans-serif;color:#1d1d1f;white-space:nowrap;`
-          + `box-shadow:0 1px 4px rgba(0,0,0,.18)">${txt}${g.n > 1 ? `<span style="color:#86868b"> ×${g.n}</span>` : ""}</span>`,
+          + `font:600 11px/1.5 -apple-system,sans-serif;color: #1d1d1f;white-space:nowrap;`
+          + `box-shadow:0 1px 4px rgba(0,0,0,.18)">${txt}${g.n > 1 ? `<span style="color: #86868b"> ×${g.n}</span>` : ""}</span>`,
           { permanent: true, direction: "top", offset: [0, -4], className: "paliwo-pin" });
       }
       mk._txids = g.txids;
@@ -909,7 +909,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
       {/* ── Nagłówek ── */}
       <div className="bg-white rounded-2xl border border-gray-100 p-4 flex flex-wrap items-center gap-3">
         <div className="flex-1 min-w-[180px]">
-          <div className="text-[11px] uppercase tracking-wide text-gray-400">VBS Transport · flota</div>
+          <div className="text-[11px] uppercase tracking-wide text-gray-500">VBS Transport · flota</div>
           <h2 className="text-lg font-semibold text-gray-900">⛽ Paliwo</h2>
         </div>
         <select value={month} onChange={e => setMonth(e.target.value)}
@@ -956,7 +956,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
           <div className="flex items-center justify-between">
             <h3 className="font-semibold text-gray-900">📥 Import raportów kart paliwowych</h3>
             <button onClick={() => { setShowImport(false); setImportState(null); }}
-              className="text-sm text-gray-400 hover:text-gray-600">Zamknij ✕</button>
+              className="text-sm text-gray-500 hover:text-gray-600">Zamknij ✕</button>
           </div>
           <p className="text-xs text-gray-500 leading-relaxed">
             Wrzuć raporty miesięczne — <b>Eurowag</b> (EW_Export), <b>E100</b> (transaction-…) i <b>Andamur</b> (MOJE ZUŻYCIE).
@@ -977,7 +977,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
           )}
           {importState?.phase === "saving" && <div className="text-sm text-gray-500">💾 Zapisuję…</div>}
           {importState?.phase === "error" && (
-            <div className="text-sm text-red-600 bg-red-50 rounded-xl p-3">❌ {importState.msg}</div>
+            <div className="text-sm text-red-700 bg-red-50 rounded-xl p-3">❌ {importState.msg}</div>
           )}
 
           {importState?.detected && (
@@ -1044,10 +1044,10 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
         <div className="bg-white rounded-2xl border border-gray-100 p-4">
           <div className="flex items-start justify-between mb-3 gap-2">
             <div>
-              <div className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">
+              <div className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">
                 📋 Podsumowanie — {monthLabel(month)}, netto EUR
               </div>
-              <div className="text-[11px] text-gray-400">
+              <div className="text-[11px] text-gray-500">
                 Wszystkie karty i oba produkty, <b>niezależnie od filtrów widoku</b>. Kursy NBP z dnia transakcji.
                 {rokTryb && <> Suma <b>{months.filter(m => m.slice(0, 4) === month).length} miesięcy</b> tego roku.</>}
               </div>
@@ -1057,7 +1057,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
                 className="px-3 py-1.5 rounded-lg text-xs font-medium text-white" style={{ background: "#0071e3" }}>
                 📋 Kopiuj tabelę
               </button>
-              <button onClick={() => setShowSummary(false)} className="text-sm text-gray-400 hover:text-gray-600">Zwiń ✕</button>
+              <button onClick={() => setShowSummary(false)} className="text-sm text-gray-500 hover:text-gray-600">Zwiń ✕</button>
             </div>
           </div>
 
@@ -1098,7 +1098,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
 
           {/* Kontrola sum — do zestawienia z fakturami dostawców */}
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-gray-500">
-            <span className="font-semibold uppercase tracking-wide text-gray-400">Kontrola per karta:</span>
+            <span className="font-semibold uppercase tracking-wide text-gray-500">Kontrola per karta:</span>
             {podsumowanieMc.karty.map(k => (
               <span key={k.card}>
                 <b style={{ color: CARDS[k.card]?.color }}>{CARDS[k.card]?.name || k.card}</b> {eur(k.e)} ({k.n} tx)
@@ -1116,7 +1116,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
               ref={el => el && el.select()}
               className="mt-3 w-full text-[11px] font-mono border border-gray-200 rounded-lg p-2 bg-gray-50" />
           )}
-          <div className="mt-2 text-[11px] text-gray-400 leading-relaxed">
+          <div className="mt-2 text-[11px] text-gray-500 leading-relaxed">
             Kwoty netto: Eurowag ma netto w raporcie, E100 i Andamur przeliczamy z brutto stawką VAT kraju tankowania.
             <b> W Total_26 koszty wpisujemy ze znakiem minus.</b> Opłaty drogowe są osobno — w Analizy → Opłaty drogowe.
           </div>
@@ -1128,18 +1128,18 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
         <div className="bg-white rounded-2xl border border-gray-100 p-4">
           <div className="flex items-start justify-between mb-3 gap-2">
             <div>
-              <div className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">📊 Trend cen netto €/L — miesiąc do miesiąca</div>
-              <div className="text-[11px] text-gray-400">
+              <div className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">📊 Trend cen netto €/L — miesiąc do miesiąca</div>
+              <div className="text-[11px] text-gray-500">
                 {product === "on" ? "Diesel" : "AdBlue"} · średnia ważona litrami · karty:{" "}
                 {fCards.size === Object.keys(CARDS).length ? "wszystkie" : [...fCards].map(k => CARDS[k]?.name || k).join(", ")}
               </div>
             </div>
-            <button onClick={() => setShowTrend(false)} className="text-sm text-gray-400 hover:text-gray-600 shrink-0">Zwiń ✕</button>
+            <button onClick={() => setShowTrend(false)} className="text-sm text-gray-500 hover:text-gray-600 shrink-0">Zwiń ✕</button>
           </div>
 
-          {trendLoading && <div className="text-sm text-gray-400 py-3">⏳ Wczytuję wszystkie miesiące…</div>}
+          {trendLoading && <div className="text-sm text-gray-500 py-3">⏳ Wczytuję wszystkie miesiące…</div>}
           {!trendLoading && trend && trend.monthsAsc.length < 2 && (
-            <div className="text-sm text-gray-400 py-2">
+            <div className="text-sm text-gray-500 py-2">
               Potrzeba co najmniej 2 miesięcy w bazie, żeby pokazać trend. Zaimportuj kolejny miesiąc raportami kart.
             </div>
           )}
@@ -1157,7 +1157,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
             return (
               <div className="overflow-x-auto">
                 <table className="w-full text-[12.5px] min-w-[440px]">
-                  <thead className="text-[10.5px] uppercase tracking-wide text-gray-400">
+                  <thead className="text-[10.5px] uppercase tracking-wide text-gray-500">
                     <tr>
                       <th className="text-left pb-1.5">Kraj</th>
                       {monthsAsc.map(m => <th key={m} className="text-right pb-1.5 px-2">{shortM(m)}</th>)}
@@ -1177,7 +1177,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
                             const o = perMonth[monthsAsc[i]].byCC[cc];
                             return (
                               <td key={i} className="py-1 px-2 text-right tabular-nums font-semibold align-bottom"
-                                style={{ color: v == null ? "#c7c7cc" : (nums.length > 1 && v === mn) ? "#16a34a" : (nums.length > 1 && v === mx) ? "#dc2626" : "#1d1d1f" }}>
+                                style={{ color: v == null ? "#c7c7cc" : (nums.length > 1 && v === mn) ? "#15803d" : (nums.length > 1 && v === mx) ? "#b91c1c" : "#1d1d1f" }}>
                                 {v == null ? "—" : p3(v)}
                                 <span className="block text-[9.5px] text-gray-300 font-normal">{o ? Math.round(o.l) + " L" : ""}</span>
                               </td>
@@ -1206,9 +1206,9 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
                     })()}
                   </tbody>
                 </table>
-                <div className="text-[11px] text-gray-400 mt-2 leading-relaxed">
-                  €/L <b>netto</b>, średnia ważona litrami. <b className="text-green-600">Zielony</b> = najtańszy miesiąc w wierszu,
-                  {" "}<b className="text-red-600">czerwony</b> = najdroższy. <b>Δ ost.</b> = zmiana między dwoma ostatnimi miesiącami z danymi
+                <div className="text-[11px] text-gray-500 mt-2 leading-relaxed">
+                  €/L <b>netto</b>, średnia ważona litrami. <b className="text-green-700">Zielony</b> = najtańszy miesiąc w wierszu,
+                  {" "}<b className="text-red-700">czerwony</b> = najdroższy. <b>Δ ost.</b> = zmiana między dwoma ostatnimi miesiącami z danymi
                   (spadek = zielony). Litry pod ceną = wielkość próbki — mała próbka (np. 1 tankowanie) to cena mniej wiarygodna.
                   Trend obejmuje <b>całą flotę</b> (filtr aut nie zawęża tej tabeli celowo).
                 </div>
@@ -1274,7 +1274,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
               [String(totals.n), "tankowań"]].map(([a, b]) => (
               <div key={b} className="bg-white rounded-2xl border border-gray-100 p-3">
                 <div className="text-lg font-semibold text-gray-900 tracking-tight">{a}</div>
-                <div className="text-[10.5px] uppercase tracking-wide text-gray-400">{b}</div>
+                <div className="text-[10.5px] uppercase tracking-wide text-gray-500">{b}</div>
               </div>
             ))}
           </div>
@@ -1283,10 +1283,10 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
           <div className="bg-white rounded-2xl border border-gray-100 p-4">
             <div className="flex items-start justify-between gap-2 mb-1">
               <div>
-                <div className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">
+                <div className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">
                   🏪 Gdzie tankujemy najwięcej
                 </div>
-                <div className="text-[11px] text-gray-400">
+                <div className="text-[11px] text-gray-500">
                   {rankingStacji
                     ? <>10 stacji z największym wolumenem w {rankingStacji.rok} — materiał do rozmowy o rabacie</>
                     : <>Ranking liczy się z całego roku, więc wymaga dociągnięcia wszystkich miesięcy</>}
@@ -1306,13 +1306,13 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
                 Pokaż ranking roku ({months.length} {months.length === 1 ? "miesiąc" : "mies."} do dociągnięcia)
               </button>
             )}
-            {pokazRanking && trendLoading && <div className="text-[12px] text-gray-400 py-2">⏳ Wczytuję wszystkie miesiące…</div>}
+            {pokazRanking && trendLoading && <div className="text-[12px] text-gray-500 py-2">⏳ Wczytuję wszystkie miesiące…</div>}
 
             {rankingStacji && (rankingStacji.top.length === 0
-              ? <div className="text-[12px] text-gray-400 py-2">Brak tankowań w {rankingStacji.rok} przy tych filtrach.</div>
+              ? <div className="text-[12px] text-gray-500 py-2">Brak tankowań w {rankingStacji.rok} przy tych filtrach.</div>
               : <>
                 <table className="w-full text-[11.5px] mt-2">
-                  <thead className="text-[9.5px] uppercase tracking-wide text-gray-400">
+                  <thead className="text-[9.5px] uppercase tracking-wide text-gray-500">
                     <tr>
                       <th className="text-left pb-1">Stacja</th>
                       <th className="text-right pb-1 px-1">Tank.</th>
@@ -1341,7 +1341,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
                         </td>
                         <td className="py-1 px-1 text-right tabular-nums text-gray-500">{Math.round(o.l).toLocaleString("pl-PL")}</td>
                         <td className="py-1 px-1 text-right tabular-nums font-semibold"
-                          style={{ color: o.cena > rankingStacji.cenaRoku ? "#dc2626" : "#16a34a" }}>
+                          style={{ color: o.cena > rankingStacji.cenaRoku ? "#b91c1c" : "#15803d" }}>
                           {p3(o.cena)}
                         </td>
                         {!rokTryb && (
@@ -1356,7 +1356,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
                     onFocus={e => e.target.select()} ref={el => el && el.select()}
                     className="mt-2 w-full text-[10px] font-mono border border-gray-200 rounded-lg p-2 bg-gray-50" />
                 )}
-                <div className="text-[10.5px] text-gray-400 mt-2 leading-relaxed">
+                <div className="text-[10.5px] text-gray-500 mt-2 leading-relaxed">
                   Klik w wiersz pokazuje stację na mapie — z danymi {rokTryb ? "całego roku" : `za ${monthLabel(month)}`},
                   bo mapa pracuje na wybranym okresie. <b>Tank.</b> = liczba tankowań w {rankingStacji.rok}{!rokTryb && <> (po ukośniku ile z nich w {monthLabel(month)})</>}.
                   Kolor ceny rocznej wobec <b>średniej całego roku {p3(rankingStacji.cenaRoku)} €/L</b> w tym zestawie
@@ -1373,19 +1373,19 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
         <div className="space-y-4 self-start">
           <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden relative min-h-[420px]">
             <div className="absolute z-[500] top-3 left-3 flex gap-1.5 items-center bg-white/95 backdrop-blur border border-gray-100 rounded-xl px-2.5 py-2 shadow-sm">
-              <span className="text-[11px] text-gray-400 mr-1">Etykiety:</span>
+              <span className="text-[11px] text-gray-500 mr-1">Etykiety:</span>
               {chip(labelMode === "price", () => setLabelMode("price"), "€/L")}
               {chip(labelMode === "liters", () => setLabelMode("liters"), "litry")}
               {chip(labelMode === "none", () => setLabelMode("none"), "bez")}
             </div>
             <div className="absolute z-[500] bottom-4 left-3 bg-white/95 backdrop-blur border border-gray-100 rounded-xl px-3 py-2.5 shadow-sm">
-              <div className="text-[10.5px] uppercase tracking-wide text-gray-400 font-semibold mb-1">Karta</div>
+              <div className="text-[10.5px] uppercase tracking-wide text-gray-500 font-semibold mb-1">Karta</div>
               {Object.entries(CARDS).map(([k, v]) => (
                 <div key={k} className="flex items-center gap-1.5 text-[11.5px] text-gray-700">
                   <span className="w-2 h-2 rounded-full" style={{ background: v.color }} />{v.name}
                 </div>
               ))}
-              <div className="text-[10.5px] uppercase tracking-wide text-gray-400 font-semibold mt-2">Wielkość = litry · ×N = tankowań</div>
+              <div className="text-[10.5px] uppercase tracking-wide text-gray-500 font-semibold mt-2">Wielkość = litry · ×N = tankowań</div>
             <div className="flex items-center gap-1.5 text-[11.5px] text-gray-700">
               <span className="w-2 h-2 rounded-full" style={{ background: "#6e6e73" }} />kilka kart
             </div>
@@ -1399,7 +1399,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
           {/* Wnioski */}
           {insights.length > 0 && (
             <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-              <div className="px-4 pt-3 text-[11px] uppercase tracking-wide text-gray-400 font-semibold">Wnioski</div>
+              <div className="px-4 pt-3 text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Wnioski</div>
               <div className="divide-y divide-gray-100 mt-1">
                 {insights.map(([ico, html], i) => (
                   <div key={i} className="px-4 py-2.5 flex gap-2 text-[12.5px] text-gray-700 leading-snug">
@@ -1414,9 +1414,9 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
           {/* Ceny per kraj */}
           {byCountry.length > 0 && (
             <div className="bg-white rounded-2xl border border-gray-100 p-4">
-              <div className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold mb-2">Ceny per kraj (netto)</div>
+              <div className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-2">Ceny per kraj (netto)</div>
               <table className="w-full text-[12.5px]">
-                <thead className="text-[10.5px] uppercase tracking-wide text-gray-400">
+                <thead className="text-[10.5px] uppercase tracking-wide text-gray-500">
                   <tr><th className="text-left pb-1.5">Kraj</th><th className="text-right pb-1.5">Litry</th>
                     <th className="pb-1.5 w-16"></th><th className="text-right pb-1.5">€/L</th><th className="text-right pb-1.5">Koszt</th></tr>
                 </thead>
@@ -1435,7 +1435,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
                           </div>
                         </td>
                         <td className="py-1 text-right tabular-nums font-semibold"
-                          style={{ color: c.p === mn ? "#16a34a" : c.p === mxp ? "#dc2626" : "#1d1d1f" }}>{p3(c.p)}</td>
+                          style={{ color: c.p === mn ? "#15803d" : c.p === mxp ? "#b91c1c" : "#1d1d1f" }}>{p3(c.p)}</td>
                         <td className="py-1 text-right tabular-nums text-gray-500">{Math.round(c.e)} €</td>
                       </tr>
                     ));
@@ -1448,7 +1448,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
           {/* Auta: litry / km / spalanie */}
           {byVehicle.length > 0 && (
             <div className="bg-white rounded-2xl border border-gray-100 p-4">
-              <div className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold mb-2">
+              <div className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-2">
                 Auto i kierowca — ile zatankował, po jakiej cenie
               </div>
               {/* Dwie linie na pojazd: kto i za ile (górna) + jak jeździ (dolna). W panelu ~400 px
@@ -1459,11 +1459,11 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
                     <div className="flex items-baseline justify-between gap-2">
                       <div className="min-w-0">
                         <div className="text-[13px] font-medium text-gray-900">{plateOf(v.vid)}</div>
-                        <div className="text-[11px] text-gray-400 truncate">{driverOf(v.vid)}</div>
+                        <div className="text-[11px] text-gray-500 truncate">{driverOf(v.vid)}</div>
                       </div>
                       <div className="text-right shrink-0">
                         <div className="text-[13px] font-semibold text-gray-900 tabular-nums">{eur(v.e)}</div>
-                        <div className="text-[11px] text-gray-400 tabular-nums">{litr(v.l)} · {v.n} tank.</div>
+                        <div className="text-[11px] text-gray-500 tabular-nums">{litr(v.l)} · {v.n} tank.</div>
                       </div>
                     </div>
                     <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11.5px] text-gray-500 tabular-nums">
@@ -1484,7 +1484,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
                               : "delta Atlas (±1%)"}>
                               {Math.round(v.km).toLocaleString("pl-PL")} km
                               {v.kmSource !== "report" && v.kmSource !== "snapshot" && (
-                                <span className={v.kmSource === "snapshot_approx_start" ? "text-amber-600 font-semibold" : "text-gray-400"}>*</span>
+                                <span className={v.kmSource === "snapshot_approx_start" ? "text-amber-600 font-semibold" : "text-gray-500"}>*</span>
                               )}
                             </span>
                           : canEdit && !rokTryb
@@ -1515,11 +1515,11 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
                       <div className="flex items-baseline justify-between gap-2">
                         <div>
                           <div className="text-[13px] font-semibold text-gray-900">RAZEM</div>
-                          <div className="text-[11px] text-gray-400">{byVehicle.length} kierowców</div>
+                          <div className="text-[11px] text-gray-500">{byVehicle.length} kierowców</div>
                         </div>
                         <div className="text-right">
                           <div className="text-[13px] font-semibold text-gray-900 tabular-nums">{eur(e)}</div>
-                          <div className="text-[11px] text-gray-400 tabular-nums">{litr(l)} · {n} tank.</div>
+                          <div className="text-[11px] text-gray-500 tabular-nums">{litr(l)} · {n} tank.</div>
                         </div>
                       </div>
                       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11.5px] text-gray-500 tabular-nums">
@@ -1537,7 +1537,7 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
                   );
                 })()}
               </div>
-              <div className="text-[11px] text-gray-400 mt-2 leading-relaxed">
+              <div className="text-[11px] text-gray-500 mt-2 leading-relaxed">
                 Koszt i średnia €/L = <b>netto</b>, z kursu NBP z dnia tankowania. km z raportu panelu albo ze
                 snapshotu licznika (CF, 1. dnia miesiąca o 00:05). <b>*</b> = delta z Atlas API, zaniża ~1–4%.
               </div>
@@ -1546,12 +1546,12 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
 
           {/* Lista tankowań */}
           <div className="bg-white rounded-2xl border border-gray-100 p-4">
-            <div className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold mb-1">
+            <div className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-1">
               Tankowania ({filtered.length})
             </div>
-            {loading && <div className="text-sm text-gray-400 py-3">⏳ Wczytuję…</div>}
+            {loading && <div className="text-sm text-gray-500 py-3">⏳ Wczytuję…</div>}
             {!loading && filtered.length === 0 && (
-              <div className="text-sm text-gray-400 py-3">
+              <div className="text-sm text-gray-500 py-3">
                 Brak danych. {canEdit ? "Wrzuć raporty kart przyciskiem u góry." : "Poproś admina o import raportów."}
               </div>
             )}
@@ -1559,18 +1559,18 @@ export default function PaliwoTab({ vehicles = [], canEdit = false, showToast = 
               {[...filtered].sort((a, b) => (a.ts < b.ts ? 1 : -1)).map(t => (
                 <button key={t.id} onClick={() => flyTo(t)}
                   className="w-full text-left py-2 grid grid-cols-[44px_1fr_auto] gap-2 items-center hover:bg-gray-50">
-                  <div className="text-[11px] text-gray-400 tabular-nums leading-tight">
+                  <div className="text-[11px] text-gray-500 tabular-nums leading-tight">
                     {t.ts.slice(8, 10)}.{t.ts.slice(5, 7)}<br />{t.ts.slice(11)}
                   </div>
                   <div className="text-[12.5px] truncate">
                     <span className="inline-block w-1.5 h-1.5 rounded-full mr-1.5"
                       style={{ background: CARDS[t.card]?.color }} />
                     {FLAG[t.country] || ""} {t.station || "—"}
-                    <span className="block text-[11px] text-gray-400">{t.plate}{!t.lat && " · brak lokalizacji"}</span>
+                    <span className="block text-[11px] text-gray-500">{t.plate}{!t.lat && " · brak lokalizacji"}</span>
                   </div>
                   <div className="text-right text-[12.5px] tabular-nums">
                     {p3(t.pricePerLNet)} €/L
-                    <span className="block text-[10.5px] text-gray-400">
+                    <span className="block text-[10.5px] text-gray-500">
                       {Math.round(t.liters)} L · {Math.round(t.netEUR)} €
                     </span>
                   </div>

@@ -58,7 +58,7 @@ function PoleKwoty({ z, blad, inp, onWaluta, onKwota }) {
           {WALUTY_ZLECENIA.map(w => (
             <button key={w} type="button" onClick={() => onWaluta(w)}
               className="px-1.5 text-[10px] font-bold transition-colors"
-              style={{ background: waluta === w ? "#111827" : "#fff", color: waluta === w ? "#fff" : "#9ca3af" }}>
+              style={{ background: waluta === w ? "#111827" : "#fff", color: waluta === w ? "#fff" : "#6b7280" }}>
               {w}
             </button>
           ))}
@@ -66,9 +66,9 @@ function PoleKwoty({ z, blad, inp, onWaluta, onKwota }) {
         <input type="number" placeholder="0.00" value={z?.kwota || ""} onChange={e => onKwota(e.target.value)} className={inp + " flex-1 min-w-0"} />
       </div>
       {blad
-        ? <div className="text-[11px] text-red-600 mt-1 font-medium">⚠️ {blad}</div>
+        ? <div className="text-[11px] text-red-700 mt-1 font-medium">⚠️ {blad}</div>
         : wymagaPrzeliczenia(waluta) && z?.cenaEur
-          ? <div className="text-[11px] text-emerald-700 mt-1 font-semibold">≈ {Number(z.cenaEur).toFixed(2)} € <span className="text-gray-400 font-normal">· {opis}</span></div>
+          ? <div className="text-[11px] text-emerald-700 mt-1 font-semibold">≈ {Number(z.cenaEur).toFixed(2)} € <span className="text-gray-500 font-normal">· {opis}</span></div>
           : null}
     </>
   );
@@ -362,7 +362,7 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
           style={{ color: val ? "#15803d" : "#3b82f6", background: val ? "#f0fdf4" : "transparent" }}>
           {val ? `✅ ${val}` : "📍 Ustaw lokalizację"}
         </button>
-        {val && <button type="button" onClick={() => set(gc.key,"")} className="text-xs text-gray-400 hover:text-red-400">✕</button>}
+        {val && <button type="button" onClick={() => set(gc.key,"")} className="text-xs text-gray-500 hover:text-red-400">✕</button>}
       </div>
     );
   };
@@ -498,7 +498,7 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col" style={{maxHeight:"92vh"}}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
           <h3 className="text-base font-bold text-gray-900">{record ? "Edytuj fracht" : "Nowy fracht"}</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-600 text-xl">✕</button>
         </div>
         <div className="overflow-y-auto flex-1 px-6 py-4 space-y-3">
 
@@ -532,7 +532,7 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
             <div style={{border:"2px solid #6ee7b7",borderRadius:12,padding:"14px",background:"#f0fdf4"}}>
               <div className="flex items-center justify-between mb-3">
                 <div className="text-xs font-semibold text-emerald-700 uppercase tracking-wider">📦 Z2 — Załadunek dodatkowy</div>
-                <button type="button" onClick={() => { setShowZ2(false); ["zaladunekFirma2","zaladunekKodPocztowy2","zaladunekMiasto2","zaladunekKod2","zaladunekAdres2","zaladunekTelefon2","zaladunekGeo2","dataZaladunku2","godzZaladunku2"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-600">✕ usuń Z2</button>
+                <button type="button" onClick={() => { setShowZ2(false); ["zaladunekFirma2","zaladunekKodPocztowy2","zaladunekMiasto2","zaladunekKod2","zaladunekAdres2","zaladunekTelefon2","zaladunekGeo2","dataZaladunku2","godzZaladunku2"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-700">✕ usuń Z2</button>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2"><label className={lbl}>Nazwa firmy</label><input value={f.zaladunekFirma2||""} onChange={e => set("zaladunekFirma2",e.target.value)} className={inp} /></div>
@@ -547,7 +547,7 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
               </div>
             </div>
           ) : (
-            <button type="button" onClick={() => setShowZ2(true)} className="text-xs text-emerald-600 hover:text-emerald-800 font-semibold flex items-center gap-1 pl-1">＋ dodaj drugi punkt załadunku</button>
+            <button type="button" onClick={() => setShowZ2(true)} className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold flex items-center gap-1 pl-1">＋ dodaj drugi punkt załadunku</button>
           )}
 
           {/* ══ ROZŁADUNEK ══ */}
@@ -574,7 +574,7 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
             <div style={{border:"2px solid #93c5fd",borderRadius:12,padding:"14px",background:"#eff6ff"}}>
               <div className="flex items-center justify-between mb-3">
                 <div className="text-xs font-semibold text-blue-700 uppercase tracking-wider">🏁 R2 — Rozładunek 2</div>
-                <button type="button" onClick={() => { setShowR2(false); setShowR3(false); setShowR4(false); setShowR5(false); ["rozladunekFirma2","dokodPocztowy2","dokodMiasto2","dokod2","rozladunekAdres2","rozladunekTelefon2","rozladunekGeo2","dataRozladunku2","godzRozladunku2"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-600">✕ usuń R2</button>
+                <button type="button" onClick={() => { setShowR2(false); setShowR3(false); setShowR4(false); setShowR5(false); ["rozladunekFirma2","dokodPocztowy2","dokodMiasto2","dokod2","rozladunekAdres2","rozladunekTelefon2","rozladunekGeo2","dataRozladunku2","godzRozladunku2"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-700">✕ usuń R2</button>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2"><label className={lbl}>Nazwa firmy</label><input value={f.rozladunekFirma2||""} onChange={e => set("rozladunekFirma2",e.target.value)} className={inp} /></div>
@@ -597,7 +597,7 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
             <div style={{border:"2px solid #93c5fd",borderRadius:12,padding:"14px",background:"#eff6ff"}}>
               <div className="flex items-center justify-between mb-3">
                 <div className="text-xs font-semibold text-blue-700 uppercase tracking-wider">🏁 R3 — Rozładunek 3</div>
-                <button type="button" onClick={() => { setShowR3(false); setShowR4(false); setShowR5(false); ["rozladunekFirma3","dokodPocztowy3","dokodMiasto3","dokod3","rozladunekAdres3","rozladunekTelefon3","rozladunekGeo3","dataRozladunku3","godzRozladunku3"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-600">✕ usuń R3</button>
+                <button type="button" onClick={() => { setShowR3(false); setShowR4(false); setShowR5(false); ["rozladunekFirma3","dokodPocztowy3","dokodMiasto3","dokod3","rozladunekAdres3","rozladunekTelefon3","rozladunekGeo3","dataRozladunku3","godzRozladunku3"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-700">✕ usuń R3</button>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2"><label className={lbl}>Nazwa firmy</label><input value={f.rozladunekFirma3||""} onChange={e => set("rozladunekFirma3",e.target.value)} className={inp} /></div>
@@ -620,7 +620,7 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
             <div style={{border:"2px solid #93c5fd",borderRadius:12,padding:"14px",background:"#eff6ff"}}>
               <div className="flex items-center justify-between mb-3">
                 <div className="text-xs font-semibold text-blue-700 uppercase tracking-wider">🏁 R4 — Rozładunek 4</div>
-                <button type="button" onClick={() => { setShowR4(false); setShowR5(false); ["rozladunekFirma4","dokodPocztowy4","dokodMiasto4","dokod4","rozladunekAdres4","rozladunekTelefon4","rozladunekGeo4","dataRozladunku4","godzRozladunku4"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-600">✕ usuń R4</button>
+                <button type="button" onClick={() => { setShowR4(false); setShowR5(false); ["rozladunekFirma4","dokodPocztowy4","dokodMiasto4","dokod4","rozladunekAdres4","rozladunekTelefon4","rozladunekGeo4","dataRozladunku4","godzRozladunku4"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-700">✕ usuń R4</button>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2"><label className={lbl}>Nazwa firmy</label><input value={f.rozladunekFirma4||""} onChange={e => set("rozladunekFirma4",e.target.value)} className={inp} /></div>
@@ -643,7 +643,7 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
             <div style={{border:"2px solid #93c5fd",borderRadius:12,padding:"14px",background:"#eff6ff"}}>
               <div className="flex items-center justify-between mb-3">
                 <div className="text-xs font-semibold text-blue-700 uppercase tracking-wider">🏁 R5 — Rozładunek 5</div>
-                <button type="button" onClick={() => { setShowR5(false); ["rozladunekFirma5","dokodPocztowy5","dokodMiasto5","dokod5","rozladunekAdres5","rozladunekTelefon5","rozladunekGeo5","dataRozladunku5","godzRozladunku5"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-600">✕ usuń R5</button>
+                <button type="button" onClick={() => { setShowR5(false); ["rozladunekFirma5","dokodPocztowy5","dokodMiasto5","dokod5","rozladunekAdres5","rozladunekTelefon5","rozladunekGeo5","dataRozladunku5","godzRozladunku5"].forEach(k => set(k,"")); }} className="text-xs text-red-400 hover:text-red-700">✕ usuń R5</button>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2"><label className={lbl}>Nazwa firmy</label><input value={f.rozladunekFirma5||""} onChange={e => set("rozladunekFirma5",e.target.value)} className={inp} /></div>
@@ -687,7 +687,7 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
           {/* ══ ZLECENIODAWCA ══ */}
           <div className="text-xs font-bold text-orange-600 uppercase tracking-widest pt-2">Zleceniodawca</div>
           <div style={{border:"1px solid #fed7aa",borderRadius:12,padding:"14px",background:"#fff7ed"}}>
-            <div className="text-xs text-orange-500 mb-3">Dane do wysyłki trackera i kontaktu ze zleceniodawcą</div>
+            <div className="text-xs text-orange-700 mb-3">Dane do wysyłki trackera i kontaktu ze zleceniodawcą</div>
             <div className="grid grid-cols-2 gap-3">
               <div><label className={lbl}>Firma</label><input placeholder="nazwa firmy" value={f.zleceniodawcaFirma||""} onChange={e => set("zleceniodawcaFirma",e.target.value)} className={inp} /></div>
               <div><label className={lbl}>Osoba kontaktowa</label><input placeholder="Jan Kowalski" value={f.zleceniodawcaOsoba||""} onChange={e => set("zleceniodawcaOsoba",e.target.value)} className={inp} /></div>
@@ -730,7 +730,7 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
           {/* ══ BIURO ══ */}
           <div className="text-xs font-bold text-gray-500 uppercase tracking-widest pt-2">Dane biurowe</div>
           <div style={{border:"1px solid #e5e7eb",borderRadius:12,padding:"14px",background:"#fafafa"}}>
-            <div className="text-xs text-gray-400 mb-3">🔒 Kierowca nie widzi tych danych</div>
+            <div className="text-xs text-gray-500 mb-3">🔒 Kierowca nie widzi tych danych</div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div><label className={lbl}>Klient</label><input placeholder="nazwa klienta" value={f.klient||""} onChange={e => set("klient",e.target.value)} className={inp} /></div>
               <div><label className={lbl}>Dyspozytor</label><input placeholder="imię dyspozytora" value={f.dyspozytor||""} onChange={e => set("dyspozytor",e.target.value)} className={inp} /></div>
@@ -744,7 +744,7 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
               </div>
               <div><label className={lbl}>KM podjazd</label><input type="number" placeholder="0" value={f.kmPodjazd||""} onChange={e => set("kmPodjazd",e.target.value)} className={inp} /></div>
               <div><label className={lbl}>KM ładowne</label><input type="number" placeholder="0" value={f.kmLadowne||""} onChange={e => set("kmLadowne",e.target.value)} className={inp} /></div>
-              <div><label className={lbl}>KM wszystkie (auto)</label><input readOnly value={f.kmWszystkie||""} className={inp+" bg-gray-50 text-gray-400"} /></div>
+              <div><label className={lbl}>KM wszystkie (auto)</label><input readOnly value={f.kmWszystkie||""} className={inp+" bg-gray-50 text-gray-500"} /></div>
             </div>
             {(eurKmLad||eurKmWsz) && <div className="flex gap-4 text-sm mt-2">{eurKmLad && <span className="px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 font-semibold">EUR/km lad: {eurKmLad}</span>}{eurKmWsz && <span className="px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 font-semibold">EUR/km wsz: {eurKmWsz}</span>}</div>}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3">
@@ -781,7 +781,7 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">Zlecenie {i + 1}</span>
                   {i > 0 && (
-                    <button type="button" onClick={() => usunZlecenie(i)} className="text-xs text-red-400 hover:text-red-600 px-2 py-0.5 rounded-lg hover:bg-red-50" title="Usuń to zlecenie">✕ usuń</button>
+                    <button type="button" onClick={() => usunZlecenie(i)} className="text-xs text-red-400 hover:text-red-700 px-2 py-0.5 rounded-lg hover:bg-red-50" title="Usuń to zlecenie">✕ usuń</button>
                   )}
                 </div>
 
@@ -833,7 +833,7 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
                     <span className="text-xl">📄</span>
                     <a href={safeHref(z.urlZlecenie)} target="_blank" rel="noopener noreferrer" className="flex-1 text-xs text-blue-600 hover:underline">Otwórz dokument →</a>
                     <ZlecenieUploadBtn frachtId={record?.id || "new"} onUploaded={i === 0 ? onUploadedParsed : (url, parsed) => wgrajKolejne(i, url, parsed)} label="Zastąp" />
-                    <button type="button" onClick={() => setZl(i,"urlZlecenie","")} className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50" title="Usuń plik">✕</button>
+                    <button type="button" onClick={() => setZl(i,"urlZlecenie","")} className="text-xs text-red-400 hover:text-red-700 px-2 py-1 rounded-lg hover:bg-red-50" title="Usuń plik">✕</button>
                   </div>
                 ) : (
                   <ZlecenieUploadBtn frachtId={record?.id || "new"} onUploaded={i === 0 ? onUploadedParsed : (url, parsed) => wgrajKolejne(i, url, parsed)} label="📎 Wgraj zlecenie (PDF / JPG)" fullWidth />
@@ -858,7 +858,7 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
             <div className="text-xs text-gray-500 mb-2 flex items-center gap-1 justify-end flex-wrap">
               <span>📧 Podsumowanie wysłane: {new Date(record.tripEmailSentAt).toLocaleString("pl-PL", { dateStyle: "short", timeStyle: "short" })}</span>
               {(record.tripEmailRecipient || record.zleceniodawcaEmail) && (
-                <span className="text-gray-400">→ {record.tripEmailRecipient || record.zleceniodawcaEmail}</span>
+                <span className="text-gray-500">→ {record.tripEmailRecipient || record.zleceniodawcaEmail}</span>
               )}
             </div>
           )}
@@ -1104,7 +1104,7 @@ function SendTrackerLinkModal({ fracht, frachtId, trackerToken, trackerEnabled =
             <div className="text-lg font-bold text-gray-800">🔗 Wyślij tracker</div>
             <div className="text-xs text-gray-500 mt-0.5">Publiczny link do śledzenia dla zleceniodawcy</div>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl px-2">✕</button>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-600 text-xl px-2">✕</button>
         </div>
 
         <div className="px-6 py-5 space-y-4">
@@ -1167,7 +1167,7 @@ function SendTrackerLinkModal({ fracht, frachtId, trackerToken, trackerEnabled =
                 </label>
               ))}
             </div>
-            <div className="text-[11px] text-gray-400 mt-1 pl-1">Nic nie zaznaczone = tylko statusy i trasa (bez zdjęć).</div>
+            <div className="text-[11px] text-gray-500 mt-1 pl-1">Nic nie zaznaczone = tylko statusy i trasa (bez zdjęć).</div>
           </div>
 
           <div>
@@ -1186,7 +1186,7 @@ function SendTrackerLinkModal({ fracht, frachtId, trackerToken, trackerEnabled =
                 📋
               </button>
             </div>
-            <div className="text-[11px] text-gray-400 mt-1.5 leading-relaxed">
+            <div className="text-[11px] text-gray-500 mt-1.5 leading-relaxed">
               Klient zobaczy: nr zlecenia, pasek postępu, status trasy, km do celu, ETA i — jeśli w trasie — aktualne koordynaty GPS.
               Dane wewnętrzne (cena, dyspozytor, adresy) są ukryte.
             </div>
@@ -1329,7 +1329,7 @@ function GeoPickerModal({ initialGeo, address, onSave, onClose }) {
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl flex flex-col" style={{maxHeight:"90vh"}}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <h3 className="text-base font-bold text-gray-900">📍 Wybierz lokalizację</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-600 text-xl">×</button>
         </div>
         <div className="px-5 py-3">
           <div className="flex gap-2">
@@ -1344,10 +1344,10 @@ function GeoPickerModal({ initialGeo, address, onSave, onClose }) {
               {searching ? "..." : inputIsCoords ? "📍 Ustaw pinezkę" : "Szukaj"}
             </button>
           </div>
-          <div className="text-[11px] mt-1 text-gray-400">
+          <div className="text-[11px] mt-1 text-gray-500">
             💡 Tip: w Google Maps kliknij prawym na punkt (Street View znajdzie wjazd) → kopiuj współrzędne → wklej tutaj → "Ustaw pinezkę"
           </div>
-          <div className="text-xs mt-1" style={{color: hasPinned ? "#9ca3af" : "#dc2626", fontWeight: hasPinned ? 400 : 600}}>
+          <div className="text-xs mt-1" style={{color: hasPinned ? "#6b7280" : "#b91c1c", fontWeight: hasPinned ? 400 : 600}}>
             {hasPinned
               ? "Możesz przeciągnąć pinezkę lub kliknąć ponownie, aby skorygować."
               : "⚠️ Wklej współrzędne z Google lub kliknij w mapę na dokładne miejsce (np. brama wjazdowa)."}
@@ -1356,7 +1356,7 @@ function GeoPickerModal({ initialGeo, address, onSave, onClose }) {
         <div ref={mapRef} style={{height: 350, width: "100%"}}></div>
         <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between">
           <span className="text-xs text-gray-500">
-            {hasPinned ? `${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}` : <span style={{color: "#dc2626"}}>Pinezka nie ustawiona</span>}
+            {hasPinned ? `${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}` : <span style={{color: "#b91c1c"}}>Pinezka nie ustawiona</span>}
           </span>
           <div className="flex gap-2">
             <button onClick={onClose}

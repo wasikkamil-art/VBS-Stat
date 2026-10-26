@@ -37,7 +37,7 @@ export default function TachografComplianceSection({ device, position, driverAct
       <div className="bg-white rounded-2xl border border-gray-100 p-8 text-center">
         <div className="text-4xl mb-3">👤</div>
         <div className="text-sm text-gray-600">Brak aktywnego kierowcy przypisanego do tego pojazdu.</div>
-        <div className="text-xs text-gray-400 mt-2">Dodaj kierowcę w panelu edycji pojazdu (sekcja Historia kierowców).</div>
+        <div className="text-xs text-gray-500 mt-2">Dodaj kierowcę w panelu edycji pojazdu (sekcja Historia kierowców).</div>
       </div>
     );
   }
@@ -89,7 +89,7 @@ export default function TachografComplianceSection({ device, position, driverAct
   };
   const suggestionChips = (tachoSuggestion || przegladSuggestion) ? (
     <div className="flex items-center flex-wrap gap-1.5 mt-2">
-      <span className="text-[10px] text-gray-400">💡 Sugestie:</span>
+      <span className="text-[10px] text-gray-500">💡 Sugestie:</span>
       {tachoSuggestion && (
         <button type="button" onClick={() => handleTachoCardChange(msToDateInput(tachoSuggestion.endMs))}
           title="Koniec ostatniego długiego odpoczynku (≥56h) = prawdopodobnie wyjazd z bazy"
@@ -178,7 +178,7 @@ export default function TachografComplianceSection({ device, position, driverAct
             <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl" style={{ background: "#dbeafe", color: "#1e40af" }}>📋</div>
             <div>
               <div className="text-sm font-bold text-gray-900">{vehicle.plate} · {driverName}</div>
-              <div className="text-xs text-gray-400">Tachograf compliance · 561/2006 + Pakiet Mobilności</div>
+              <div className="text-xs text-gray-500">Tachograf compliance · 561/2006 + Pakiet Mobilności</div>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -229,7 +229,7 @@ export default function TachografComplianceSection({ device, position, driverAct
             </span>
             <span className="text-gray-500 tabular-nums">
               <strong className="text-gray-900">{fmtHM(dailyDriveRemaining)}</strong>
-              <span className="text-gray-400 ml-1">/ {fmtHM(compliance.daily.limit)}</span>
+              <span className="text-gray-500 ml-1">/ {fmtHM(compliance.daily.limit)}</span>
             </span>
           </div>
           <Bar val={dailyDriveRemaining} max={compliance.daily.limit} color={remainingColor(dailyDriveRemaining, compliance.daily.limit)} />
@@ -365,7 +365,7 @@ export default function TachografComplianceSection({ device, position, driverAct
             <div className="text-[11px] text-gray-500 mt-0.5">
               +{compliance.shift.shiftHours}h od rozpoczęcia
               {compliance.shift.canReduce
-                ? <span className="ml-1 text-gray-400">(z ~9h skróconym odp.)</span>
+                ? <span className="ml-1 text-gray-500">(z ~9h skróconym odp.)</span>
                 : <span className="ml-1 text-amber-600 font-semibold">(brak skróceń — 11h regularny)</span>}
             </div>
           </div>
@@ -398,7 +398,7 @@ export default function TachografComplianceSection({ device, position, driverAct
             </span>
             <span className="text-gray-500 tabular-nums">
               <strong className="text-gray-900">{fmtHM(weeklyDriveRemaining)}</strong>
-              <span className="text-gray-400 ml-1">/ {fmtHM(compliance.weekly.effectiveDriveLimit)}</span>
+              <span className="text-gray-500 ml-1">/ {fmtHM(compliance.weekly.effectiveDriveLimit)}</span>
             </span>
           </div>
           <Bar val={weeklyDriveRemaining} max={compliance.weekly.effectiveDriveLimit} color={remainingColor(weeklyDriveRemaining, compliance.weekly.effectiveDriveLimit)} />
@@ -415,15 +415,15 @@ export default function TachografComplianceSection({ device, position, driverAct
             <div className="flex items-center gap-1.5 mb-2">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
               <span className="text-[10px] font-semibold text-gray-500 uppercase">Wydłużenia dziennego czasu jazdy</span>
-              <span className="text-[10px] text-gray-400 ml-auto">{compliance.weekly.extendedDailyDrives} / {compliance.weekly.extendedDailyDrivesAllowed}</span>
+              <span className="text-[10px] text-gray-500 ml-auto">{compliance.weekly.extendedDailyDrives} / {compliance.weekly.extendedDailyDrivesAllowed}</span>
             </div>
             <div className="flex gap-1.5">
               {Array.from({ length: compliance.weekly.extendedDailyDrivesAllowed }).map((_, i) => (
-                <span key={i} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold ${i < compliance.weekly.extendedDailyDrives ? "bg-green-100 text-green-800 border border-green-200" : "bg-gray-50 text-gray-400 border border-gray-200"}`}>
+                <span key={i} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold ${i < compliance.weekly.extendedDailyDrives ? "bg-green-100 text-green-800 border border-green-200" : "bg-gray-50 text-gray-500 border border-gray-200"}`}>
                   10h
                 </span>
               ))}
-              {compliance.weekly.extendedDailyDrives === 0 && <span className="text-[11px] text-gray-400 italic ml-1 self-center">brak</span>}
+              {compliance.weekly.extendedDailyDrives === 0 && <span className="text-[11px] text-gray-500 italic ml-1 self-center">brak</span>}
             </div>
           </div>
 
@@ -432,15 +432,15 @@ export default function TachografComplianceSection({ device, position, driverAct
             <div className="flex items-center gap-1.5 mb-2">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
               <span className="text-[10px] font-semibold text-gray-500 uppercase">Zmniejszone dzienne odpoczynki</span>
-              <span className="text-[10px] text-gray-400 ml-auto">{compliance.weekly.reducedDailyRests} / {compliance.weekly.reducedDailyRestsAllowed}</span>
+              <span className="text-[10px] text-gray-500 ml-auto">{compliance.weekly.reducedDailyRests} / {compliance.weekly.reducedDailyRestsAllowed}</span>
             </div>
             <div className="flex gap-1.5">
               {Array.from({ length: compliance.weekly.reducedDailyRestsAllowed }).map((_, i) => (
-                <span key={i} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold ${i < compliance.weekly.reducedDailyRests ? "bg-green-100 text-green-800 border border-green-200" : "bg-gray-50 text-gray-400 border border-gray-200"}`}>
+                <span key={i} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold ${i < compliance.weekly.reducedDailyRests ? "bg-green-100 text-green-800 border border-green-200" : "bg-gray-50 text-gray-500 border border-gray-200"}`}>
                   &lt;11h
                 </span>
               ))}
-              {compliance.weekly.reducedDailyRests === 0 && <span className="text-[11px] text-gray-400 italic ml-1 self-center">brak</span>}
+              {compliance.weekly.reducedDailyRests === 0 && <span className="text-[11px] text-gray-500 italic ml-1 self-center">brak</span>}
             </div>
           </div>
         </div>
@@ -455,7 +455,7 @@ export default function TachografComplianceSection({ device, position, driverAct
             {compliance.period28 && (
               <span className="text-gray-500 tabular-nums">
                 <strong className="text-gray-900">{compliance.period28.daysLeft} dni</strong>
-                <span className="text-gray-400 ml-1">/ {REGULATION.RETURN_TO_BASE_DAYS}</span>
+                <span className="text-gray-500 ml-1">/ {REGULATION.RETURN_TO_BASE_DAYS}</span>
               </span>
             )}
           </div>
@@ -467,13 +467,13 @@ export default function TachografComplianceSection({ device, position, driverAct
               <div className="flex items-center justify-between text-[11px] text-gray-500 mt-1.5 gap-2">
                 <span>Deadline: {fmtDateTime(compliance.period28.deadlineMs)}</span>
                 <span className="flex items-center gap-1.5 flex-shrink-0">
-                  <span className="text-gray-400">wg karty:</span>
+                  <span className="text-gray-500">wg karty:</span>
                   <input type="date" value={vehicle.tachoCardStart}
                     onChange={e => handleTachoCardChange(e.target.value)}
                     className="text-[11px] outline-none bg-transparent text-gray-700 border border-gray-200 rounded px-1 py-0.5"
                     style={{ fontFamily: "'DM Sans', sans-serif" }} />
                   <button onClick={() => handleTachoCardChange("")}
-                    className="text-gray-400 hover:text-red-400 transition-all">Reset</button>
+                    className="text-gray-500 hover:text-red-400 transition-all">Reset</button>
                 </span>
               </div>
             </>
@@ -487,7 +487,7 @@ export default function TachografComplianceSection({ device, position, driverAct
             </div>
           )}
           {suggestionChips}
-          <div className="text-[10px] text-gray-400 mt-1.5 italic">Niezależne od daty wyjazdu w przeglądzie — własny licznik tachografu.</div>
+          <div className="text-[10px] text-gray-500 mt-1.5 italic">Niezależne od daty wyjazdu w przeglądzie — własny licznik tachografu.</div>
         </div>
       </div>
 
@@ -606,7 +606,7 @@ export default function TachografComplianceSection({ device, position, driverAct
                     {p.windows.map((w) => (
                       <div key={w.fromWeekMs} className="tabular-nums">
                         {dd(w.fromWeekMs)}–{dd(w.toWeekMs)}: {w.restCount} odp. / <strong className={w.regularCount >= 2 ? "text-emerald-700" : "text-amber-700"}>{w.regularCount} reg.</strong>
-                        {w.truncated && <span className="text-gray-400 italic"> · okno przed początkiem danych, nieliczone</span>}
+                        {w.truncated && <span className="text-gray-500 italic"> · okno przed początkiem danych, nieliczone</span>}
                       </div>
                     ))}
                     <div className="text-gray-500 mt-0.5">
@@ -741,7 +741,7 @@ export default function TachografComplianceSection({ device, position, driverAct
             )}
           </div>
         ) : (
-          <div className="text-xs text-gray-400 italic">Brak danych do wyznaczenia planu</div>
+          <div className="text-xs text-gray-500 italic">Brak danych do wyznaczenia planu</div>
         )}
       </div>
 

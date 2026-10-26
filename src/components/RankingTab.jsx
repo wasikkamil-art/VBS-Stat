@@ -108,7 +108,7 @@ export default function RankingTab({ vehicles = [], frachtyList = [], costs = []
       <div className="flex items-center justify-between flex-wrap gap-3 mb-4 ranking-noprint">
         <div>
           <h2 className="text-xl font-bold text-gray-900 mb-1">Ranking kierowców</h2>
-          <p className="text-sm text-gray-400">
+          <p className="text-sm text-gray-500">
             Okres rozliczony: {podpis} · {MONTHS.length} {MONTHS.length === 1 ? "miesiąc" : "miesięcy"} · kwoty netto EUR
           </p>
         </div>
@@ -145,14 +145,14 @@ export default function RankingTab({ vehicles = [], frachtyList = [], costs = []
               <div className="flex items-start justify-between gap-4 mb-3 pb-3 border-b border-gray-100">
                 <div>
                   <h3 className="text-base font-bold text-gray-900">Ranking — {r.tytul.toLowerCase()}</h3>
-                  <div className="text-xs text-gray-400 mt-0.5">
+                  <div className="text-xs text-gray-500 mt-0.5">
                     {podpis} · {r.podtytul}{r.jednostka ? ` · ${r.jednostka}` : ""}
                     {r.mniejLepiej ? " · mniej = lepiej" : ""}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <img src="/app-fleetstat.png" alt="FleetStat" style={{ height: 22, width: "auto" }} />
-                  <div className="text-[10px] text-gray-400 leading-tight">VBS Transport<br />{new Date().toLocaleDateString("pl-PL")}</div>
+                  <div className="text-[10px] text-gray-500 leading-tight">VBS Transport<br />{new Date().toLocaleDateString("pl-PL")}</div>
                 </div>
               </div>
 
@@ -180,13 +180,13 @@ export default function RankingTab({ vehicles = [], frachtyList = [], costs = []
                       <td className="lbl">
                         <span className="inline-block mr-2 align-middle" style={{ width: 8, height: 8, borderRadius: 2, background: w.col }} />
                         <span className="font-semibold text-gray-800">{w.name}</span>
-                        <span className="text-gray-400 ml-2 text-[10px]">{w.plate}</span>
+                        <span className="text-gray-500 ml-2 text-[10px]">{w.plate}</span>
                       </td>
                       {w.wartosciTxt.map((v, i) => (
-                        <td key={i} style={{ color: w.lider[i] ? w.col : (w.wartosci[i] < 0 ? "#dc2626" : undefined),
+                        <td key={i} style={{ color: w.lider[i] ? w.col : (w.wartosci[i] < 0 ? "#b91c1c" : undefined),
                           fontWeight: w.lider[i] ? 700 : undefined }}>{v}</td>
                       ))}
-                      <td className="sum" style={{ color: w.suma < 0 ? "#dc2626" : undefined }}>{w.sumaTxt}</td>
+                      <td className="sum" style={{ color: w.suma < 0 ? "#b91c1c" : undefined }}>{w.sumaTxt}</td>
                       {r.pokazSrednia && <td className="text-gray-500">{w.sredniaTxt}</td>}
                       {r.extraNaglowek && <td className="text-gray-500">{w.extraTxt}</td>}
                     </tr>
@@ -214,7 +214,7 @@ export default function RankingTab({ vehicles = [], frachtyList = [], costs = []
                 </ul>
               </div>
 
-              <div className="mt-3 pt-2 border-t border-gray-100 text-[9px] text-gray-400 leading-relaxed">
+              <div className="mt-3 pt-2 border-t border-gray-100 text-[9px] text-gray-500 leading-relaxed">
                 Źródło: FleetStat — frachty i koszty z bazy, dni w trasie, km licznika oraz litry z danych
                 operacyjnych. Kierowca przypisany do pojazdu wg historii kierowców. {r.opisMetody}
                 {" "}Ranking obejmuje wyłącznie miesiące rozliczone (z kosztami zmiennymi), żeby wszystkie metryki liczyły ten sam czas.

@@ -121,7 +121,7 @@ function DriverCzasPracyDashboard({ user, vehicle, driverActivities = [], showTo
       <div style={{ background: "#fff", borderRadius: 16, padding: 14, marginBottom: 12, border: "1px solid #e5e7eb" }}>
         <div className="flex items-center justify-between" style={{ marginBottom: 10 }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>🗓️ Dzisiaj</div>
-          <div style={{ fontSize: 10, color: "#9ca3af" }}>od {fmtTimeShort(compliance.daily.start)}</div>
+          <div style={{ fontSize: 10, color: "#6b7280" }}>od {fmtTimeShort(compliance.daily.start)}</div>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6, marginBottom: 10 }}>
           {Object.entries(ACTIVITY_TYPES).map(([key, meta]) => (
@@ -170,7 +170,7 @@ function DriverCzasPracyDashboard({ user, vehicle, driverActivities = [], showTo
         <div style={{ background: "#fff", borderRadius: 16, padding: 14, marginBottom: 12, border: "1px solid #e5e7eb" }}>
           <div className="flex items-center justify-between" style={{ marginBottom: 6 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>🛣️ Okres 28-dniowy</div>
-            <div style={{ fontSize: 10, color: "#9ca3af" }}>start: {new Date(compliance.period28.startMs).toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit" })}</div>
+            <div style={{ fontSize: 10, color: "#6b7280" }}>start: {new Date(compliance.period28.startMs).toLocaleDateString("pl-PL", { day: "2-digit", month: "2-digit" })}</div>
           </div>
           <div className="flex items-center justify-between" style={{ fontSize: 12, marginBottom: 4 }}>
             <span style={{ color: "#6b7280" }}>Dzień {compliance.period28.daysPassed} / {REGULATION.RETURN_TO_BASE_DAYS}</span>
@@ -183,7 +183,7 @@ function DriverCzasPracyDashboard({ user, vehicle, driverActivities = [], showTo
           {[
             { label: "Jazda tygodniowa", val: compliance.weekly.drive, max: compliance.weekly.limit, color: "#3b82f6" },
             { label: "Jazda dwutygodniowa", val: compliance.biweekly.drive, max: compliance.biweekly.limit, color: "#3b82f6" },
-            { label: "Czas pracy (48h/tydz śr.)", val: compliance.weekly.workTime, max: REGULATION.WORK_TIME_WEEKLY_AVG, color: "#f59e0b" },
+            { label: "Czas pracy (48h/tydz śr.)", val: compliance.weekly.workTime, max: REGULATION.WORK_TIME_WEEKLY_AVG, color: "#b45309" },
           ].map(l => (
             <div key={l.label} style={{ marginBottom: 4 }}>
               <div className="flex items-center justify-between" style={{ fontSize: 11, marginBottom: 2 }}>
@@ -218,7 +218,7 @@ function DriverCzasPracyDashboard({ user, vehicle, driverActivities = [], showTo
         </button>
       </div>
 
-      <div style={{ fontSize: 10, color: "#9ca3af", textAlign: "center", marginBottom: 8 }}>
+      <div style={{ fontSize: 10, color: "#6b7280", textAlign: "center", marginBottom: 8 }}>
         Auto-wykrywanie z GPS działa w tle. Kliknięcia tutaj nadpisują automat.
       </div>
 
@@ -291,7 +291,7 @@ function DriverDddUploadCard({ user, vehicle, showToast }) {
         <div style={{ fontSize: 13, fontWeight: 700, color: "#6d28d9" }}>
           {uploading ? "Wgrywam i parsuję..." : "Wybierz plik DDD z telefonu"}
         </div>
-        <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>
+        <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>
           Obsługiwane: .ddd · .esm · .tgd · .v1b
         </div>
         <input type="file" accept=".ddd,.DDD,.esm,.ESM,.tgd,.v1b" disabled={uploading}
@@ -603,7 +603,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
         display: "inline-flex", alignItems: "center", gap: 4,
         padding: "3px 8px", borderRadius: 8, fontSize: 11, fontWeight: 600,
         background: delay.onTime ? "#f0fdf4" : delay.diffMin > 120 ? "#fef2f2" : "#fffbeb",
-        color: delay.onTime ? "#15803d" : delay.diffMin > 120 ? "#dc2626" : "#d97706",
+        color: delay.onTime ? "#15803d" : delay.diffMin > 120 ? "#b91c1c" : "#d97706",
       }}>
         {delay.onTime ? "✅" : "⏰"} {delay.text}
       </span>
@@ -674,7 +674,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
         )}
         {isDone && onUndo && (
           <button onClick={onUndo}
-            style={{padding: "6px 10px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", color: "#9ca3af", fontSize: 11, fontWeight: 500, cursor: "pointer"}}>
+            style={{padding: "6px 10px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", color: "#6b7280", fontSize: 11, fontWeight: 500, cursor: "pointer"}}>
             ↩ Cofnij
           </button>
         )}
@@ -839,7 +839,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
             <div style={{padding: "12px 16px 16px"}}>
               <div className="flex items-center gap-2" style={{marginBottom: 8}}>
                 <div style={{width: 10, height: 10, borderRadius: "50%", background: "#10b981", border: "2px solid #a7f3d0"}}></div>
-                <span style={{fontSize: 11, fontWeight: 700, color: "#10b981", textTransform: "uppercase", letterSpacing: 0.5}}>Rozładunek</span>
+                <span style={{fontSize: 11, fontWeight: 700, color: "#047857", textTransform: "uppercase", letterSpacing: 0.5}}>Rozładunek</span>
               </div>
               <div style={{paddingLeft: 18}}>
                 <div style={{fontSize: 16, fontWeight: 700, color: "#111827", marginBottom: 2}}>{kody.roz}</div>
@@ -881,20 +881,20 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
               <div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: (f.towarPalety || f.towarOpis) ? 12 : 0}}>
                 {f.towarIloscPalet && (
                   <div style={{padding: 12, borderRadius: 12, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
-                    <div style={{fontSize: 11, color: "#9ca3af"}}>Ilość palet</div>
+                    <div style={{fontSize: 11, color: "#6b7280"}}>Ilość palet</div>
                     <div style={{fontSize: 18, fontWeight: 700, color: "#111827"}}>{f.towarIloscPalet}</div>
                   </div>
                 )}
                 {f.wagaLadunku && (
                   <div style={{padding: 12, borderRadius: 12, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
-                    <div style={{fontSize: 11, color: "#9ca3af"}}>Waga łączna</div>
+                    <div style={{fontSize: 11, color: "#6b7280"}}>Waga łączna</div>
                     <div style={{fontSize: 18, fontWeight: 700, color: "#111827"}}>{f.wagaLadunku} kg</div>
                   </div>
                 )}
               </div>
               {f.towarPalety && (
                 <div>
-                  <div style={{fontSize: 11, color: "#9ca3af", marginBottom: 6}}>Wymiary</div>
+                  <div style={{fontSize: 11, color: "#6b7280", marginBottom: 6}}>Wymiary</div>
                   {f.towarPalety.split("\n").filter(Boolean).map((line, i) => (
                     <div key={i} style={{padding: "8px 12px", borderRadius: 8, background: "#f8fafc", border: "1px solid #f1f5f9", marginBottom: 4, fontSize: 13, color: "#374151", fontWeight: 500}}>
                       {line}
@@ -928,7 +928,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
           <div style={{background: "#fff", borderRadius: 16, border: "2px solid #bfdbfe", padding: 16, marginBottom: 12}}>
             <div className="flex items-center justify-between" style={{marginBottom: 8}}>
               <div style={{fontSize: 13, fontWeight: 700, color: "#1d4ed8"}}>📦 ZAŁADUNEK</div>
-              <span style={{fontSize: 11, color: "#9ca3af"}}>{fmtDate(f.dataZaladunku)}{f.godzZaladunku ? ` · ${f.godzZaladunku}` : ""}</span>
+              <span style={{fontSize: 11, color: "#6b7280"}}>{fmtDate(f.dataZaladunku)}{f.godzZaladunku ? ` · ${f.godzZaladunku}` : ""}</span>
             </div>
             {hasDotarcieZal && zalDelay && (
               <div style={{marginBottom: 10}}>{renderDelayBadge(zalDelay)}</div>
@@ -1017,7 +1017,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
                   onBlur={(e) => { if (e.target.value !== (uwagiZalEvent?.note || "")) saveDriverNote(f, "uwagi_zaladunek", e.target.value); }}
                   style={{width: "100%", fontSize: 14, padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e7eb",
                     background: "#fff", resize: "vertical", minHeight: 60, fontFamily: "inherit"}} />
-                {uwagiZalEvent?.ts && <div style={{fontSize: 11, color: "#9ca3af", marginTop: 4}}>
+                {uwagiZalEvent?.ts && <div style={{fontSize: 11, color: "#6b7280", marginTop: 4}}>
                   Zapisane: {new Date(uwagiZalEvent.ts).toLocaleString("pl-PL", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
                 </div>}
               </div>
@@ -1030,7 +1030,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
             {hasStartRoz && (
               <div style={{padding: 12, borderRadius: 12, marginBottom: 8, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
                 <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 4}}>🔢 Stan licznika — start trasy</div>
-                <div style={{fontSize: 11, color: "#9ca3af", marginBottom: 8}}>
+                <div style={{fontSize: 11, color: "#6b7280", marginBottom: 8}}>
                   {f.kmStart ? "📡 Odczyt z CAN — skoryguj jeśli nieprawidłowy" : "⚠️ Auto nie zapisało — wpisz ręcznie"}
                 </div>
                 <input
@@ -1053,8 +1053,8 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
             return (
           <div key={s.n} style={{background: "#fff", borderRadius: 16, border: `2px solid ${enabled ? "#a7f3d0" : "#e5e7eb"}`, padding: 16, opacity: enabled ? 1 : 0.4, marginTop: s.idx === 0 ? 0 : 16}}>
             <div className="flex items-center justify-between" style={{marginBottom: 8}}>
-              <div style={{fontSize: 13, fontWeight: 700, color: "#059669"}}>📦 ROZŁADUNEK{nLabel}</div>
-              <span style={{fontSize: 11, color: "#9ca3af"}}>{fmtDate(s.data)}{s.godz ? ` · ${s.godz}` : ""}</span>
+              <div style={{fontSize: 13, fontWeight: 700, color: "#047857"}}>📦 ROZŁADUNEK{nLabel}</div>
+              <span style={{fontSize: 11, color: "#6b7280"}}>{fmtDate(s.data)}{s.godz ? ` · ${s.godz}` : ""}</span>
             </div>
             {multiStop && (s.adres || s.dokod) && (
               <div style={{fontSize: 12, color: "#6b7280", marginBottom: 8, paddingLeft: 2}}>{s.adres || s.dokod}</div>
@@ -1070,7 +1070,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
             {s.isLast && s.hasDotarcie && (
               <div style={{padding: 12, borderRadius: 12, marginBottom: 8, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
                 <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 4}}>🔢 Stan licznika — koniec trasy</div>
-                <div style={{fontSize: 11, color: "#9ca3af", marginBottom: 8}}>
+                <div style={{fontSize: 11, color: "#6b7280", marginBottom: 8}}>
                   {f.kmEnd ? "📡 Odczyt z CAN — skoryguj jeśli nieprawidłowy" : "⚠️ Auto nie zapisało — wpisz ręcznie"}
                   {f.kmStart && f.kmEnd && Number(f.kmEnd) > Number(f.kmStart) && (
                     <span style={{color: "#15803d", fontWeight: 600}}> · Trasa: {Number(f.kmEnd) - Number(f.kmStart)} km</span>
@@ -1133,7 +1133,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
                   onBlur={(e) => { if (e.target.value !== (s.uwagiEvent?.note || "")) saveDriverNote(f, "uwagi_rozladunek", e.target.value, s.rParam); }}
                   style={{width: "100%", fontSize: 14, padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e7eb",
                     background: "#fff", resize: "vertical", minHeight: 60, fontFamily: "inherit"}} />
-                {s.uwagiEvent?.ts && <div style={{fontSize: 11, color: "#9ca3af", marginTop: 4}}>
+                {s.uwagiEvent?.ts && <div style={{fontSize: 11, color: "#6b7280", marginTop: 4}}>
                   Zapisane: {new Date(s.uwagiEvent.ts).toLocaleString("pl-PL", {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
                 </div>}
               </div>
@@ -1142,14 +1142,14 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
             {/* 4. Zdjęcie uszkodzonego towaru — TYLKO na ostatnim stopie */}
             {s.isLast && s.hasDotarcie && (
               <div style={{padding: 12, borderRadius: 12, background: "#f8fafc", border: "1px solid #f1f5f9"}}>
-                <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 4}}>📸 Zdjęcie uszkodzeń <span style={{fontSize: 11, color: "#9ca3af", fontWeight: 400}}>(opcjonalne)</span></div>
+                <div style={{fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 4}}>📸 Zdjęcie uszkodzeń <span style={{fontSize: 11, color: "#6b7280", fontWeight: 400}}>(opcjonalne)</span></div>
                 {towarDmgPhotos.length > 0 && (
                   <div style={{display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8}}>
                     {towarDmgPhotos.map((p, i) => (
                       <div key={p.id || i} style={{display: "flex", alignItems: "center", gap: 2}}>
                         <a href={p.photoUrl} target="_blank" rel="noopener noreferrer"
                           style={{display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 8,
-                            background: "#fef2f2", border: "1px solid #fecaca", fontSize: 12, color: "#dc2626",
+                            background: "#fef2f2", border: "1px solid #fecaca", fontSize: 12, color: "#b91c1c",
                             fontWeight: 500, textDecoration: "none"}}>
                           ⚠️ Uszkodzenie {i + 1}
                         </a>
@@ -1161,7 +1161,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
                 )}
                 <label style={{display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
                   padding: "10px", borderRadius: 10, border: "1px dashed #fecaca", background: "#fff",
-                  color: "#9ca3af", fontSize: 13, fontWeight: 500, cursor: "pointer"}}>
+                  color: "#6b7280", fontSize: 13, fontWeight: 500, cursor: "pointer"}}>
                   📷 {towarDmgPhotos.length > 0 ? "Dodaj kolejne zdjęcie uszkodzenia" : "Dodaj zdjęcia uszkodzenia"}
                   <input type="file" accept="image/*" multiple className="hidden"
                     onChange={async (e) => {
@@ -1187,7 +1187,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
                 <div style={{marginTop: 16, padding: 14, borderRadius: 12, background: "#f0fdf4", border: "2px solid #bbf7d0", display: "flex", alignItems: "center", justifyContent: "space-between"}}>
                   <div style={{fontSize: 15, fontWeight: 700, color: "#15803d"}}>✅ Trasa zakończona</div>
                   <button onClick={() => undoFrachtStatus(f, "rozladowano")}
-                    style={{padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, background: "#fff", color: "#dc2626", border: "1px solid #fecaca", cursor: "pointer"}}>
+                    style={{padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, background: "#fff", color: "#b91c1c", border: "1px solid #fecaca", cursor: "pointer"}}>
                     ↩️ Cofnij
                   </button>
                 </div>
@@ -1279,26 +1279,26 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
               );
             })()}
           </div>
-          {f.nrRef && <span style={{ fontSize: 11, color: "#9ca3af" }}>{f.nrRef}</span>}
+          {f.nrRef && <span style={{ fontSize: 11, color: "#6b7280" }}>{f.nrRef}</span>}
         </div>
         <div style={{ padding: "12px 16px" }}>
           <div className="flex items-center gap-2" style={{ marginBottom: 4 }}>
             <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#3b82f6", flexShrink: 0 }}></div>
             <span style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{kody.zal.split(" / ")[0]}</span>
-            <span style={{ fontSize: 12, color: "#9ca3af", marginLeft: "auto" }}>{fmtDate(f.dataZaladunku)}{f.godzZaladunku ? ` · ${f.godzZaladunku}` : ""}</span>
+            <span style={{ fontSize: 12, color: "#6b7280", marginLeft: "auto" }}>{fmtDate(f.dataZaladunku)}{f.godzZaladunku ? ` · ${f.godzZaladunku}` : ""}</span>
           </div>
           <div style={{ width: 1, height: 10, background: "#e5e7eb", marginLeft: 3 }}></div>
           <div className="flex items-center gap-2">
             <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#10b981", flexShrink: 0 }}></div>
             <span style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{kody.roz.split(" / ")[0]}</span>
-            <span style={{ fontSize: 12, color: "#9ca3af", marginLeft: "auto" }}>{fmtDate(f.dataRozladunku)}{f.godzRozladunku ? ` · ${f.godzRozladunku}` : ""}</span>
+            <span style={{ fontSize: 12, color: "#6b7280", marginLeft: "auto" }}>{fmtDate(f.dataRozladunku)}{f.godzRozladunku ? ` · ${f.godzRozladunku}` : ""}</span>
           </div>
         </div>
         {(f.towarIloscPalet || f.wagaLadunku || f.zaladunekTyp) && (
           <div style={{ padding: "0 16px 12px", display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {f.towarIloscPalet && <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: "#f3f4f6", color: "#6b7280" }}>{f.towarIloscPalet} palet</span>}
-            {f.wagaLadunku && <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: "#f3f4f6", color: "#6b7280" }}>{f.wagaLadunku} kg</span>}
-            {f.zaladunekTyp && <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: "#f3f4f6", color: "#6b7280" }}>{f.zaladunekTyp}</span>}
+            {f.towarIloscPalet && <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: "#f3f4f6", color: "#4b5563" }}>{f.towarIloscPalet} palet</span>}
+            {f.wagaLadunku && <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: "#f3f4f6", color: "#4b5563" }}>{f.wagaLadunku} kg</span>}
+            {f.zaladunekTyp && <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: "#f3f4f6", color: "#4b5563" }}>{f.zaladunekTyp}</span>}
           </div>
         )}
       </div>
@@ -1320,9 +1320,9 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
             <div>
               {active.length > 0 && (<><div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Aktywne ({active.length})</div>{active.map(f => renderFrachtCard(f))}</>)}
               {upcoming.length > 0 && (<><div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-4 mb-2">Nadchodzące ({upcoming.length})</div>{upcoming.map(f => renderFrachtCard(f))}</>)}
-              {history.length > 0 && (<><div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-4 mb-2">Historia ({history.length})</div>{history.slice(0, 10).map(f => renderFrachtCard(f))}{history.length > 10 && <div className="text-xs text-gray-400 text-center mt-2">…i {history.length - 10} więcej</div>}</>)}
+              {history.length > 0 && (<><div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-4 mb-2">Historia ({history.length})</div>{history.slice(0, 10).map(f => renderFrachtCard(f))}{history.length > 10 && <div className="text-xs text-gray-500 text-center mt-2">…i {history.length - 10} więcej</div>}</>)}
               {active.length === 0 && upcoming.length === 0 && history.length === 0 && (
-                <div className="text-center py-12 text-gray-400"><div className="text-4xl mb-3">🛣️</div><div className="font-medium">Brak zleceń</div></div>
+                <div className="text-center py-12 text-gray-500"><div className="text-4xl mb-3">🛣️</div><div className="font-medium">Brak zleceń</div></div>
               )}
             </div>
           )}
@@ -1334,7 +1334,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
                 <div className="flex items-center gap-3 mb-4"><div className="text-3xl">🚛</div><div><div className="text-lg font-bold text-gray-900">{vehicle.plate}</div>{vehicle.plate2 && <div className="text-sm text-gray-500">Przyczepa: {vehicle.plate2}</div>}</div></div>
                 <div className="grid grid-cols-2 gap-3">
                   {[["Marka",vehicle.brand],["Typ",vehicle.type],["Rok",vehicle.year],["Wymiary",vehicle.dimensions],["Ładowność",vehicle.maxWeight?`${vehicle.maxWeight} kg`:null],["VIN",vehicle.vin],["Przebieg",vehicle.currentKm?`${Number(vehicle.currentKm).toLocaleString("pl-PL")} km`:null]].filter(([,v])=>v).map(([l,v])=>(
-                    <div key={l} className="p-3 rounded-lg bg-gray-50 border border-gray-100"><div className="text-xs text-gray-400">{l}</div><div className="text-sm font-semibold text-gray-800">{v}</div></div>
+                    <div key={l} className="p-3 rounded-lg bg-gray-50 border border-gray-100"><div className="text-xs text-gray-500">{l}</div><div className="text-sm font-semibold text-gray-800">{v}</div></div>
                   ))}
                 </div>
               </div>
@@ -1355,7 +1355,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
                 <div className="space-y-2">
                   {[["OC",vehicle.ocExpiry],["AC",vehicle.acExpiry],["Przegląd techniczny",vehicle.inspectionExpiry],["UDT ważność",vehicle.udtExpiry],["UDT przegląd",vehicle.udtNextDate],["GAP",vehicle.gapExpiry]].filter(([,d])=>d).map(([label,date])=>{
                     const days=daysUntil(date);const urgent=days!==null&&days<=30;const warn=days!==null&&days<=60;
-                    return(<div key={label} className="flex items-center justify-between py-2 px-3 rounded-lg" style={{background:urgent?"#fef2f2":warn?"#fffbeb":"#f9fafb"}}><span className="text-sm text-gray-700">{label}</span><div className="text-right"><span className="text-sm font-semibold" style={{color:urgent?"#dc2626":warn?"#d97706":"#374151"}}>{fmtDateFull(date)}</span>{days!==null&&<span className="ml-2 text-xs" style={{color:urgent?"#dc2626":warn?"#d97706":"#9ca3af"}}>({days>0?`za ${days} dni`:days===0?"dziś!":`${Math.abs(days)} dni temu`})</span>}</div></div>);
+                    return(<div key={label} className="flex items-center justify-between py-2 px-3 rounded-lg" style={{background:urgent?"#fef2f2":warn?"#fffbeb":"#f9fafb"}}><span className="text-sm text-gray-700">{label}</span><div className="text-right"><span className="text-sm font-semibold" style={{color: urgent?"#b91c1c":warn?"#d97706":"#374151"}}>{fmtDateFull(date)}</span>{days!==null&&<span className="ml-2 text-xs" style={{color: urgent?"#b91c1c":warn?"#d97706":"#6b7280"}}>({days>0?`za ${days} dni`:days===0?"dziś!":`${Math.abs(days)} dni temu`})</span>}</div></div>);
                   })}
                 </div>
               </div>
@@ -1363,8 +1363,8 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
                 <div className="bg-white rounded-2xl border border-gray-100 p-5">
                   <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Serwis olejowy</div>
                   <div className="grid grid-cols-2 gap-3">
-                    {vehicle.lastOilServiceKm&&<div className="p-3 rounded-lg bg-gray-50 border border-gray-100"><div className="text-xs text-gray-400">Ostatni serwis</div><div className="text-sm font-semibold text-gray-800">{Number(vehicle.lastOilServiceKm).toLocaleString("pl-PL")} km</div></div>}
-                    {vehicle.oilServiceEveryKm&&<div className="p-3 rounded-lg bg-gray-50 border border-gray-100"><div className="text-xs text-gray-400">Następny co</div><div className="text-sm font-semibold text-gray-800">{Number(vehicle.oilServiceEveryKm).toLocaleString("pl-PL")} km</div></div>}
+                    {vehicle.lastOilServiceKm&&<div className="p-3 rounded-lg bg-gray-50 border border-gray-100"><div className="text-xs text-gray-500">Ostatni serwis</div><div className="text-sm font-semibold text-gray-800">{Number(vehicle.lastOilServiceKm).toLocaleString("pl-PL")} km</div></div>}
+                    {vehicle.oilServiceEveryKm&&<div className="p-3 rounded-lg bg-gray-50 border border-gray-100"><div className="text-xs text-gray-500">Następny co</div><div className="text-sm font-semibold text-gray-800">{Number(vehicle.oilServiceEveryKm).toLocaleString("pl-PL")} km</div></div>}
                   </div>
                 </div>
               )}
@@ -1436,7 +1436,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
                   return (
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
                       <div style={{ background: "#fff", borderRadius: 12, padding: "10px 8px", textAlign: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", borderTop: "3px solid #059669" }}>
-                        <div style={{ fontSize: 15, fontWeight: 800, color: "#059669" }}>{totalL > 0 ? totalL.toLocaleString("pl-PL") : "—"}</div>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: "#047857" }}>{totalL > 0 ? totalL.toLocaleString("pl-PL") : "—"}</div>
                         <div style={{ fontSize: 10, color: "#64748b" }}>Diesel L</div>
                       </div>
                       <div style={{ background: "#fff", borderRadius: 12, padding: "10px 8px", textAlign: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", borderTop: "3px solid #2563eb" }}>
@@ -1465,7 +1465,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
                 {fuelView === "list" && (
                   <div>
                     {sorted.length === 0 && (
-                      <div style={{ textAlign: "center", padding: "32px 0", color: "#9ca3af" }}>
+                      <div style={{ textAlign: "center", padding: "32px 0", color: "#6b7280" }}>
                         <div style={{ fontSize: 32, marginBottom: 8 }}>⛽</div>
                         <div style={{ fontSize: 14 }}>Brak tankowań</div>
                         <div style={{ fontSize: 12, marginTop: 4 }}>Dodaj pierwsze tankowanie</div>
@@ -1521,7 +1521,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
                   return (
                     <div>
                       {months.length === 0 && (
-                        <div style={{ textAlign: "center", padding: "32px 0", color: "#9ca3af" }}>
+                        <div style={{ textAlign: "center", padding: "32px 0", color: "#6b7280" }}>
                           <div style={{ fontSize: 32, marginBottom: 8 }}>📊</div>
                           <div style={{ fontSize: 13 }}>Dodaj tankowania aby zobaczyć statystyki</div>
                         </div>
@@ -1535,7 +1535,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
                             <div style={{ fontSize: 14, fontWeight: 700, color: "#1e293b", marginBottom: 10, textTransform: "capitalize" }}>{label}</div>
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
                               <div style={{ padding: "10px 6px", borderRadius: 10, background: "#f0fdf4", textAlign: "center" }}>
-                                <div style={{ fontSize: 16, fontWeight: 800, color: "#059669" }}>{m.diesel > 0 ? m.diesel.toLocaleString("pl-PL") : "—"}</div>
+                                <div style={{ fontSize: 16, fontWeight: 800, color: "#047857" }}>{m.diesel > 0 ? m.diesel.toLocaleString("pl-PL") : "—"}</div>
                                 <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>Diesel L</div>
                               </div>
                               <div style={{ padding: "10px 6px", borderRadius: 10, background: "#e0f2fe", textAlign: "center" }}>
@@ -1668,7 +1668,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
               { id: "jazda",    label: "Jazda",       color: "#15803d", bg: "#f0fdf4" },
               { id: "pauza9",   label: "Pauza 9h",    color: "#b45309", bg: "#fffbeb" },
               { id: "pauza11",  label: "Pauza 11h",   color: "#c2410c", bg: "#fff7ed" },
-              { id: "pauza24",  label: "Pauza 24h",   color: "#dc2626", bg: "#fef2f2" },
+              { id: "pauza24",  label: "Pauza 24h",   color: "#b91c1c", bg: "#fef2f2" },
               { id: "pauza45",  label: "Pauza 45h",   color: "#9333ea", bg: "#faf5ff" },
               { id: "pauzaInne",label: "Pauza inne",  color: "#0369a1", bg: "#f0f9ff" },
               { id: "baza",     label: "Baza",        color: "#6b7280", bg: "#f3f4f6" },
@@ -1796,7 +1796,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
                   border: `2px solid ${todaySt ? todaySt.color : "#e5e7eb"}`,
                 }}>
                   <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600, marginBottom: 4 }}>Dzisiaj</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: todaySt ? todaySt.color : "#9ca3af" }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: todaySt ? todaySt.color : "#6b7280" }}>
                     {todaySt ? todaySt.label : "Brak statusu"}
                   </div>
                   {todayEntry && todayEntry.note && (
@@ -1830,7 +1830,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
                     </div>
                   )}
                   {totalDays === 0 && (
-                    <div style={{ textAlign: "center", padding: "12px 0", color: "#9ca3af", fontSize: 12 }}>Brak wpisów w tym miesiącu</div>
+                    <div style={{ textAlign: "center", padding: "12px 0", color: "#6b7280", fontSize: 12 }}>Brak wpisów w tym miesiącu</div>
                   )}
                 </div>
 
@@ -1963,7 +1963,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
                 {docView === "list" && (
                   <div>
                     {sorted.length === 0 && (
-                      <div style={{ textAlign: "center", padding: "32px 0", color: "#9ca3af" }}>
+                      <div style={{ textAlign: "center", padding: "32px 0", color: "#6b7280" }}>
                         <div style={{ fontSize: 32, marginBottom: 8 }}>📄</div>
                         <div style={{ fontSize: 14 }}>Brak dokumentów</div>
                         <div style={{ fontSize: 12, marginTop: 4 }}>Dodaj paragon, fakturę lub inny dokument</div>
@@ -2084,14 +2084,14 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
 
           {/* MAPA — placeholder */}
           {driverTab === "mapa" && (
-            <div className="text-center py-16 text-gray-400">
+            <div className="text-center py-16 text-gray-500">
               <div className="text-4xl mb-3">🗺️</div>
               <div className="font-medium">Wkrótce — integracja GPS</div>
             </div>
           )}
 
           {!vehicle && driverTab !== "zlecenia" && (
-            <div className="text-center py-12 text-gray-400"><div className="text-4xl mb-3">🚛</div><div className="font-medium">Brak przypisanego pojazdu</div></div>
+            <div className="text-center py-12 text-gray-500"><div className="text-4xl mb-3">🚛</div><div className="font-medium">Brak przypisanego pojazdu</div></div>
           )}
         </div>
       </div>
@@ -2126,12 +2126,12 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
                   setDriverZoom(next);
                   try { localStorage.setItem("fleetstat_driver_zoom", next); } catch {}
                 }}
-                  className="text-xs text-gray-400 hover:text-gray-200"
+                  className="text-xs text-gray-500 hover:text-gray-200"
                   style={{padding: "2px 6px", borderRadius: 6, background: driverZoom === "large" ? "rgba(255,255,255,0.15)" : "transparent"}}>
                   {driverZoom === "large" ? "🔍 Aa−" : "🔍 Aa+"}
                 </button>
                 <button onClick={() => { logAction("logout", "auth", { reason: "manual" }); signOut(auth); }}
-                  className="text-xs text-gray-400 hover:text-gray-200">Wyloguj</button>
+                  className="text-xs text-gray-500 hover:text-gray-200">Wyloguj</button>
               </div>
             </div>
           </div>
@@ -2175,7 +2175,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
                   <span style={{ fontSize: 11, fontWeight: 600, color: active.length > 0 ? "#15803d" : "#2563eb" }}>
                     {active.length > 0 ? "🚛 W trasie" : "📋 Nadchodzące"}
                   </span>
-                  {firstActive.nrRef && <span style={{ fontSize: 11, color: "#9ca3af" }}>{firstActive.nrRef}</span>}
+                  {firstActive.nrRef && <span style={{ fontSize: 11, color: "#6b7280" }}>{firstActive.nrRef}</span>}
                 </div>
                 <div className="flex items-center gap-2">
                   <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#3b82f6" }}></div>
@@ -2183,7 +2183,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
                   <span style={{ color: "#d1d5db", fontSize: 12 }}>→</span>
                   <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981" }}></div>
                   <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{firstKody.roz.split(" / ")[0]}</span>
-                  <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: "auto" }}>{fmtDate(firstActive.dataRozladunku)}</span>
+                  <span style={{ fontSize: 11, color: "#6b7280", marginLeft: "auto" }}>{fmtDate(firstActive.dataRozladunku)}</span>
                 </div>
               </div>
             </div>
@@ -2195,7 +2195,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
           {[
             { id: "serwis", icon: "🔧", label: "Serwis", gradient: "linear-gradient(135deg, #f59e0b, #d97706)",
               sub: serwisAlert ? `${serwisAlert.label} za ${serwisAlert.days}d` : "Terminy OK",
-              subStyle: serwisAlert && serwisAlert.days <= 30 ? { background: "#fef2f2", color: "#dc2626" } : null },
+              subStyle: serwisAlert && serwisAlert.days <= 30 ? { background: "#fef2f2", color: "#b91c1c" } : null },
             { id: "dokumenty", icon: "📄", label: "Dokumenty", gradient: "linear-gradient(135deg, #8b5cf6, #7c3aed)", sub: driverDocs.length > 0 ? `${driverDocs.length} dokumentów` : "Paragony, faktury" },
             { id: "spalanie", icon: "⛽", label: "Tankowania", gradient: "linear-gradient(135deg, #06b6d4, #0891b2)",
               sub: fuelEntries.length > 0 ? `${fuelEntries.length} tankowań` : "Dodaj tankowanie" },
@@ -2217,7 +2217,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
                 display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>{t.icon}</div>
               <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>{t.label}</div>
               <div style={{ fontSize: 11, fontWeight: t.subStyle ? 600 : 400, padding: "2px 8px", borderRadius: 8,
-                background: t.subStyle?.background || "transparent", color: t.subStyle?.color || "#9ca3af" }}>{t.sub}</div>
+                background: t.subStyle?.background || "transparent", color: t.subStyle?.color || "#6b7280" }}>{t.sub}</div>
             </div>
           ))}
         </div>
