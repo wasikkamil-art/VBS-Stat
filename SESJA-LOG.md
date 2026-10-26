@@ -14,6 +14,49 @@ Append-only dziennik. Każda sesja = nowa sekcja z datą i opisem.
 
 ---
 
+## 2026-10-26 — Ikony pojazdów: od emoji do rodziny sterowanej danymi
+
+**Kontekst startu**: Sesja zaczęła się od instalacji dwóch skilli agentowych (`design-taste-frontend`, `impeccable`) i miała być ich oceną. Zjechała w przebudowę ikon pojazdów. **Żaden skill nie został faktycznie użyty** — cała robota to ręczne projektowanie; ocena skilli pozostaje niezrobiona.
+
+### Skille — zainstalowane, obejrzane, uśpione
+
+- `npx skills add Leonxlnx/taste-skill` + `npx impeccable install` → `.agents/`, `.claude/skills/`, `.claude/agents/`
+- Impeccable **sam dopisał hooki** do `.claude/settings.local.json` (SessionStart, PostToolUse na Edit|Write, Stop) uruchamiające 17 MB binarkę. **Usunięte na prośbę usera**, `permissions.allow` nietknięte.
+- Telemetria wyłączona (`impeccable telemetry off` → `~/.impeccable/config.json`). Uwaga: to nie blokuje requestu, tylko prosi serwer o nierejestrowanie. Twardy blok = `DO_NOT_TRACK=1`.
+- Binarka czyta `ANTHROPIC_API_KEY` i `CLAUDE_CODE_OAUTH_TOKEN` — **nie zweryfikowano, co z nimi robi**.
+- `.gitignore` 104-110: `.agents/`, `.claude/skills|agents|worktrees|settings.local.json`, `.github/skills|agents`. Bez tego 19 MB z binarką wleciałoby do repo (`.github/` jest śledzone przez `workflows/backup.yml`).
+
+### Ikony — co było nie tak
+
+`VehicleIcon` miał dwie sylwetki przełączane po `plate2`, w **dwóch różnych wagach kreski i viewBoxach** (24x24 stroke 2 vs 28x18 stroke 1.8), więc nie stały w jednej osi. Obie rysowały **ciągnik siodłowy z naczepą** — a flota to Daily 7,2 t z przyczepą dyszlową. User przysłał zdjęcia i wyprostował: naczepa (opiera się na siodle) to nie przyczepa (własne osie, dyszel).
+
+### Co weszło
+
+- **`c1b11f8`** — rodzina ikon sterowana danymi: podwozie z `type`+`plate2`, zabudowa z `equipment` (`plandeka`/`chłodnia`, inaczej box), winda z `equipment.winda`. Cztery kształty: solo / zestaw / TIR / bus. Pole „Typ pojazdu" wyciągnięte do `VEHICLE_TYPES` i rozszerzone o **TIR** (user: „nie mamy takich aut, ale chcę móc wybrać"). Stare wartości „Chłodnia"/„Plandeka" zostawione dla istniejących rekordów.
+- **`c921415`** — winda jako **litera L** (pomysł usera: pasuje do kształtu i do słowa *lift*), odstęp 1,5 od ściany, kreska 1,1. Firanka z 1,3 na **0,55**. **Kafelek 36x36 pod ikoną usunięty** na Przeglądzie i Flocie — zastąpiony pojemnikiem 52x32 bez tła (stała szerokość trzyma rejestracje w jednej osi). Sprzątanie: martwy fallback w FVTab + trzy opakowania `text-xl`/`text-2xl` po emoji.
+
+### Bug złapany dopiero na żywej flocie
+
+Pierwsza wersja `vehicleShape()` sprawdzała `type === "bus"` **przed** `plate2`, więc TK 314CL (type="Bus" + przyczepa) rysował się jako samotny bus. **Lint i build tego nie łapały** — wyszło przy odpaleniu na prawdziwych danych. Druga rejestracja wygrywa teraz nad „Bus"/„Solo".
+
+### Dane produkcyjne — zmienione
+
+Na polecenie usera dopisano `plandeka` do `equipment` trzech pojazdów: **WGM 0475M, WGM 0507M, TK 314CL**. Przez interfejs aplikacji (walidacja + audit log), nie bezpośrednio w Firestore. Uwaga na przyszłość: `src/firebase.js:24` ma `projectId: "vbs-stats"` na sztywno — **localhost pisze do tej samej bazy co produkcja**, nie ma osobnego projektu dev.
+
+### Przejrzane end-to-end
+
+Wszystkie **8 miejsc użycia** ikony i wszystkie **6 pojazdów** (4 aktywne + 2 archiwalne: TK 130EF → bus, TK 315CL/TK 761AP → zestaw). Nigdzie nic nie wystaje poza rodzica.
+
+### Otwarte
+
+- **Ocena skilli niezrobiona** — to był pierwotny cel sesji. Plan: osobny katalog/worktree, neutralne zadanie, zero kontaktu z `App.jsx` i Firestore.
+- **Druk niesprawdzony** — firanka 0,55 to ~0,77 px przy małej ikonie; w raportach DDD może przepaść.
+- **Zapis typu „TIR" nieprzetestowany** — brak takiego auta, nie zakładano testowego pojazdu w produkcyjnej bazie.
+- **Archiwum ma inny układ** niż aktywne karty (stary span zamiast pojemnika 52x32) — kosmetyka, nie zepsute.
+- W `public/` leży 9 gitignorowanych makiet `mockup_*.html` z tej sesji.
+
+---
+
 ## 2026-05-04 — Audyt stanu + wprowadzenie trybu pracy step-by-step
 
 **Kontekst startu**: User wkleił briefing z poprzedniej sesji (wyczerpał się limit). Briefing był sprzed kilku dni — od tego czasu doszło ~25 commitów. User poprosił o weryfikację co faktycznie zrobione + wprowadzenie systemu odpornego na limit.
