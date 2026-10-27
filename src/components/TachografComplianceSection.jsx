@@ -18,12 +18,42 @@ import {
 // dlatego próg żyje tutaj, a nie w REGULATION.
 const URLOP_HINT_MIN = 100 * 60;
 
+// Pasek progresu (val/max) z kolorystyką progową.
+//
+// Musi stać TUTAJ, nie w ciele komponentu: komponent zdefiniowany wewnątrz renderu
+// jest przy każdym renderze rodzica nowym typem, więc React rozbiera i stawia DOM
+// od nowa zamiast go zaktualizować. Przy `transition-all` oznacza to, że pasek
+// przeskakuje zamiast płynnie dojechać — a rodzic re-renderuje się tu co 30 s
+// od zegara. Zero zależności od scope'u komponentu, więc wyniesienie jest 1:1.
+const BAR_FILLS = { blue: "#3b82f6", yellow: "#f59e0b", red: "#ef4444", green: "#22c55e", violet: "#7c3aed" };
+
+function Bar({ val, max, color = "green" }) {
+  const pct = Math.min(100, Math.round(((val || 0) / Math.max(max, 1)) * 100));
+  return (
+    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+      <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: BAR_FILLS[color] }}></div>
+    </div>
+  );
+}
+
+// Kolor paska zależny od progu wyczerpania limitu (val do max)
+const remainingColor = (remaining, total) => {
+  const pct = (remaining / total) * 100;
+  if (pct < 15) return "red";
+  if (pct < 35) return "yellow";
+  return "green";
+};
+
 export default function TachografComplianceSection({ device, position, driverActivities = [], multiDayView = null, onUpdateVehicle, showToast }) {
-  const [, forceTick] = useState(0);
+  // „Teraz" trzymane w stanie, a nie czytane z Date.now() w trakcie renderu.
+  // Efekt jest ten sam (komponent i tak odświeżał się co 30 s), ale zegar jest
+  // teraz jawnym wejściem zamiast ukrytej niestabilności w renderze. Wszystkie
+  // trzy użycia pokazują czas z dokładnością do minuty, więc 30 s luzu jak dotąd.
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   // Tick co 30s żeby liczniki live się odświeżały (countdownów do przerwy/odpoczynku)
   useEffect(() => {
-    const t = setInterval(() => forceTick(x => x + 1), 30000);
+    const t = setInterval(() => setNowMs(Date.now()), 30000);
     return () => clearInterval(t);
   }, []);
 
@@ -109,7 +139,6 @@ export default function TachografComplianceSection({ device, position, driverAct
 
   const currentMeta = ACTIVITY_TYPES[compliance.currentStateType] || null;
   const speed = Number(position?.speed) || 0;
-  const nowMs = Date.now();
 
   // ── Helpery prezentacyjne ──
 
@@ -132,25 +161,6 @@ export default function TachografComplianceSection({ device, position, driverAct
     if (isToday) return `${hh}:${min}`;
     if (isTomorrow) return `jutro ${hh}:${min}`;
     return `${dd}.${mm}, ${hh}:${min}`;
-  };
-
-  // Pasek progresu (val/max) z kolorystyką progową
-  const Bar = ({ val, max, color = "green" }) => {
-    const pct = Math.min(100, Math.round(((val || 0) / Math.max(max, 1)) * 100));
-    const fills = { blue: "#3b82f6", yellow: "#f59e0b", red: "#ef4444", green: "#22c55e", violet: "#7c3aed" };
-    return (
-      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-        <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: fills[color] }}></div>
-      </div>
-    );
-  };
-
-  // Kolor paska zależny od progu wyczerpania limitu (val do max)
-  const remainingColor = (remaining, total) => {
-    const pct = (remaining / total) * 100;
-    if (pct < 15) return "red";
-    if (pct < 35) return "yellow";
-    return "green";
   };
 
   // ── Obliczenia derived ──
