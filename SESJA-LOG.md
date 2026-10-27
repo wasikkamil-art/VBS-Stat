@@ -14,6 +14,113 @@ Append-only dziennik. Każda sesja = nowa sekcja z datą i opisem.
 
 ---
 
+## 2026-10-27 — Kontrast domknięty: paleta tekstowa oddzielona od wykresowej (180 → 4)
+
+**Kontekst startu**: Briefing mówił „122 teksty poniżej AA, naprawa wymaga rozdzielenia palety".
+Zanim cokolwiek ruszyłem, zmierzyłem na żywym DOM-ie. Obraz wyszedł inny.
+
+### Pierwsze ustalenie: poprawka z poprzedniej sesji NIE była na produkcji
+
+`main` był 4 commity przed `origin/main` (`044b1b1`, `c14459b`, `74cd05b`, `bc22158`).
+Zmergowane lokalnie, ale `git push` nigdy nie poszedł, więc Vercel tego nie zbudował.
+Mój `git push origin main` został zablokowany przez uprawnienia narzędzia — **do odpalenia
+przez usera**. Commity trafiły na remote dopiero z gałęzią tej sesji, która się od nich odbiła.
+
+### Pomiar — metoda
+
+Skrypt wstrzyknięty przez `javascript_tool` na `localhost:5173`, `TreeWalker` po węzłach
+tekstowych. Istotne szczegóły, bez których liczby kłamią:
+- **efektywne tło** składane w górę drzewa razem z alfą, nie założona biel
+- **emoji odfiltrowane** (`\p{Extended_Pictographic}`) — mają własne kolory, `color` ich nie dotyczy
+- **separatory dekoracyjne wyłączone** (`·•|/+—→`) — WCAG 1.4.3 ich nie obejmuje
+- reguła dużego tekstu: ≥24 px albo ≥18,66 px bold → 3:1. **`text-lg` to 18 px, czyli poniżej
+  progu — bold 18 px nadal wymaga 4,5.** Na tym wyłożyły się KPI Rentowności i Frachtów.
+
+**Wynik wyjściowy: 180 oblanych z 3553 na 14 ekranach (5,1%)**, nie 122.
+
+### Drugie ustalenie: rozdzielenia palety wymagało JEDNO źródło
+
+Notatka wrzucała do jednego worka trzy różne rzeczy:
+
+| Co | Przykład | Prawda |
+|---|---|---|
+| Ma już rozdzielone klucze | `BLOK`, `breakPalette`, `ocenaPalette`, `ACTIVITY_TYPES`, role | fałszywy alarm |
+| Czysto tekstowe | `zyskColor` (osobna `zyskBg`, nigdy w `fill`) | wystarczy przyciemnić |
+| Ograniczenie symetryczne | `PALETA` rankingu | jedno przyciemnienie naprawia oba użycia |
+
+`zyskColor` to była **największa pojedyncza pozycja — 68 tekstów** — i poprzednia sesja jej
+w ogóle nie ruszyła, mimo że zapisała ją jako wymagającą rozdziału.
+
+`PALETA` rankingu jest tłem plakietki miejsca 1 (biały tekst na niej) **i** kolorem
+liczby-lidera na białym. Kontrast jest symetryczny, więc jedna ciemna wartość obsługuje oba.
+Przy okazji naprawiło to plakietkę, która miała 2,15:1 i nikt tego nie liczył.
+Rozróżnialność nowej palety sprawdzona: ΔE76 = 28,4 przy progu ~20 (stara 34,4).
+
+**Jedyny prawdziwy rozdział — `DDD_COLORS`**: te same 4 hexy wypełniały paski osi czasu
+(`App.jsx:8946`) i kolorowały liczby w kartach (`:8915–8918`, `:9414–9417`). Pasek chce
+nasycenia, liczba chce ciemności. Dodane `DDD_TEXT`; wypełnienie i legendy bez zmian.
+
+### Decyzja usera: kategorie kosztów bez migracji danych
+
+Kolory kategorii częściowo siedzą w **Firestore** (własne kategorie usera). Zamiast ruszać
+bazę — nowy `src/utils/kolorTekstu.js`: `tekstowy()` przyciemnia w HSL w momencie rysowania,
+zachowując odcień. **Kropka, słupek i wykres zachowują kolor oryginalny, ciemnieje tylko napis.**
+Potwierdzone wizualnie: słupki „Struktura kosztów" nadal nasycone, etykiety czytelne.
+
+Chipy kategorii mają tło liczone z własnego koloru (`catColor + "18"` ≈ 9,4% na białym), więc
+tekst kontrastuje z tintem — stąd pomocnicze `zmieszaj()` i `alfaZSufiksu()`.
+
+### Co jeszcze weszło
+
+KPI Rentowności i Frachtów, komórki „miesiąc trwa" (×2 warianty), filtry lat ×3, karty KPI
+faktur (`text-red-400`/`yellow-500`/`green-400` → `-700`), badge powiadomień (biały na red-500
+= 3,76), chipy nieaktywnych zakładek, role `kierowca` i `podglad` w `roles.shared.json`,
+status „ok" w `gray-300` (1,47:1 — praktycznie niewidoczny), karta pojazdu GPS gdy zaznaczona.
+
+Wszystkie wartości z **rampy -700 Tailwinda, już obecnej w kodzie** — zero nowych hexów.
+
+### Makieta zamiast opisu
+
+`public/mockup_paleta_kontrast.html` (gitignorowana) — 7 grup, każda z komponentem w docelowym
+rozmiarze, przed/po obok siebie, policzonym kontrastem i linijką plus/minus. User wybrał na niej
+zakres i wariant dla kategorii.
+
+### Wynik
+
+**180 → 4.** Rentowność 80→0, Analizy 23→0, Koszty 19→0, Użytkownicy 19→0, GPS/Czas pracy 17→0,
+Faktury 10→0, Frachty 4→0, Przegląd/Kalkulator/Sprawy 0.
+
+Pozostałe 4 **zostają świadomie**: biały tekst na chipach marek kart paliwowych (E100, Andamur)
+— kolor marki to decyzja biznesowa.
+
+### Czego NIE zweryfikowałem
+
+- **DriverPanel** — nadal nieosiągalny z konta admina, potrzebne konto roli `kierowca`.
+  Zmiany `DDD_TEXT` i `breakPalette` go dotyczą pośrednio.
+- **Druk raportów DDD** — niesprawdzony, tak jak poprzednio.
+- **Smoke E2E** — nie puszczone, bo chodzą przeciw produkcji (`fleetstat.pl`), a zmiana siedzi
+  na gałęzi. Przetestują dopiero po merge'u.
+- **`roles.shared.json` czytają też Cloud Functions** — ale wyłącznie po `id`, więc zmiana
+  koloru jest dla nich obojętna. Deploy funkcji niepotrzebny; przy najbliższym i tak się zsynchronizuje.
+
+### Potknięcie warte zapamiętania
+
+W trakcie prac apka nagle przestała się renderować (`#root` pusty, dane w konsoli się ładowały).
+Wyglądało na mój błąd — build i lint przechodziły, więc zacząłem szukać w zmianach.
+To był **Service Worker** serwujący zepsuty cache (`fleetstat-v6`). `getRegistrations()` +
+`caches.delete()` w karcie i wróciło. `CLAUDE.md` o tym ostrzega; warto sprawdzać SW **przed**
+podejrzewaniem własnego kodu.
+
+### Otwarte
+
+- **Merge `a11y/paleta-tekstowa` → main i deploy — decyzja usera.** Commit `861a67e`.
+- Z audytu `impeccable`, nietknięte: brak nagłówków h1–h6, 4 pola bez etykiety, brak
+  `focus-visible`, 16 celów dotykowych <44 px, zero zmiennych CSS, pusty `theme.extend`.
+- `impeccable detect` nadal kandydat do `.husky/pre-push`.
+- W `public/` leży 15 gitignorowanych makiet `mockup_*.html`.
+
+---
+
 ## 2026-10-26 (cd.) — Ocena skilli + poprawka kontrastu WCAG AA
 
 **Kontekst**: Po domknięciu ikon user wrócił do pierwotnego pytania — co dają zainstalowane skille. Tym razem je faktycznie uruchomiłem.
