@@ -39,12 +39,22 @@ export const REGULATION = {
   RETURN_TO_BASE_DAYS: 28,           // Pakiet Mobilności: powrót co 28 dni
 };
 
-// Typy aktywności
+// Typy aktywności.
+//
+// `color` jest tu kolorem PODWÓJNEGO użytku — służy i jako tekst na jasnym `bg`
+// (liczby w panelu kierowcy), i jako tło przycisku pod białym napisem. Kontrast
+// jest symetryczny, więc jedna ciemna wartość obsługuje oba; wszystkie cztery
+// trzymają ≥4,5:1 w obie strony. Jeśli dojdzie nowy stan, sprawdź OBA kierunki.
+//
+// `rest` było do 2026-10-27 na `#22c55e` i oblewało: 2,18:1 jako liczba i 2,28:1
+// pod białym napisem przycisku „Odpoczynek". Trzy pozostałe przyciemniono sesję
+// wcześniej, ten został pominięty. Kropki 6/12 px i obramowanie karty używają tej
+// samej wartości, ale jako dekoracja — próg kontrastu ich nie obowiązuje.
 export const ACTIVITY_TYPES = {
   drive: { label: "Jazda",          icon: "🚛", color: "#2563eb", bg: "#eff6ff" },
   work:  { label: "Inna praca",     icon: "🔧", color: "#b45309", bg: "#fffbeb" },
   avail: { label: "Dyspozycyjność", icon: "⏱",  color: "#64748b", bg: "#f8fafc" },
-  rest:  { label: "Odpoczynek",     icon: "🛏",  color: "#22c55e", bg: "#f0fdf4" },
+  rest:  { label: "Odpoczynek",     icon: "🛏",  color: "#15803d", bg: "#f0fdf4" },
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
