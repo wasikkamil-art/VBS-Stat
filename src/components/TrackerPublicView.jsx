@@ -7,9 +7,8 @@
 // zleceniodawcy WIDZIELI wcześniej cały bundle FleetStat (1.87 MB) tylko żeby
 // zobaczyć status paczki. Teraz dostają mały chunk + minimalne core.
 //
-// 3 komponenty wewnątrz pliku:
+// Komponenty w tym pliku:
 //   - TrackerPhotoCard (~22 linii) — galeria zdjęć dla jednej fazy (CMR/towar/etc)
-//   - TrackerPhaseCard (~30 linii) — kafelek fazy z grupami zdjęć
 //   - TrackerPublicView (~464 linii) — główny komponent (stepper + mapa + ETA + galerie)
 
 import { useState, useEffect, Fragment } from "react";
@@ -38,30 +37,75 @@ function TrackerPhotoCard({ title, urls }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// TRACKER PHASE CARD — karta fazowa (legacy, jeszcze użyta? — sprawdź)
+// SHELL — wrapper layoutu strony publicznej.
+//
+// Stoi tutaj, a nie w ciele TrackerPublicView: komponent definiowany w renderze
+// jest przy każdym renderze nowym typem, więc React rozbiera CAŁE poddrzewo strony
+// i stawia je od nowa. Tutaj bolało podwójnie — widok odświeża się co 30 s (fetch)
+// i co 60 s (zegar), a przebudowa gubiła pozycję przewinięcia i restartowała
+// animacje steppera u zleceniodawcy. Zero zależności od scope'u, wyniesienie 1:1.
 // ═══════════════════════════════════════════════════════════════════════════════
-function TrackerPhaseCard({ title, groups }) {
+function Shell({ children }) {
   return (
-    <div style={{ marginTop: 14, background: "#fff", borderRadius: 16, padding: 18, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
-      <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", letterSpacing: 0.3, marginBottom: 14 }}>
-        {title}
-      </div>
-      {groups.map((g, gi) => (
-        <div key={gi} style={{ marginBottom: gi < groups.length - 1 ? 14 : 0 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", letterSpacing: 0.3, marginBottom: 8, textTransform: "uppercase" }}>
-            {g.label} <span style={{ color: "#94a3b8", fontWeight: 500 }}>· {g.urls.length}</span>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
-            {g.urls.map((url, i) => (
-              <a key={i} href={url} target="_blank" rel="noopener noreferrer"
-                style={{ aspectRatio: "1", borderRadius: 8, overflow: "hidden", border: "1px solid #e2e8f0", background: "#f8fafc", display: "block" }}>
-                <img src={url} alt="" loading="lazy"
-                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-              </a>
-            ))}
-          </div>
+    <div style={{
+      minHeight: "100vh",
+      background: "#f8f9fb",
+      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      padding: "20px 16px 40px",
+    }}>
+      <div style={{ width: "100%", maxWidth: 480 }}>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 28 }}>
+          <img src="/logodologowania.png" alt="FleetStat" style={{ width: 200, maxWidth: "70%" }} />
         </div>
-      ))}
+        {children}
+        <div style={{ marginTop: 32, textAlign: "center", fontSize: 11, color: "#6b7280" }}>
+          fleetstat.pl
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STEPPER — pasek etapów trasy. `steps` i `activeIdx` wchodzą propsami, bo
+// komponent musi stać poza renderem rodzica (patrz komentarz przy Shell).
+// ═══════════════════════════════════════════════════════════════════════════════
+function Stepper({ steps, activeIdx }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0 4px", gap: 4 }}>
+      {steps.map((s, i) => {
+        const done = i < activeIdx;
+        const active = i === activeIdx;
+        const dotBg = done ? "#22c55e" : active ? "#3b82f6" : "#e2e8f0";
+        const dotColor = done || active ? "#fff" : "#94a3b8";
+        const labelColor = done ? "#15803d" : active ? "#1d4ed8" : "#94a3b8";
+        const lineColor = done ? "#22c55e" : "#e2e8f0";
+        return (
+          <Fragment key={i}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 50, position: "relative" }}>
+              <div style={{
+                width: 34, height: 34, borderRadius: "50%",
+                background: dotBg, color: dotColor,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 16, fontWeight: 700,
+                boxShadow: active ? "0 0 0 4px rgba(59,130,246,0.18)" : "none",
+                transition: "all 0.3s",
+              }}>
+                {done ? "✓" : s.icon}
+              </div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: labelColor, marginTop: 6, textAlign: "center", lineHeight: 1.2 }}>
+                {s.label}
+              </div>
+            </div>
+            {i < steps.length - 1 && (
+              <div style={{ flex: 1, height: 2, background: lineColor, marginTop: -20, transition: "background 0.3s" }} />
+            )}
+          </Fragment>
+        );
+      })}
     </div>
   );
 }
@@ -74,10 +118,14 @@ export default function TrackerPublicView({ token }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [tick, setTick] = useState(0);
+  // „Teraz" jako jawny stan zamiast licznika-atrapy. Wcześniej był `tick`, którego
+  // jedynym zadaniem było wymusić przeliczenie `fmtRelative` (stąd `void tick`),
+  // a sam czas czytany był z Date.now() w trakcie renderu. Efekt ten sam, ale
+  // zależność jest teraz widoczna zamiast udawana.
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
-    if (!token) { setError("missing_token"); setLoading(false); return; }
+    if (!token) return;   // brak tokenu obsłużony gałęzią renderu niżej, bez ustawiania stanu w efekcie
     let active = true;
     const fetchData = async () => {
       try {
@@ -105,7 +153,7 @@ export default function TrackerPublicView({ token }) {
 
   // Tick co minutę dla "ostatnia aktualizacja X min temu"
   useEffect(() => {
-    const id = setInterval(() => setTick(t => t + 1), 60000);
+    const id = setInterval(() => setNowMs(Date.now()), 60000);
     return () => clearInterval(id);
   }, []);
 
@@ -128,38 +176,27 @@ export default function TrackerPublicView({ token }) {
   };
   const fmtRelative = (ms) => {
     if (!ms) return "";
-    const diff = Date.now() - ms;
+    const diff = nowMs - ms;
     const minutes = Math.floor(diff / 60000);
-    // tick w zależności żeby się odświeżało
-    void tick;
     if (minutes < 1) return "przed chwilą";
     if (minutes < 60) return `${minutes} min temu`;
     const hours = Math.floor(minutes / 60);
     return `${hours} h temu`;
   };
 
-  // Wrapper layout
-  const Shell = ({ children }) => (
-    <div style={{
-      minHeight: "100vh",
-      background: "#f8f9fb",
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      padding: "20px 16px 40px",
-    }}>
-      <div style={{ width: "100%", maxWidth: 480 }}>
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: 28 }}>
-          <img src="/logodologowania.png" alt="FleetStat" style={{ width: 200, maxWidth: "70%" }} />
+  // Brak tokenu w URL-u — rozstrzygane w renderze, nie w efekcie. Wcześniej efekt
+  // ustawiał error="missing_token", przez co pierwsza klatka pokazywała „Ładowanie…"
+  // zanim przeskoczyła na komunikat błędu. Wynik końcowy ten sam, bez mignięcia.
+  if (!token) {
+    return (
+      <Shell>
+        <div style={{ background: "#fff", borderRadius: 16, padding: 32, textAlign: "center" }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#b91c1c" }}>Nie udało się wczytać danych</div>
+          <div style={{ fontSize: 13, color: "#64748b", marginTop: 8 }}>Link jest niekompletny — skontaktuj się z nadawcą.</div>
         </div>
-        {children}
-        <div style={{ marginTop: 32, textAlign: "center", fontSize: 11, color: "#6b7280" }}>
-          fleetstat.pl
-        </div>
-      </div>
-    </div>
-  );
+      </Shell>
+    );
+  }
 
   if (loading && !data) {
     return (
@@ -235,40 +272,6 @@ export default function TrackerPublicView({ token }) {
         { label: "Dostarczono",          icon: "✅" },
       ];
 
-  const Stepper = () => (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0 4px", gap: 4 }}>
-      {steps.map((s, i) => {
-        const done = i < activeIdx;
-        const active = i === activeIdx;
-        const dotBg = done ? "#22c55e" : active ? "#3b82f6" : "#e2e8f0";
-        const dotColor = done || active ? "#fff" : "#94a3b8";
-        const labelColor = done ? "#15803d" : active ? "#1d4ed8" : "#94a3b8";
-        const lineColor = done ? "#22c55e" : "#e2e8f0";
-        return (
-          <Fragment key={i}>
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 50, position: "relative" }}>
-              <div style={{
-                width: 34, height: 34, borderRadius: "50%",
-                background: dotBg, color: dotColor,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 16, fontWeight: 700,
-                boxShadow: active ? "0 0 0 4px rgba(59,130,246,0.18)" : "none",
-                transition: "all 0.3s",
-              }}>
-                {done ? "✓" : s.icon}
-              </div>
-              <div style={{ fontSize: 10, fontWeight: 600, color: labelColor, marginTop: 6, textAlign: "center", lineHeight: 1.2 }}>
-                {s.label}
-              </div>
-            </div>
-            {i < steps.length - 1 && (
-              <div style={{ flex: 1, height: 2, background: lineColor, marginTop: -20, transition: "background 0.3s" }} />
-            )}
-          </Fragment>
-        );
-      })}
-    </div>
-  );
 
   // Delay / ETA
   const delayMin = d.delayMin;
@@ -370,7 +373,7 @@ export default function TrackerPublicView({ token }) {
         </div>
 
         {/* Stepper */}
-        <Stepper />
+        <Stepper steps={steps} activeIdx={activeIdx} />
 
         {/* Paski postępu — dla 2 rozładunków dwa osobne, dla 1 rozładunku jeden główny */}
         {hasR2 && status === "w_trasie" && (typeof d.percentToNext === "number" || typeof d.percentToR1 === "number") ? (
