@@ -39,7 +39,7 @@ export default function AnalizyTab({ vehicles = [], frachtyList = [], costs = []
             <button key={o.id} onClick={() => setWidok(o.id)}
               className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all"
               style={{ background: aktywny === o.id ? "#fff" : "transparent",
-                       color: aktywny === o.id ? "#111827" : "#6b7280",
+                       color: aktywny === o.id ? "#111827" : "#4b5563",   // nieaktywny: gray-600, bo gray-500 na gray-100 daje tylko 4,39:1
                        boxShadow: aktywny === o.id ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }}>
               {o.label}
             </button>

@@ -16,7 +16,13 @@ export const MIES_K = ["", "Sty", "Lut", "Mar", "Kwi", "Maj", "Cze", "Lip", "Sie
 
 // Kolory kierowców — stała kolejność, żeby ten sam kierowca miał ten sam kolor
 // między odświeżeniami (paski, kropki przy nazwisku, podświetlenie lidera miesiąca).
-const PALETA = ["#2563eb", "#16a34a", "#f59e0b", "#7c3aed", "#db2777", "#0891b2"];
+//
+// Rampa -700, nie -500/-600: ten sam kolor jest TŁEM plakietki miejsca 1 (biały
+// tekst na nim) i KOLOREM liczby-lidera na białym. Kontrast jest symetryczny,
+// więc oba zastosowania mają identyczne ograniczenie ≥4,5:1 — jedna ciemna
+// wartość obsługuje oba. Amber -500 dawał 2,15:1 w obie strony.
+// Rozróżnialność sprawdzona: najbliższa para (blue↔violet) ΔE76 = 28,4 przy progu ~20.
+const PALETA = ["#1d4ed8", "#15803d", "#b45309", "#6d28d9", "#be185d", "#0e7490"];
 
 export const eur = (n, d = 0) => Number(n || 0).toLocaleString("pl-PL",
   { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: "always" });
