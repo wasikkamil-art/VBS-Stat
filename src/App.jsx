@@ -13,6 +13,7 @@ import { logAction, logFleetWrite } from "./utils/logAction";
 import { logLoginEvent } from "./utils/loginLog";
 // safeHref — sanityzacja URL (wydzielone 2026-04-29 #5c krok 6, 10 użyć)
 import { safeHref } from "./utils/safeHref";
+import { tekstowy, zmieszaj, alfaZSufiksu } from "./utils/kolorTekstu";
 // ZlecenieUploadBtn — przycisk uploadu PDF zlecenia (wydzielone 2026-04-29 #5c krok 6)
 // Używane w 3 miejscach (FVTab, FrachtyTab, FrachtyModal). Nie lazy — używane stale.
 import ZlecenieUploadBtn from "./components/ZlecenieUploadBtn";
@@ -2869,7 +2870,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                     }}>
                     <span className="w-5 flex items-center justify-center flex-shrink-0" style={{opacity: tab === id ? 0.9 : 0.5}}>{icon}</span>
                     {label}
-                    {badge ? <span className="ml-auto px-1.5 py-0.5 rounded-full text-xs font-bold" style={{background:"#ef4444",color: "#fff"}}>{badge}</span> : null}
+                    {badge ? <span className="ml-auto px-1.5 py-0.5 rounded-full text-xs font-bold" style={{background:"#dc2626",color: "#fff"}}>{badge}</span> : null}
                   </button>
                 );
               };
@@ -2934,7 +2935,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                   const mentions = sprawyList.reduce((acc, s) => {
                     return acc + (s.zdarzenia||[]).filter(z => z.mentions && z.mentions.includes(user?.email) && !z.seenBy?.includes(user?.email)).length;
                   }, 0);
-                  return mentions > 0 ? <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs font-bold" style={{background:"#ef4444",color: "#fff"}}>{mentions}</span> : null;
+                  return mentions > 0 ? <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs font-bold" style={{background:"#dc2626",color: "#fff"}}>{mentions}</span> : null;
                 })()}
               </div>
               <div className="px-1 mb-2">
@@ -3610,7 +3611,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               {/* ── FILTR ROK + MIESIĄCE ── */}
               <div className="flex items-center gap-2 flex-wrap mb-3">
                 <div className="flex gap-1.5 flex-shrink-0">
-                  {[["2026","2026","#0ea5e9","#f0f9ff","#bae6fd"],["2025","2025","#6366f1","#eef2ff","#c7d2fe"],["all","Wszystkie","#111827","#f9fafb","#e5e7eb"]].map(([key,label,color,bg,border]) => {
+                  {[["2026","2026","#0369a1","#f0f9ff","#bae6fd"],["2025","2025","#4338ca","#eef2ff","#c7d2fe"],["all","Wszystkie","#111827","#f9fafb","#e5e7eb"]].map(([key,label,color,bg,border]) => {
                     const active = filterYear===key && filterMonth==="all";
                     return (
                       <button key={key} onClick={() => { setCostFilterYear(key); setFilterMonth("all"); }}
@@ -3782,8 +3783,12 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                       <span className="col-span-2 text-gray-500 text-xs w-full md:w-auto" style={{ fontFamily: "'DM Mono', monospace" }}>{fmtDate(c.date)}</span>
                       <span className="col-span-2 font-medium text-gray-800 text-xs">{v?.plate || "?"}</span>
                       <div className="col-span-2">
+                        {/* Tło to własny kolor kategorii na 9,4% ("18"), więc tekst
+                            kontrastuje z tintem, nie z bielą — stąd zmieszaj() jako tło
+                            dla tekstowy(). Sam kolor kategorii w danych zostaje nietknięty. */}
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-                          style={{ background: catColor(c.category) + "18", color: catColor(c.category) }}>
+                          style={{ background: catColor(c.category) + "18",
+                                   color: tekstowy(catColor(c.category), zmieszaj(catColor(c.category), "#ffffff", alfaZSufiksu("18"))) }}>
                           {catLabel(c.category)}
                         </span>
                       </div>
@@ -3982,7 +3987,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                               })}
                               {(v.customEquipment || []).map((item, i) => (
                                 <span key={i} className="px-2 py-0.5 rounded-full text-xs font-medium"
-                                  style={{ background: "#eff6ff", color: "#3b82f6" }}>
+                                  style={{ background: "#eff6ff", color: "#1d4ed8" }}>
                                   {item}
                                 </span>
                               ))}
@@ -7050,14 +7055,15 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
                     <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isOnline ? "bg-green-500" : "bg-gray-300"}`}></span>
                     <span className={`text-sm font-semibold ${isActive ? "text-violet-700" : "text-gray-800"}`}>{plate}</span>
                   </div>
+                  {/* gray-600 na zaznaczonej karcie: gray-500 na bg-violet-50 daje 4,41:1 */}
                   {dev.fleetVehicle && (
-                    <div className="text-xs text-gray-500 ml-4 mt-0.5">
+                    <div className={`text-xs ml-4 mt-0.5 ${isActive ? "text-gray-600" : "text-gray-500"}`}>
                       {dev.fleetVehicle.brand} {dev.fleetVehicle.model}
                       {activeDriverName(dev.fleetVehicle) && <span> · {activeDriverName(dev.fleetVehicle)}</span>}
                     </div>
                   )}
                   {pos && (
-                    <div className="text-xs text-gray-500 ml-4 mt-0.5">
+                    <div className={`text-xs ml-4 mt-0.5 ${isActive ? "text-gray-600" : "text-gray-500"}`}>
                       {pos.speed != null && <span>{Math.round(pos.speed)} km/h · </span>}
                       {formatDate(pos.dateTime || pos.timestamp)}
                     </div>
@@ -8410,11 +8416,24 @@ function GpsDddSection({ device, showToast }) {
 //   - summary (total period)
 // ═══════════════════════════════════════════════════════════════════════════════
 // Kolory pasków aktywności w timeline (zgodne z konwencją tachograficzną)
+// Kolory osi czasu DDD — WYPEŁNIENIE pasków i kwadracików legendy.
+// Nasycone, bo muszą być rozpoznawalne z daleka na wąskich segmentach.
+// Do TEKSTU nie używać — patrz DDD_TEXT niżej.
 const DDD_COLORS = {
   drive: "#16a34a", // zielony
   work:  "#f59e0b", // amber
   avail: "#6b7280", // gray
   rest:  "#3b82f6", // blue
+};
+// Te same cztery stany, ale w wersji do LICZB i etykiet na jasnym tle.
+// Rozdzielone, bo wypełnienie i tekst mają sprzeczne wymagania: pasek chce
+// nasycenia, liczba przy 12 px chce ≥4,5:1. Wersje -500/-600 dawały na #f9fafb
+// odpowiednio 3,15 (drive), 2,06 (work) i 3,52 (rest) — czyli poniżej AA.
+const DDD_TEXT = {
+  drive: "#15803d",
+  work:  "#b45309",
+  avail: "#4b5563",
+  rest:  "#1d4ed8",
 };
 const DDD_TYPE_LABEL = { drive: "Jazda", work: "Praca", avail: "Dyspozycyjność", rest: "Odpoczynek" };
 
@@ -8899,10 +8918,10 @@ function DddDailyRow({ day, data }) {
         </div>
         <div className="text-gray-600">
           {(d.km || 0) > 0 && <span className="font-semibold">{(d.km || 0).toLocaleString("pl-PL")} km · </span>}
-          <span style={{ color: DDD_COLORS.drive }}>🚛 {fmtHM(d.drive || 0)}</span>
-          {(d.work || 0) > 0 && <span style={{ color: DDD_COLORS.work }}> · 🔧 {fmtHM(d.work || 0)}</span>}
-          {(d.avail || 0) > 0 && <span style={{ color: DDD_COLORS.avail }}> · ⚪ {fmtHM(d.avail || 0)}</span>}
-          {(d.rest || 0) > 0 && <span style={{ color: DDD_COLORS.rest }}> · 😴 {fmtHM(d.rest || 0)}</span>}
+          <span style={{ color: DDD_TEXT.drive }}>🚛 {fmtHM(d.drive || 0)}</span>
+          {(d.work || 0) > 0 && <span style={{ color: DDD_TEXT.work }}> · 🔧 {fmtHM(d.work || 0)}</span>}
+          {(d.avail || 0) > 0 && <span style={{ color: DDD_TEXT.avail }}> · ⚪ {fmtHM(d.avail || 0)}</span>}
+          {(d.rest || 0) > 0 && <span style={{ color: DDD_TEXT.rest }}> · 😴 {fmtHM(d.rest || 0)}</span>}
         </div>
       </div>
 
@@ -9398,10 +9417,10 @@ function MultiDayActivityView({ vehicle, driverActivities = [], currentUser = nu
       {/* Sumy okresu */}
       <div className="bg-white rounded-2xl border border-gray-100 p-4 mb-3">
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-          <DddSummaryCard label="🚛 Jazda" value={fmtHM(periodSums.drive)} color={DDD_COLORS.drive} bg="#f0fdf4" />
-          <DddSummaryCard label="🔧 Praca" value={fmtHM(periodSums.work)} color={DDD_COLORS.work} bg="#fffbeb" />
-          <DddSummaryCard label="⚪ Dyspo" value={fmtHM(periodSums.avail)} color={DDD_COLORS.avail} bg="#f9fafb" />
-          <DddSummaryCard label="😴 Odpoczynek" value={fmtHM(periodSums.rest)} color={DDD_COLORS.rest} bg="#eff6ff" />
+          <DddSummaryCard label="🚛 Jazda" value={fmtHM(periodSums.drive)} color={DDD_TEXT.drive} bg="#f0fdf4" />
+          <DddSummaryCard label="🔧 Praca" value={fmtHM(periodSums.work)} color={DDD_TEXT.work} bg="#fffbeb" />
+          <DddSummaryCard label="⚪ Dyspo" value={fmtHM(periodSums.avail)} color={DDD_TEXT.avail} bg="#f9fafb" />
+          <DddSummaryCard label="😴 Odpoczynek" value={fmtHM(periodSums.rest)} color={DDD_TEXT.rest} bg="#eff6ff" />
           <DddSummaryCard label="📍 Kilometry" value={`${periodSums.km.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} km`} color="#7c3aed" bg="#faf5ff" />
         </div>
       </div>
@@ -12624,7 +12643,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
     setShowForm(true);
   };
 
-  const zyskColor = (z) => z > 0 ? "#16a34a" : z < 0 ? "#dc2626" : "#6b7280";
+  const zyskColor = (z) => z > 0 ? "#15803d" : z < 0 ? "#b91c1c" : "#6b7280";
   const zyskBg   = (z) => z > 0 ? "#f0fdf4" : z < 0 ? "#fef2f2" : "#f9fafb";
   const fmt      = (n) => (n||0).toLocaleString("pl-PL", { minimumFractionDigits:0, maximumFractionDigits:0 }) + " €";
   const fmtS     = (n) => (n > 0 ? "+" : "") + fmt(n);
@@ -12672,7 +12691,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
         {[["flota","Flota — przegląd"],["pojazd","Pojazd — dane operacyjne"],["trendy","Trendy"]].map(([id,label]) => (
           <button key={id} onClick={() => setView(id)}
             className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all"
-            style={{ background: view===id ? "#fff" : "transparent", color: view===id ? "#111827" : "#6b7280",
+            style={{ background: view===id ? "#fff" : "transparent", color: view===id ? "#111827" : "#4b5563",
                      boxShadow: view===id ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }}>
             {label}
           </button>
@@ -12684,8 +12703,8 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
         <div className="space-y-3">
           {/* Fleet summary row */}
           <div className="grid grid-cols-3 gap-3 mb-4">
-            {[["Przychody floty", fleetFrachty(selYear), "#3b82f6"],
-              ["Koszty floty",   fleetKoszt(selYear),   "#ef4444"],
+            {[["Przychody floty", fleetFrachty(selYear), "#1d4ed8"],
+              ["Koszty floty",   fleetKoszt(selYear),   "#b91c1c"],
               ["Zysk floty",     fleetZysk(selYear),    zyskColor(fleetZysk(selYear))]
             ].map(([lbl, val, color]) => (
               <div key={lbl} className="bg-white rounded-2xl px-4 py-3 border border-gray-100">
@@ -12733,7 +12752,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
                             <td key={mi} className="text-center py-2 px-1">
                               <button onClick={() => openAdd(v.id, selYear, mi)}
                                 className="w-full h-7 rounded-lg text-xs font-bold transition-all hover:opacity-80"
-                                style={{ background: "#eff6ff", color: "#3b82f6" }}
+                                style={{ background: "#eff6ff", color: "#1d4ed8" }}
                                 title="Miesiąc trwa — pokazana tylko suma frachtów (koszty zamykane po końcu miesiąca)">
                                 +{Math.round(f).toLocaleString("pl-PL")}*
                               </button>
@@ -12771,7 +12790,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
                       if (isCurrent) {
                         const f = vehicles.reduce((s,v) => { const r = getRecord(v.id,selYear,mi); return s + (r?.frachty||0); }, 0);
                         if (f === 0) return <td key={mi} className="text-center py-2.5 px-1 font-bold text-xs text-gray-200">—</td>;
-                        return <td key={mi} className="text-center py-2.5 px-1 font-bold text-xs" style={{ color: "#3b82f6" }} title="Miesiąc trwa — suma frachtów">+{Math.round(f).toLocaleString("pl-PL")}*</td>;
+                        return <td key={mi} className="text-center py-2.5 px-1 font-bold text-xs" style={{ color: "#1d4ed8" }} title="Miesiąc trwa — suma frachtów">+{Math.round(f).toLocaleString("pl-PL")}*</td>;
                       }
                       // Closed — suma zysku
                       const z = vehicles.reduce((s,v) => { const r=getRecord(v.id,selYear,mi); if(!r) return s; const f=r.frachty||0; const k=Object.values(r?.costs||{}).reduce((s,v)=>s+(v||0),0); return s+f-k; }, 0);
@@ -13892,7 +13911,7 @@ function RentFormModal({ vehicles, record, initVehicle, initYear, initMonth, onS
              iloscFr: Number(iloscFr)||undefined, note });
   };
 
-  const zyskColor = (z) => z > 0 ? "#16a34a" : z < 0 ? "#dc2626" : "#6b7280";
+  const zyskColor = (z) => z > 0 ? "#15803d" : z < 0 ? "#b91c1c" : "#6b7280";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background:"rgba(0,0,0,0.5)", backdropFilter:"blur(4px)" }}>
@@ -14943,7 +14962,7 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
           <div className="flex flex-wrap gap-1.5 mb-3">
             {v.customEquipment.map((item, i) => (
               <span key={i} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium"
-                style={{ background: "#eff6ff", color: "#3b82f6", border: "1px solid #bfdbfe" }}>
+                style={{ background: "#eff6ff", color: "#1d4ed8", border: "1px solid #bfdbfe" }}>
                 {item}
                 <button onClick={() => setF("customEquipment", v.customEquipment.filter((_, idx) => idx !== i))}
                   className="hover:text-red-400 transition-colors ml-0.5">✕</button>
@@ -15424,7 +15443,7 @@ function AddVehicleModal({ onSave, onClose }) {
               <div className="flex flex-wrap gap-1.5 mb-2">
                 {form.customEquipment.map((item, i) => (
                   <span key={i} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium"
-                    style={{ background: "#eff6ff", color: "#3b82f6", border: "1px solid #bfdbfe" }}>
+                    style={{ background: "#eff6ff", color: "#1d4ed8", border: "1px solid #bfdbfe" }}>
                     {item}
                     <button onClick={() => set("customEquipment", form.customEquipment.filter((_, idx) => idx !== i))}
                       className="hover:text-red-400 transition-colors">✕</button>
@@ -15951,7 +15970,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
         <div className="mb-5">
           <div className="flex items-center gap-2 flex-wrap mb-3">
             <div className="flex gap-1.5 flex-shrink-0">
-              {[["2026","2026","#0ea5e9","#f0f9ff","#bae6fd"],["2025","2025","#6366f1","#eef2ff","#c7d2fe"],["all","Wszystkie","#111827","#f9fafb","#e5e7eb"]].map(([key,label,color,bg,border]) => {
+              {[["2026","2026","#0369a1","#f0f9ff","#bae6fd"],["2025","2025","#4338ca","#eef2ff","#c7d2fe"],["all","Wszystkie","#111827","#f9fafb","#e5e7eb"]].map(([key,label,color,bg,border]) => {
                 const active = filterYear===key && filterMonth==="all";
                 return (
                   <button key={key} onClick={() => { setFilterYear(key); setFilterMonth("all"); }}
@@ -15992,17 +16011,17 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
           <div className="rounded-xl p-3 border border-red-100 bg-red-50">
             <div className="text-xs text-red-700 mb-1">🔴 Przeterminowane</div>
             <div className="text-lg font-bold text-red-700">{fmt(kpiAll.przeterminowane)}</div>
-            <div className="text-xs text-red-400">{kpiAll.przeterminowane_count} faktur</div>
+            <div className="text-xs text-red-700">{kpiAll.przeterminowane_count} faktur</div>
           </div>
           <div className="rounded-xl p-3 border border-yellow-100 bg-yellow-50">
             <div className="text-xs text-yellow-700 mb-1">🟡 Wysłane / czekają</div>
-            <div className="text-lg font-bold text-yellow-600">{fmt(kpiAll.czeka)}</div>
-            <div className="text-xs text-yellow-500">{kpiAll.czeka_count} faktur</div>
+            <div className="text-lg font-bold text-yellow-700">{fmt(kpiAll.czeka)}</div>
+            <div className="text-xs text-yellow-700">{kpiAll.czeka_count} faktur</div>
           </div>
           <div className="rounded-xl p-3 border border-green-100 bg-green-50">
             <div className="text-xs text-green-700 mb-1">🟢 Zapłacone</div>
             <div className="text-lg font-bold text-green-700">{fmt(kpiAll.zaplacone)}</div>
-            <div className="text-xs text-green-400">{kpiAll.zaplacone_count} faktur</div>
+            <div className="text-xs text-green-700">{kpiAll.zaplacone_count} faktur</div>
           </div>
         </div>
 
@@ -16036,7 +16055,7 @@ function FVTab({ frachtyList, vehicles, onUpdate }) {
                     <div className="text-sm font-semibold text-green-700">{fmt(suma)}</div>
                     {hasPrzet
                       ? <div className="text-xs text-red-700">{przet.length} przeterminowane</div>
-                      : <div className="text-xs text-gray-300">ok</div>}
+                      : <div className="text-xs text-gray-500">ok</div>}
                   </div>
                 </div>
               );
@@ -16558,8 +16577,8 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
           <div className="flex items-center gap-2 flex-wrap mb-3">
             <div className="flex gap-1.5 flex-shrink-0">
               {[
-                { key: "2026", label: "2026", color: "#0ea5e9", bg: "#f0f9ff", border: "#bae6fd" },
-                { key: "2025", label: "2025", color: "#6366f1", bg: "#eef2ff", border: "#c7d2fe" },
+                { key: "2026", label: "2026", color: "#0369a1", bg: "#f0f9ff", border: "#bae6fd" },
+                { key: "2025", label: "2025", color: "#4338ca", bg: "#eef2ff", border: "#c7d2fe" },
                 { key: "all",  label: "Wszystkie", color: "#111827", bg: "#f9fafb", border: "#e5e7eb" },
               ].map(({ key, label, color, bg, border }) => {
                 const active = overviewYear === key;
@@ -16593,9 +16612,9 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
               const s = { count: visibleList.length, eur: visibleList.reduce((a,r)=>a+(parseFloat(r.cenaEur)||0),0), km: visibleList.reduce((a,r)=>a+(parseInt(r.kmWszystkie)||parseInt(r.kmLadowne)||0),0) };
               const avgKm = s.km > 0 ? (s.eur / s.km).toFixed(2) : "—";
               return [
-                ["Frachtów", s.count, "#6366f1"],
-                ["Łącznie EUR", s.eur > 0 ? parseFloat(s.eur).toLocaleString("pl-PL",{maximumFractionDigits:0})+" €" : "—", "#16a34a"],
-                ["Śr. €/km", avgKm !== "—" ? avgKm+" €" : "—", "#f59e0b"],
+                ["Frachtów", s.count, "#4338ca"],
+                ["Łącznie EUR", s.eur > 0 ? parseFloat(s.eur).toLocaleString("pl-PL",{maximumFractionDigits:0})+" €" : "—", "#15803d"],
+                ["Śr. €/km", avgKm !== "—" ? avgKm+" €" : "—", "#b45309"],
               ].map(([label, value, color]) => (
                 <div key={label} className="rounded-xl p-3 border border-gray-100 bg-white flex flex-col justify-center">
                   <div className="text-xs text-gray-500 mb-1">{label}</div>
@@ -16702,7 +16721,7 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
         </div>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-        {[["Frachtow",rows.length,"#6366f1"],["Przychod EUR",fmt(totalCena),"#16a34a"],["KM wszystkie",totalKmWszAll.toLocaleString("pl-PL"),"#0ea5e9"],["Sr. EUR/km",avgEurKm,"#f59e0b"]].map(([label,value,color]) => (
+        {[["Frachtow",rows.length,"#4338ca"],["Przychod EUR",fmt(totalCena),"#15803d"],["KM wszystkie",totalKmWszAll.toLocaleString("pl-PL"),"#0369a1"],["Sr. EUR/km",avgEurKm,"#b45309"]].map(([label,value,color]) => (
           <div key={label} className="rounded-xl p-3 border border-gray-100 bg-white"><div className="text-xs text-gray-500 mb-1">{label}</div><div className="text-lg font-bold" style={{color}}>{value}</div></div>
         ))}
       </div>
