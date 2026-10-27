@@ -14,6 +14,77 @@ Append-only dziennik. Każda sesja = nowa sekcja z datą i opisem.
 
 ---
 
+## 2026-10-27 cd. — Dług react-hooks: komponenty wyniesione poza render (PR #3 i #4 zmergowane)
+
+**Kontekst**: przy pushu usera pre-push pokazał **182 warningi**, wcześniej 136. To nie była
+regresja — nowsza wersja wtyczki `react-hooks` wprowadziła reguły, których wcześniej nie było
+(`static-components`, `purity`, `immutability`), zgłaszane na starym kodzie.
+
+### Dlaczego `static-components` to nie kosmetyka
+
+Komponent zdefiniowany w ciele innego komponentu jest przy **każdym renderze rodzica nowym
+typem**, więc React rozbiera poddrzewo i stawia je od nowa zamiast zaktualizować. W obu
+naprawionych plikach rodzic tyka na timerze, więc skutki były widoczne:
+
+- **`Bar`** w `TachografComplianceSection` — rodzic odświeża się co 30 s, więc pasek
+  z `transition-all` **przeskakiwał zamiast płynnie dojechać**. Transition nie miał na czym
+  działać, bo DOM był budowany od zera.
+- **`Shell`** w `TrackerPublicView` — opakowuje **całą stronę publiczną zleceniodawcy**,
+  odświeżaną co 30 s (fetch) i co 60 s (zegar). Każdy tick przebudowywał poddrzewo.
+
+### Co jeszcze weszło (commit `9cc4274`)
+
+- `Stepper` → scope modułu, `steps` i `activeIdx` propsami
+- dwa **liczniki-atrapy** zamienione na jawny stan `nowMs`: `forceTick` w Tachografie i `tick`
+  z `void tick` w trackerze. Oba istniały tylko po to, żeby wymusić przeliczenie, a czas i tak
+  szedł z `Date.now()` w renderze. Teraz `setNowMs(Date.now())` w tym samym interwale.
+- strażnik `!token` w trackerze przeniesiony z efektu do gałęzi renderu — przy okazji znika
+  mignięcie „Ładowanie…" przed komunikatem o błędzie
+- usunięty martwy `TrackerPhaseCard` — zero referencji w repo, a komentarz w nagłówku pliku
+  sam pytał „jeszcze użyta? — sprawdź". Nie była.
+
+### Weryfikacja na żywo
+
+Zakładka **Czas pracy kierowcy** renderuje 3 paski, a licznik odpoczynku przeszedł
+**3h 20min → 3h 21min** po tyknięciu interwału — czyli stan `nowMs` napędza liczniki dokładnie
+tak jak poprzedni `forceTick`. Lint by tego nie powiedział.
+
+Po merge'u obu PR-ów sprawdzony **stan połączony** na `main`: 0 naruszeń kontrastu na 9 ekranach,
+3 paski `Bar`, ciemniejszy amber z #3 i zielony pasek z #4 obok siebie. Lint `src/`: 161 warningów,
+0 errors. Build zielony.
+
+### Zmergowane
+
+- **PR #3** `bc42ca4` — kontrast AA, paleta tekstowa oddzielona od wykresowej (180 → 4)
+- **PR #4** `d3785f7` — react-hooks, komponenty poza render
+
+### Znalezione przy okazji, NIEZROBIONE
+
+**`ACTIVITY_TYPES.rest.color` = `#22c55e` oblewa w dwóch miejscach `DriverPanel`**, policzone
+wzorem (panelu nie da się otworzyć z konta admina):
+
+| Gdzie | Co | Kontrast |
+|---|---|---|
+| `DriverPanel:131` | liczba 12 px bold na `#f0fdf4` | **2,18** |
+| `DriverPanel:216` | biały tekst na przycisku „🛏 Odpoczynek" | **2,28** |
+
+Pozostałe trzy stany (`drive`, `work`, `avail`) przechodzą — poprzednia sesja je przyciemniła,
+`rest` został pominięty. Fix to jedna wartość: `#22c55e` → `#15803d` (4,79 i 5,02). Kropki 6 px
+i 8 px używające tego koloru to dekoracja, zmiana im nie szkodzi.
+
+**Nie wprowadzone**, bo to przycisk w panelu kierowcy, którego nie mogę obejrzeć — decyzja usera.
+
+### Otwarte
+
+- **23 `static-components` w `App.jsx`** — świadomie nietknięte podczas prac, bo kolidowałyby
+  z równolegle otwartym PR #3. Teraz oba zmergowane, więc droga wolna.
+- `react-hooks` razem 72: `exhaustive-deps` 24, `static-components` 23, `set-state-in-effect` 15,
+  `purity` 5, `immutability` 5. **`exhaustive-deps` nie zamieniać hurtem** — w monolicie to
+  w dużej części świadome pominięcia, dopisanie zależności potrafi wywołać pętlę odświeżeń.
+- `TrackerPublicView` nieobejrzany w przeglądarce — wymaga ważnego tokenu `/t/{token}`.
+
+---
+
 ## 2026-10-27 — Kontrast domknięty: paleta tekstowa oddzielona od wykresowej (180 → 4)
 
 **Kontekst startu**: Briefing mówił „122 teksty poniżej AA, naprawa wymaga rozdzielenia palety".
