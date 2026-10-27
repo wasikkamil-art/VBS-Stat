@@ -225,6 +225,38 @@ if [ -z "$DRY_RUN" ]; then
     fi
 fi
 
+# === Meldunek („znak życia") do Firestore ===
+#
+# PO CO: backup, który się NIE uruchomił, nie wyśle powiadomienia, że go nie było.
+# Dlatego po każdym przebiegu zostawiamy w bazie ślad, a workflow `heartbeat-mac.yml`
+# sprawdza go raz dziennie i PADA, gdy ślad jest przeterminowany — wtedy GitHub wysyła
+# maila tym samym kanałem, którym zgłasza padnięte backupy baz.
+#
+# Firestore, a nie `git push`: skrypt chodzi z launchd i sięganie po klucz SSH z Keychaina
+# bywa w tym kontekście zawodne, a konto serwisowe to zwykły plik na dysku.
+# Błąd meldunku NIE przerywa backupu — kopia jest ważniejsza niż powiadomienie o niej.
+if [ -z "$DRY_RUN" ]; then
+    MELDUNEK_STATUS=$([ "$ERRORS" -gt 0 ] && echo "partial" || echo "ok")
+    MEM_N=$(ls -1 "$DEST_BASE/memory/$DATE" 2>/dev/null | wc -l | tr -dc '0-9')
+    if MELDUNEK_OUT=$(cd "$SOURCE_REPO" && node -e '
+      const admin = require("firebase-admin");
+      admin.initializeApp({ credential: admin.credential.cert(require("./serviceAccountKey.json")) });
+      admin.firestore().doc("config/backupHeartbeat").set({
+        ts: new Date().toISOString(),
+        status: process.argv[1],
+        bledy: Number(process.argv[2]),
+        plikowPamieci: Number(process.argv[3]),
+        host: require("os").hostname(),
+        zrodlo: "backup-claude-memory.sh",
+      }, { merge: true }).then(() => process.exit(0), (e) => { console.error(e.message); process.exit(1); });
+    ' "$MELDUNEK_STATUS" "$ERRORS" "${MEM_N:-0}" 2>&1); then
+        echo "📡 Meldunek zapisany w Firestore (status: $MELDUNEK_STATUS)"
+    else
+        echo "⚠️  Meldunek do Firestore nie poszedł: $(echo "$MELDUNEK_OUT" | tail -1)"
+        echo "    Backup jest zrobiony — nie zadziała tylko powiadomienie o nim."
+    fi
+fi
+
 echo
 if [ "$ERRORS" -gt 0 ]; then
     echo "⚠️  Backup zakończony z $ERRORS błędem(ami) — $TIMESTAMP"

@@ -1,0 +1,79 @@
+# Czujnik backupu z Maca („dead man's switch").
+#
+# PO CO: backup pamięci Claude'a chodzi z launchd na MacBooku (13:00 i 22:00) i kopiuje
+# rzeczy, których NIE ma w żadnym repo: pamięć, transkrypty, narzędzia i .env.local.
+# Skrypt, który się nie uruchomił, nie wyśle powiadomienia, że go nie było — a wyłączony
+# albo uśpiony laptop wygląda dokładnie tak samo jak udany backup.
+#
+# JAK: skrypt po każdym przebiegu zapisuje „znak życia" do `config/backupHeartbeat`.
+# Ten workflow czyta go raz dziennie i CELOWO PADA, gdy ślad jest przeterminowany albo
+# gdy backup zgłosił błędy. Padnięty workflow = mail z GitHuba, czyli ten sam kanał,
+# którym dostajesz zgłoszenia o padniętych backupach baz. Zero nowej infrastruktury.
+#
+# ⚠️ Mail przychodzi TYLKO gdy coś nie gra. Zielony przebieg jest cichy — cisza znaczy OK.
+
+name: Czujnik backupu z Maca
+
+on:
+  schedule:
+    # 09:10 UTC = 10:10 (zima) / 11:10 (lato) w PL — po nocnym przebiegu z 22:00,
+    # więc świeży meldunek ma wtedy ~12 h. Próg alarmu to 20 h (patrz niżej).
+    - cron: '10 9 * * *'
+  workflow_dispatch:
+
+jobs:
+  sprawdz:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - name: Install Firebase Admin
+        run: npm install firebase-admin@14
+
+      - name: Odczytaj meldunek i oceń
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          # Ile godzin bez meldunku uznajemy za awarię. Przy przebiegach 13:00 i 22:00
+          # normalny wiek o poranku to ~12 h, więc 20 h łapie już POJEDYNCZY pominięty
+          # przebieg wieczorny, a nie dopiero całą dobę ciszy.
+          PROG_GODZIN: '20'
+        run: |
+          printenv SA > sa.json
+          cat > sprawdz.js << 'JS'
+          const { initializeApp, cert } = require('firebase-admin/app');
+          const { getFirestore } = require('firebase-admin/firestore');
+          const fs = require('fs');
+
+          initializeApp({ credential: cert(JSON.parse(fs.readFileSync('sa.json', 'utf8'))) });
+          const prog = Number(process.env.PROG_GODZIN || 20);
+
+          (async () => {
+            const snap = await getFirestore().doc('config/backupHeartbeat').get();
+            if (!snap.exists) {
+              console.error('::error::Brak meldunku w config/backupHeartbeat — backup z Maca nigdy się nie zameldował.');
+              process.exit(1);
+            }
+            const d = snap.data();
+            const wiekH = (Date.now() - new Date(d.ts).getTime()) / 3600000;
+            const wiek = wiekH.toFixed(1);
+
+            console.log(`Ostatni backup: ${d.ts}  (${wiek} h temu)`);
+            console.log(`Status: ${d.status} · błędów: ${d.bledy ?? '?'} · plików pamięci: ${d.plikowPamieci ?? '?'} · host: ${d.host ?? '?'}`);
+
+            const problemy = [];
+            if (wiekH > prog) problemy.push(`ostatni backup ma ${wiek} h (próg ${prog} h) — prawdopodobnie Mac był wyłączony albo zadanie launchd padło`);
+            if (d.status !== 'ok') problemy.push(`backup zgłosił status "${d.status}" (${d.bledy} błędów) — część kroków się nie powiodła, szczegóły w ~/Library/Logs/fleetstat-backup.log`);
+            // Pamięć może rosnąć i maleć, ale zjazd do zera znaczy, że kopiowaliśmy pustkę.
+            if (Number(d.plikowPamieci) === 0) problemy.push('snapshot pamięci ma 0 plików — źródło było puste albo niedostępne');
+
+            if (problemy.length) {
+              for (const p of problemy) console.error(`::error::${p}`);
+              process.exit(1);
+            }
+            console.log('✅ Backup z Maca aktualny i bez błędów.');
+          })().catch((e) => { console.error(`::error::Nie udało się odczytać meldunku: ${e.message}`); process.exit(1); });
+          JS
+          node sprawdz.js
