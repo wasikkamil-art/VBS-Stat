@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo, useCallback, useRef, Fragment, lazy, Suspense } from "react";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, CartesianGrid } from "recharts";
+import { XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, CartesianGrid } from "recharts";
 // v2025.03.31 — YoY Scorecard rebuild
 
 // Helpery formatowania zlecenia (wydzielone z monolitu 2026-04-28, TODO #5c)
-import { parseGeoString, formatOrderForDriverCopy, allDokody, przytnijGleboko } from "./utils/orderFormatters";
+import { allDokody, przytnijGleboko } from "./utils/orderFormatters";
 // Helpery statusu frachtu (single source of truth, wydzielone 2026-04-28 #5c krok 2)
 import { computeFrachtStatus, isFrachtRozladowany, isStaleUnfinished, hasZaladunekActive, getMaxRouteIndex } from "./utils/frachtStatus";
 // Role — wspólna definicja z Cloud Functions (patrz src/utils/roles.js)
@@ -19,16 +19,13 @@ import { tekstowy, zmieszaj, alfaZSufiksu } from "./utils/kolorTekstu";
 import ZlecenieUploadBtn from "./components/ZlecenieUploadBtn";
 import ZlecenieLinki from "./components/ZlecenieLinki";
 // Trip stats helpers (wydzielone 2026-04-28 #5c krok 2 — wspólne admin + DriverPanel)
-import { computeTripStats, fmtTripDuration } from "./utils/tripStats";
+import { computeTripStats } from "./utils/tripStats";
 // TripSummaryPanel (wydzielone 2026-04-28 #5c krok 2 — shared między admin a kierowca)
 import TripSummaryPanel from "./components/TripSummaryPanel";
 // Czas pracy kierowcy — pure logic (wydzielone 2026-04-29 #5c krok 2)
 import {
-  REGULATION, ACTIVITY_TYPES,
-  addMin, minBetween, fmtMin, fmtHM, fmtTimeShort,
-  normalizeSegment, sumByType, continuousDriveSince,
-  lastDailyRestEnd, lastWeeklyRestEnd, preferDddSegments,
-  computeDriverCompliance, computeDriverPlan,
+  fmtHM,
+  normalizeSegment, preferDddSegments,
 } from "./utils/czasPracy";
 
 // Lazy-loaded komponenty (code splitting — admin/kierowca/zleceniodawca chunki).
@@ -48,7 +45,7 @@ const AnalizyTab = lazy(() => import("./components/AnalizyTab"));
 // ─── FIREBASE ───────────────────────────────────────────────────────────────
 // Init wydzielony do src/firebase.js (2026-04-28 TODO #5c) — pozwala lazy-loaded
 // komponentom importować db/auth/storage/functions bez circular dependency z App.jsx.
-import { app, db, auth, storage, functions, messaging, pushDiag, reinitMessaging, callClaude } from "./firebase";
+import { db, auth, storage, functions, messaging, pushDiag, reinitMessaging, callClaude } from "./firebase";
 import { doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, where, orderBy, arrayUnion, serverTimestamp, writeBatch, runTransaction, limit as firestoreLimit } from "firebase/firestore";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
@@ -183,17 +180,6 @@ const IMI_REF = (id) => doc(db, "imi", id);
 // Zostaje jako mapa, a nie sztywny kod, bo docs/rent nadal są tablicami.
 const PRZENIESIONE = { fleetv2_costs: COST_REF, fleetv2_imi: IMI_REF };
 
-async function dbGet(key) {
-  try {
-    const snap = await getDoc(DATA_REF());
-    if (!snap.exists()) return null;
-    const val = snap.data()[key];
-    return val !== undefined ? val : null;
-  } catch (e) {
-    console.error("dbGet error", e);
-    return null;
-  }
-}
 
 // Flaga blokująca onSnapshot podczas lokalnych zapisów
 // Zapobiega race condition: zmiana statusu → dbSet → onSnapshot nadpisuje starymi danymi
@@ -418,6 +404,12 @@ async function dbUpdateInArrayField(fieldKey, id, patch) {
 // nadpisuje wszystko. Server emit po commit aktualizuje state przez onSnapshot.
 // Shrink-protection (2026-05-13): wymagaj explicit {confirmShrink:true} gdy next < prev,
 // żeby przypadkowy bulk-replace pustym/krótszym arrayem nie zniszczył danych.
+// Nieużywane w normalnym biegu aplikacji i tak ma zostać: to narzędzie do importów
+// i migracji, dopisane przy hartowaniu po utracie danych (commit `0b9fb1c`). Jego
+// wartością jest shrink-protection — blokada zapisu, który skróciłby tablicę bez
+// jawnego {confirmShrink:true}. Kasowanie go oznaczałoby wyrzucenie zabezpieczenia,
+// które powstało po realnym incydencie.
+// eslint-disable-next-line no-unused-vars
 async function dbBulkReplaceArrayField(fieldKey, items, { confirmShrink = false } = {}) {
   let prev, next;
   await runTransaction(db, async (tx) => {
@@ -1239,7 +1231,6 @@ function ExportCostsModal({ costs, vehicles, categories, onClose }) {
 // UPLOAD ZAŁĄCZNIKA DO FIREBASE STORAGE
 // ═══════════════════════════════════════════════════════════════════════════════
 async function uploadSprawaFile(file, sprawaId, subfolder) {
-  const ext = file.name.split(".").pop();
   const name = `sprawy/${sprawaId}/${subfolder}/${Date.now()}_${file.name}`;
   const ref = storageRef(storage, name);
   await uploadBytes(ref, file);
@@ -1309,16 +1300,6 @@ function SprawaFileUpload({ sprawaId, subfolder, onUploaded, label = "📎 Dodaj
 
 function AttachmentList({ files, onDelete }) {
   if (!files || files.length === 0) return null;
-  const fileIcon = (url) => {
-    if (!url) return '📄';
-    const ext = url.split('?')[0].split('.').pop().toLowerCase();
-    if (ext==='pdf') return '📄';
-    if (ext==='docx'||ext==='doc') return '📝';
-    return '🖼️';
-  };
-  const fileName = (url) => {
-    try { const p=url.split('?')[0].split('%2F').pop(); return decodeURIComponent(p).substring(0,30); } catch { return 'plik'; }
-  };
   return (
     <div className="flex flex-wrap gap-2 mt-2">
       {files.map((f, i) => (
@@ -1454,7 +1435,6 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   const isAdmin      = role === "admin";
   const [showExportModal, setShowExportModal] = useState(false);
   const isDyspozytor = role === "dyspozytor";
-  const isPodglad    = role === "podglad";
   const isKierowca   = role === "kierowca";
   const canEdit      = isAdmin || isDyspozytor;  // może edytować
   const canFinance   = isAdmin || isDyspozytor;  // widzi finanse
@@ -2667,17 +2647,6 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   const catLabel = (id) => { const c = catById(id); return c ? `${c.icon} ${c.label}` : id; };
 
   // current active driver for a vehicle (assignedDriver + driverHistory)
-  const currentDriver = (v) => {
-    const hist = v.driverHistory || [];
-    const active = hist.find((d) => !d.to);
-    if (active) return active;
-    // fallback: szukaj po assignedDriver email
-    if (v.assignedDriver) {
-      const byEmail = hist.find(d => d.email === v.assignedDriver);
-      if (byEmail) return byEmail;
-    }
-    return hist[hist.length - 1] || null;
-  };
 
   // ── GET PLN VALUE ──
   const getPLN = (c) => c.currency === "EUR" ? (toPLN(c.amountEUR) || 0) : (c.amountPLN || 0);
@@ -2690,34 +2659,6 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   };
 
   // ── STATS ──
-  const stats = useMemo(() => {
-    const rate      = eurRate || 4.25;
-    const totalPLN  = costs.reduce((s, c) => s + getPLN(c), 0);
-    const thisMonth = new Date().toISOString().slice(0, 7);
-    const monthPLN  = costs.filter((c) => c.date?.startsWith(thisMonth)).reduce((s, c) => s + getPLN(c), 0);
-
-    const byVehicle = vehicles.map((v) => {
-      const vc = costs.filter((c) => c.vehicleId === v.id);
-      const hist = v.driverHistory || [];
-      const active = hist.find((d) => !d.to) || hist[hist.length - 1];
-      return { ...v, total: vc.reduce((s, c) => s + getPLN(c), 0), count: vc.length, activeDriver: active?.name || "—" };
-    });
-
-    const byCategory = categories.map((cat) => ({
-      ...cat,
-      total: costs.filter((c) => c.category === cat.id).reduce((s, c) => s + getPLN(c), 0),
-    })).filter((c) => c.total > 0);
-
-    const monthMap = {};
-    costs.forEach((c) => {
-      const m = c.date?.slice(0, 7); if (!m) return;
-      if (!monthMap[m]) monthMap[m] = { month: m, total: 0 };
-      monthMap[m].total += getPLN(c);
-    });
-    const monthly = Object.values(monthMap).sort((a, b) => a.month.localeCompare(b.month)).slice(-6);
-
-    return { totalPLN, monthPLN, byVehicle, byCategory, monthly, rate };
-  }, [costs, vehicles, categories, eurRate]);
 
   // ── FILTERED COSTS ──
   const filteredCosts = useMemo(() => costs.filter((c) => {
@@ -2729,12 +2670,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     return true;
   }).sort((a, b) => (b.date||"").localeCompare(a.date||"")), [costs, filterVehicle, filterCat, filterMonth, filterYear, filterNote]);
 
-  const months = useMemo(() => {
-    const s = new Set(costs.map((c) => c.date?.slice(0, 7)).filter(Boolean));
-    return [...s].sort((a, b) => b.localeCompare(a));
-  }, [costs]);
 
-  const filteredTotal = filteredCosts.reduce((s, c) => s + getPLN(c), 0);
 
   // ── LOADING ──
   if (!loaded) return (
@@ -3021,7 +2957,6 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
               {/* KARTY POJAZDÓW — główna sekcja */}
               {(() => {
-                const today = new Date();
                 return (
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
                     {vehicles.filter(v => {
@@ -3693,7 +3628,6 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 })).filter(c => c.total > 0).sort((a,b) => b.total - a.total);
 
                 const totalEUR = filteredCosts.reduce((s,c) => s + getEUR(c), 0);
-                const totalPLN = filteredTotal;
 
                 // Średnia cena €/L paliwa — łączymy 2 źródła:
                 // A) rekordy kosztów z litrami (importy marzec+)
@@ -3862,11 +3796,6 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
               </div>
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                 {vehicles.filter(v => !v.archived).map((v) => {
-                  const vc      = costs.filter((c) => c.vehicleId === v.id);
-                  const total   = vc.reduce((s, c) => s + getPLN(c), 0);
-                  const topCat  = categories.map((cat) => ({
-                    ...cat, t: vc.filter((c) => c.category === cat.id).reduce((s, c) => s + getPLN(c), 0),
-                  })).sort((a, b) => b.t - a.t)[0];
                   const hist    = v.driverHistory || [];
                   const active  = hist.find((d) => !d.to) || null;
                   const isEditing = editVehicleId === v.id;
@@ -4333,7 +4262,6 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
             // ── PANEL KIEROWCÓW — podgląd tankowań, dokumentów, statusów ──
             // Drivers list (from users with role kierowca + assigned vehicles)
             const drivers = appUsers.filter(u => u.role === "kierowca");
-            const driverEmails = drivers.map(d => d.email);
 
             // Filtered data
             const filteredFuel = dkFilter === "all"
@@ -4794,7 +4722,6 @@ function ChatTab({ currentUser, appUsers = [], vehicles = [], showToast, onActiv
   const [newRoomType, setNewRoomType] = useState("channel");
   const [newRoomMembers, setNewRoomMembers] = useState([]);
   const [uploading, setUploading] = useState(false);
-  const [showMembers, setShowMembers] = useState(false);
   const [editingMsg, setEditingMsg] = useState(null);
   const [editText, setEditText] = useState("");
   const [replyTo, setReplyTo] = useState(null);
@@ -4806,7 +4733,6 @@ function ChatTab({ currentUser, appUsers = [], vehicles = [], showToast, onActiv
   const [typingUsers, setTypingUsers] = useState({});
   const [lastReadMap, setLastReadMap] = useState({});
   const [pushStatus, setPushStatus] = useState(null); // null | "checking" | {success, error, step, token}
-  const [showPushPanel, setShowPushPanel] = useState(false);
   const [pushRegistered, setPushRegistered] = useState(() => {
     try { return localStorage.getItem("pushRegistered") === "1"; } catch { return false; }
   });
@@ -5273,12 +5199,6 @@ function ChatTab({ currentUser, appUsers = [], vehicles = [], showToast, onActiv
     return d.toDateString() === now.toDateString() ? time : `${d.toLocaleDateString("pl-PL", { day: "numeric", month: "short" })} ${time}`;
   };
 
-  const roomIcon = (r) => {
-    if (r.type === "self") return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>;
-    if (r.type === "dm") return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>;
-    if (r.type === "group") return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>;
-    return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
-  };
 
   // Znajdź pojazd przypisany do kierowcy (po emailu) — dla pokojów WhatsApp
   const findDriverVehicle = (driverEmail) => {
@@ -5435,7 +5355,7 @@ function ChatTab({ currentUser, appUsers = [], vehicles = [], showToast, onActiv
                 <button onClick={() => { setShowSearch(!showSearch); setSearchQuery(""); }} className="flex items-center justify-center" style={{ width: '34px', height: '34px', borderRadius: '10px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', cursor: 'pointer' }} title="Szukaj">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                 </button>
-                <button onClick={() => { setShowRoomSettings(!showRoomSettings); setEditRoomName(activeRoom.name); setShowMembers(false); }} className="flex items-center justify-center" style={{ width: '34px', height: '34px', borderRadius: '10px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', cursor: 'pointer' }} title="Ustawienia pokoju">
+                <button onClick={() => { setShowRoomSettings(!showRoomSettings); setEditRoomName(activeRoom.name); }} className="flex items-center justify-center" style={{ width: '34px', height: '34px', borderRadius: '10px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', cursor: 'pointer' }} title="Ustawienia pokoju">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
                 </button>
               </div>
@@ -6596,7 +6516,6 @@ function EmailStatusTab({ showToast }) {
   const [newName, setNewName] = useState("");
   const [sendgridKey, setSendgridKey] = useState("");
   const [senderEmail, setSenderEmail] = useState("");
-  const [configLoaded, setConfigLoaded] = useState(false);
   const [sending, setSending] = useState(false);
   const [logs, setLogs] = useState([]);
 
@@ -6619,7 +6538,6 @@ function EmailStatusTab({ showToast }) {
           setSenderEmail(data.senderEmail || "");
         }
       } catch (e) { console.error("config load err", e); }
-      setConfigLoaded(true);
     })();
   }, []);
 
@@ -7550,64 +7468,8 @@ async function getRoute(waypoints) {
 // Zamienia dane z rzadkich punktów breadcrumb (co 1-5 min) w gładką trasę
 // następującą po rzeczywistej sieci drogowej. Input: [{lat,lng,ts}], output:
 // { coordinates: [[lat,lng]...], distance: meters } lub null.
-async function mapMatchRoute(points) {
-  if (!points || points.length < 2) return null;
 
-  // 1) Dedup punktów stacjonarnych (gdy auto stoi — sąsiednie punkty w tym samym miejscu
-  //    mylą OSRM; zostawiamy tylko punkty ruchome, > ~15m od poprzedniego ruchomego)
-  const haversineM = (a, b) => {
-    const R = 6371000;
-    const toR = v => v * Math.PI / 180;
-    const dLat = toR(b.lat - a.lat), dLng = toR(b.lng - a.lng);
-    const s = Math.sin(dLat/2)**2 + Math.cos(toR(a.lat))*Math.cos(toR(b.lat))*Math.sin(dLng/2)**2;
-    return 2 * R * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
-  };
-  let pts = [points[0]];
-  for (let i = 1; i < points.length; i++) {
-    if (haversineM(pts[pts.length - 1], points[i]) >= 15) pts.push(points[i]);
-  }
-  // Zawsze dopinamy ostatni, żeby koniec trasy był prawdziwy
-  if (pts[pts.length - 1] !== points[points.length - 1]) pts.push(points[points.length - 1]);
-  if (pts.length < 2) return null;
-
-  // 2) OSRM match limit 100 koord — próbkowanie równomierne jeśli więcej
-  if (pts.length > 100) {
-    const step = Math.ceil(pts.length / 100);
-    const sampled = pts.filter((_, i) => i % step === 0);
-    if (sampled[sampled.length - 1] !== pts[pts.length - 1]) sampled.push(pts[pts.length - 1]);
-    pts = sampled;
-  }
-
-  const coords = pts.map(p => `${p.lng},${p.lat}`).join(";");
-  // radiuses 200m — tolerancja dla breadcrumbów zbieranych co 2 min (punkty mogą być
-  // nieco od drogi, gdy auto zatrzymało się na poboczu / parkingu przy drodze)
-  const radiuses = pts.map(() => 200).join(";");
-  const timestamps = pts.map(p => Math.floor((p.ts || Date.now()) / 1000)).join(";");
-  try {
-    // gaps=ignore — nie dziel trasy na chunki przy długich przerwach czasowych
-    // tidy=true — OSRM filtruje outliery (skoki GPS)
-    const url = `https://router.project-osrm.org/match/v1/driving/${coords}?overview=full&geometries=geojson&radiuses=${radiuses}&timestamps=${timestamps}&gaps=ignore&tidy=true`;
-    const resp = await fetch(url);
-    const data = await resp.json();
-    if (data?.code === "Ok" && Array.isArray(data.matchings) && data.matchings.length > 0) {
-      const allCoords = [];
-      let totalDist = 0;
-      data.matchings.forEach(m => {
-        if (m.geometry?.coordinates) {
-          allCoords.push(...m.geometry.coordinates.map(c => [c[1], c[0]]));
-        }
-        totalDist += m.distance || 0;
-      });
-      console.log(`[OSRM match] OK — ${allCoords.length} koord, ${(totalDist/1000).toFixed(1)} km z ${pts.length} punktów`);
-      if (allCoords.length > 0) return { coordinates: allCoords, distance: totalDist };
-    } else {
-      console.warn("[OSRM match] code:", data?.code, "message:", data?.message);
-    }
-  } catch (e) { console.warn("[OSRM match] error:", e?.message); }
-  return null;
-}
-
-function GpsMapSection({ device, position, allPositions, allDevices, frachtyList = [], vehicles = [], driverEvents = [], selectedFracht = null }) {
+function GpsMapSection({ device, position, allPositions, allDevices, frachtyList = [], driverEvents = [], selectedFracht = null }) {
   // Index events per frachtId — używane przez computeFrachtStatus (single source of truth).
   const eventsByFracht = useMemo(() => {
     const map = {};
@@ -8249,7 +8111,7 @@ function GpsMapSection({ device, position, allPositions, allDevices, frachtyList
 }
 
 // ── Sekcja: PLIKI DDD (tachograf) ──
-function GpsDddSection({ device, showToast }) {
+function GpsDddSection({ showToast }) {
   const [dddFiles, setDddFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [parsingId, setParsingId] = useState(null);
@@ -8472,7 +8334,6 @@ function dddIsDST(dateStr) {
   const [y, m, d] = dateStr.split("-").map(Number);
   if (m > 3 && m < 10) return true;
   if (m < 3 || m > 10) return false;
-  const date = new Date(Date.UTC(y, m - 1, d));
   const lastSundayOfMonth = (year, month) => {
     const last = new Date(Date.UTC(year, month, 0));
     return last.getUTCDate() - last.getUTCDay();
@@ -9066,12 +8927,10 @@ function MultiDayActivityView({ vehicle, driverActivities = [], currentUser = nu
   // Scalamy z propsem (świeże live z okna) po id → recent jest na żywo, stare z dofetchu.
   // `refetchTick` wymusza ponowny dociąg po zapisie/usunięciu korekty (może być poza oknem).
   const [fetchedActs, setFetchedActs] = useState(null);
-  const [fetchingHist, setFetchingHist] = useState(false);
   const [refetchTick, setRefetchTick] = useState(0);
   useEffect(() => {
     if (vehicleId === "__none__") { setFetchedActs(null); return; }
     let alive = true;
-    setFetchingHist(true);
     (async () => {
       try {
         const snap = await getDocs(query(collection(db, "driverActivities"), where("vehicleId", "==", vehicleId)));
@@ -9104,7 +8963,6 @@ function MultiDayActivityView({ vehicle, driverActivities = [], currentUser = nu
         console.error("MultiDayActivityView history fetch error", e);
         if (alive) setFetchedActs([]);   // fallback: zdamy się na okno z propsu
       }
-      if (alive) setFetchingHist(false);
     })();
     return () => { alive = false; };
   }, [vehicleId, refetchTick, vehicle?.driverHistory]);
@@ -10042,7 +9900,7 @@ function TerminyPobranTab({ vehicles }) {
   );
 }
 
-function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
+function UsersTab({ currentUid, showToast, vehicles }) {
   const [users, setUsers]     = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedUid, setExpandedUid] = useState(null);
@@ -10073,7 +9931,7 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
     podglad:    ["dashboard","frachty","vehicles","serwis","analizy","docs","imi","chat"],
   };
 
-  async function saveAllowedTabs(uid, newTabs, userRole) {
+  async function saveAllowedTabs(uid, newTabs) {
     try {
       await setDoc(doc(db, "users", uid), { allowedTabs: newTabs }, { merge: true });
       logAction("update", "users", { targetUid: uid, allowedTabs: newTabs });
@@ -10092,7 +9950,7 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
     const next = current.includes(tabId)
       ? current.filter(t => t !== tabId)
       : [...current, tabId];
-    saveAllowedTabs(u.uid, next, u.role);
+    saveAllowedTabs(u.uid, next);
   }
 
   async function changeRole(uid, newRole) {
@@ -10316,7 +10174,7 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
                           )}
                         </div>
                         {hasCustom && (
-                          <button onClick={() => saveAllowedTabs(u.uid, [], u.role)}
+                          <button onClick={() => saveAllowedTabs(u.uid, [])}
                             className="text-xs text-gray-500 hover:text-gray-800 underline">
                             Przywróć domyślne dla roli
                           </button>
@@ -10549,15 +10407,6 @@ function UsersTab({ currentUid, showToast, vehicles, setVehicles }) {
 }
 
 // Mały helper-wiersz w panelu detalu
-function Row({ label, value }) {
-  if (!value) return null;
-  return (
-    <div>
-      <div className="text-xs text-gray-500 uppercase tracking-wide">{label}</div>
-      <div className="font-medium text-gray-900">{value}</div>
-    </div>
-  );
-}
 
 // ── AI: rachunek hotelowy (Booking / hotel PDF / zdjęcie) → JSON ──
 const HOTEL_AI_PROMPT = `Jesteś asystentem księgowym floty transportowej. Przeczytaj załączony rachunek/potwierdzenie hotelowe (np. z Booking.com) i zwróć WYŁĄCZNIE obiekt JSON (bez komentarza, bez markdown):
@@ -10645,24 +10494,10 @@ function guessVehicleByGuest(guestName, vehicles) {
   return null;
 }
 
-function Field({ label, children }) {
-  return (
-    <div>
-      <div className="text-xs font-semibold text-gray-600 mb-1">{label}</div>
-      {children}
-    </div>
-  );
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // IMI / SIPSI TAB
 // ═══════════════════════════════════════════════════════════════════════════════
-const EU_COUNTRIES = [
-  "Austria","Belgia","Bułgaria","Chorwacja","Cypr","Czechy","Dania","Estonia",
-  "Finlandia","Francja","Grecja","Hiszpania","Holandia","Irlandia","Litwa",
-  "Luksemburg","Łotwa","Malta","Niemcy","Polska","Portugalia","Rumunia",
-  "Słowacja","Słowenia","Szwecja","Węgry","Włochy","Norwegia","Szwajcaria","UK",
-];
 
 function ImiTab({ imiRecords, vehicles, onAdd, onDelete }) {
   const [showUpload, setShowUpload] = useState(false);
@@ -10738,8 +10573,7 @@ function ImiTab({ imiRecords, vehicles, onAdd, onDelete }) {
   );
 }
 
-function ImiCard({ record: r, vehicles, onPreview, onDelete }) {
-  const vehicle = vehicles.find(v => v.id === r.vehicleId);
+function ImiCard({ record: r, onPreview, onDelete }) {
   const isActive = r.dateTo && new Date(r.dateTo) >= new Date();
 
   return (
@@ -10800,7 +10634,6 @@ function buildImiHtml(r) {
     return `${day}/${m}/${y}`;
   };
   const period = (r.dateFrom && r.dateTo) ? `${fmtD(r.dateFrom)} - ${fmtD(r.dateTo)}` : (r.dateFrom ? fmtD(r.dateFrom) : "");
-  const ops = [r.operationType, r.carriageType].filter(Boolean).join("<br>");
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -10912,9 +10745,8 @@ function buildImiHtml(r) {
 </html>`;
 }
 
-function ImiPreviewModal({ record: r, vehicles, onClose }) {
+function ImiPreviewModal({ record: r, onClose }) {
   const html = buildImiHtml(r);
-  const [opened, setOpened] = useState(false);
 
   const [showPrintView, setShowPrintView] = useState(false);
 
@@ -10976,11 +10808,6 @@ function ImiPreviewModal({ record: r, vehicles, onClose }) {
             style={{ background:"#111827" }}>
             🖨 Otwórz widok drukowania → Ctrl+P / PDF
           </button>
-          {opened && (
-            <p className="text-xs text-center text-gray-500 mt-2">
-              Użyj <strong>Ctrl+P</strong> (lub ⌘P) i wybierz <strong>„Zapisz jako PDF"</strong>
-            </p>
-          )}
         </div>
       </div>
     </div>
@@ -10990,7 +10817,6 @@ function ImiPreviewModal({ record: r, vehicles, onClose }) {
 
 function ImiUploadModal({ vehicles, existingRecords, onSave, onClose }) {
   const [queue, setQueue] = useState([]);
-  const [started, setStarted] = useState(false);
   const fileRef = useRef();
 
   const AI_PROMPT = `Extract all fields from this Road Transport - Posting Declaration and return JSON:
@@ -11096,7 +10922,6 @@ Extract ALL fields exactly as they appear. Return ONLY clean JSON, no text befor
     }
     if (!items.length) return;
     setQueue(q => [...q, ...items]);
-    setStarted(true);
     // process sequentially to avoid rate limits
     for (const item of items) {
       setQueue(q => q.map(x => x.id===item.id ? {...x, status:"analyzing"} : x));
@@ -11750,7 +11575,6 @@ Szukaj numerow rejestracyjnych pojazdow w dokumencie.`;
 
           {/* QUEUE */}
           {queue.map(item => {
-            const dt = DOC_TYPES.find(t => t.id === item.edited?.type) || DOC_TYPES.at(-1);
             return (
               <div key={item.id} className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
                 {/* file header */}
@@ -12501,7 +12325,6 @@ function isMonthCurrent(year, month) {
   return year === now.getFullYear() && month === now.getMonth();
 }
 
-function rentKey(vehicleId, year, month) { return `${vehicleId}_${year}_${month}`; }
 
 
 function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRate, operacyjne = [], onSaveOperacyjne, onAdd, onUpdate, onDelete }) {
@@ -12906,7 +12729,6 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
           </div>
 
           {selVehicle && (() => {
-            const v = vehicles.find(vv => vv.id === selVehicle);
             const yearData = MONTHS_PL.map((lbl, mi) => {
               const isCurrent = isMonthCurrent(selYear, mi);
               const isFuture = !isMonthClosed(selYear, mi) && !isCurrent;
@@ -13171,7 +12993,7 @@ function RentownoscTab({ vehicles, records, frachtyList = [], costs = [], eurRat
   );
 }
 
-function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne, selYear, getRecord, isSettled }) {
+function TrendyTab({ vehicles, operacyjne, selYear, getRecord, isSettled }) {
   const METRYKI = [
     { id: "frachty",  label: "Frachty €",      color: "#3b82f6" },
     { id: "koszty",   label: "Koszty €",       color: "#b91c1c" },
@@ -13335,14 +13157,6 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
       });
     });
   }
-  const allVals = series.flatMap(s=>s.pts).filter(v=>v!==null && v!==0);
-  const _min = allVals.length ? Math.min(...allVals) : 0;
-  const minVal = _min >= 0 ? 0 : _min;
-  const maxVal = allVals.length ? Math.max(...allVals) : 1;
-  const range = maxVal - minVal || 1;
-  const H = 240, W_PT = 52, chartW = 12 * W_PT;
-  const PAD = 15;
-  const toY = v => H - ((v - minVal) / range * (H - 2*PAD)) - PAD;
   const MS = ["Sty","Lut","Mar","Kwi","Maj","Cze","Lip","Sie","Wrz","Paź","Lis","Gru"];
   return (
     <div className="space-y-4">
@@ -13755,7 +13569,6 @@ function TrendyTab({ vehicles, records, frachtyList = [], costs = [], operacyjne
         const rows = yoyMode==="flota"
           ? [{ label:"Flota total", vals25: MS.map((_,mi)=>getFlotaVal(2025,mi)), vals26: MS.map((_,mi)=>getFlotaVal(2026,mi)) }]
           : vehicles.map(v=>({ label:v.plate, vals25: MS.map((_,mi)=>getVehVal(v.id,2025,mi)), vals26: MS.map((_,mi)=>getVehVal(v.id,2026,mi)) }));
-        const maxAll = Math.max(...rows.flatMap(r=>[...r.vals25,...r.vals26]));
         return (
           <div className="bg-white rounded-2xl border border-gray-100 px-5 py-4">
             {/* Header + toggles */}
@@ -14749,7 +14562,6 @@ function CzasPracyModal({ vehicle, entries, onSave, onDelete, onClose }) {
           {/* ZAKRES + GODZINA START + PRZYCISK ZAPISZ */}
           {rangeStart && (() => {
             const selSt = CZAS_STATUSY.find(s=>s.id===selectedStatus);
-            const endCalc = selSt?.hours ? calcEndTime(startTime, selSt.hours) : null;
             return (
               <div className="mb-4 p-3 rounded-xl" style={{ background: selSt?.bg, border: `1px solid ${selSt?.border}` }}>
                 <div className="flex items-center gap-3 mb-2">
@@ -15561,16 +15373,6 @@ function AddVehicleModal({ onSave, onClose }) {
 function PageTitle({ children }) {
   return <h1 className="text-xl font-bold text-gray-900 mb-5">{children}</h1>;
 }
-function KpiCard({ label, value, sub, accent }) {
-  return (
-    <div className="bg-white rounded-2xl border border-gray-100 p-4">
-      <div className="text-xs text-gray-500 font-medium mb-1.5">{label}</div>
-      <div className="font-bold text-gray-900 text-lg leading-tight">{value}</div>
-      <div className="text-xs text-gray-500 mt-0.5">{sub}</div>
-      <div className="h-0.5 mt-3 rounded-full" style={{ background: accent, width: "36%", opacity: 0.7 }} />
-    </div>
-  );
-}
 function FSel({ value, onChange, options }) {
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)}
@@ -15734,7 +15536,7 @@ Jeśli nie możesz odczytać danego pola, wpisz null.`,
 // ═══════════════════════════════════════════════════════════════════════════════
 // COSTS IMPORT MODAL
 // ═══════════════════════════════════════════════════════════════════════════════
-function CostsImportModal({ vehicles, categories, onImport, onClose }) {
+function CostsImportModal({ vehicles, onImport, onClose }) {
   const [status, setStatus] = useState("idle");
   const [rows, setRows]     = useState([]);
   const [errorMsg, setErrorMsg] = useState("");
@@ -16582,17 +16384,8 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
   });
 
   // KPI per rok dla baner-przycisków
-  const yearStats = (year) => {
-    const l = filterByYear(frachtyList, year);
-    return {
-      count: l.length,
-      eur: l.reduce((s,r) => s + (parseFloat(r.cenaEur)||0), 0),
-      km: l.reduce((s,r) => s + (parseInt(r.kmWszystkie)||parseInt(r.kmLadowne)||0), 0),
-    };
-  };
 
   if (!selectedVehicle) {
-    const kpi = { count: visibleList.length, eur: visibleList.reduce((s,r) => s+(parseFloat(r.cenaEur)||0),0), km: visibleList.reduce((s,r) => s+(parseInt(r.kmWszystkie)||parseInt(r.kmLadowne)||0),0) };
     return (
       <div className="p-4 md:p-6">
         {showImport && (
@@ -16823,12 +16616,6 @@ function FrachtyTab({ frachtyList, vehicles, driverEvents = [], fuelEntries = []
             {rows.map((r,idx) => {
               const eurKmLad = r.kmLadowne && r.cenaEur ? (parseFloat(r.cenaEur)/parseInt(r.kmLadowne)).toFixed(2) : "-";
               const eurKmWsz = r.kmWszystkie && r.cenaEur ? (parseFloat(r.cenaEur)/parseInt(r.kmWszystkie)).toFixed(2) : "-";
-              const FV_STATUSES = [
-                { id: "nie_wyslana",  label: "Nie wysłana",    bg: "#f3f4f6", color: "#6b7280", dot: "#6b7280" },
-                { id: "wyslana",      label: "Wysłana / czeka", bg: "#fefce8", color: "#92400e", dot: "#f59e0b" },
-                { id: "przeterminowana", label: "Przeterminowana", bg: "#fef2f2", color: "#991b1b", dot: "#ef4444" },
-                { id: "zaplacona",    label: "Zapłacona",      bg: "#f0fdf4", color: "#166534", dot: "#22c55e" },
-              ];
               return [
                 <tr key={r.id} className="border-b border-gray-50 hover:bg-blue-50 transition-colors" style={{fontSize: 12}}>
                   <td className="px-1.5 py-1.5 text-gray-500">{idx+1}</td>
@@ -17281,16 +17068,8 @@ function FrachtyImportModal({ vehicles, onImport, onClose }) {
   const [status, setStatus] = useState("idle"); // idle | parsing | preview | importing | done | error
   const [rows, setRows]     = useState([]);
   const [errorMsg, setErrorMsg] = useState("");
-  const [skipDupes, setSkipDupes] = useState(true);
   const fileRef = useRef(null);
 
-  const TEMPLATE_KEYS = [
-    "vehicleId","dataZlecenia","dataZaladunku","dataRozladunku",
-    "godzZaladunku","godzRozladunku","skad","zaladunekKod","dokod",
-    "klient","cenaEur","kmPodjazd","kmLadowne","kmWszystkie",
-    "eurKmLad","eurKmWsz","wagaLadunku","dyspozytor",
-    "nrFV","dataWyslania","terminPlatnosci","uwagi"
-  ];
   const FORMULA_KEYS = new Set(["kmWszystkie","eurKmLad","eurKmWsz"]);
 
   const parseXLSX = async (file) => {

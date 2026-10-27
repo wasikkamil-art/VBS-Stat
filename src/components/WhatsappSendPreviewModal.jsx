@@ -30,8 +30,6 @@ export default function WhatsappSendPreviewModal({ fracht, driver, dispatcherNam
   const [sending, setSending] = useState(false);
   const [sendReminder, setSendReminder] = useState(true);
 
-  const signedPreview = `*${dispatcherName}:*\n${body}`;
-
   async function send() {
     if (!driver?.uid) { showToast("❌ Brak kierowcy"); return; }
     if (!driver.whatsappNumber) { showToast("❌ Kierowca nie ma numeru WhatsApp"); return; }

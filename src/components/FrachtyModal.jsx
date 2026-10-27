@@ -1002,7 +1002,7 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
 // SEND TRACKER LINK MODAL — publiczny link do śledzenia dla zleceniodawcy
 // Generuje trackerToken jeśli nie istnieje, daje opcje: kopiuj / WhatsApp / email.
 // ═══════════════════════════════════════════════════════════════════════════════
-function SendTrackerLinkModal({ fracht, frachtId, trackerToken, trackerEnabled = true, initialShow = {}, onTokenGenerated, onShowChange, onToggleEnabled, showToast, onClose }) {
+function SendTrackerLinkModal({ fracht, trackerToken, trackerEnabled = true, initialShow = {}, onTokenGenerated, onShowChange, onToggleEnabled, showToast, onClose }) {
   const initialToken = trackerToken || "";
   const [token, setToken] = useState(initialToken);
   const [enabled, setEnabled] = useState(trackerEnabled);
