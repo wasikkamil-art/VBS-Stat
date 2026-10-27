@@ -47,6 +47,14 @@ $DRY_RUN mkdir -p "$DEST_BASE/memory/$DATE"
 $DRY_RUN mkdir -p "$DEST_BASE/env"
 
 # === Backup memory (versioned snapshot per dzień) ===
+#
+# WSZYSTKIE projekty Claude'a, nie tylko FleetStat (zmiana 2026-10-27). Wcześniej
+# ścieżka była zaszyta na jeden katalog, więc pamięć z sesji prowadzonych z innego
+# repo (FOX, FreeTruck) ani z worktree nie trafiała do kopii w ogóle.
+#
+# Pamięć głównego projektu ląduje w `memory/$DATE/` jak dotąd (żeby nie łamać
+# dotychczasowych snapshotów i procedury odtwarzania), a pozostałe projekty
+# w `memory/$DATE/_inne-projekty/<nazwa>/`.
 if [ -d "$SOURCE_MEMORY" ]; then
     FILE_COUNT=$(find "$SOURCE_MEMORY" -maxdepth 1 -type f | wc -l | xargs)
     SIZE=$(du -sh "$SOURCE_MEMORY" 2>/dev/null | awk '{print $1}')
@@ -56,17 +64,32 @@ else
     echo "⚠️  Source memory nieobecny: $SOURCE_MEMORY (pomijam)"
 fi
 
+INNE_N=0
+for PROJ_DIR in "$HOME/.claude/projects"/*; do
+    [ -d "$PROJ_DIR/memory" ] || continue
+    [ "$PROJ_DIR/memory" = "$SOURCE_MEMORY" ] && continue
+    PROJ_NAME=$(basename "$PROJ_DIR")
+    $DRY_RUN mkdir -p "$DEST_BASE/memory/$DATE/_inne-projekty/$PROJ_NAME"
+    $DRY_RUN cp -R "$PROJ_DIR/memory/" "$DEST_BASE/memory/$DATE/_inne-projekty/$PROJ_NAME/"
+    INNE_N=$((INNE_N + 1))
+    echo "✅ Pamięć innego projektu: $PROJ_NAME ($(find "$PROJ_DIR/memory" -maxdepth 1 -type f | wc -l | xargs) plików)"
+done
+[ "$INNE_N" -eq 0 ] && echo "ℹ️  Innych projektów z pamięcią brak — kopiowana tylko pamięć główna"
+
 # === Backup transcripts Claude Code (rolling, bez per-dzień snapshotu) ===
 # .jsonl transkrypty są lokalne w ~/.claude/projects/.../, append-only.
 # Rolling rsync z --update: kopiuje tylko nowe/zmienione, NIE usuwa starych
 # (cumulative history — gdyby Claude Code rotował lokalnie, my zachowujemy w backupie).
-SOURCE_TRANSCRIPTS="$HOME/.claude/projects/-Users-kamilwasik-Desktop-VBS-Stat-nosync"
+# WSZYSTKIE projekty, nie tylko FleetStat (zmiana 2026-10-27) — wcześniej transkrypt
+# z worktree albo z sesji prowadzonej z innego repo wypadał poza kopię.
+# Nazwy plików to UUID-y, więc spłaszczenie do jednego katalogu jest bezkolizyjne.
+SOURCE_TRANSCRIPTS="$HOME/.claude/projects"
 DEST_TRANSCRIPTS="$DEST_BASE/transcripts"
 if [ -d "$SOURCE_TRANSCRIPTS" ]; then
     $DRY_RUN mkdir -p "$DEST_TRANSCRIPTS"
     if [ -n "$DRY_RUN" ]; then
-        SRC_COUNT=$(find "$SOURCE_TRANSCRIPTS" -maxdepth 1 -name "*.jsonl" | wc -l | xargs)
-        SRC_TOTAL=$(du -ch "$SOURCE_TRANSCRIPTS"/*.jsonl 2>/dev/null | tail -1 | awk '{print $1}')
+        SRC_COUNT=$(find "$SOURCE_TRANSCRIPTS" -maxdepth 2 -name "*.jsonl" | wc -l | xargs)
+        SRC_TOTAL=$(du -ch "$SOURCE_TRANSCRIPTS"/*/*.jsonl 2>/dev/null | tail -1 | awk '{print $1}')
         echo "[DRY] rsync $SRC_COUNT .jsonl files (~$SRC_TOTAL) → $DEST_TRANSCRIPTS/"
     else
         # rsync --update: skip jeśli destination jest nowszy/identyczny; kopiuje nowe + zmienione.
@@ -77,7 +100,7 @@ if [ -d "$SOURCE_TRANSCRIPTS" ]; then
         # Kod 24 = plik zniknął w trakcie (aktywna sesja) — to nie jest błąd backupu.
         TR_OK=0
         for ATTEMPT in 1 2 3; do
-            RSYNC_ERR=$(rsync -a --update "$SOURCE_TRANSCRIPTS"/*.jsonl "$DEST_TRANSCRIPTS/" 2>&1)
+            RSYNC_ERR=$(rsync -a --update "$SOURCE_TRANSCRIPTS"/*/*.jsonl "$DEST_TRANSCRIPTS/" 2>&1)
             RC=$?
             if [ "$RC" -eq 0 ] || [ "$RC" -eq 24 ]; then TR_OK=1; break; fi
             echo "⚠️  rsync transkryptów: kod $RC (próba $ATTEMPT/3): $(echo "$RSYNC_ERR" | tail -2 | tr '\n' ' ')"
@@ -169,35 +192,44 @@ if [ -d "$SOURCE_REPO/podglad" ]; then
     fi
 fi
 
-# === Backup .env.local (1 kopia, overwrite) ===
+# === Backup .env.local — WSZYSTKIE projekty (1 kopia każdy, overwrite) ===
+#
+# Do 2026-10-27 kopiowany był TYLKO plik FleetStata, a sekrety FOX-a i FreeTrucka
+# istniały wyłącznie na dysku. Te pliki są gitignorowane, więc `git push` ich nie ratuje.
+# Pierwszy (FleetStat) zostaje pod starą nazwą `.env.local`, żeby nie łamać procedury
+# odtwarzania; pozostałe dostają sufiks z nazwą projektu.
+#
 # iCloud Drive ma znanego buga "Resource deadlock avoided" przy cp do plików
 # które są w trakcie sync. Workaround: rm -f destination + retry 3x z sleep.
-if [ -f "$SOURCE_ENV" ]; then
-    DEST_ENV="$DEST_BASE/env/.env.local"
-    if [ -n "$DRY_RUN" ]; then
-        echo "[DRY] cp $SOURCE_ENV $DEST_ENV"
-    else
-        ENV_OK=0
-        for ATTEMPT in 1 2 3; do
-            rm -f "$DEST_ENV" 2>/dev/null || true
-            sleep 1
-            if cp "$SOURCE_ENV" "$DEST_ENV" 2>/dev/null; then
-                echo "✅ .env.local skopiowany (próba $ATTEMPT): $DEST_ENV"
-                ENV_OK=1
-                break
-            fi
-            echo "⚠️  cp .env.local fail (próba $ATTEMPT/3) — czekam 3s na iCloud..."
-            sleep 3
-        done
-        if [ "$ENV_OK" -eq 0 ]; then
-            echo "❌ .env.local NIE skopiowany po 3 próbach (resource deadlock?)"
-            ERRORS=$((ERRORS + 1))
-            FAILED_STEPS="$FAILED_STEPS .env.local"
-        fi
+kopiuj_env() {
+    ZRODLO="$1"; CEL="$2"; NAZWA="$3"
+    if [ ! -f "$ZRODLO" ]; then
+        echo "ℹ️  $NAZWA: brak pliku ($ZRODLO) — pomijam"
+        return 0
     fi
-else
-    echo "⚠️  Source .env.local nieobecny: $SOURCE_ENV (pomijam)"
-fi
+    if [ -n "$DRY_RUN" ]; then
+        echo "[DRY] cp $ZRODLO $CEL"
+        return 0
+    fi
+    for ATTEMPT in 1 2 3; do
+        rm -f "$CEL" 2>/dev/null || true
+        sleep 1
+        if cp "$ZRODLO" "$CEL" 2>/dev/null; then
+            echo "✅ $NAZWA skopiowany (próba $ATTEMPT): $CEL"
+            return 0
+        fi
+        echo "⚠️  cp $NAZWA fail (próba $ATTEMPT/3) — czekam 3s na iCloud..."
+        sleep 3
+    done
+    echo "❌ $NAZWA NIE skopiowany po 3 próbach (resource deadlock?)"
+    ERRORS=$((ERRORS + 1))
+    FAILED_STEPS="$FAILED_STEPS $NAZWA"
+    return 1
+}
+
+kopiuj_env "$SOURCE_ENV" "$DEST_BASE/env/.env.local" ".env.local (FleetStat)"
+kopiuj_env "$HOME/Desktop/fox.nosync/.env.local"       "$DEST_BASE/env/.env.local.fox"       ".env.local (FOX)"
+kopiuj_env "$HOME/Desktop/freetruck.nosync/.env.local" "$DEST_BASE/env/.env.local.freetruck" ".env.local (FreeTruck)"
 
 # === Manifest log (append-only) — zawsze zapisuje status (success/partial) ===
 MANIFEST="$DEST_BASE/manifest.txt"
