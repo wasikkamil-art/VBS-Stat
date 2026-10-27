@@ -7,7 +7,7 @@
 // przez App.jsx (lazy + Suspense) — kierowca pobiera tylko ten chunk + main core,
 // admin nie pobiera w ogóle (oszczędność 2k+ linii kodu w bundle adminskim).
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { addDoc, collection, doc, deleteDoc, updateDoc } from "firebase/firestore";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { signOut } from "firebase/auth";
@@ -229,7 +229,7 @@ function DriverCzasPracyDashboard({ user, vehicle, driverActivities = [], showTo
 }
 
 // Komponent uploadu DDD w panelu kierowcy (mobile)
-function DriverDddUploadCard({ user, vehicle, showToast }) {
+function DriverDddUploadCard({ showToast }) {
   const [uploading, setUploading] = useState(false);
   const [lastResult, setLastResult] = useState(null);
 
@@ -339,7 +339,7 @@ function PlanRow({ emoji, bg, border, color, title, sub }) {
 // ═══════════════════════════════════════════════════════════════════
 //  PANEL KIEROWCY — mobile-first, osobny layout
 // ═══════════════════════════════════════════════════════════════════
-export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne = [], driverEvents = [], driverActivities = [], fuelEntries = [], driverDocs = [], showToast, onUpdateFracht = () => {} }) {
+export default function DriverPanel({ user, vehicle, frachty, pauzy, driverEvents = [], driverActivities = [], fuelEntries = [], driverDocs = [], showToast, onUpdateFracht = () => {} }) {
   const [selectedFracht, setSelectedFracht] = useState(null);
   const [driverTab, setDriverTab] = useState("home"); // "home" | "zlecenia" | "pojazd" | "serwis" | "spalanie" | "czas" | "dokumenty" | "mapa"
   const [fuelView, setFuelView] = useState("list"); // "list" | "form" | "stats"
@@ -350,7 +350,6 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
   const [driverZoom, setDriverZoom] = useState(() => {
     try { return localStorage.getItem("fleetstat_driver_zoom") || "normal"; } catch { return "normal"; }
   }); // "normal" | "large"
-  const zoomScale = driverZoom === "large" ? 1.25 : 1;
 
   const todayStr = new Date().toISOString().slice(0, 10);
   const today = new Date();
@@ -688,10 +687,6 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
     const kody = formatKody(f);
     // Sprawdź driverEvents dla tego frachtu (uwzględnij cofnięcia)
     const myEvents = driverEvents.filter(ev => ev.frachtId === f.id).sort((a,b) => (a.ts||"").localeCompare(b.ts||""));
-    const zalEvent = myEvents.filter(e => e.type === "zaladowano").pop();
-    const zalUndo = myEvents.filter(e => e.type === "cofnij_zaladowano").pop();
-    const rozEvent = myEvents.filter(e => e.type === "rozladowano").pop();
-    const rozUndo = myEvents.filter(e => e.type === "cofnij_rozladowano").pop();
     const towarPhotos = myEvents.filter(e => e.type === "towar_photo");
     const towarDmgPhotos = myEvents.filter(e => e.type === "towar_damage_photo");
     const cmrZalPhotos = myEvents.filter(e => e.type === "cmr_zaladunek_photo");
@@ -1242,23 +1237,12 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
   })();
 
   // Średnie spalanie (z fuelEntries FULL lub fallback na operacyjne)
-  const avgSpalanie = (() => {
-    const fulls = [...fuelEntries].filter(e => e.fullTank && e.mileage > 0).sort((a,b) => a.mileage - b.mileage);
-    if (fulls.length >= 2) {
-      const tL = fulls.slice(1).reduce((s,e) => s + (e.liters||0), 0);
-      const tK = fulls[fulls.length-1].mileage - fulls[0].mileage;
-      if (tK > 0) return ((tL / tK) * 100).toFixed(1);
-    }
-    const w = operacyjne.filter(o => o.spalanie > 0);
-    return w.length > 0 ? (w.reduce((s,o) => s + o.spalanie, 0) / w.length).toFixed(1) : null;
-  })();
 
   const renderFrachtCard = (f) => {
     const kody = formatKody(f);
     const myEvts = driverEvents.filter(ev => ev.frachtId === f.id);
     const isDone = isFrachtRozladowany(f, myEvts) || (f.dataRozladunku && f.dataRozladunku < todayStr);
     const hasZal = hasZaladunekActive(myEvts) || f._driverZaladowano;
-    const hasRoz = isDone;
     return (
       <div key={f.id} onClick={() => setSelectedFracht(f)}
         style={{ background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", overflow: "hidden", cursor: "pointer", marginBottom: 8 }}>
@@ -1380,13 +1364,6 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
             const byMileage = [...fuelEntries].filter(e => e.mileage > 0).sort((a,b) => b.mileage - a.mileage);
             const totalKm = byMileage.length >= 2 ? byMileage[0].mileage - byMileage[byMileage.length-1].mileage : 0;
             // Spalanie z tankowań FULL
-            const fulls = [...fuelEntries].filter(e => e.fullTank && e.mileage > 0).sort((a,b) => a.mileage - b.mileage);
-            const avgFuel = (() => {
-              if (fulls.length < 2) return null;
-              const tL = fulls.slice(1).reduce((s,e) => s + (e.liters||0), 0);
-              const tK = fulls[fulls.length-1].mileage - fulls[0].mileage;
-              return tK > 0 ? ((tL / tK) * 100).toFixed(1) : null;
-            })();
             // Submit fuel entry
             const submitFuel = async () => {
               if (!fuelForm.liters || !fuelForm.mileage) { showToast("Podaj litry i przebieg"); return; }
@@ -1875,7 +1852,7 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, operacyjne 
                     <div style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", marginBottom: 8 }}>Wpisy</div>
                     {monthEntries.map((p,i) => {
                       const info = stInfo(p.status);
-                      const fmtD = (d) => { if (!d) return ""; const [y,m,day] = d.split("-"); return `${day}.${m}`; };
+                      const fmtD = (d) => { if (!d) return ""; const [, m, day] = d.split("-"); return `${day}.${m}`; };
                       const range = p.start === p.end ? fmtD(p.start) : `${fmtD(p.start)} – ${fmtD(p.end)}`;
                       return (
                         <div key={p.id||i} style={{
