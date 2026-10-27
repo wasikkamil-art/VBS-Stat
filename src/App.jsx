@@ -1407,6 +1407,49 @@ const ACTIVITIES_WINDOW_DAYS = 60;
 // dociąga własnym zapytaniem po vehicleId na żądanie (patrz tam). NIC nie kasujemy.
 const ADMIN_ACTIVITIES_WINDOW_DAYS = 45;
 
+// ─── PASEK BOCZNY — komponenty w scope modułu ────────────────────────────────
+//
+// Stoją TUTAJ, nie w ciele App, bo komponent definiowany w renderze jest przy
+// każdym renderze nowym typem — React rozbiera poddrzewo i stawia je od nowa
+// zamiast zaktualizować. `App` re-renderuje się przy każdym `onSnapshot` z
+// kilkunastu kolekcji, więc cały pasek boczny (20 przycisków) przebudowywał się
+// po każdej zmianie w bazie: `transition-all` startował od zera, a ewentualny
+// focus klawiaturowy i pozycja przewinięcia paska przepadały.
+//
+// `canSeeTab`, `tab` i `setTab` siedzą w App, więc wchodzą jednym obiektem
+// `ctx` — jeden props zamiast trzech przy każdym z 20 wywołań.
+
+function IconChevron({ open }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+      strokeLinecap="round" strokeLinejoin="round"
+      style={{ transition: "transform 0.2s", transform: open ? "rotate(90deg)" : "rotate(0deg)" }}>
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  );
+}
+
+function NavBtn({ ctx, id, label, icon, badge, indent }) {
+  const { tab, setTab, canSeeTab } = ctx;
+  if (!canSeeTab(id)) return null;
+  const aktywny = tab === id;
+  return (
+    <button onClick={() => setTab(id)}
+      className="w-full flex items-center gap-2.5 py-2 rounded-lg text-sm text-left transition-all"
+      style={{
+        paddingLeft: indent ? "28px" : "12px", paddingRight: "12px",
+        background:  aktywny ? "#f3f4f6" : "transparent",
+        color: aktywny ? "#111827" : "#4b5563",
+        fontWeight:  aktywny ? 600 : 400,
+        fontSize: indent ? "13px" : "14px",
+      }}>
+      <span className="w-5 flex items-center justify-center flex-shrink-0" style={{ opacity: aktywny ? 0.9 : 0.5 }}>{icon}</span>
+      {label}
+      {badge ? <span className="ml-auto px-1.5 py-0.5 rounded-full text-xs font-bold" style={{ background: "#dc2626", color: "#fff" }}>{badge}</span> : null}
+    </button>
+  );
+}
+
 function App({ user, role, appUsers = [], allowedTabs = null }) {
   const isAdmin      = role === "admin";
   const [showExportModal, setShowExportModal] = useState(false);
@@ -2854,26 +2897,10 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
 
           <nav className="space-y-0.5 flex-1 overflow-y-auto">
             {(() => {
-              const IconChevron = ({open}) => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{transition:"transform 0.2s", transform: open?"rotate(90deg)":"rotate(0deg)"}}><polyline points="9 18 15 12 9 6"/></svg>;
-
-              const NavBtn = ({id, label, icon, badge, indent}) => {
-                if (!canSeeTab(id)) return null;
-                return (
-                  <button key={id} onClick={() => setTab(id)}
-                    className="w-full flex items-center gap-2.5 py-2 rounded-lg text-sm text-left transition-all"
-                    style={{
-                      paddingLeft: indent ? "28px" : "12px", paddingRight: "12px",
-                      background:  tab === id ? "#f3f4f6" : "transparent",
-                      color: tab === id ? "#111827" : "#4b5563",
-                      fontWeight:  tab === id ? 600 : 400,
-                      fontSize: indent ? "13px" : "14px",
-                    }}>
-                    <span className="w-5 flex items-center justify-center flex-shrink-0" style={{opacity: tab === id ? 0.9 : 0.5}}>{icon}</span>
-                    {label}
-                    {badge ? <span className="ml-auto px-1.5 py-0.5 rounded-full text-xs font-bold" style={{background:"#dc2626",color: "#fff"}}>{badge}</span> : null}
-                  </button>
-                );
-              };
+              // Jeden obiekt zamiast trzech propsów przy każdym z 20 wywołań.
+              // NavBtn stoi w scope modułu (patrz nad App) — inaczej był przy każdym
+              // renderze nowym typem i React przebudowywał CAŁY pasek boczny.
+              const navCtx = { tab, setTab, canSeeTab };
 
               const pojazdyChildren = ["vehicles","kierowcy","imi","serwis","docs","gps"];
               const pojazdyOpen = sidebarOpen.pojazdy === undefined
@@ -2881,12 +2908,12 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 : sidebarOpen.pojazdy;
 
               return (<>
-                <NavBtn id="dashboard" label="Przegląd" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></svg>} />
-                <NavBtn id="frachty" label="Frachty" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 17V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a1 1 0 0 0 1 1h1.5"/><path d="M13 8h4l4 4v4h-1.5"/><circle cx="7.5" cy="17.5" r="2.5"/><circle cx="17" cy="17.5" r="2.5"/><path d="M10 17.5h4.5"/></svg>} />
-                <NavBtn id="kalkulator" label="Kalkulator tras" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="10" r="3"/><path d="M12 2a8 8 0 0 0-8 8c0 5.4 8 12 8 12s8-6.6 8-12a8 8 0 0 0-8-8z"/></svg>} />
-                <NavBtn id="fv" label="Faktury sprzedaży" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 8h6"/><path d="M14 12c0-1.5-3-1.5-3 0s3 1.5 3 0"/><path d="M9 17h3"/></svg>} />
-                <NavBtn id="costs" label="Koszty" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="13" rx="2.5"/><path d="M2 10h20"/><path d="M6 15h4"/></svg>} />
-                <NavBtn id="paliwo" label="Paliwo" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/><path d="M4 8h12"/><path d="M18 8v9a2 2 0 0 0 2 2 2 2 0 0 0 2-2V9l-3-4"/></svg>} />
+                <NavBtn ctx={navCtx} id="dashboard" label="Przegląd" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></svg>} />
+                <NavBtn ctx={navCtx} id="frachty" label="Frachty" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 17V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a1 1 0 0 0 1 1h1.5"/><path d="M13 8h4l4 4v4h-1.5"/><circle cx="7.5" cy="17.5" r="2.5"/><circle cx="17" cy="17.5" r="2.5"/><path d="M10 17.5h4.5"/></svg>} />
+                <NavBtn ctx={navCtx} id="kalkulator" label="Kalkulator tras" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="10" r="3"/><path d="M12 2a8 8 0 0 0-8 8c0 5.4 8 12 8 12s8-6.6 8-12a8 8 0 0 0-8-8z"/></svg>} />
+                <NavBtn ctx={navCtx} id="fv" label="Faktury sprzedaży" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 8h6"/><path d="M14 12c0-1.5-3-1.5-3 0s3 1.5 3 0"/><path d="M9 17h3"/></svg>} />
+                <NavBtn ctx={navCtx} id="costs" label="Koszty" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="13" rx="2.5"/><path d="M2 10h20"/><path d="M6 15h4"/></svg>} />
+                <NavBtn ctx={navCtx} id="paliwo" label="Paliwo" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/><path d="M4 8h12"/><path d="M18 8v9a2 2 0 0 0 2 2 2 2 0 0 0 2-2V9l-3-4"/></svg>} />
 
                 {/* ── POJAZDY (grupa rozwijana) ── */}
                 <button onClick={() => setSidebarOpen(p => ({...p, pojazdy: !pojazdyOpen}))}
@@ -2904,23 +2931,23 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 </button>
                 {pojazdyOpen && (
                   <div className="space-y-0.5">
-                    <NavBtn indent id="vehicles" label="Dane pojazdów" icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3v4"/><path d="M8 3v4"/><path d="M2 11h20"/></svg>} />
-                    <NavBtn indent id="kierowcy" label="Panel kierowców" icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>} />
-                    <NavBtn indent id="imi" label="IMI / SIPSI" icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>} />
-                    <NavBtn indent id="serwis" label="Serwis" icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>} />
-                    <NavBtn indent id="docs" label="Dokumenty" icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>} />
-                    <NavBtn indent id="gps" label="GPS / Monitoring" icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3"/><path d="M12 19v3"/><path d="M2 12h3"/><path d="M19 12h3"/></svg>} />
+                    <NavBtn ctx={navCtx} indent id="vehicles" label="Dane pojazdów" icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3v4"/><path d="M8 3v4"/><path d="M2 11h20"/></svg>} />
+                    <NavBtn ctx={navCtx} indent id="kierowcy" label="Panel kierowców" icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>} />
+                    <NavBtn ctx={navCtx} indent id="imi" label="IMI / SIPSI" icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>} />
+                    <NavBtn ctx={navCtx} indent id="serwis" label="Serwis" icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>} />
+                    <NavBtn ctx={navCtx} indent id="docs" label="Dokumenty" icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>} />
+                    <NavBtn ctx={navCtx} indent id="gps" label="GPS / Monitoring" icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3"/><path d="M12 19v3"/><path d="M2 12h3"/><path d="M19 12h3"/></svg>} />
                   </div>
                 )}
 
-                <NavBtn id="rent" label="Rentowność" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>} />
-                <NavBtn id="analizy" label="Analizy" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>} />
-                <NavBtn id="sprawy" label="Sprawy" badge={sprawyList.filter(s => !['zamknieta','wygrana','przegrana'].includes(s.status) && (s.przypisani||[]).includes(user?.email)).length || null} icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v6"/><line x1="7" y1="13" x2="12" y2="13"/><line x1="7" y1="17" x2="10" y2="17"/></svg>} />
-                <NavBtn id="users" label="Użytkownicy" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>} />
-                <NavBtn id="email" label="Email statusy" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>} />
-                <NavBtn id="logi" label="Logi aktywności" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>} />
-                <NavBtn id="logowania" label="Historia logowań" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>} />
-                <NavBtn id="chat" label="Czat" badge={chatUnreadCount || null} icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>} />
+                <NavBtn ctx={navCtx} id="rent" label="Rentowność" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>} />
+                <NavBtn ctx={navCtx} id="analizy" label="Analizy" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>} />
+                <NavBtn ctx={navCtx} id="sprawy" label="Sprawy" badge={sprawyList.filter(s => !['zamknieta','wygrana','przegrana'].includes(s.status) && (s.przypisani||[]).includes(user?.email)).length || null} icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v6"/><line x1="7" y1="13" x2="12" y2="13"/><line x1="7" y1="17" x2="10" y2="17"/></svg>} />
+                <NavBtn ctx={navCtx} id="users" label="Użytkownicy" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>} />
+                <NavBtn ctx={navCtx} id="email" label="Email statusy" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>} />
+                <NavBtn ctx={navCtx} id="logi" label="Logi aktywności" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>} />
+                <NavBtn ctx={navCtx} id="logowania" label="Historia logowań" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>} />
+                <NavBtn ctx={navCtx} id="chat" label="Czat" badge={chatUnreadCount || null} icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>} />
               </>);
             })()}
           </nav>
@@ -9880,6 +9907,70 @@ function LoginHistoryTab() {
 //  Karta kierowcy: max co 28 dni · Pamięć pojazdu (VU): max co 90 dni
 //  (UE 581/2010). Liczy z plików dddFiles obecnych w FleetStat.
 // ═══════════════════════════════════════════════════════════════════
+// ─── TERMINY POBRAŃ DDD — tabela w scope modułu ──────────────────────────────
+//
+// Wyniesione z ciała TerminyPobranTab: komponent definiowany w renderze jest przy
+// każdym renderze nowym typem, więc obie tabele przebudowywały się od zera przy
+// każdym `onSnapshot` z kolekcji `dddFiles`. Oba helpery okazały się czyste
+// (zależą wyłącznie od argumentu), więc poszły razem — bez propsów.
+//
+// Nazwy rozróżniające, bo `fmtD` istnieje w App.jsx jeszcze trzy razy, w innych
+// zakresach i z innym formatem daty.
+
+const fmtTerminData = (ms) => ms ? new Date(ms).toLocaleDateString("pl-PL") : "—";
+
+const terminStatus = (r) => {
+  if (!r.has) return { label: "Nigdy nie pobrano", cls: "bg-red-100 text-red-700" };
+  if (r.daysLeft == null) return { label: "—", cls: "bg-gray-100 text-gray-500" };
+  if (r.daysLeft < 0) return { label: `Po terminie (${-r.daysLeft} dni)`, cls: "bg-red-100 text-red-700" };
+  if (r.daysLeft <= 7) return { label: `Za ${r.daysLeft} dni`, cls: "bg-amber-100 text-amber-700" };
+  return { label: `Za ${r.daysLeft} dni`, cls: "bg-green-100 text-green-700" };
+};
+
+function TerminyTable({ title, subtitle, rows, colName }) {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
+      <div className="px-4 py-3 border-b border-gray-100">
+        <h3 className="font-semibold text-gray-800">{title}</h3>
+        <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500 bg-gray-50">
+              <th className="px-4 py-2.5 font-medium">{colName}</th>
+              <th className="px-4 py-2.5 font-medium">Dane do</th>
+              <th className="px-4 py-2.5 font-medium">Termin</th>
+              <th className="px-4 py-2.5 font-medium">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && (
+              <tr><td colSpan={4} className="px-4 py-6 text-center text-gray-500">Brak danych.</td></tr>
+            )}
+            {rows.map((r, i) => {
+              const s = terminStatus(r);
+              return (
+                <tr key={i} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-gray-800">{r.name}</div>
+                    {r.sub && <div className="text-xs text-gray-500 font-mono">{r.sub}</div>}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-gray-600">{r.through ? new Date(r.through).toLocaleDateString("pl-PL") : "—"}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-gray-600">{fmtTerminData(r.deadline)}</td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-medium ${s.cls}`}>{s.label}</span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function TerminyPobranTab({ vehicles }) {
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -9902,7 +9993,6 @@ function TerminyPobranTab({ vehicles }) {
     return null;
   };
   const normPlate = (p) => (p || "").toUpperCase().replace(/\s+/g, "");
-  const fmtD = (ms) => ms ? new Date(ms).toLocaleDateString("pl-PL") : "—";
 
   // KARTY (28 dni) — grupuj po numerze karty, weź najświeższy plik
   const byCard = {};
@@ -9932,56 +10022,6 @@ function TerminyPobranTab({ vehicles }) {
     return { name: v.plate, sub: v.brand || "", through: f.periodEnd, deadline, daysLeft: deadline ? Math.floor((deadline - now) / DAY) : null, has: true, limit: 90 };
   }).sort((a, b) => (a.has === b.has) ? ((a.daysLeft ?? 1e9) - (b.daysLeft ?? 1e9)) : (a.has ? 1 : -1));
 
-  const statusOf = (r) => {
-    if (!r.has) return { label: "Nigdy nie pobrano", cls: "bg-red-100 text-red-700" };
-    if (r.daysLeft == null) return { label: "—", cls: "bg-gray-100 text-gray-500" };
-    if (r.daysLeft < 0) return { label: `Po terminie (${-r.daysLeft} dni)`, cls: "bg-red-100 text-red-700" };
-    if (r.daysLeft <= 7) return { label: `Za ${r.daysLeft} dni`, cls: "bg-amber-100 text-amber-700" };
-    return { label: `Za ${r.daysLeft} dni`, cls: "bg-green-100 text-green-700" };
-  };
-
-  const Table = ({ title, subtitle, rows, colName }) => (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
-      <div className="px-4 py-3 border-b border-gray-100">
-        <h3 className="font-semibold text-gray-800">{title}</h3>
-        <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500 bg-gray-50">
-              <th className="px-4 py-2.5 font-medium">{colName}</th>
-              <th className="px-4 py-2.5 font-medium">Dane do</th>
-              <th className="px-4 py-2.5 font-medium">Termin</th>
-              <th className="px-4 py-2.5 font-medium">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 && (
-              <tr><td colSpan={4} className="px-4 py-6 text-center text-gray-500">Brak danych.</td></tr>
-            )}
-            {rows.map((r, i) => {
-              const s = statusOf(r);
-              return (
-                <tr key={i} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-gray-800">{r.name}</div>
-                    {r.sub && <div className="text-xs text-gray-500 font-mono">{r.sub}</div>}
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap text-gray-600">{r.through ? new Date(r.through).toLocaleDateString("pl-PL") : "—"}</td>
-                  <td className="px-4 py-3 whitespace-nowrap text-gray-600">{fmtD(r.deadline)}</td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-medium ${s.cls}`}>{s.label}</span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-
   return (
     <div className="p-4 md:p-6">
       <div className="mb-5">
@@ -9994,8 +10034,8 @@ function TerminyPobranTab({ vehicles }) {
         <div className="text-gray-500 py-8 text-center">Ładowanie…</div>
       ) : (
         <>
-          <Table title="🧑‍✈️ Karty kierowców" subtitle="Pobranie co max 28 dni. Termin = ostatnie dane + 28 dni." rows={cardRows} colName="Kierowca" />
-          <Table title="🚚 Pamięć pojazdu (VU)" subtitle={'Pobranie co max 90 dni. „Nigdy nie pobrano" = brak pliku VU w FleetStat dla tego pojazdu.'} rows={vuRows} colName="Pojazd" />
+          <TerminyTable title="🧑‍✈️ Karty kierowców" subtitle="Pobranie co max 28 dni. Termin = ostatnie dane + 28 dni." rows={cardRows} colName="Kierowca" />
+          <TerminyTable title="🚚 Pamięć pojazdu (VU)" subtitle={'Pobranie co max 90 dni. „Nigdy nie pobrano" = brak pliku VU w FleetStat dla tego pojazdu.'} rows={vuRows} colName="Pojazd" />
         </>
       )}
     </div>
