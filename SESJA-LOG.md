@@ -14,6 +14,104 @@ Append-only dziennik. Każda sesja = nowa sekcja z datą i opisem.
 
 ---
 
+## 2026-10-27 cd.2 — Sprzątanie lintu: static-components i martwy kod (PR #6, #7)
+
+**Kontekst**: po domknięciu kontrastu wzięliśmy się za dług lintu. Punkt wyjścia: 161 warningów
+w `src/`, 0 errorów.
+
+### PR #6 — ostatnie 23 `static-components` w `App.jsx`
+
+Okazały się **trzema komponentami**, nie dwudziestoma trzema: `NavBtn` miał 20 wywołań.
+
+- **`NavBtn` + `IconChevron` → scope modułu.** `App` re-renderuje się przy **każdym `onSnapshot`**
+  z kilkunastu kolekcji, więc **cały pasek boczny — 20 przycisków — rozbierał się i stawiał od
+  zera po każdej zmianie w bazie**. Przy flocie dosyłającej pozycje GPS dzieje się to bez przerwy.
+  `canSeeTab`, `tab` i `setTab` wchodzą jednym obiektem `ctx`.
+- **`Table` → `TerminyTable`** wraz z `terminStatus` i `fmtTerminData` (oba okazały się czyste).
+  Nazwy rozróżniające, bo `fmtD` istnieje w `App.jsx` jeszcze trzy razy, w innych zakresach
+  i z innym formatem daty.
+
+**Dowód wprost, nie sam lint**: uchwyt do węzła DOM przycisku „Frachty" wzięty PRZED przełączeniem
+zakładki jest PO przełączeniu **tym samym węzłem** (`tenSamWezelDOM: true`). Przed zmianą React
+budował nowy węzeł.
+
+Jedna rzecz zmyliła na chwilę: `getComputedStyle` na chevronie zwracał macierz jednostkową mimo
+`rotate(90deg)` w atrybucie `style`. Zrzut pokazał strzałkę w dół — to quirk odczytu transformu
+z korzenia SVG, nie regresja.
+
+### PR #7 — `no-unused-vars` 88 → 0, netto −246 linii
+
+Trzy klasy, każda traktowana inaczej.
+
+**Martwe importy (30).** `czasPracy`: **12 z 15** importów w `App.jsx` — logika tachografu dawno
+wyprowadzona. recharts: `BarChart/Bar/PieChart/Pie/Cell`, ale **zależność zostaje**, bo jeden
+`LineChart` żyje.
+
+**Martwe funkcje (7).** `dbGet`, `Row`, `Field`, `KpiCard`, `rentKey`, `mapMatchRoute`.
+
+**Nieużywane argumenty (11).** Zdjęte z sygnatur, **nie prefiksowane `_`** — sygnatura ma uczciwie
+mówić, co komponent konsumuje. `TrendyTab` brał `records`/`frachtyList`/`costs` i nie używał
+żadnego; `GpsDddSection` brał `device`, choć panel DDD jest globalny; `saveAllowedTabs` brał
+`userRole`, mimo że domyślne roli liczy `toggleTab`.
+
+**Wartości policzone i nieużyte (40).**
+
+### Trzy decyzje, które nie były mechaniczne
+
+1. **`mapMatchRoute` usunięte mimo 56 linii strojonej logiki OSRM.** Historia rozstrzygnęła:
+   commit `10dcefa` („breadcrumb jako kropki GPS zamiast polyline") **świadomie ją odpiął**.
+   Pozostałość po porzuconym podejściu, nie niedokończona funkcja.
+2. **`dbBulkReplaceArrayField` ZOSTAJE**, wyciszone `eslint-disable` z uzasadnieniem w kodzie.
+   Narzędzie importów/migracji z hartowania po utracie danych (`0b9fb1c`); jego wartością jest
+   shrink-protection. Kasowanie = wyrzucenie zabezpieczenia po realnym incydencie.
+3. **Pierwsze cięcie było błędne i zostało cofnięte.** Własny bilanser nawiasów wyłożył się na
+   literale szablonowym (`${...}` zostawiało niedomknięty nawias) i **zjadł 21 linii prawdziwego
+   JSX** w `DriverPanel`. Wykryte diffem, oba pliki przywrócone, powtórzone `@babel/parser`em
+   po zakresach z AST. **Wniosek: do wycinania kodu używaj parsera, nie liczenia nawiasów.**
+
+### Znaleziska warte zapamiętania
+
+- **Cztery stany zapisywane, ale nigdy nieczytane** (`showMembers`, `configLoaded`,
+  `fetchingHist`, `started`) — każde `setX` przerysowywało komponent **bez żadnego efektu**.
+- **`opened` w `ImiPreviewModal`** — setter nie był wołany ANI RAZU, więc gałąź z podpowiedzią
+  Ctrl+P nie miała prawa się pokazać.
+- **`zoomScale` w `DriverPanel` miał `1.25`, a działający zoom w CSS ma `1.2`** — martwa
+  duplikacja z rozjechaną wartością.
+- Cały aparat skalowania osi w `TrendyTab` to pozostałość po ręcznym wykresie SVG zastąpionym
+  przez recharts.
+
+### Weryfikacja
+
+14 ekranów przeklikanych po każdej zmianie. **Wykres Trendy sprawdzony osobno**, bo usunięto
+z niego najwięcej — pierwszy zrzut wyglądał na pusty, ale DOM miał krzywą
+(`d="M77.667,143.92C..."`): to była animacja recharts w trakcie, nie regresja.
+
+Błędy `NavBtn is not defined` w konsoli pochodziły ze **starego stanu HMR** (znacznik
+`1793099847301`) — gdyby były aktualne, cały `App` by się nie wyrenderował.
+
+### Wynik
+
+| | początek dnia | koniec |
+|---|---:|---:|
+| lint `src/` | 161 | **49** |
+| `react-hooks` | 72 | **49** |
+| `static-components` | 23 | **0** |
+| `no-unused-vars` | 88 | **0** |
+
+Zero errorów przez cały czas, build zielony.
+
+### Otwarte
+
+- **`exhaustive-deps` 23 — NIE zamieniać hurtem.** W monolicie to w dużej części świadome
+  pominięcia; dopisanie zależności potrafi wywołać pętlę odświeżeń. Każdy przypadek osobno.
+- Reszta lintu: `set-state-in-effect` 15, `purity` 5, `immutability` 5, `no-irregular-whitespace` 1.
+- **Cudzy błąd, nietknięty**: `AuditLogTab` renderuje listę `<option>` bez propsa `key`.
+  Ostrzeżenie istnieje na `main`, nie dotykałem tego pliku.
+- **Panel kierowcy nadal niezweryfikowany wizualnie** — czeka na konto testowe roli `kierowca`.
+  Przepis (z omijaniem pułapki sieroty w `users`) ustalony; user zakłada konto.
+
+---
+
 ## 2026-10-27 cd. — Dług react-hooks: komponenty wyniesione poza render (PR #3 i #4 zmergowane)
 
 **Kontekst**: przy pushu usera pre-push pokazał **182 warningi**, wcześniej 136. To nie była
