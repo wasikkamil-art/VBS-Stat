@@ -1236,8 +1236,6 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, driverEvent
     return checks[0] || null;
   })();
 
-  // Średnie spalanie (z fuelEntries FULL lub fallback na operacyjne)
-
   const renderFrachtCard = (f) => {
     const kody = formatKody(f);
     const myEvts = driverEvents.filter(ev => ev.frachtId === f.id);
@@ -1363,7 +1361,6 @@ export default function DriverPanel({ user, vehicle, frachty, pauzy, driverEvent
             const totalL = fuelEntries.reduce((s,e) => s + (e.liters||0), 0);
             const byMileage = [...fuelEntries].filter(e => e.mileage > 0).sort((a,b) => b.mileage - a.mileage);
             const totalKm = byMileage.length >= 2 ? byMileage[0].mileage - byMileage[byMileage.length-1].mileage : 0;
-            // Spalanie z tankowań FULL
             // Submit fuel entry
             const submitFuel = async () => {
               if (!fuelForm.liters || !fuelForm.mileage) { showToast("Podaj litry i przebieg"); return; }
