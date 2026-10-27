@@ -14,6 +14,77 @@ Append-only dziennik. Każda sesja = nowa sekcja z datą i opisem.
 
 ---
 
+## 2026-10-27 cd.3 — Domknięcie: panel kierowcy zweryfikowany, raport dyspozytorów to fałszywy alarm
+
+### `rest.color` w panelu kierowcy (PR #5, `284c3f7` → merge `bc42ca4`… właśc. merge PR #5)
+
+`ACTIVITY_TYPES.rest.color` zostało na green-500, gdy trzy pozostałe stany przyciemniono sesję
+wcześniej. Kolor ma w panelu kierowcy **podwójne użycie** i oblewał w obu: **2,18:1** jako liczba
+12 px (`DriverPanel:131`) i **2,28:1** pod białym napisem przycisku „Odpoczynek" (`:216`).
+Kontrast jest symetryczny → jedna ciemna wartość naprawia oba. `#22c55e` → `#15803d` (4,79 i 5,02).
+
+Sprawdzone, że `rest.color` poza tym to dekoracja (kropki 6/12 px, obramowanie) i **żaden wykres
+go nie używa** — oś czasu DDD ma własne `DDD_COLORS`, paski postępu własne `BAR_FILLS`.
+Widok admina w ogóle go nie renderuje.
+
+⚠️ **Próba obejrzenia panelu przez wymuszenie gałęzi `isKierowca` została ZABLOKOWANA** jako
+obchodzenie kontroli roli — i słusznie. Łatka cofnięta, nie szukałem obejścia.
+
+### ✅ Panel kierowcy ZWERYFIKOWANY — przez usera, na telefonie
+
+User zalogował się na konto kierowcy **na własnym telefonie** i potwierdził, że panel wygląda
+dobrze i działa. To domyka dług ciągnący się **trzy sesje** (`DDD_TEXT`, `breakPalette`,
+`rest.color`, plus dzisiejsze usuwanie martwego kodu z `DriverPanel`).
+
+🔑 **Lekcja**: gdy komponent jest za rolą, najtańszą i najlepszą weryfikacją jest poproszenie
+usera, żeby zalogował się na telefonie. Odkładałem to trzy sesje, kombinując z atrapą i obejściem
+kontroli roli. Pytać o to OD RAZU.
+
+### ❌ Raport dyspozytorów — mój fałszywy alarm
+
+Zgłosiłem, że „brakuje raportu za wrzesień", bo w roocie są PDF-y za kw-maj / lipiec / sierpień,
+a wrzesień nie występuje. **Błąd w rozumowaniu**: zestawienie per spedytor zostało wbudowane
+w aplikację (`Analizy → 📊 Dyspozytorzy`, `src/components/DyspozytorzyAnaliza.jsx` +
+`src/utils/dyspozytorzy.js`) właśnie po to, żeby NIE generować PDF-ów co miesiąc.
+
+Moduł robi **więcej** niż PDF: ujęcie miesięczne z porównaniem, ujęcie narastająco (YTD) i —
+czego PDF nie umiał — poprawnie traktuje **miesiąc w toku**, porównując do tego samego dnia
+poprzedniego miesiąca (zestawienie 17 dni z pełnym miesiącem pokazywało fikcyjny spadek 52%).
+
+PDF-y w roocie to **artefakty sprzed modułu**. Pamięć poprawiona, żeby alarm nie wrócił.
+
+### Sprzątanie po sobie (`dd399bb`)
+
+Dwa osierocone komentarze w `DriverPanel` opisujące obliczenia usunięte w `25b0f63`
+(`avgSpalanie`, `avgFuel`). Przy okazji sprawdzone, że **zakładka Tankowania liczy wszystko sama**
+(`totalL`, `byMileage`, `totalKm`) — usunięcie `avgSpalanie`/`operacyjne` niczego nie zepsuło.
+
+### Stan na koniec dnia
+
+| | rano | wieczorem |
+|---|---:|---:|
+| teksty poniżej WCAG AA | 180 | **4** (chipy marek kart, świadomie) |
+| `npm run lint` (całość) | 182 | **57** |
+| `src/` | 161 | **49** |
+| errory | 0 | **0** |
+
+Siedem zmian na produkcji przez PR-y #3–#7, stary PR #2 z maja zamknięty jako nieaktualny
+(jego treść była w `main` od `6d1c500`). Wszystkie repa czyste, zero niewypchniętych commitów.
+
+### Otwarte
+
+- **Bundle 1,66 MB** — jedyna pozycja z realnym wpływem na kierowców (ładują apkę w trasie
+  na telefonie). Build przypomina o tym przy każdym pushu.
+- **Wydruk raportów DDD** — nadal niesprawdzony.
+- **49 warningów w `src/`**: `exhaustive-deps` 23 (**nie hurtem**), `set-state-in-effect` 15,
+  `purity` 5, `immutability` 5, `no-irregular-whitespace` 1.
+- **`AuditLogTab` renderuje `<option>` bez propsa `key`** — cudzy błąd, istnieje na `main`,
+  nie dotykałem tego pliku.
+- Z audytu dostępności nietknięte: brak nagłówków `h1`–`h6`, 4 pola bez etykiety,
+  brak `focus-visible`, 16/50 celów dotykowych <44 px, zero zmiennych CSS.
+
+---
+
 ## 2026-10-27 cd.2 — Sprzątanie lintu: static-components i martwy kod (PR #6, #7)
 
 **Kontekst**: po domknięciu kontrastu wzięliśmy się za dług lintu. Punkt wyjścia: 161 warningów
