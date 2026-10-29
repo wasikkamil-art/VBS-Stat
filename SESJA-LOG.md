@@ -14,6 +14,122 @@ Append-only dziennik. Każda sesja = nowa sekcja z datą i opisem.
 
 ---
 
+## 2026-10-28/29 — FOX: rejestr zamówień spedycyjnych (merge `6f707b0`, LIVE na fox.fleetstat.pl)
+
+Nowy temat, nie FleetStat: **panel rejestracji zamówień dla spedytorów w FOX-ie**. Zastępuje
+arkusze Excel prowadzone osobno przez każdego spedytora. Wpinany w istniejący FOX (role,
+baza firm, moduł weryfikacji kontrahenta), nie budowany obok.
+
+### Źródłem prawdy był arkusz Radka, nie wyobraźnia
+
+User podesłał `Radek.xlsx` — rejestr po jednym arkuszu na rok, 2018–2026. Zdekodowane
+kolumny: klient · kwota od klienta · `Zysk = B−E` · `Radek = Zysk×0,4` · kwota dla
+przewoźnika · nr zlecenia (`4356/RS/01/2026`) · zał./rozł. · POD · przewoźnik · nr kierowcy
+· faktura · wysłana · uwagi. **Prowizja to 0,4 w 3198 z 3198 wierszy** 2024–2026.
+
+Skala 2026: **785 zleceń, obrót 1 154 855, zysk 245 895 (marża 21,3%), prowizja Radka
+98 294, 100 zleceń bez numeru faktury.**
+
+🚩 Trzy rzeczy, których arkusz nie pokazuje, a panel pokazał od razu: **100 niezafakturowanych**
+(brak takiego widoku w Excelu), **11 grup klientów pisanych na kilka sposobów**
+(`MINT ITALAI`/`MINT ITALI`/`MINT ITALIA`/`MINT ITALIA SRL`, `JAN TROMP` ×4) przez co nie da
+się uczciwie policzyć klienta, oraz **3 wiersze z kilkoma numerami w jednej komórce**.
+
+### Decyzje usera (każda zmieniała kształt modułu)
+
+- **Tylko FOX**, nowa kolekcja `orders`; FleetStat nietknięty
+- Kwoty **EUR i PLN**; PLN przeliczane kursem NBP z **daty załadunku**, kurs zapisany na stałe
+- **Nr zlecenia wpisuje spedytor** (panel pilnuje tylko unikalności) — wcześniejsza decyzja
+  o autonumeracji została przez usera cofnięta
+- Prowizja **40% domyślnie, procent zmienia wyłącznie admin**
+- **Skonto w procentach + termin dni** („tym się to charakteryzuje"), nie kwotą; przy kilku
+  wpisach obowiązuje najnowszy, procentów się nie sumuje
+- **Anulacja i storno**: kwoty zostają, wiersz przekreślony i przygaszony, ale poza
+  statystykami i **bez prowizji**
+- Każde zdarzenie może nieść **korektę zysku**, która przelicza też prowizję
+- **Marża znika z listy** (idzie do dashboardu adminów), zostaje prowizja
+- Import: **tylko 2026**, wcześniejsze lata zostają w Excelu
+- Wiola i Przemek: **wszystko jak admin, bez Użytkowników** — rola **odłożona na koniec**
+
+### Co powstało
+
+`orderCalc.js` (reguły, bez Reacta) · `useOrders` + `useOrderEvents` · widok `Zamowienia`
+(układ wariant A z makiety: pełna szerokość, wyszukiwarka, sortowanie, filtry, szczegóły po
+kliknięciu) · `OrderModal` · podkolekcja `orders/{id}/zdarzenia` (komentarz, skonto,
+reklamacja, storno, anulacja, dokument, faktura) · przypomnienia z terminem spięte z zakładką
+Przypomnienia i dzwonkiem w menu · opcja **@** wysyłająca mail · szybkie wstawienie daty
+wysłanej faktury prosto z listy · odczyt zlecenia z PDF-a.
+
+Zdarzenia celowo w **podkolekcji, nie tablicy** — dopisują do niej spedytor, biuro i docelowo
+automat z poczty, a tablica przy tylu rękach gubi zapisy (incydent `fleet/data` z 05.2026).
+
+### 🚩 Pułapki złapane po drodze
+
+1. **`bg-fox` nie istnieje w palecie** — Tailwind nie generował klasy, więc główny przycisk
+   „Zweryfikuj w sieci" w module weryfikacji to był **biały napis bez tła**, niewidoczny na
+   białej karcie. Zmierzone na żywej stronie: `rgba(0,0,0,0)`. To samo `bg-fox-400`.
+2. **Firestore: `<=` na stringu wciąga `null`** (null sortuje się przed tekstem), więc funkcja
+   mailowa czytałaby co rano zdarzenia **wszystkich** zleceń. Dołożona dolna granica zakresu.
+3. **Wpis dopisywany z listy nie zna zdarzeń zlecenia** (te wczytują się leniwie) — przeliczenie
+   wyzerowałoby liczniki otwartych reklamacji i przypomnień. `dodajZdarzenie(…, null, …)`
+   dociąga teraz pełną historię przez `getDocs`.
+4. **Filtr z Przypomnień przyklejał się na stałe** przez stan w historii przeglądarki: powrót
+   do Zamówień z menu pokazywał 1 z 14 zleceń bez widocznego powodu.
+5. **Oś czasu dziedziczyła szerokość tabeli** (1708 px) — na telefonie trzeba było przewijać
+   w bok, żeby doczytać komentarz. Treść rozwiniętego wiersza przypięta do widoku (`sticky`).
+
+### 🚨 Wyciek klucza Resend — druga sprawa tej klasy
+
+Kazałem userowi odczytać istniejący sekret komendą `firebase functions:secrets:access`, która
+**drukuje go na ekran**; user wkleił do czatu całą zawartość terminala razem z kluczem.
+Rotacja: nowy klucz w panelu Resend → `secrets:set` w obu projektach → redeploy Faktur
+(funkcje trzymają się konkretnej **wersji** sekretu) → test „Wyślij status" → dopiero wtedy
+kasowanie starego. **Zasada zapisana w pamięci: nigdy nie każ userowi odpalać komendy, która
+drukuje sekret.** Patrz `incident_pat_leak_2026_06_16.md`.
+
+### Odczyt PDF-a: prompt uczony na prawdziwym dokumencie
+
+Rozpakowałem lokalnie `ORDER.pdf` usera (warstwa tekstowa przez mapę ToUnicode) i zobaczyłem
+trzy pułapki, których prompt nie przewidywał: **„Brak Danych"** w polu kierowcy (parser
+wpisałby ten napis jako telefon), **pole „ID: 23593" obok „Nr: 5113/RS/10/2026"**, oraz
+**„Data / Date" w nagłówku** = data wystawienia, łatwa do pomylenia z załadunkiem.
+Potwierdzone z userem: kwota na tym dokumencie (2350 EUR) to stawka **dla przewoźnika** —
+ceny od klienta na nim nie ma i nie będzie. Tras, wag i typu pojazdu nie wyciągamy.
+
+### Zweryfikowane
+
+✅ **93 asercje** reguł: `diagnose_zamowienia.mjs` (72) + `diagnose_przypomnienia_mail.mjs`
+(21, na atrapie Firestore). ✅ Klikanie E2E w trybie DEMO: skonto 3% z 1150 = 34,50 € podnosi
+zysk 100 → 134,50 €, anulacja zeruje prowizję przy zachowanej kwocie, 6500 zł z niedzieli
+przeliczone kursem **4,3917 z piątku 23.10** (realne NBP, sobota zwraca 404), Marek widzi 0
+zleceń Anny, pole procentu read-only dla spedytora, dwa wpisy „Faktura wysłana" po poprawce
+daty, chip reklamacji przeżył obie operacje. ✅ Kontrast: nagłówek tabeli 3,47 → **8,23:1**,
+anulowane wiersze 2,32 → **4,76:1**. ✅ Produkcyjny bundle `index-wpL9BVlA.js` zawiera
+wszystkie nowe napisy i prawdziwy `projectId`.
+
+### ❌ Czego NIE zweryfikowałem
+
+- **Reguł Firestore na żywo** — spedytor widzący tylko swoje, blokada zmiany procentu
+  prowizji, blokada kasowania wpisów. DEMO reguł nie używa. **To pierwsza rzecz do
+  potwierdzenia po wejściu na produkcję.**
+- **Odczytu PDF-a na prawdziwym zleceniu** — funkcja wdrożona, dokumentu nie widziała.
+- **Panelu u spedytora** — Radek ma się zalogować na telefonie. Kontroli roli nie obchodzę.
+- **Maili z przypomnień** — ani jeden prawdziwy nie poszedł; pierwszy przebieg 30.10 o 7:00.
+
+### Otwarte
+
+- **Storage w FOX niewłączony** (projekt nie ma bucketa) → dopięcie oryginału PDF-a do
+  historii padnie z czytelnym komunikatem, dopóki user nie włączy go w konsoli
+- **Rola funkcyjna Wioli i Przemka** — świadomie na koniec kolejki
+- **Import 785 zleceń z 2026** — niezrobiony; zostają do rozstrzygnięcia grupy nazw klientów
+  i wiersze z dwoma numerami
+- **Dane DEMO używają numerów z prawdziwego rejestru** (`4780/RS/06/2026` należy w arkuszu do
+  JAN TROMP, nie do TECNOBODY) — user nie zdecydował, czy zmieniać na niemożliwe numery
+- **`docs/DOKUMENTACJA-TECHNICZNA.md`** w repo FOX nieśledzony od początku sesji; opisuje
+  FOX-a sprzed panelu Zamówień
+
+---
+
 ## 2026-10-27 cd.3 — Domknięcie: panel kierowcy zweryfikowany, raport dyspozytorów to fałszywy alarm
 
 ### `rest.color` w panelu kierowcy (PR #5, `284c3f7` → merge `bc42ca4`… właśc. merge PR #5)
