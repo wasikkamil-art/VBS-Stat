@@ -14,6 +14,108 @@ Append-only dziennik. Każda sesja = nowa sekcja z datą i opisem.
 
 ---
 
+## 2026-10-29/30 — FOX: rejestr nazwany „Zlecenia", 785 zleceń z 2026 w bazie, dashboard rozliczeniowy
+
+Ciąg dalszy wczorajszego panelu. Dzień zaczął się od pierwszego realnego użycia
+przez usera i od tego momentu wszystko, co poszło nie tak, wychodziło **na produkcji,
+nie w DEMO** — co samo w sobie jest wnioskiem dnia.
+
+### 🚩 Tryb DEMO nie dowodzi niczego o produkcji
+
+Trzy błędy tej doby miały wspólny mianownik: **w DEMO ta ścieżka nie istnieje**.
+
+1. **Parser PDF padał z 400** — `output_config.format.schema: Invalid schema: Enum value
+   'EUR' does not match declared type '['string','null']'`. Walidator Anthropica nie łączy
+   `enum` z typem dopuszczającym `null`. W DEMO schemat w ogóle nie jest używany
+   (podstawiamy atrapę), więc pierwszy prawdziwy strzał do API poszedł dopiero u usera.
+   `enum` usunięty, dozwolone wartości pilnuje opis + normalizacja (`eur`/`€`/`zł` → EUR/PLN,
+   nieznana waluta = brak danych).
+2. **Strona główna uciekała do Firm** — przekierowanie pyta o rolę, a ta dociąga się
+   z Firestore PO pierwszym renderze. W DEMO rola jest znana od razu (`loading` startuje
+   jako `false`), więc błąd nie miał prawa się pokazać. Trasy nie renderują się, dopóki
+   rola nie jest znana.
+3. **Reguły Firestore i Storage** — DEMO ich nie używa w ogóle; nadal **nie są
+   zweryfikowane na żywo** (patrz „czego NIE zweryfikowałem").
+
+### Zmiany na produkcji
+
+- **`56b423f` + `37b432c`** — rejestr przemianowany na **„Zlecenia"** (tak mówi arkusz
+  i spedytorzy); ścieżka `/zamowienia` → `/zlecenia` z przekierowaniem starego adresu,
+  bo poszły już maile z linkiem. Plus poprawka przekierowania z punktu 2.
+- **`ae87fea`** — dokumenty dopinane ręcznie do historii (CMR, wydruk temperatury).
+  Wcześniej plik dało się dopiąć **wyłącznie** przez wczytanie zlecenia z PDF-a przy
+  zakładaniu; rodzaj „Dokument" zapisywał sam opis.
+- **`f6d2f00`** — 🚩 **diagnoza z produkcyjnej bazy**: w zleceniu `5113/RS/10/2026`
+  `ORDER.pdf` wisiał przy wpisie typu `komentarz`, nie `dokument`. Przyczyna w moim UI:
+  wybór plików pokazywałem tylko przy rodzaju „Dokument", a wybrane pliki zostawały
+  w stanie formularza po zmianie rodzaju — znikały z oczu, ale szły do zapisu.
+  Teraz „📎 Dołącz plik" jest przy **każdym** rodzaju, pliki nie znikają, a wpis niosący
+  załączniki ma plakietkę `📎 N`.
+- **`6003af0`** — historia w kolejności **chronologicznej, jak czat** (najstarsze u góry,
+  nowy wpis tuż nad polem).
+- **`83ca59e`** — Zlecenia pierwsze w menu i jako strona startowa.
+- **`58903ab` + `4f77c22`** — **dashboard rozliczeniowy** dla admina: kafelki globalne
+  (suma zleceń, zysk, prowizje, **zostaje firmie**, bez faktury, na minusie) + kafelek na
+  spedytora, klik wchodzi w jego zlecenia. Okres leci razem z kliknięciem — bez tego
+  kafelek mówił „12 zleceń", a lista otwierała się na bieżącym miesiącu i pokazywała 3.
+  **Nazewnictwo: „Obrót" → „Suma zleceń"** (user: „słowo obrót jest błędne").
+- **Storage włączony** w `fox-fleetstat`, **europe-west1** (user wybrał płatną lokalizację
+  zamiast darmowej US-EAST1 — dokumenty przewozowe mają dane kierowców, reszta stacku
+  jest w UE). `storage.rules` wdrożone: czyta i pisze tylko zalogowany, 15 MB, wyłącznie
+  PDF i obrazy, **kasowanie i nadpisywanie zablokowane**. Potwierdzone z zewnątrz: odczyt
+  403, zapis 403.
+
+### Import 785 zleceń z 2026 — wiernie, bez sprzątania
+
+Decyzja usera: **bez scalania nazw, bez poprawiania dat, bez oznaczania anulacji**.
+Skrypt `import_zlecen_2026.mjs` (gitignored, zostaje lokalnie jako wzorzec).
+
+🔑 **Sumy uzgodnione co do euro**, ale dopiero po wykryciu, że w **6 wierszach Radek
+nadpisał „Zysk" ręcznie** (noty obciążeniowe wpisane jako wiersze z opisem zamiast numeru,
+oraz dwie transakcje wyzerowane po fakcie). Pierwsze podejście liczyło `klient − przewoźnik`
+i rozjeżdżało się o 640 €. Rozwiązanie: biorę zysk z arkusza, a różnicę zapisuję jako
+**korektę** — panel pokazuje wtedy cały rachunek zamiast udawać, że arytmetyka się zgadza.
+
+🚩 **Blokada nadpisywania po POLU `nr`, nie po id dokumentu.** Pierwsza wersja porównywała
+identyfikatory i nie zauważyła kolizji, bo zlecenie dodane z panelu ma id losowe.
+`5113/RS/10/2026` istniało już z trzema komentarzami i PDF-em — import by je zmiótł.
+
+**Stan w bazie (zweryfikowany przez Firestore REST, nie przez raport skryptu):**
+785 zleceń · suma 1 154 955 € · zysk 245 995 € · prowizja 98 334 €. Różnica wobec arkusza
+(+100/+100/+40) tłumaczy się dokładnie pominiętym `5113` — user wpisał tam 2600 zamiast
+2500 z Excela. Rozkład: 2026-01…10 po 42–94, **2024-01: 27** (literówki w arkuszu),
+**bez daty: 11**.
+
+### Zweryfikowane
+
+✅ Odczyt PDF-a **na prawdziwym zleceniu usera** — po poprawce schematu zadziałał; prompt
+douczony trzema pułapkami z tego dokumentu: „Brak Danych" ≠ wartość, pole `ID` obok `Nr`,
+data w nagłówku to data wystawienia, nie załadunku. ✅ Sumy importu vs arkusz co do euro.
+✅ Reguły Storage z zewnątrz (403/403). ✅ Każdy deploy potwierdzony porównaniem hasha
+bundla produkcyjnego z lokalnym. ✅ 93 asercje reguł dalej przechodzą.
+
+### ❌ Czego NIE zweryfikowałem
+
+- **Reguł Firestore na żywo** — spedytor widzący tylko swoje, blokada zmiany procentu
+  prowizji, blokada kasowania wpisów. DEMO ich nie dotyka. **Nadal otwarte od wczoraj.**
+- **Panelu u spedytora** — Radek nie logował się na telefonie.
+- **Maili z przypomnień** — ani jeden nie poszedł; pierwszy przebieg 30.10 o 7:00 na pustej
+  bazie terminów.
+- **Dopięcia dokumentu przez Storage na produkcji** — reguły wdrożone, ale user wgrywał
+  plik przed ich wdrożeniem.
+
+### Otwarte
+
+- **Rola dla Wioli i Przemka** — user przerwał pytania o zakres; ustalone tylko, że mają mieć
+  „wszystko jak ja, bez ustawień". **Kont w FOX nie ma** — zakłada je user w konsoli.
+  Bez tej roli dashboard widzi wyłącznie admin.
+- **Dane DEMO używają numerów z prawdziwego rejestru** (`4780/RS/06/2026` należy w arkuszu
+  do JAN TROMP, nie do TECNOBODY) — user nie zdecydował, czy zmieniać.
+- **`docs/DOKUMENTACJA-TECHNICZNA.md`** w repo FOX wciąż nieśledzony i opisuje FOX-a sprzed
+  panelu Zleceń.
+
+---
+
 ## 2026-10-28/29 — FOX: rejestr zamówień spedycyjnych (merge `6f707b0`, LIVE na fox.fleetstat.pl)
 
 Nowy temat, nie FleetStat: **panel rejestracji zamówień dla spedytorów w FOX-ie**. Zastępuje
