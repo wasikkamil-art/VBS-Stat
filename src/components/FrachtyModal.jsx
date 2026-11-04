@@ -945,6 +945,30 @@ export default function FrachtyModal({ record, vehicles, driverEvents = [], fuel
                 const ok = confirm(`Uwaga: pole(a) ${multistopFields.join(", ")} wygląda jakby zawierało wiele adresów ("1. ... 2. ..."). Powinieneś rozdzielić je na osobne punkty (R1, R2, ...).\n\nZapisać mimo to?`);
                 if (!ok) return;
               }
+              // Daty, które nie mogą się zdarzyć — najczęściej literówka w miesiącu, u nas
+              // albo u klienta w zleceniu. Powód realny (2026-11-04): klient wpisał w PDF
+              // załadunek 04-10 zamiast 04-11, parser odczytał wiernie, a fracht wylądował
+              // miesiąc wstecz. Lista frachtów filtruje po dacie ZAŁADUNKU, więc dla
+              // dyspozytora zlecenie po prostu ZNIKNĘŁO i wgrywał je drugi raz.
+              // Ostrzegamy, ale NIE blokujemy: fracht wpisywany po czasie bywa poprawny,
+              // a to dyspozytor wie, co jest w papierze.
+              const dt = (s) => (/^\d{4}-\d{2}-\d{2}$/.test(s || "") ? s : null);
+              const nielogiczne = [];
+              if (dt(f.dataZaladunku) && dt(f.dataZlecenia) && f.dataZaladunku < f.dataZlecenia) {
+                nielogiczne.push(`załadunek ${f.dataZaladunku} jest PRZED datą zlecenia ${f.dataZlecenia}`);
+              }
+              if (dt(f.dataZaladunku) && dt(f.dataRozladunku) && f.dataRozladunku < f.dataZaladunku) {
+                nielogiczne.push(`rozładunek ${f.dataRozladunku} jest PRZED załadunkiem ${f.dataZaladunku}`);
+              }
+              if (nielogiczne.length) {
+                const ok = confirm(
+                  `Uwaga, daty wyglądają na błędne:\n\n• ${nielogiczne.join("\n• ")}\n\n` +
+                  `Najczęstsza przyczyna to pomylony miesiąc w zleceniu od klienta.\n` +
+                  `Fracht trafi na listę według daty ZAŁADUNKU — przy złej dacie nie znajdziesz go w bieżącym miesiącu.\n\n` +
+                  `Zapisać mimo to?`
+                );
+                if (!ok) return;
+              }
               onSave(zapiszZlecenia(f, zlecenia));
             }} className="px-5 py-2 rounded-lg text-sm font-semibold text-white" style={{background:"#111827"}}>{record ? "Zapisz zmiany" : "Dodaj fracht"}</button>
           </div>
