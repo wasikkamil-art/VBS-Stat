@@ -270,7 +270,21 @@ fi
 if [ -z "$DRY_RUN" ]; then
     MELDUNEK_STATUS=$([ "$ERRORS" -gt 0 ] && echo "partial" || echo "ok")
     MEM_N=$(ls -1 "$DEST_BASE/memory/$DATE" 2>/dev/null | wc -l | tr -dc '0-9')
-    if MELDUNEK_OUT=$(cd "$SOURCE_REPO" && node -e '
+
+    # 🚩 launchd uruchamia skrypt z MINIMALNYM PATH (/usr/bin:/bin:/usr/sbin:/sbin),
+    # bez Homebrew — a node mieszka w /opt/homebrew/bin. Przez to `node` był
+    # nieosiągalny i meldunek nie szedł przez 8 dni (28.10–05.11), mimo że backup
+    # robił się poprawnie. Ręczny test tego NIE wyłapał, bo powłoka interaktywna
+    # ma Homebrew w PATH. Dlatego szukamy interpretera JAWNIE, po ścieżkach.
+    NODE_BIN=""
+    for KANDYDAT in /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node "$(command -v node 2>/dev/null)"; do
+        [ -n "$KANDYDAT" ] && [ -x "$KANDYDAT" ] && { NODE_BIN="$KANDYDAT"; break; }
+    done
+    if [ -z "$NODE_BIN" ]; then
+        echo "⚠️  Meldunek do Firestore nie poszedł: nie znalazłem interpretera node"
+        echo "    Backup jest zrobiony — nie zadziała tylko powiadomienie o nim."
+        MELDUNEK_OUT="brak node"
+    elif MELDUNEK_OUT=$(cd "$SOURCE_REPO" && "$NODE_BIN" -e '
       const admin = require("firebase-admin");
       admin.initializeApp({ credential: admin.credential.cert(require("./serviceAccountKey.json")) });
       admin.firestore().doc("config/backupHeartbeat").set({

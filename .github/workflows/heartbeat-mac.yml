@@ -64,7 +64,16 @@ jobs:
             console.log(`Status: ${d.status} · błędów: ${d.bledy ?? '?'} · plików pamięci: ${d.plikowPamieci ?? '?'} · host: ${d.host ?? '?'}`);
 
             const problemy = [];
-            if (wiekH > prog) problemy.push(`ostatni backup ma ${wiek} h (próg ${prog} h) — prawdopodobnie Mac był wyłączony albo zadanie launchd padło`);
+            // Trzy możliwe przyczyny, w kolejności prawdopodobieństwa. Trzecią dopisano
+            // po incydencie 28.10–05.11: backup robił się codziennie, ale meldunek nie
+            // przechodził (`node` poza PATH launchd), a komunikat wskazywał wyłącznie
+            // na wyłączony komputer i przez to mylił trop.
+            if (wiekH > prog) problemy.push(
+              `ostatni backup ma ${wiek} h (próg ${prog} h). Sprawdź po kolei: ` +
+              `(1) czy Mac był włączony o 13:00 i 22:00, ` +
+              `(2) czy zadanie launchd żyje — launchctl print gui/$(id -u)/com.fleetstat.backup-claude-memory, ` +
+              `(3) czy backup się ROBI, a nie przechodzi tylko sam meldunek — ogon ~/Library/Logs/fleetstat-backup.log`
+            );
             if (d.status !== 'ok') problemy.push(`backup zgłosił status "${d.status}" (${d.bledy} błędów) — część kroków się nie powiodła, szczegóły w ~/Library/Logs/fleetstat-backup.log`);
             // Pamięć może rosnąć i maleć, ale zjazd do zera znaczy, że kopiowaliśmy pustkę.
             if (Number(d.plikowPamieci) === 0) problemy.push('snapshot pamięci ma 0 plików — źródło było puste albo niedostępne');
