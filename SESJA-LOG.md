@@ -7450,3 +7450,130 @@ do „650(". Widać to było dopiero na zrzucie, nie w kodzie.
   nic nie poszło.
 - **Parsera AI na prawdziwym polskim zleceniu w PLN.** Prompt zmieniony, dokument przez niego
   nie przeszedł. **Do sprawdzenia pierwszym realnym zleceniem Mykoły.**
+
+## 2026-10-23 — Tachograf: tydzień, który jeszcze trwa, nie wydaje werdyktów (commit `605b9b0`)
+
+Agnieszka przez usera: *„u Mirka we FleetStacie się rozpisał pod pauzami — ostatnie 30 h
+zaliczył mu jako tygodniówkę, a to był dobowy z rekompensatą; tygodniówkę zaczyna teraz"*.
+
+### Przyczyna systemowa, nie kosmetyka
+
+🔑 Reguła „tygodniowy = najdłuższy odpoczynek ≥24 h w tygodniu" ma sens **dopiero po
+zamknięciu tygodnia**. W trwającym tygodniu najdłuższy dotychczasowy odpoczynek bywa czymś
+zupełnie innym — u Mirka blok ponaddobowy był **dobowym z doczepioną rekompensatą**,
+a prawdziwą tygodniówkę zaczynał dopiero tego dnia. Panel zrobił z tego skrócony tygodniowy,
+dorobił parę dwóch skróconych pod rząd i dług wyrównania — wszystko nieistniejące.
+
+Bieżący tydzień wolno POKAZAĆ, ale nie wolno z niego orzekać:
+- `weeklyRestList` — flaga `wToku`, bez przesądzania o skróceniu
+- `weeklyRestRules` — pary i `nextMustBeRegular` tylko z tygodni zamkniętych; okno 4 tygodni
+  obejmujące bieżący tydzień oznaczone `unfinished` i pomijane przy liczeniu minimum
+- `weeklyRestCompensation` — brak długu z niezamkniętego tygodnia
+- `lastWeeklyRest` — nie twierdzi „ostatni był skrócony"; `endMs` zostaje kotwicą terminu
+  6×24 h, bo liczenie od ostatniego ≥24 h jest ostrożniejsze
+- UI: szara przerywana pauza „w toku" + wyjaśnienie; plan zamiast żądać 45 h mówi, że nie przesądza
+
+### Zweryfikowane
+
+✅ **Przed/po na żywych danych floty**: Lukashuchuk dług **32h42 → 18h59**, Siarhei
+**4h45 → 0**, u obu znika fałszywe „następny musi być regularny". Tygodnie ZAMKNIĘTE, pary
+i długi u wszystkich pięciu kierowców **bez zmian**.
+✅ 29 testów nowej reguły + 129 asercji kontraktu UI.
+✅ Obejrzane w atrapie komponentu — i to się opłaciło: wyszło, że **plan do przodu nadal
+krzyczał „ostatni tygodniowy był skrócony"**, bo szedł inną ścieżką (`lastWeeklyRest`).
+Sam kod by tego nie pokazał.
+
+🚩 **Drugi raz ten sam mój błąd co przy Portugalii**: pierwsze porównanie floty czytało
+`komp.debts`, a funkcja zwraca `{owedMin, deadlineMs}` — „długi bez zmian" porównywało dwie
+pustki. Wyszło dopiero, gdy test syntetyczny pokazał brak długu tam, gdzie musiał być.
+❌ Nie klikane w produkcji — panel za loginem admina.
+ℹ️ Przypadku Mirka nie dało się odtworzyć: w trakcie pracy wgrano świeży DDD i jego blok
+rozpadł się na 23h41 + 5 minut pracy + 48 min, czyli spadł poniżej progu 24 h.
+
+## 2026-10-27 — Przegląd backupów: od „sprawdź" do czterech napraw (commity `f590228`, `5e4fa64`)
+
+Zaczęło się od „sprawdź mi backup", skończyło na odkryciu, że **monitoring nie istniał,
+a pokrycie miało trzy dziury**.
+
+### Co było
+
+✅ Bazy: trzy repa z nocnymi zrzutami przez GitHub Actions, wszystkie zielone (FleetStat
+30/30, Faktury 30/30, FOX 20/20). Wrześniowe maile o awarii Faktur dotyczyły serii 12–17.09,
+od 18.09 bez wpadki.
+✅ Pamięć i klucze: launchd → iCloud, 31 snapshotów bez dziury, retencja 30 dni.
+✅ **Próba odtworzenia**: 70 z 72 plików identycznych co do sumy kontrolnej, zero pustych,
+frontmatter poprawny w 71/71, `.env.local` zgodny. Dwie różnice to nowsza treść na żywo.
+
+### Co naprawione
+
+1. **Backup raz dziennie → dwa razy** (13:00 i 22:00) — okno ryzyka z ~22 h do ~9 h.
+2. **Czujnik „dead man's switch"** — skrypt melduje się do `config/backupHeartbeat`,
+   a workflow `heartbeat-mac.yml` codziennie o 09:10 UTC **celowo pada**, gdy ślad jest
+   starszy niż 20 h. Alarm idzie mailem z GitHuba, czyli kanałem, który user już zna.
+   🔑 Bez tego backup, który się nie uruchomił, nie miał jak o sobie powiedzieć — cisza
+   wyglądała identycznie jak sukces.
+3. **Trzy dziury w pokryciu**: pamięć wszystkich projektów zamiast jednego, transkrypt
+   z worktree (186 KB, wypadał), sekrety **FOX-a i FreeTrucka** (istniały wyłącznie na dysku).
+4. **Backup bazy FreeTrucka** — jedyny projekt z żywą bazą bez kopii. Workflow na gałąź
+   `backups`, progi alarmowe **nie wpisane na sztywno**, tylko porównanie z poprzednim
+   zrzutem (zjazd do zera albo spadek >20%). Pierwszy zrzut: 27 dokumentów, ~13 KB.
+
+🐛 **Nauka**: nieustawiony sekret podstawia się w Actions jako PUSTY STRING, więc
+`printenv SA > sa.json` daje plik **1-bajtowy** i `[ ! -s plik ]` go przepuszcza — skrypt
+pada dopiero na `JSON.parse`. Sprawdzaj TREŚĆ (`grep '"private_key"'`), nie rozmiar.
+
+## 2026-11-04/05 — „Arek nie może wgrać zlecenia" + czujnik backupu miał rację (`9eecee0`, `3ca7384`)
+
+### Zgłoszenie Arka — i to NIE była usterka FleetStata
+
+Arek zgłosił, że nie może wgrać zlecenia. Sprawdzenie wykluczyło po kolei: produkcję
+(Vercel Ready), klucz Anthropic, modele AI, rolę i Custom Claim (`dyspozytor`, Storage
+przepuszcza), blokadę walutową (0 frachtów z kwotą bez kursu), limit 25 MB.
+
+🔑 **Prawda: wgrał je DWA RAZY i oba frachty zapisały się poprawnie — tylko zniknęły z listy.**
+PDF zlecenia 2602487, przysłany 4 listopada, podawał załadunek `04-10-2026` i rozładunek
+`05-10-2026`. **Błąd był w dokumencie klienta** (miesiąc 10 zamiast 11). Parser odczytał
+wiernie, aplikacja zapisała wiernie, a lista filtruje po **dacie ZAŁADUNKU** — więc zlecenie
+wylądowało w październiku i w listopadzie go nie było.
+
+Zrobione: duplikat `ce9zs7wb` skasowany po asercjach (ten sam numer, kwota, pojazd, data),
+październik v5 wrócił z 8 na 7 frachtów i −950 €. Dołożone **ostrzeżenie przy zapisie**, gdy
+załadunek jest przed datą zlecenia albo rozładunek przed załadunkiem — z komunikatem mówiącym
+wprost, że lista filtruje po dacie załadunku. Świadomie `confirm`, nie blokada.
+⚠️ Fracht `4tvxrd2i` **nadal ma daty październikowe** — nie zmieniam ich sam, bo to
+twierdzenie o tym, kiedy towar jedzie. Czeka na potwierdzenie u klienta (CDC).
+
+### Czujnik backupu padał 8 dni i miał rację
+
+Meldunek stał na 27.10, czyli na ostatnim RĘCZNYM uruchomieniu. Backup robił się poprawnie
+(snapshoty codziennie, 20 przebiegów), zepsuty był sam meldunek:
+**launchd uruchamia skrypt z minimalnym PATH** (`/usr/bin:/bin:/usr/sbin:/sbin`), bez
+Homebrew, a `node` mieszka w `/opt/homebrew/bin`.
+
+🚩 **Mój błąd metodyczny**: sprawdziłem skrypt ze swojej powłoki, która ma Homebrew w PATH,
+zamiast w środowisku, w którym naprawdę chodzi. Teraz interpreter szukany jawnie po ścieżkach,
+a komunikat czujnika podaje **trzy przyczyny po kolei** zamiast wskazywać tylko na wyłączony Mac.
+✅ Zweryfikowane uruchomieniem **przez launchd**, nie z powłoki.
+
+## 2026-11-09 — FOX: kalkulator auta prowadzonego dla przewoźnika (`4c3accb`, `753434c`)
+
+Praca w repo **fox**, nie FleetStat. Pełny opis reguł: pamięć `project_fox_crm`.
+
+Spedytor prowadzi auto KLIENTA — jego rentowność nas nie interesuje, liczy się stawka za km
+przy umówionym przebiegu (solo chłodnia: 1,20 €/km przy 10 000 km/mc).
+
+🔑 **Korektor**: przy 9 000 km naiwnie wypadałoby 12 000/9 000 = 1,333 €/km, ale to za dużo —
+przewoźnik tych 1 000 km nie przejechał, więc **nie spalił paliwa** (paliwo płaci klient).
+Wzór wyrównuje WYNIK, nie przychód, i daje **1,310 €/km**. Sprawdzian poprawności:
+„przychód minus paliwo" identyczne przy każdym przebiegu.
+
+✅ 62 testy + przejście przez formularz w trybie DEMO: 9 000 km → 1,309 €/km, 11 781 €
+dla przewoźnika, 218 € oszczędności paliwa.
+🚩 Test pokazał też **nasz zysk −781 €** — przy 90% przebiegu dopłacamy. Moduł pokazuje to
+na czerwono w trakcie miesiąca, nie po.
+🚩 User na produkcji trafił na **950 km → 10,560 €/km i 10 032 € do wypłaty**. Arytmetycznie
+poprawne, rynkowo bez sensu: dolna granica korektora jest domyślnie wyłączona. Dołożone
+ostrzeżenie przy stawce ≥2× bazowej.
+❌ **Sprawdzone wyłącznie w trybie DEMO**, który omija reguły Firestore i role. Reguły dla
+`auta`/`trasyReczne` wdrożone (`firebase deploy` potwierdzony), ale **blokada edycji warunków
+przez spedytora niepotwierdzona na żywym koncie**.
