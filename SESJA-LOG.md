@@ -7726,3 +7726,14 @@ odrzucone po obejrzeniu — przy zestawie etykiety nachodziły na siebie. Numer 
 wypisane NA ścianach klocka (osobna tekstura na górę, boki i czoła); waga także na rzutach w PDF-ie
 i w panelu wybranej sztuki. Etykiety „DRZWI" i nazwy przestrzeni mają stały rozmiar na ekranie.
 ✅ Atrapa: wygląd, przeciąganie z tablicą materiałów, 20 wag na rzutach wydruku. ❌ Nie na produkcji.
+
+## 2026-11-10 cd.8 — Planer: miejsca paletowe i metry ładowne (LDM) w podsumowaniu
+
+User: w podsumowaniu ma być, ile miejsc paletowych jest dostępnych i ile zostaje po załadunku, oraz LDM.
+- miejsca paletowe = europalety 120×80 na podłodze: „zostaje X z Y" (pusta paka liczona lepszym z dwóch
+  wyników — zachłannego i wzoru na rzędy mieszane, bo zachłanny gubił miejsce: naczepa 13,6 m 33 zamiast 34)
+- LDM = **powierzchnia podłogi ÷ 2,4 m** (europaleta = 0,4 LDM); sztuki piętrowane nie zajmują dodatkowych
+  ⚠️ definicja przyjęta przeze mnie jako standard branżowy — do potwierdzenia u usera (alternatywa: sama długość)
+- przy zestawie dodatkowo wiersz „Razem zestaw"; to samo w PDF-ie
+Testy 847/847. Nasz zestaw: bus 420×225 = 8 miejsc / 3,9 LDM, przyczepa 640×245 = 16 miejsc / 6,5 LDM.
+✅ Atrapa (ekran + tabele wydruku). ❌ Nie na produkcji.

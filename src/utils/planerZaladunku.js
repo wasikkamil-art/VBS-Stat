@@ -14,6 +14,7 @@
 // Układanie to heurystyka — daje dobry, powtarzalny układ, nie dowód, że lepszego nie ma.
 
 const EPS = 0.01;
+const LDM_CM2 = 100 * 240; // 1 metr ładowny = 1 m długości × 2,4 m szerokości
 
 /** „607x243x245" / „6,07 x 2,43 x 2,45 m" → { dl, sz, wys } w cm albo null. */
 export function parsujWymiaryPaki(tekst) {
@@ -318,6 +319,18 @@ export function wolneEuropalety(paka, ulozone, limit = 66) {
   return n;
 }
 
+/**
+ * Ile europalet mieści PUSTA paka. Układanie zachłanne potrafi zgubić jedno miejsce (naczepa
+ * 13,6 m: 33 zamiast 34), więc bierzemy lepszy z dwóch wyników: zachłannego i wzoru na rzędy
+ * mieszane — k rzędów palet wzdłuż, reszta długości rzędami w poprzek.
+ */
+export function miejscaEuropalet(paka) {
+  const wzdluz = Math.floor(paka.sz / 80), wPoprzek = Math.floor(paka.sz / 120);
+  let best = 0;
+  for (let k = 0; k * 120 <= paka.dl; k++) best = Math.max(best, k * wzdluz + Math.floor((paka.dl - k * 120) / 80) * wPoprzek);
+  return Math.max(best, wolneEuropalety(paka, []));
+}
+
 /** Liczby do panelu podsumowania. `maxWaga` w kg (ładowność z kartoteki) albo null. */
 export function podsumowanie(paka, ulozone, nieulozone = [], maxWaga = null) {
   const dlZajeta = ulozone.reduce((m, s) => Math.max(m, s.x + s.dl), 0);
@@ -327,6 +340,7 @@ export function podsumowanie(paka, ulozone, nieulozone = [], maxWaga = null) {
   const waga = ulozone.reduce((sum, s) => sum + (s.waga || 0), 0);
   const polePaki = paka.dl * paka.sz, objPaki = polePaki * paka.wys;
   const max = Number(maxWaga) > 0 ? Number(maxWaga) : null;
+  const miejscaEur = miejscaEuropalet(paka);
   return {
     sztuk: ulozone.length, nieulozonych: nieulozone.length,
     pietrowanych: ulozone.filter(s => s.z > EPS).length,
@@ -338,7 +352,14 @@ export function podsumowanie(paka, ulozone, nieulozone = [], maxWaga = null) {
     wagaPct: max ? (waga / max) * 100 : null,
     zapasWagi: max ? max - waga : null,
     przeladowane: max ? waga > max + EPS : false,
-    wolneEur: wolneEuropalety(paka, ulozone),
+    // Miejsca paletowe = europalety 120×80 na podłodze: ile mieści pusta paka i ile zostaje po załadunku.
+    miejscaEur,
+    wolneEur: Math.min(miejscaEur, wolneEuropalety(paka, ulozone)),
+    // Metry ładowne (LDM) wg standardu: powierzchnia podłogi / 2,4 m (szerokość naczepy).
+    // Europaleta = 0,4 LDM. Sztuki piętrowane nie zajmują dodatkowych LDM — liczy się podłoga.
+    ldmPaki: polePaki / LDM_CM2,
+    ldmZajete: podloga / LDM_CM2,
+    ldmWolne: Math.max(0, polePaki - podloga) / LDM_CM2,
   };
 }
 

@@ -824,6 +824,12 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
                   <KafleSumy suma={sumy[pr.i]} />
                 </div>
               ))}
+              {zestaw && sumy.every(Boolean) && (
+                <div className="p-3 rounded-xl mb-2 text-sm text-gray-900" style={{ background: "#eff6ff" }}>
+                  <b>Razem zestaw:</b> miejsca paletowe — zostaje {sumy.reduce((a, x) => a + x.wolneEur, 0)} z {sumy.reduce((a, x) => a + x.miejscaEur, 0)} · LDM — zostaje {fmt(sumy.reduce((a, x) => a + x.ldmWolne, 0), 1)} z {fmt(sumy.reduce((a, x) => a + x.ldmPaki, 0), 1)}
+                </div>
+              )}
+              <p className="text-xs text-gray-600 mb-1">LDM = powierzchnia podłogi ÷ 2,4 m (europaleta = 0,4 LDM). Sztuki piętrowane nie zajmują dodatkowych LDM.</p>
               {ulozone.some(s => !s.waga) && <p className="text-xs mt-2" style={{ color: "#b45309" }}>{ulozone.filter(s => !s.waga).length} szt. bez wagi — suma kg i naciski na osie są zaniżone{zestaw ? ", a automat nie pilnuje dla nich ładowności" : ""}.</p>}
 
               <div className="mt-4 pt-3 border-t border-gray-100">
@@ -965,7 +971,8 @@ function TabelaSumy({ tytul, suma }) {
         <tr><td>Ułożono</td><td><b>{suma.sztuk} szt.</b></td></tr>
         <tr><td>Zajęta długość paki</td><td><b>{fmt(suma.dlZajeta)} cm</b> · wolne {fmt(suma.dlWolna)} cm</td></tr>
         <tr><td>Podłoga / objętość</td><td>{fmt(suma.podlogaPct)}% / {fmt(suma.objPct)}%</td></tr>
-        <tr><td>Wolne miejsca paletowe</td><td>{suma.wolneEur} (europalety 120×80 na podłogę)</td></tr>
+        <tr><td>Miejsca paletowe (120×80)</td><td>dostępne <b>{suma.miejscaEur}</b> · po załadunku zostaje <b>{suma.wolneEur}</b></td></tr>
+        <tr><td>Metry ładowne (LDM)</td><td>dostępne <b>{fmt(suma.ldmPaki, 1)}</b> · zajęte {fmt(suma.ldmZajete, 1)} · zostaje <b>{fmt(suma.ldmWolne, 1)}</b></td></tr>
         <tr><td>Waga ładunku</td><td><b>{wagaTxt(suma)}</b>{suma.maxWaga ? ` z ${fmt(suma.maxWaga)} kg` : ""}{suma.przeladowane ? " — PRZEKROCZONA" : ""}{suma.bezWagi && suma.bezWagi !== suma.sztuk ? ` (${suma.bezWagi} szt. bez wagi)` : ""}</td></tr>
       </tbody></table>
     </div>
@@ -989,7 +996,8 @@ function KafleSumy({ suma }) {
       <Kafel t="Zajęta długość paki" w={`${fmt(suma.dlZajeta)} cm`} d={`wolne ${fmt(suma.dlWolna)} cm`} />
       <Kafel t="Podłoga" w={`${fmt(suma.podlogaPct)}%`} d={`wolne ${fmt(suma.wolnaPodlogaM2, 1)} m²`} />
       <Kafel t="Objętość" w={`${fmt(suma.objPct)}%`} d={`wolne ${fmt(suma.wolnaObjM3, 1)} m³`} />
-      <Kafel t="Wolne miejsca paletowe" w={String(suma.wolneEur)} d="europalety 120×80 na wolną podłogę" />
+      <Kafel t="Miejsca paletowe" w={`zostaje ${suma.wolneEur} z ${suma.miejscaEur}`} d="europalety 120×80 na podłodze" />
+      <Kafel t="Metry ładowne (LDM)" w={`zostaje ${fmt(suma.ldmWolne, 1)} z ${fmt(suma.ldmPaki, 1)}`} d={`zajęte ${fmt(suma.ldmZajete, 1)} LDM`} />
       <Kafel t="Waga ładunku" w={brakWag ? "brak wag" : `${fmt(suma.waga)} kg`} zle={suma.przeladowane}
         d={brakWag ? "wpisz kg / szt. przy pozycjach" : suma.maxWaga ? (suma.przeladowane ? `PRZEKROCZONA o ${fmt(-suma.zapasWagi)} kg` : `zapas ${fmt(suma.zapasWagi)} kg z ${fmt(suma.maxWaga)}`) : "brak ładowności w kartotece"} />
       <Kafel t="Piętrowane" w={`${suma.pietrowanych} szt.`} d={`z ${suma.sztuk} ułożonych`} />
