@@ -7718,3 +7718,11 @@ To ilustracja — nie wchodzi do żadnych obliczeń. ✅ Obejrzane w atrapie (so
 User: przyczepa ma osie na początku i na końcu, nie tandem pośrodku — poprawione (rysunek).
 Przy okazji wyszło, że w widoku „Z boku" zestaw nie mieścił się w kadrze (kabina i tył ucięte):
 odległość kamery liczona teraz z kąta widzenia i proporcji okna. ✅ Atrapa. ❌ Nie na produkcji.
+
+## 2026-11-10 cd.7 — Planer: numer i waga na ścianach klocków
+
+User: waga ma być widoczna na każdym klocku. Pierwsze podejście (dopisek do pływającej etykiety)
+odrzucone po obejrzeniu — przy zestawie etykiety nachodziły na siebie. Numer pozycji i waga są teraz
+wypisane NA ścianach klocka (osobna tekstura na górę, boki i czoła); waga także na rzutach w PDF-ie
+i w panelu wybranej sztuki. Etykiety „DRZWI" i nazwy przestrzeni mają stały rozmiar na ekranie.
+✅ Atrapa: wygląd, przeciąganie z tablicą materiałów, 20 wag na rzutach wydruku. ❌ Nie na produkcji.

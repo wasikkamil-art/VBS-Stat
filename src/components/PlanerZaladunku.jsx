@@ -53,6 +53,33 @@ function wczytajStan() {
 const inp = "w-full px-2 py-1.5 rounded-lg text-sm outline-none border border-gray-200 focus:border-gray-400 bg-white text-gray-900";
 const lbl = "block text-xs font-medium text-gray-600 mb-1";
 
+// Materiały sztuki bywają tablicą (osobna tekstura na ścianę) — wspólna pętla.
+const kazdyMat = (mesh, fn) => (Array.isArray(mesh.material) ? mesh.material : [mesh.material]).forEach(fn);
+
+// Ściana klocka z numerem pozycji i wagą wypisanymi NA niej. Pływające etykiety nad klockami
+// nachodziły na siebie przy większym ładunku; napis na ścianie nigdy się nie nakłada.
+function materialSciany(THREE, wCm, hCm, kolor, l1, l2) {
+  const k = 256 / Math.max(wCm, hCm);
+  const cv = document.createElement("canvas");
+  cv.width = Math.max(48, Math.round(wCm * k)); cv.height = Math.max(48, Math.round(hCm * k));
+  const ctx = cv.getContext("2d");
+  ctx.fillStyle = kolor; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = "#fff";
+  ctx.strokeStyle = "rgba(15,23,42,0.55)"; ctx.lineJoin = "round";
+  const pisz = (t, y, fs) => {
+    let f = fs; ctx.font = `bold ${f}px system-ui, sans-serif`;
+    const szer = ctx.measureText(t).width;
+    if (szer > cv.width * 0.9) { f = (f * cv.width * 0.9) / szer; ctx.font = `bold ${f}px system-ui, sans-serif`; }
+    ctx.lineWidth = Math.max(2, f * 0.14); ctx.strokeText(t, cv.width / 2, y); ctx.fillText(t, cv.width / 2, y);
+  };
+  const fs = Math.min(cv.height * (l2 ? 0.36 : 0.5), cv.width * 0.5);
+  pisz(l1, cv.height * (l2 ? 0.36 : 0.52), fs);
+  if (l2) pisz(l2, cv.height * 0.72, fs * 0.62);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+  return new THREE.MeshLambertMaterial({ map: tex, transparent: true, opacity: 1 });
+}
+
 // ── Sylwetka auta w scenie: kabina dostawczaka z nadbudówką sypialną zamiast klocka. ──
 // Wymiary w metrach; y=0 to podłoga paki, ziemia leży PODWOZIE_H niżej. To ilustracja,
 // żeby było widać przód i skalę — nie model konkretnego pojazdu i nie wchodzi do obliczeń.
@@ -142,6 +169,9 @@ function Rzut({ paka, ulozone, kolor, os }) {
             <text x={x + w / 2} y={y + h / 2 + fs * 0.35} textAnchor="middle" fontSize={fs} fontWeight="700" fill="#fff">
               {s.nr}{gora && s.z > 0 ? "↑" : ""}
             </text>
+            {s.waga && Math.min(w, h) >= fs * 3.2 && (
+              <text x={x + w / 2} y={y + h / 2 + fs * 1.3} textAnchor="middle" fontSize={fs * 0.62} fontWeight="600" fill="#fff">{fmt(s.waga)} kg</text>
+            )}
           </g>
         );
       })}
@@ -383,8 +413,7 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
         const r = sprawdzMiejsce(pk, inne, s, p.x, p.y, s.dl, s.sz, { twarde: false, kolejnosc: kol });
         const z = r.z ?? 0;
         akcja.mesh.position.set((pr.x0 + p.x + s.dl / 2) * S, (z + s.wys / 2) * S, (p.y + s.sz / 2 - pk.sz / 2) * S);
-        akcja.mesh.material.emissive.set(r.ok ? 0x000000 : 0xb91c1c);
-        akcja.mesh.material.opacity = r.ok ? 1 : 0.75;
+        kazdyMat(akcja.mesh, mt => { mt.emissive.set(r.ok ? 0x000000 : 0xb91c1c); mt.opacity = r.ok ? 1 : 0.75; });
         akcja.wynik = r.ok ? { x: p.x, y: p.y, z, obr: !!s.obr, p: s.p } : null;
         rysuj();
       };
@@ -394,7 +423,7 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
         if (a.typ === "orbita") { if (!a.ruch) setWybrana(null); return; }
         if (!a.ruch) return;
         if (a.wynik) danePrzeciagania.current.zamrozZ({ [a.id]: a.wynik });
-        else { a.mesh.position.copy(a.start); a.mesh.material.emissive.set(0x000000); a.mesh.material.opacity = 1; rysuj(); }
+        else { a.mesh.position.copy(a.start); kazdyMat(a.mesh, mt => { mt.emissive.set(a.id === g.current.wybrana ? 0x3f3f00 : 0x000000); mt.opacity = 1; }); rysuj(); }
       };
       const wheel = (e) => { e.preventDefault(); const c = g.current; c.orbit.r = Math.min(60, Math.max(2, c.orbit.r * (e.deltaY > 0 ? 1.1 : 0.9))); rysuj(); };
       const el = renderer.domElement;
@@ -444,9 +473,11 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
     const c = g.current;
     if (!gotowe3d || !c.THREE) return;
     const { THREE, grupa } = c;
-    const zwolnij = (o) => { o.geometry?.dispose?.(); if (o.material) { o.material.map?.dispose?.(); o.material.dispose?.(); } };
+    const zwolnij = (o) => { o.geometry?.dispose?.(); if (o.material) kazdyMat(o, mt => { mt.map?.dispose?.(); mt.dispose?.(); }); };
     grupa.traverse(zwolnij); grupa.clear(); c.meshe = new Map();
-    const napis = (tekst, x, y, z, skala = 0.5, tlo = null) => {
+    // Etykiety mają STAŁY rozmiar na ekranie (sizeAttenuation: false) — przy zestawie z przyczepą
+    // kamera stoi daleko i napisy skalowane ze sceną były nieczytelne. `skala` = ułamek wysokości okna.
+    const napis = (tekst, x, y, z, skala = 0.03, tlo = null) => {
       const cv = document.createElement("canvas");
       const miara = cv.getContext("2d"); miara.font = "bold 56px system-ui, sans-serif";
       cv.width = Math.max(256, Math.ceil(miara.measureText(tekst).width) + 48); cv.height = 96;
@@ -454,7 +485,7 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
       if (tlo) { ctx.fillStyle = tlo; ctx.beginPath(); ctx.roundRect(4, 8, cv.width - 8, 80, 18); ctx.fill(); }
       ctx.font = "bold 56px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillStyle = tlo ? "#fff" : "#0f172a"; ctx.fillText(tekst, cv.width / 2, 50);
-      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: !!tlo, transparent: true }));
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: !!tlo, transparent: true, sizeAttenuation: false }));
       sp.scale.set(skala * cv.width / 96, skala, 1); sp.position.set(x, y, z); grupa.add(sp);
     };
     for (const pr of przestrzenie) {
@@ -481,21 +512,24 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
       const pkt = [];
       for (let x = 100; x < paka.dl; x += 100) pkt.push((pr.x0 + x) * S, 0.002, -W / 2, (pr.x0 + x) * S, 0.002, W / 2);
       if (pkt.length) { const gg = new THREE.BufferGeometry(); gg.setAttribute("position", new THREE.Float32BufferAttribute(pkt, 3)); grupa.add(new THREE.LineSegments(gg, new THREE.LineBasicMaterial({ color: 0x94a3b8 }))); }
-      napis("DRZWI", cx + L / 2 + 0.3, 0.15, W / 2 + 0.25, 0.26);
-      if (zestaw) napis(pr.nazwa, cx, H + 0.32, 0, 0.3, "rgba(51,65,85,0.92)");
+      napis("DRZWI", cx + L / 2 + 0.3, 0.15, W / 2 + 0.25, 0.026);
+      if (zestaw) napis(pr.nazwa, cx, H + 0.32, 0, 0.032, "rgba(51,65,85,0.92)");
     }
     for (const s of ulozone) {
       const pr = przestrzenie[s.p], paka = pr?.paka;
       if (!paka) continue;
+      const kol = kolor(s);
+      const l1 = String(s.nr) + (wieleRozl ? ` R${s.rozl}` : ""), l2 = s.waga ? `${fmt(s.waga)} kg` : "";
+      const czolo = materialSciany(THREE, s.sz, s.wys, kol, l1, l2), bok = materialSciany(THREE, s.dl, s.wys, kol, l1, l2);
+      // kolejność ścian BoxGeometry: +x, −x, +y (góra), −y (spód), +z, −z
       const m = new THREE.Mesh(
         new THREE.BoxGeometry(Math.max(0.01, s.dl * S - 0.012), Math.max(0.01, s.wys * S - 0.006), Math.max(0.01, s.sz * S - 0.012)),
-        new THREE.MeshLambertMaterial({ color: kolor(s), transparent: true, opacity: 1 }));
+        [czolo, czolo, materialSciany(THREE, s.dl, s.sz, kol, l1, l2), new THREE.MeshLambertMaterial({ color: kol, transparent: true }), bok, bok]);
       m.position.set((pr.x0 + s.x + s.dl / 2) * S, (s.z + s.wys / 2) * S, (s.y + s.sz / 2 - paka.sz / 2) * S);
       m.userData.id = s.id;
       const kr = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), new THREE.LineBasicMaterial({ color: 0x0f172a }));
       m.add(kr); m.userData.kr = kr;
       grupa.add(m); c.meshe.set(s.id, m);
-      napis(String(s.nr) + (wieleRozl ? ` R${s.rozl}` : ""), m.position.x, (s.z + s.wys) * S + 0.14, m.position.z, 0.26, "rgba(15,23,42,0.88)");
     }
     c.podswietl?.();
     rysuj();
@@ -510,7 +544,7 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
       for (const [id, m] of c.meshe) {
         const w = id === c.wybrana;
         m.userData.kr.material.color.set(w ? 0xfacc15 : 0x0f172a);
-        m.material.emissive.set(w ? 0x3f3f00 : 0x000000);
+        kazdyMat(m, mt => mt.emissive.set(w ? 0x3f3f00 : 0x000000));
       }
     };
     c.wybrana = wybrana;
@@ -756,7 +790,7 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
             {wybranaSzt && (
               <div className="flex flex-wrap items-center gap-3 mt-2 p-2 rounded-lg bg-gray-50 text-xs text-gray-800">
                 <b>Poz. {wybranaSzt.nr}, szt. {wybranaSzt.lp}{zestaw ? ` · ${przestrzenie[wybranaSzt.p]?.nazwa}` : ""}</b>
-                <span>{wybranaSzt.dl}×{wybranaSzt.sz}×{wybranaSzt.wys} cm</span>
+                <span>{wybranaSzt.dl}×{wybranaSzt.sz}×{wybranaSzt.wys} cm{wybranaSzt.waga ? ` · ${fmt(wybranaSzt.waga)} kg` : " · bez wagi"}</span>
                 <span>od przedniej ściany {fmt(wybranaSzt.x)} cm · od prawej burty {fmt(wybranaSzt.y)} cm · {wybranaSzt.z > 0 ? `na wys. ${fmt(wybranaSzt.z)} cm` : "na podłodze"}</span>
                 <button onClick={obrocWybrana} className="px-2 py-1 rounded-md border border-gray-300 font-semibold">Obróć 90°</button>
               </div>
@@ -916,7 +950,7 @@ function RzutyPrzestrzeni({ pr, ulozone, kolor, tytul = "" }) {
       <Rzut paka={pr.paka} ulozone={lista} kolor={kolor} os="gora" />
       <h2 style={{ marginTop: 8 }}>{tytul ? `${tytul} — z` : "Z"} boku</h2>
       <Rzut paka={pr.paka} ulozone={lista} kolor={kolor} os="bok" />
-      <div style={{ color: "#475569", fontSize: 9, marginTop: 2 }}>Liczba = numer pozycji z tabeli · ↑ = sztuka stoi na innej</div>
+      <div style={{ color: "#475569", fontSize: 9, marginTop: 2 }}>Liczba = numer pozycji z tabeli · kg = waga sztuki · ↑ = sztuka stoi na innej</div>
     </>
   );
 }
