@@ -7705,3 +7705,10 @@ pokazywało się jako dwie osobne pozycje, a ma być **jednym zestawem**.
 dokument do druku (3 strony: 510 / 685 / 326 px przy limicie 726).
 ❌ Niesprawdzone: prawdziwa aplikacja po zalogowaniu, prawdziwy plik PDF. Założenie do potwierdzenia:
 kolejność rozładunku liczona osobno w aucie i osobno na przyczepie.
+
+## 2026-11-10 cd.5 — Planer załadunku: sylwetka auta zamiast klocka
+
+User: mamy Iveco z nadbudówką sypialną, kabina ma mieć podobny obrys. W scenie 3D klocek zastąpiony
+bryłą dostawczaka (maska, pochylona szyba, nadbudówka nad kabiną, szyby boczne, światła, zderzak),
+do tego rama i koła pod paką, a przy przyczepie osie tandem i dyszel. Kadr kamery obejmuje kabinę.
+To ilustracja — nie wchodzi do żadnych obliczeń. ✅ Obejrzane w atrapie (solo i zestaw). ❌ Nie na produkcji.

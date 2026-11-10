@@ -53,6 +53,74 @@ function wczytajStan() {
 const inp = "w-full px-2 py-1.5 rounded-lg text-sm outline-none border border-gray-200 focus:border-gray-400 bg-white text-gray-900";
 const lbl = "block text-xs font-medium text-gray-600 mb-1";
 
+// ── Sylwetka auta w scenie: kabina dostawczaka z nadbudówką sypialną zamiast klocka. ──
+// Wymiary w metrach; y=0 to podłoga paki, ziemia leży PODWOZIE_H niżej. To ilustracja,
+// żeby było widać przód i skalę — nie model konkretnego pojazdu i nie wchodzi do obliczeń.
+const PODWOZIE_H = 0.95;
+
+function bryla(THREE, punkty, szer, kolor) {
+  const k = new THREE.Shape();
+  punkty.forEach(([u, y], i) => (i ? k.lineTo(-u, y) : k.moveTo(-u, y)));
+  k.closePath();
+  const geo = new THREE.ExtrudeGeometry(k, { depth: szer, bevelEnabled: false });
+  geo.translate(0, 0, -szer / 2);
+  return new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: kolor }));
+}
+
+function kolo(THREE, x, z, r = 0.37, szer = 0.24) {
+  const g = new THREE.Group();
+  const opona = new THREE.Mesh(new THREE.CylinderGeometry(r, r, szer, 28), new THREE.MeshLambertMaterial({ color: 0x111827 }));
+  const felga = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.55, r * 0.55, szer + 0.02, 20), new THREE.MeshLambertMaterial({ color: 0x9ca3af }));
+  opona.rotation.x = felga.rotation.x = Math.PI / 2;
+  g.add(opona, felga);
+  g.position.set(x, -PODWOZIE_H + r, z);
+  return g;
+}
+
+function zbudujKabine(THREE, W, H) {
+  const g = new THREE.Group();
+  const szer = Math.min(W, Math.max(1.7, W * 0.9));
+  const lakier = 0xd9dde2, szyba = 0x1f2937;
+  // u = odległość do przodu od tylnej ściany kabiny; profil boczny: zderzak → maska → szyba → dach
+  g.add(bryla(THREE, [[0, -0.6], [2.02, -0.6], [2.14, -0.42], [2.14, -0.05], [2.06, 0.2], [1.52, 0.5], [1.02, 1.36], [0, 1.36]], szer, lakier));
+  // nadbudówka sypialna nad kabiną, wysunięta nad szybę
+  const gora = Math.max(1.75, Math.min(2.2, H * 0.9));
+  g.add(bryla(THREE, [[0, 1.36], [1.04, 1.36], [1.5, 1.5], [1.5, gora - 0.32], [1.12, gora], [0, gora]], szer * 0.98, lakier));
+  // szyba czołowa — płaszczyzna na pochyłej ścianie
+  const dl = Math.hypot(1.52 - 1.02, 1.36 - 0.5);
+  const czolowa = new THREE.Mesh(new THREE.PlaneGeometry(dl * 0.86, szer * 0.86), new THREE.MeshLambertMaterial({ color: szyba, side: THREE.DoubleSide }));
+  czolowa.rotation.set(Math.PI / 2, 0, 0);
+  const os = new THREE.Group(); os.add(czolowa);
+  os.rotation.z = -Math.atan2(1.36 - 0.5, 1.52 - 1.02);
+  os.position.set(-(1.27 + 0.012), 0.93 + 0.008, 0); g.add(os);
+  // szyby boczne, okienko nadbudówki, atrapa, światła, zderzak
+  for (const strona of [1, -1]) {
+    const z = strona * (szer / 2 + 0.006);
+    const boczna = new THREE.Shape(); [[0.5, 0.52], [1.44, 0.52], [1.06, 1.22], [0.5, 1.22]].forEach(([u, y], i) => (i ? boczna.lineTo(-u, y) : boczna.moveTo(-u, y)));
+    const mb = new THREE.Mesh(new THREE.ShapeGeometry(boczna), new THREE.MeshLambertMaterial({ color: szyba, side: THREE.DoubleSide }));
+    mb.position.z = z; g.add(mb);
+    const ok = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.2), new THREE.MeshLambertMaterial({ color: szyba, side: THREE.DoubleSide }));
+    ok.position.set(-1.05, gora - 0.3, strona * (szer * 0.49 + 0.006)); g.add(ok);
+    const lampa = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.13, 0.36), new THREE.MeshLambertMaterial({ color: 0xf8fafc }));
+    lampa.position.set(-2.1, 0.1, strona * (szer / 2 - 0.24)); g.add(lampa);
+    g.add(kolo(THREE, -1.42, strona * (szer / 2 - 0.1)));
+  }
+  const atrapa = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.3, szer * 0.5), new THREE.MeshLambertMaterial({ color: szyba }));
+  atrapa.position.set(-2.13, -0.2, 0); g.add(atrapa);
+  const zderzak = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.2, szer * 1.0), new THREE.MeshLambertMaterial({ color: 0x9ca3af }));
+  zderzak.position.set(-2.1, -0.52, 0); g.add(zderzak);
+  return g;
+}
+
+/** Rama pod paką i koła tylne. `osie` = położenia osi jako ułamek długości paki od przodu. */
+function zbudujPodwozie(THREE, L, W, cx, osie) {
+  const g = new THREE.Group();
+  const rama = new THREE.Mesh(new THREE.BoxGeometry(L, 0.14, Math.min(0.9, W * 0.4)), new THREE.MeshLambertMaterial({ color: 0x374151 }));
+  rama.position.set(cx, -0.13, 0); g.add(rama);
+  for (const u of osie) for (const strona of [1, -1]) g.add(kolo(THREE, cx - L / 2 + L * u, strona * (W / 2 - 0.16), 0.37, 0.3));
+  return g;
+}
+
 function kolorSztuki(s, tryb, indeksPozycji) {
   return tryb === "rozl" ? (KOLORY_ROZL[s.rozl] || "#475569") : PALETA[(indeksPozycji.get(s.pozycjaId) ?? 0) % PALETA.length];
 }
@@ -352,8 +420,10 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
     if (!gotowe3d || !c.orbit || !zPaka.length) return;
     const dl = zPaka.reduce((sum, pr) => sum + pr.paka.dl, 0) + ODSTEP * (zPaka.length - 1);
     const sz = Math.max(...zPaka.map(pr => pr.paka.sz)), wys = Math.max(...zPaka.map(pr => pr.paka.wys));
-    c.orbit.cel = { x: 0, y: wys * S * 0.35, z: 0 };
-    c.orbit.r = Math.max(dl, sz * 1.6, wys * 1.6) * S * (zPaka.length > 1 ? 1.45 : 1.75);
+    // Kadr obejmuje też kabinę (ok. 2,2 m przed paką), więc środek przesuwamy do przodu.
+    const KABINA = 220;
+    c.orbit.cel = { x: -KABINA * S / 2, y: wys * S * 0.3, z: 0 };
+    c.orbit.r = Math.max(dl + KABINA, sz * 1.6, wys * 1.6) * S * (zPaka.length > 1 ? 1.35 : 1.6);
     rysuj();
   }, [gotowe3d, przestrzenie, rysuj]);
 
@@ -393,15 +463,14 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
       const sciana = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshBasicMaterial({ color: 0x94a3b8, transparent: true, opacity: 0.35, side: THREE.DoubleSide }));
       sciana.rotation.y = Math.PI / 2; sciana.position.set(cx - L / 2, H / 2, 0); grupa.add(sciana);
       if (pr.i === 0) {
-        // kabina — tylko żeby było widać, gdzie przód
-        const kd = Math.min(1.6, L * 0.3);
-        const kab = new THREE.Mesh(new THREE.BoxGeometry(kd, H * 0.8, W), new THREE.MeshLambertMaterial({ color: 0x475569 }));
-        kab.position.set(cx - L / 2 - kd / 2 - 0.05, H * 0.4, 0); grupa.add(kab);
-        napis("KABINA", cx - L / 2 - 0.5, H * 0.8 + 0.25, 0, 0.3);
+        const kab = zbudujKabine(THREE, W, H);
+        kab.position.set(cx - L / 2 - 0.06, 0, 0); grupa.add(kab);
+        grupa.add(zbudujPodwozie(THREE, L, W, cx, [0.62]));
       } else {
-        // dyszel przyczepy
-        const dyszel = new THREE.Mesh(new THREE.BoxGeometry(ODSTEP * S, 0.06, 0.12), new THREE.MeshLambertMaterial({ color: 0x475569 }));
-        dyszel.position.set((pr.x0 - ODSTEP / 2) * S, 0.2, 0); grupa.add(dyszel);
+        // dyszel przyczepy + osie tandem pośrodku
+        const dyszel = new THREE.Mesh(new THREE.BoxGeometry(ODSTEP * S + 0.3, 0.07, 0.12), new THREE.MeshLambertMaterial({ color: 0x374151 }));
+        dyszel.position.set((pr.x0 - ODSTEP / 2) * S, -0.25, 0); grupa.add(dyszel);
+        grupa.add(zbudujPodwozie(THREE, L, W, cx, [0.44, 0.58]));
       }
       // siatka co 1 m
       const pkt = [];
