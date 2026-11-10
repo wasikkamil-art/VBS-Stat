@@ -7577,3 +7577,43 @@ ostrzeżenie przy stawce ≥2× bazowej.
 ❌ **Sprawdzone wyłącznie w trybie DEMO**, który omija reguły Firestore i role. Reguły dla
 `auta`/`trasyReczne` wdrożone (`firebase deploy` potwierdzony), ale **blokada edycji warunków
 przez spedytora niepotwierdzona na żywym koncie**.
+
+## 2026-11-09/10 — Dashboard dyspozytora Karola + FOX: Auta jako osobny moduł z klientami (`f8920f1`)
+
+### Dashboard Karola dla zarządu (FleetStat, tylko odczyt)
+
+`make_dashboard_karol.js` (gitignored) → `Dashboard_Karol_dyspozytor.pdf`, 3 strony A4.
+Ustalenia usera, każde zmieniało liczby:
+- liczymy **tylko frachty z Karolem w polu `dyspozytor`** (27 pozycji, wszystkie na WGM 0507M)
+- **dwie noty nie wchodzą** (WEGO 50 €, AW Sped 1 400 €) → 25 frachtów / 36 374 €
+- „ile auto zarobiło" **jak w Rentowności**, a koszty miesiąca dzielone według **udziału Karola
+  w kwocie frachtów auta** (X–XI 100%, XII 99%, I 74%, II 14%) — mój wariant, zatwierdzony
+- podział: **X–XII 2025** (+3 680 €) i **I–II 2026** (+1 807 €), razem **+5 487 €**
+- km = **total** (ładowne + podjazd; `kmWszystkie` puste w X–XII 2025, gdzie jest — w 145/146 równe tej sumie)
+- porównanie z WGM 0475M (−2 188 €) i WGM 5367K (+5 608 €) jako całymi autami
+
+🔑 Baza pokazuje ciągły blok Karola **15.10.2025–05.02.2026**; user pamiętał „XI–II". Wariant
+okresu zmieniał wynik z +6 199 na +1 261 € — dlatego zapytałem, zamiast wybrać.
+❌ Kwoty nie porównane z fakturami; PDF oglądany na zrzucie tego samego HTML (brak `pdftoppm`).
+
+### FOX: Auta = klient → jego auta → trasy, bez rejestru Zleceń
+
+User: zleceniodawca auta bywa kimś spoza rejestru Radka, a auta przychodzą od klientów,
+którzy oddają je do prowadzenia. Zrobione:
+- kolekcja **`klienciAut`** + „+ Dodaj klienta" / „✎ Dane klienta" (admin); reguły wdrożone
+- „+ Dodaj auto" przy wybranym kliencie (`klientId`), klienta z autami nie da się usunąć
+- trasy wyłącznie z modułu („+ Dodaj trasę", pole **Zleceniodawca**); `trasyAuta` nie czyta zleceń
+- z okna zlecenia zniknęła sekcja auta/km/kraju
+- auta bez klienta → pomarańczowa grupa „Bez klienta" (dotyczy testowego WGM 000111)
+
+Przed zmianą sprawdzone na produkcji: **0 zleceń przypiętych do auta**, więc bez migracji.
+✅ DEMO: klient → auto → trasa, korektor 8 000 km DE = 1,446 €/km / 11 568 €; testy 61 + 72.
+✅ Bundle produkcyjny `index-BHtzhhX0.js` zawiera „Dodaj klienta".
+❌ **Niesprawdzone na żywym koncie** (DEMO omija reguły): spedytor widzi klientów, nie dodaje;
+blokada usuwania klienta z autami nieklikana (okno `alert`).
+⚠️ Push na main **zablokowany narzędziu** mimo zgody usera — user puścił go sam.
+
+### Otwarte
+- Testowe auto „test solo" → user zakłada klienta „Rad_trans" i przypina auto w „Warunkach auta"
+- Push 3 commitów FleetStata na main (`9eecee0` ostrzeżenie o datach, `3ca7384`, `4aa62a3`) — nadal czeka
+- Październik 2025 bez wpisu o zamknięciu w logu — do potwierdzenia u usera
