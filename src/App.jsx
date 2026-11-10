@@ -39,6 +39,7 @@ const TachografComplianceSection = lazy(() => import("./components/TachografComp
 const FrachtyModal = lazy(() => import("./components/FrachtyModal"));
 // Kalkulator tras — szacunkowy koszt trasy (paliwo per kraj + myto). Lazy chunk.
 const KalkulatorTras = lazy(() => import("./components/KalkulatorTras"));
+const PlanerZaladunku = lazy(() => import("./components/PlanerZaladunku"));
 const PaliwoTab = lazy(() => import("./components/PaliwoTab"));
 const AnalizyTab = lazy(() => import("./components/AnalizyTab"));
 
@@ -1365,8 +1366,8 @@ function exportCostsToExcel(costs, vehicles, categories, filterYear, filterMonth
 
 // ── Per-role default tab access (fallback kiedy user nie ma jeszcze allowedTabs) ──
 const DEFAULT_TABS_BY_ROLE = {
-  admin:      ["dashboard","frachty","kalkulator","fv","costs","paliwo","vehicles","serwis","rent","analizy","docs","imi","users","email","logi","logowania","sprawy","kierowcy","chat","gps"],
-  dyspozytor: ["dashboard","frachty","kalkulator","fv","costs","paliwo","vehicles","serwis","rent","analizy","docs","imi","sprawy","chat","gps"],
+  admin:      ["dashboard","frachty","kalkulator","planer","fv","costs","paliwo","vehicles","serwis","rent","analizy","docs","imi","users","email","logi","logowania","sprawy","kierowcy","chat","gps"],
+  dyspozytor: ["dashboard","frachty","kalkulator","planer","fv","costs","paliwo","vehicles","serwis","rent","analizy","docs","imi","sprawy","chat","gps"],
   podglad:    ["dashboard","frachty","vehicles","serwis","analizy","docs","imi","chat"],
   kierowca:   ["driver"],  // kierowca widzi TYLKO swój panel
 };
@@ -2847,6 +2848,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 <NavBtn ctx={navCtx} id="dashboard" label="Przegląd" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></svg>} />
                 <NavBtn ctx={navCtx} id="frachty" label="Frachty" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 17V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a1 1 0 0 0 1 1h1.5"/><path d="M13 8h4l4 4v4h-1.5"/><circle cx="7.5" cy="17.5" r="2.5"/><circle cx="17" cy="17.5" r="2.5"/><path d="M10 17.5h4.5"/></svg>} />
                 <NavBtn ctx={navCtx} id="kalkulator" label="Kalkulator tras" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="10" r="3"/><path d="M12 2a8 8 0 0 0-8 8c0 5.4 8 12 8 12s8-6.6 8-12a8 8 0 0 0-8-8z"/></svg>} />
+                <NavBtn ctx={navCtx} id="planer" label="Planer załadunku" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg>} />
                 <NavBtn ctx={navCtx} id="fv" label="Faktury sprzedaży" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 8h6"/><path d="M14 12c0-1.5-3-1.5-3 0s3 1.5 3 0"/><path d="M9 17h3"/></svg>} />
                 <NavBtn ctx={navCtx} id="costs" label="Koszty" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="13" rx="2.5"/><path d="M2 10h20"/><path d="M6 15h4"/></svg>} />
                 <NavBtn ctx={navCtx} id="paliwo" label="Paliwo" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/><path d="M4 8h12"/><path d="M18 8v9a2 2 0 0 0 2 2 2 2 0 0 0 2-2V9l-3-4"/></svg>} />
@@ -4166,6 +4168,11 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 }
               }}
             />
+          )}
+          {tab === "planer" && canSeeTab("planer") && (
+            <Suspense fallback={<div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-sm text-gray-500">📦 Ładowanie planera załadunku…</div>}>
+              <PlanerZaladunku vehicles={vehicles} canEdit={canEdit} showToast={showToast} />
+            </Suspense>
           )}
           {tab === "kalkulator" && canSeeTab("kalkulator") && (
             <Suspense fallback={<div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-sm text-gray-500">🗺️ Ładowanie kalkulatora tras…</div>}>
@@ -9492,6 +9499,7 @@ const ASSIGNABLE_TABS = [
   { id: "dashboard",  label: "Przegląd",      icon: "📊" },
   { id: "frachty",    label: "Frachty",       icon: "🚛" },
   { id: "kalkulator", label: "Kalkulator tras", icon: "🗺️" },
+  { id: "planer",     label: "Planer załadunku", icon: "📦" },
   { id: "fv",         label: "Faktury sprzedaży", icon: "💰" },
   { id: "costs",      label: "Koszty",        icon: "💳" },
   { id: "paliwo",     label: "Paliwo",        icon: "⛽" },

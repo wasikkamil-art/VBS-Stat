@@ -173,6 +173,15 @@ service cloud.firestore {
     // KAŻDYM zleceniu, a dokument był wtedy na 83% limitu 1 MiB (dziś 32% — frachty
     // wyprowadzone do kolekcji — ale zasada „nowe dane nie idą do fleet/data" zostaje).
     // ═══════════════════════════════════════════════════════════════
+    // PLANER ZAŁADUNKU — dane techniczne osi per pojazd (rozstaw, naciski pustego auta,
+    // naciski dopuszczalne). Osobna kolekcja, bo nowe dane nie idą do `fleet/data`.
+    // Same plany załadunku NIE trafiają do bazy (wersja robocza żyje w przeglądarce).
+    match /planerAuta/{vehicleId} {
+      allow read: if canRead();
+      allow create, update: if canEdit();
+      allow delete: if isAdmin();
+    }
+
     match /planyTras/{frachtId} {
       allow read: if canRead();
       allow create, update: if canEdit();

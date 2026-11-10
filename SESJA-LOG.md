@@ -7651,3 +7651,36 @@ Repo **fox**, wszystko na produkcji (push robi user):
 - `433d9a0` ikona wskaźnika paliwa (`IkonaKorektor.jsx`) zamiast 🧮.
 
 ❌ Niesprawdzone na produkcji: zdejmowanie CMR (tylko DEMO), symulator (tylko DEMO).
+
+## 2026-11-10 cd.3 — FleetStat: planer załadunku 3D (nowa zakładka)
+
+Ustalenia usera (zmieniały zakres): automat + ręczna korekta · **tylko osobna zakładka** (bez przycisku
+we frachcie) · na start **sam PDF**, bez linku publicznego · reguły: piętrowanie, ładowność kg,
+kolejność rozładunku, rozkład na osie.
+
+- `src/utils/planerZaladunku.js` — silnik (czysta logika): parser wymiarów z `towarPalety`, układanie
+  z grawitacją i pełnym podparciem, kolejność R1 przy drzwiach, „cięższe nie na lżejszym", wolne miejsca
+  paletowe, naciski na osie. Testy: `diagnose_planer_zaladunku.mjs` (gitignored) — **793/793**.
+- `src/components/PlanerZaladunku.jsx` — zakładka „Planer załadunku" (lazy chunk 44 kB / 16 kB gzip):
+  auto z kartoteki (pola `dimensions` / `maxWeight`, przyczepa osobno), lista ładunku, wklejanie wymiarów,
+  wczytanie zlecenia PDF istniejącym parserem, scena three.js, przeciąganie sztuk, PDF przez `window.print`.
+- three.js ładowany **z CDN** (jsdelivr, wersja 0.160.0, dopiero po wejściu w zakładkę) — celowo nie przez
+  npm, bo `package-lock.json` ma niewyjaśnione zmiany i nie chciałem ich mieszać z nową zależnością.
+- Plan żyje w `localStorage` (wersja robocza). Do bazy idą tylko dane osi: nowa kolekcja
+  `planerAuta/{vehicleId}` (reguły: odczyt każdy zalogowany, zapis admin/dyspozytor).
+- Zakładka `planer` w domyślnych uprawnieniach admina i dyspozytora + na liście do przyznawania.
+  ⚠️ Użytkownik z jawną listą `allowedTabs` jej NIE zobaczy, dopóki user jej nie przyzna.
+
+🐛 Dwa błędy złapane dopiero przy odpaleniu, nie w przeglądzie kodu:
+- `img.decode()` w ukrytym poddrzewie potrafi nie rozstrzygnąć się nigdy → okno druku nie otwierało się.
+  Zamienione na czekanie na `load` z limitem 1,5 s.
+- flaga „scena gotowa" jako boolean: po ponownym postawieniu sceny efekty jej nie wypełniały (pusta paka).
+  Zamieniona na licznik.
+
+✅ Sprawdzone w atrapie `podglad/planer` (auta TESTOWE, zapis wyłączony): układanie, piętrowanie,
+przekroczenie ładowności, przeciąganie z przyciąganiem do ściany, odtworzenie planu po odświeżeniu,
+dokument do druku (2 strony, strona 1 = 667 px przy limicie 726), naciski na osie (suma = masa własna + ładunek),
+auto bez wymiarów, przyczepa, szerokość telefonu bez poziomego przewijania.
+❌ **Niesprawdzone**: zakładka w prawdziwej aplikacji po zalogowaniu; wczytanie zlecenia z PDF-a (w atrapie
+AI wyłączone); prawdziwy wydruk do PDF (oglądany jako układ, nie plik z drukarki); zapis danych osi do
+Firestore; wymiary naszych aut — nie wiem, które pojazdy mają wypełnione pole „Wymiary".
