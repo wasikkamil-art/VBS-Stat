@@ -7749,3 +7749,9 @@ Dla nas najważniejsze są **miejsca paletowe 120×80** — mają być narysowan
   i przyczepy + wiersz „Razem zestaw" (palety max/wolne, waga z łączną ładownością)
 - LDM pokazany jako długość ładunku w metrach (z długości paki)
 Testy 850/850. Bus 8 miejsc / 4,2 m, przyczepa 16 miejsc / 6,4 m. ✅ Atrapa. ❌ Nie na produkcji.
+
+## 2026-11-10 cd.10 — Planer: pasek wagi nad widokiem 3D
+
+User: nad grafiką 3D waga dla auta i przyczepy — max / zajęte / wolne i procent. Dodany pasek na każdą
+przestrzeń (zielony, bursztynowy od 90%, czerwony przy przekroczeniu). ✅ Atrapa: 84% i 83% dla
+750/895 i 1750/2100 kg. ❌ Nie na produkcji.

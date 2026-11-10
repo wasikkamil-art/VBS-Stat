@@ -795,6 +795,11 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
                   <option value="pozycja">pozycji</option><option value="rozl">rozładunku</option>
                 </select></label>
             </div>
+            {przestrzenie.some(pr => sumy[pr.i]) && (
+              <div className="grid gap-2 mb-2" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+                {przestrzenie.map(pr => sumy[pr.i] && <PasekWagi key={pr.i} nazwa={zestaw ? pr.nazwa : (auto?.przestrzenie[0]?.nazwa || "Auto")} suma={sumy[pr.i]} />)}
+              </div>
+            )}
             <div ref={holderRef} className="rounded-xl overflow-hidden" style={{ height: 440, background: "#f1f5f9", position: "relative" }}>
               {!jestPaka && <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-600 p-6 text-center" style={{ zIndex: 1 }}>Wybierz auto albo wpisz wymiary paki.</div>}
               {blad3d && <div className="absolute inset-0 flex items-center justify-center text-sm p-6 text-center" style={{ zIndex: 1, color: "#b45309" }}>{blad3d}</div>}
@@ -1007,6 +1012,28 @@ function OsieWiersz({ osie, zestaw = false }) {
     <div style={{ marginTop: 4 }}>
       <b>Osie pojazdu (przód / tył):</b> {fmt(osie.przod)} / {fmt(osie.tyl)} kg, dopuszczalne {fmt(osie.dopPrzod)} / {fmt(osie.dopTyl)} kg
       {osie.przodPrzekroczony || osie.tylPrzekroczony ? " — PRZEKROCZONE" : ""}{zestaw ? " (bez nacisku dyszla przyczepy)" : ""}
+    </div>
+  );
+}
+
+/** Pasek wagi nad widokiem 3D: max / zajęte / wolne i procent wykorzystania ładowności. */
+function PasekWagi({ nazwa, suma }) {
+  const max = suma.maxWaga, pct = max ? (suma.waga / max) * 100 : null;
+  const zle = suma.przeladowane, kolor = zle ? "#b91c1c" : pct != null && pct >= 90 ? "#b45309" : "#15803d";
+  return (
+    <div className="p-2.5 rounded-xl" style={{ background: zle ? "#fee2e2" : "#f9fafb" }}>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs font-bold text-gray-900">{nazwa}</span>
+        <span className="text-sm font-bold" style={{ color: max ? kolor : "#4b5563" }}>{pct != null ? `${fmt(pct)}%` : "—"}</span>
+      </div>
+      <div className="h-2 rounded-full my-1.5" style={{ background: "#e5e7eb" }} role="img" aria-label={pct != null ? `Wykorzystanie ładowności ${fmt(pct)}%` : "Brak ładowności"}>
+        <div className="h-2 rounded-full" style={{ width: `${Math.min(100, pct || 0)}%`, background: kolor }} />
+      </div>
+      <div className="text-xs text-gray-700">
+        {max ? <>max <b>{fmt(max)} kg</b> · zajęte <b>{fmt(suma.waga)} kg</b> · {zle ? <b style={{ color: "#991b1b" }}>przekroczone o {fmt(-suma.zapasWagi)} kg</b> : <>wolne <b>{fmt(suma.zapasWagi)} kg</b></>}</>
+          : <>zajęte <b>{fmt(suma.waga)} kg</b> · brak ładowności w kartotece</>}
+        {suma.bezWagi > 0 && <span style={{ color: "#b45309" }}> · {suma.bezWagi} szt. bez wagi</span>}
+      </div>
     </div>
   );
 }
