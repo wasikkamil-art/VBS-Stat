@@ -15,7 +15,7 @@ import { db } from "../firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import ZlecenieUploadBtn from "./ZlecenieUploadBtn";
 import {
-  parsujWymiaryPaki, parsujPalety, rozwinPozycje, uloz, sprawdzMiejsce, podsumowanie, naciskiOsi,
+  parsujWymiaryPaki, parsujPalety, rozwinPozycje, ulozZestaw, sprawdzMiejsce, podsumowanie, naciskiOsi,
   ostrzezeniaUkladu, przyciagnij, KOLORY_ROZL, TYPY_PALET,
 } from "../utils/planerZaladunku";
 
@@ -26,6 +26,8 @@ const zaladujThree = () => (threePromise ||= import(/* @vite-ignore */ THREE_URL
 const LS_KEY = "fleetstat.planerZaladunku.v1";
 const PALETA = ["#2563eb", "#16a34a", "#d97706", "#9333ea", "#dc2626", "#0891b2", "#be185d", "#4d7c0f", "#b45309", "#475569"];
 const S = 0.01; // cm → jednostki sceny (metry)
+const ODSTEP = 130; // cm między autem a przyczepą w scenie (dyszel)
+const PUSTA_PAKA = { dl: "", sz: "", wys: "", maxWaga: "" };
 const nowyId = () => Math.random().toString(36).slice(2, 9);
 const pustaPozycja = (extra = {}) => ({ id: nowyId(), nazwa: "", dl: "", sz: "", wys: "", szt: 1, waga: "", pietrowanie: false, obrot: true, rozl: 1, uwagi: [], ...extra });
 const fmt = (n, d = 0) => (Number.isFinite(n) ? n.toLocaleString("pl-PL", { minimumFractionDigits: d, maximumFractionDigits: d }) : "—");
@@ -82,7 +84,9 @@ function Rzut({ paka, ulozone, kolor, os }) {
 export default function PlanerZaladunku({ vehicles = [], canEdit = false, showToast = () => {} }) {
   const [start] = useState(wczytajStan);
   const [autoKey, setAutoKey] = useState(start.autoKey || "");
-  const [pakaTxt, setPakaTxt] = useState(start.pakaTxt || { dl: "", sz: "", wys: "", maxWaga: "" });
+  // Jedna pozycja na przestrzeń ładunkową: samo auto = 1, auto + przyczepa = 2.
+  const [pakiTxt, setPakiTxt] = useState(Array.isArray(start.pakiTxt) && start.pakiTxt.length ? start.pakiTxt : [start.pakaTxt || PUSTA_PAKA]);
+  const [najpierw, setNajpierw] = useState(start.najpierw === 1 ? 1 : 0);
   const [pozycje, setPozycje] = useState(Array.isArray(start.pozycje) ? start.pozycje : []);
   const [reczne, setReczne] = useState(start.reczne || {});
   const [tryb, setTryb] = useState(start.tryb || "podloga");
@@ -99,13 +103,17 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
   const [gotowe3d, setGotowe3d] = useState(0); // licznik, nie flaga: każde postawienie sceny od nowa musi ją też od nowa wypełnić
   const [uploadKey, setUploadKey] = useState(0);
 
-  // ── Auta z kartoteki: pojazd i (osobno) przyczepa ──
+  // ── Auta z kartoteki. Pojazd z przyczepą to JEDEN zestaw o dwóch przestrzeniach ładunkowych. ──
   const auta = useMemo(() => {
     const out = [];
     for (const v of vehicles || []) {
       if (!v?.id || v.archived) continue;
-      out.push({ key: v.id, vehicleId: v.id, etykieta: [v.plate, v.brand].filter(Boolean).join(" · "), wym: parsujWymiaryPaki(v.dimensions), maxWaga: v.maxWeight || "", zrodlo: v.dimensions || "" });
-      if (v.plate2) out.push({ key: `${v.id}:2`, vehicleId: null, etykieta: `${v.plate2} · przyczepa (${v.plate})`, wym: parsujWymiaryPaki(v.dimensions2), maxWaga: v.maxWeight2 || "", zrodlo: v.dimensions2 || "" });
+      const przestrzenie = [{ nazwa: v.plate || "Auto", wym: parsujWymiaryPaki(v.dimensions), maxWaga: v.maxWeight || "", zrodlo: v.dimensions || "" }];
+      if (v.plate2) przestrzenie.push({ nazwa: `${v.plate2} (przyczepa)`, wym: parsujWymiaryPaki(v.dimensions2), maxWaga: v.maxWeight2 || "", zrodlo: v.dimensions2 || "" });
+      out.push({
+        key: v.id, vehicleId: v.id, przestrzenie,
+        etykieta: v.plate2 ? `${v.plate} + ${v.plate2} · ${v.type || "zestaw z przyczepą"}` : [v.plate, v.brand].filter(Boolean).join(" · "),
+      });
     }
     return out;
   }, [vehicles]);
@@ -115,7 +123,7 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
   const wybierzAuto = (key) => {
     setAutoKey(key);
     const a = auta.find(x => x.key === key);
-    setPakaTxt(a ? { dl: a.wym?.dl ?? "", sz: a.wym?.sz ?? "", wys: a.wym?.wys ?? "", maxWaga: a.maxWaga ?? "" } : { dl: "", sz: "", wys: "", maxWaga: "" });
+    setPakiTxt(a ? a.przestrzenie.map(pr => ({ dl: pr.wym?.dl ?? "", sz: pr.wym?.sz ?? "", wys: pr.wym?.wys ?? "", maxWaga: pr.maxWaga ?? "" })) : [PUSTA_PAKA]);
     setReczne({});
     setWybrana(null);
     setTech({}); setTechZapis(""); // dane osi należą do auta — nowe auto zaczyna od pustych
@@ -144,28 +152,37 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
     }
   };
 
-  // ── Paka i układ ──
-  const paka = useMemo(() => {
+  // ── Przestrzenie ładunkowe i układ ──
+  const przestrzenie = useMemo(() => {
     const n = (v) => Number(String(v ?? "").replace(",", "."));
-    const p = { dl: n(pakaTxt.dl), sz: n(pakaTxt.sz), wys: n(pakaTxt.wys) };
-    return p.dl > 0 && p.sz > 0 && p.wys > 0 ? p : null;
-  }, [pakaTxt.dl, pakaTxt.sz, pakaTxt.wys]);
-  const maxWaga = Number(String(pakaTxt.maxWaga ?? "").replace(",", ".")) || null;
+    const lista = pakiTxt.map((t, i) => {
+      const pk = { dl: n(t.dl), sz: n(t.sz), wys: n(t.wys) };
+      return { i, nazwa: auto?.przestrzenie[i]?.nazwa || (i ? "Przyczepa" : "Auto"), paka: pk.dl > 0 && pk.sz > 0 && pk.wys > 0 ? pk : null, maxWaga: n(t.maxWaga) || null, x0: 0 };
+    });
+    // Położenie w scenie: auto z przodu, przyczepa za nim, całość wyśrodkowana.
+    const zPaka = lista.filter(pr => pr.paka);
+    let x = -(zPaka.reduce((sum, pr) => sum + pr.paka.dl, 0) + ODSTEP * Math.max(0, zPaka.length - 1)) / 2;
+    for (const pr of zPaka) { pr.x0 = x; x += pr.paka.dl + ODSTEP; }
+    return lista;
+  }, [pakiTxt, auto]);
+  const zestaw = przestrzenie.length > 1;
+  const jestPaka = przestrzenie.some(pr => pr.paka);
 
   const { sztuki, braki } = useMemo(() => rozwinPozycje(pozycje), [pozycje]);
-  const wynik = useMemo(() => (paka ? uloz(paka, sztuki, { tryb, stale: reczne, kolejnosc }) : { ulozone: [], nieulozone: [], tryb }), [paka, sztuki, tryb, reczne, kolejnosc]);
+  const wynik = useMemo(() => ulozZestaw(przestrzenie, sztuki, { tryb, stale: reczne, kolejnosc, najpierw }), [przestrzenie, sztuki, tryb, reczne, kolejnosc, najpierw]);
   const { ulozone, nieulozone } = wynik;
-  const suma = useMemo(() => (paka ? podsumowanie(paka, ulozone, nieulozone, maxWaga) : null), [paka, ulozone, nieulozone, maxWaga]);
-  const osie = useMemo(() => naciskiOsi(tech, ulozone), [tech, ulozone]);
-  const ostrzezenia = useMemo(() => (paka ? ostrzezeniaUkladu(paka, ulozone, { kolejnosc }) : []), [paka, ulozone, kolejnosc]);
+  const sumy = useMemo(() => przestrzenie.map(pr => (pr.paka ? podsumowanie(pr.paka, ulozone.filter(s => s.p === pr.i), [], pr.maxWaga) : null)), [przestrzenie, ulozone]);
+  // Osie liczymy dla pojazdu (przestrzeń 0). Nacisku dyszla przyczepy na hak NIE uwzględniamy.
+  const osie = useMemo(() => naciskiOsi(tech, ulozone.filter(s => s.p === 0)), [tech, ulozone]);
+  const ostrzezenia = useMemo(() => przestrzenie.flatMap(pr => (pr.paka ? ostrzezeniaUkladu(pr.paka, ulozone.filter(s => s.p === pr.i), { kolejnosc }) : [])), [przestrzenie, ulozone, kolejnosc]);
   const indeksPozycji = useMemo(() => new Map(pozycje.map((p, i) => [p.id, i])), [pozycje]);
   const kolor = useCallback((s) => kolorSztuki(s, kolorWg, indeksPozycji), [kolorWg, indeksPozycji]);
   const saRecze = Object.keys(reczne).length > 0;
   const wieleRozl = pozycje.some(p => Number(p.rozl) > 1);
 
   useEffect(() => {
-    try { localStorage.setItem(LS_KEY, JSON.stringify({ autoKey, pakaTxt, pozycje, reczne, tryb, kolejnosc, naglowek, kolorWg })); } catch {}
-  }, [autoKey, pakaTxt, pozycje, reczne, tryb, kolejnosc, naglowek, kolorWg]);
+    try { localStorage.setItem(LS_KEY, JSON.stringify({ autoKey, pakiTxt, najpierw, pozycje, reczne, tryb, kolejnosc, naglowek, kolorWg })); } catch {}
+  }, [autoKey, pakiTxt, najpierw, pozycje, reczne, tryb, kolejnosc, naglowek, kolorWg]);
 
   // ── Edycja listy ładunku ──
   const zmien = (id, pole, wartosc) => setPozycje(l => l.map(p => (p.id === id ? { ...p, [pole]: wartosc } : p)));
@@ -188,25 +205,26 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
   // przestawiałby pozostałe sztuki i poprawianie byłoby gonieniem własnego ogona.
   const zamrozZ = useCallback((zmiana) => {
     const stan = {};
-    for (const s of ulozone) stan[s.id] = { x: s.x, y: s.y, z: s.z, obr: !!s.obr };
+    for (const s of ulozone) stan[s.id] = { x: s.x, y: s.y, z: s.z, obr: !!s.obr, p: s.p };
     setReczne({ ...stan, ...zmiana });
   }, [ulozone]);
 
   const obrocWybrana = () => {
     const s = ulozone.find(u => u.id === wybrana);
+    const paka = s ? przestrzenie[s.p]?.paka : null;
     if (!s || !paka) return;
-    const inne = ulozone.filter(u => u.id !== s.id);
+    const inne = ulozone.filter(u => u.id !== s.id && u.p === s.p);
     const p = przyciagnij(paka, inne, s.id, s.x, s.y, s.sz, s.dl, 0);
     const r = sprawdzMiejsce(paka, inne, s, p.x, p.y, s.sz, s.dl, { twarde: false, kolejnosc });
     if (!r.ok) { showToast("⚠️ Po obrocie sztuka się tu nie mieści (" + r.powod + ")"); return; }
-    zamrozZ({ [s.id]: { x: p.x, y: p.y, z: r.z, obr: !s.obr } });
+    zamrozZ({ [s.id]: { x: p.x, y: p.y, z: r.z, obr: !s.obr, p: s.p } });
   };
 
   // ════════════════════════ SCENA 3D ════════════════════════
   const holderRef = useRef(null);
   const g = useRef({}); // THREE, renderer, scene, camera, grupa, orbit, meshe
-  const danePrzeciagania = useRef({ paka, ulozone, kolejnosc, zamrozZ });
-  useEffect(() => { danePrzeciagania.current = { paka, ulozone, kolejnosc, zamrozZ }; }, [paka, ulozone, kolejnosc, zamrozZ]);
+  const danePrzeciagania = useRef({ przestrzenie, ulozone, kolejnosc, zamrozZ });
+  useEffect(() => { danePrzeciagania.current = { przestrzenie, ulozone, kolejnosc, zamrozZ }; }, [przestrzenie, ulozone, kolejnosc, zamrozZ]);
 
   const rysuj = useCallback(() => {
     const c = g.current;
@@ -286,18 +304,20 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
         ustawMysz(e);
         const pkt = new THREE.Vector3();
         if (!ray.ray.intersectPlane(akcja.plaszczyzna, pkt)) return;
-        const { paka: pk, ulozone: ul, kolejnosc: kol } = danePrzeciagania.current;
+        const { przestrzenie: prz, ulozone: ul, kolejnosc: kol } = danePrzeciagania.current;
         const s = ul.find(u => u.id === akcja.id);
+        const pr = s ? prz[s.p] : null, pk = pr?.paka;
         if (!s || !pk) return;
-        const inne = ul.filter(u => u.id !== s.id);
-        const surX = (pkt.x + akcja.dx) / S + pk.dl / 2 - s.dl / 2, surY = (pkt.z + akcja.dz) / S + pk.sz / 2 - s.sz / 2;
+        // Sztukę przesuwamy w obrębie jej przestrzeni; między autem a przyczepą przenosi pole „gdzie" przy pozycji.
+        const inne = ul.filter(u => u.id !== s.id && u.p === s.p);
+        const surX = (pkt.x + akcja.dx) / S - pr.x0 - s.dl / 2, surY = (pkt.z + akcja.dz) / S + pk.sz / 2 - s.sz / 2;
         const p = przyciagnij(pk, inne, s.id, surX, surY, s.dl, s.sz);
         const r = sprawdzMiejsce(pk, inne, s, p.x, p.y, s.dl, s.sz, { twarde: false, kolejnosc: kol });
         const z = r.z ?? 0;
-        akcja.mesh.position.set((p.x + s.dl / 2 - pk.dl / 2) * S, (z + s.wys / 2) * S, (p.y + s.sz / 2 - pk.sz / 2) * S);
+        akcja.mesh.position.set((pr.x0 + p.x + s.dl / 2) * S, (z + s.wys / 2) * S, (p.y + s.sz / 2 - pk.sz / 2) * S);
         akcja.mesh.material.emissive.set(r.ok ? 0x000000 : 0xb91c1c);
         akcja.mesh.material.opacity = r.ok ? 1 : 0.75;
-        akcja.wynik = r.ok ? { x: p.x, y: p.y, z, obr: !!s.obr } : null;
+        akcja.wynik = r.ok ? { x: p.x, y: p.y, z, obr: !!s.obr, p: s.p } : null;
         rysuj();
       };
       const up = () => {
@@ -325,14 +345,17 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
     };
   }, [rysuj]);
 
-  // Kamera dopasowuje się do paki tylko przy zmianie jej wymiarów (nie przy każdym ruchu sztuki).
+  // Kamera dopasowuje się tylko przy zmianie wymiarów (nie przy każdym ruchu sztuki).
   useEffect(() => {
     const c = g.current;
-    if (!gotowe3d || !c.orbit || !paka) return;
-    c.orbit.cel = { x: 0, y: paka.wys * S * 0.35, z: 0 };
-    c.orbit.r = Math.max(paka.dl, paka.sz * 1.6, paka.wys * 1.6) * S * 1.75;
+    const zPaka = przestrzenie.filter(pr => pr.paka);
+    if (!gotowe3d || !c.orbit || !zPaka.length) return;
+    const dl = zPaka.reduce((sum, pr) => sum + pr.paka.dl, 0) + ODSTEP * (zPaka.length - 1);
+    const sz = Math.max(...zPaka.map(pr => pr.paka.sz)), wys = Math.max(...zPaka.map(pr => pr.paka.wys));
+    c.orbit.cel = { x: 0, y: wys * S * 0.35, z: 0 };
+    c.orbit.r = Math.max(dl, sz * 1.6, wys * 1.6) * S * (zPaka.length > 1 ? 1.45 : 1.75);
     rysuj();
-  }, [gotowe3d, paka, rysuj]);
+  }, [gotowe3d, przestrzenie, rysuj]);
 
   useEffect(() => {
     const c = g.current;
@@ -348,47 +371,61 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
     const { THREE, grupa } = c;
     const zwolnij = (o) => { o.geometry?.dispose?.(); if (o.material) { o.material.map?.dispose?.(); o.material.dispose?.(); } };
     grupa.traverse(zwolnij); grupa.clear(); c.meshe = new Map();
-    if (paka) {
-      const L = paka.dl * S, W = paka.sz * S, H = paka.wys * S;
+    const napis = (tekst, x, y, z, skala = 0.5, tlo = null) => {
+      const cv = document.createElement("canvas");
+      const miara = cv.getContext("2d"); miara.font = "bold 56px system-ui, sans-serif";
+      cv.width = Math.max(256, Math.ceil(miara.measureText(tekst).width) + 48); cv.height = 96;
+      const ctx = cv.getContext("2d");
+      if (tlo) { ctx.fillStyle = tlo; ctx.beginPath(); ctx.roundRect(4, 8, cv.width - 8, 80, 18); ctx.fill(); }
+      ctx.font = "bold 56px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillStyle = tlo ? "#fff" : "#0f172a"; ctx.fillText(tekst, cv.width / 2, 50);
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: !!tlo, transparent: true }));
+      sp.scale.set(skala * cv.width / 96, skala, 1); sp.position.set(x, y, z); grupa.add(sp);
+    };
+    for (const pr of przestrzenie) {
+      const paka = pr.paka;
+      if (!paka) continue;
+      const L = paka.dl * S, W = paka.sz * S, H = paka.wys * S, cx = (pr.x0 + paka.dl / 2) * S;
       const podloga = new THREE.Mesh(new THREE.BoxGeometry(L, 0.04, W), new THREE.MeshLambertMaterial({ color: 0xcbd5e1 }));
-      podloga.position.y = -0.02; grupa.add(podloga);
+      podloga.position.set(cx, -0.02, 0); grupa.add(podloga);
       const obrys = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(L, H, W)), new THREE.LineBasicMaterial({ color: 0x334155 }));
-      obrys.position.y = H / 2; grupa.add(obrys);
+      obrys.position.set(cx, H / 2, 0); grupa.add(obrys);
       const sciana = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshBasicMaterial({ color: 0x94a3b8, transparent: true, opacity: 0.35, side: THREE.DoubleSide }));
-      sciana.rotation.y = Math.PI / 2; sciana.position.set(-L / 2, H / 2, 0); grupa.add(sciana);
-      // kabina — tylko żeby było widać, gdzie przód
-      const kab = new THREE.Mesh(new THREE.BoxGeometry(Math.min(1.6, L * 0.3), H * 0.8, W), new THREE.MeshLambertMaterial({ color: 0x475569 }));
-      kab.position.set(-L / 2 - Math.min(1.6, L * 0.3) / 2 - 0.05, H * 0.4, 0); grupa.add(kab);
+      sciana.rotation.y = Math.PI / 2; sciana.position.set(cx - L / 2, H / 2, 0); grupa.add(sciana);
+      if (pr.i === 0) {
+        // kabina — tylko żeby było widać, gdzie przód
+        const kd = Math.min(1.6, L * 0.3);
+        const kab = new THREE.Mesh(new THREE.BoxGeometry(kd, H * 0.8, W), new THREE.MeshLambertMaterial({ color: 0x475569 }));
+        kab.position.set(cx - L / 2 - kd / 2 - 0.05, H * 0.4, 0); grupa.add(kab);
+        napis("KABINA", cx - L / 2 - 0.5, H * 0.8 + 0.25, 0, 0.3);
+      } else {
+        // dyszel przyczepy
+        const dyszel = new THREE.Mesh(new THREE.BoxGeometry(ODSTEP * S, 0.06, 0.12), new THREE.MeshLambertMaterial({ color: 0x475569 }));
+        dyszel.position.set((pr.x0 - ODSTEP / 2) * S, 0.2, 0); grupa.add(dyszel);
+      }
       // siatka co 1 m
       const pkt = [];
-      for (let x = 100; x < paka.dl; x += 100) pkt.push(x * S - L / 2, 0.002, -W / 2, x * S - L / 2, 0.002, W / 2);
+      for (let x = 100; x < paka.dl; x += 100) pkt.push((pr.x0 + x) * S, 0.002, -W / 2, (pr.x0 + x) * S, 0.002, W / 2);
       if (pkt.length) { const gg = new THREE.BufferGeometry(); gg.setAttribute("position", new THREE.Float32BufferAttribute(pkt, 3)); grupa.add(new THREE.LineSegments(gg, new THREE.LineBasicMaterial({ color: 0x94a3b8 }))); }
-      const napis = (tekst, x, y, z, skala = 0.5, tlo = null) => {
-        const cv = document.createElement("canvas"); cv.width = 256; cv.height = 96;
-        const ctx = cv.getContext("2d");
-        if (tlo) { ctx.fillStyle = tlo; ctx.beginPath(); ctx.roundRect(4, 8, 248, 80, 18); ctx.fill(); }
-        ctx.font = "bold 56px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.fillStyle = tlo ? "#fff" : "#0f172a"; ctx.fillText(tekst, 128, 50);
-        const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: !!tlo, transparent: true }));
-        sp.scale.set(skala * 2.67, skala, 1); sp.position.set(x, y, z); grupa.add(sp);
-      };
-      napis("DRZWI", L / 2 + 0.35, 0.15, 0, 0.3);
-      napis("KABINA", -L / 2 - 0.5, H * 0.8 + 0.25, 0, 0.3);
-      for (const s of ulozone) {
-        const m = new THREE.Mesh(
-          new THREE.BoxGeometry(Math.max(0.01, s.dl * S - 0.012), Math.max(0.01, s.wys * S - 0.006), Math.max(0.01, s.sz * S - 0.012)),
-          new THREE.MeshLambertMaterial({ color: kolor(s), transparent: true, opacity: 1 }));
-        m.position.set((s.x + s.dl / 2 - paka.dl / 2) * S, (s.z + s.wys / 2) * S, (s.y + s.sz / 2 - paka.sz / 2) * S);
-        m.userData.id = s.id;
-        const kr = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), new THREE.LineBasicMaterial({ color: 0x0f172a }));
-        m.add(kr); m.userData.kr = kr;
-        grupa.add(m); c.meshe.set(s.id, m);
-        napis(String(s.nr) + (wieleRozl ? ` R${s.rozl}` : ""), m.position.x, (s.z + s.wys) * S + 0.14, m.position.z, 0.26, "rgba(15,23,42,0.88)");
-      }
+      napis("DRZWI", cx + L / 2 + 0.3, 0.15, W / 2 + 0.25, 0.26);
+      if (zestaw) napis(pr.nazwa, cx, H + 0.32, 0, 0.3, "rgba(51,65,85,0.92)");
+    }
+    for (const s of ulozone) {
+      const pr = przestrzenie[s.p], paka = pr?.paka;
+      if (!paka) continue;
+      const m = new THREE.Mesh(
+        new THREE.BoxGeometry(Math.max(0.01, s.dl * S - 0.012), Math.max(0.01, s.wys * S - 0.006), Math.max(0.01, s.sz * S - 0.012)),
+        new THREE.MeshLambertMaterial({ color: kolor(s), transparent: true, opacity: 1 }));
+      m.position.set((pr.x0 + s.x + s.dl / 2) * S, (s.z + s.wys / 2) * S, (s.y + s.sz / 2 - paka.sz / 2) * S);
+      m.userData.id = s.id;
+      const kr = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), new THREE.LineBasicMaterial({ color: 0x0f172a }));
+      m.add(kr); m.userData.kr = kr;
+      grupa.add(m); c.meshe.set(s.id, m);
+      napis(String(s.nr) + (wieleRozl ? ` R${s.rozl}` : ""), m.position.x, (s.z + s.wys) * S + 0.14, m.position.z, 0.26, "rgba(15,23,42,0.88)");
     }
     c.podswietl?.();
     rysuj();
-  }, [gotowe3d, paka, ulozone, kolor, wieleRozl, rysuj]);
+  }, [gotowe3d, przestrzenie, zestaw, ulozone, kolor, wieleRozl, rysuj]);
 
   // Podświetlenie wybranej sztuki NIE przebudowuje sceny — przebudowa w trakcie przeciągania
   // podmieniłaby mesh, który właśnie trzyma mysz.
@@ -443,7 +480,9 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
   };
 
   const wybranaSzt = ulozone.find(s => s.id === wybrana) || null;
-  const kolejnoscZaladunku = useMemo(() => [...ulozone].sort((a, b) => a.x - b.x || a.z - b.z || a.y - b.y), [ulozone]);
+  const kolejnoscZaladunku = useMemo(() => [...ulozone].sort((a, b) => a.p - b.p || a.x - b.x || a.z - b.z || a.y - b.y), [ulozone]);
+  const zmienPake = (i, k, v) => setPakiTxt(l => l.map((t, j) => (j === i ? { ...t, [k]: v } : t)));
+  const brakWymiarow = auto ? auto.przestrzenie.filter(pr => !pr.wym) : [];
   const dzis = new Date().toLocaleDateString("pl-PL");
   const pozycjaPo = (id) => pozycje.find(p => p.id === id);
 
@@ -475,7 +514,7 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
         </div>
         <div className="flex gap-2">
           <button onClick={wyczysc} className="px-3 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50">Nowy plan</button>
-          <button onClick={drukuj} disabled={!paka || !ulozone.length}
+          <button onClick={drukuj} disabled={!jestPaka || !ulozone.length}
             className="px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40" style={{ background: "#111827" }}>
             Pobierz PDF
           </button>
@@ -489,19 +528,24 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
             <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-3">1 · Auto</div>
             <select value={autoKey} onChange={e => wybierzAuto(e.target.value)} className={inp} aria-label="Auto">
               <option value="">Inne auto — wymiary wpisane ręcznie</option>
-              {auta.map(a => <option key={a.key} value={a.key}>{a.etykieta}{a.wym ? ` — ${a.wym.dl}×${a.wym.sz}×${a.wym.wys}` : " — brak wymiarów w kartotece"}</option>)}
+              {auta.map(a => <option key={a.key} value={a.key}>{a.etykieta}{a.przestrzenie.every(pr => pr.wym) ? "" : " — brak wymiarów w kartotece"}</option>)}
             </select>
-            {auto && !auto.wym && (
+            {brakWymiarow.length > 0 && (
               <p className="text-xs mt-2" style={{ color: "#b45309" }}>
-                To auto nie ma wymiarów paki w kartotece{auto.zrodlo ? ` (wpisano: „${auto.zrodlo}")` : ""}. Wpisz je poniżej na potrzeby tego planu, a na stałe — w zakładce Pojazdy.
+                Brak wymiarów paki w kartotece: {brakWymiarow.map(pr => pr.nazwa + (pr.zrodlo ? ` (wpisano: „${pr.zrodlo}")` : "")).join(", ")}. Wpisz je poniżej na potrzeby tego planu, a na stałe — w zakładce Pojazdy.
               </p>
             )}
-            <div className="grid grid-cols-4 gap-2 mt-3">
-              {[["dl", "Długość (cm)"], ["sz", "Szerokość (cm)"], ["wys", "Wysokość (cm)"], ["maxWaga", "Ładowność (kg)"]].map(([k, l]) => (
-                <label key={k}><span className={lbl}>{l}</span>
-                  <input className={inp} inputMode="decimal" value={pakaTxt[k] ?? ""} onChange={e => setPakaTxt(p => ({ ...p, [k]: e.target.value }))} /></label>
-              ))}
-            </div>
+            {przestrzenie.map(pr => (
+              <div key={pr.i} className="mt-3">
+                {zestaw && <div className="text-xs font-semibold text-gray-800 mb-1">{pr.nazwa}</div>}
+                <div className="grid grid-cols-4 gap-2">
+                  {[["dl", "Długość (cm)"], ["sz", "Szerokość (cm)"], ["wys", "Wysokość (cm)"], ["maxWaga", "Ładowność (kg)"]].map(([k, l]) => (
+                    <label key={k}><span className={lbl}>{l}</span>
+                      <input className={inp} inputMode="decimal" value={pakiTxt[pr.i]?.[k] ?? ""} onChange={e => zmienPake(pr.i, k, e.target.value)} aria-label={`${l} — ${pr.nazwa}`} /></label>
+                  ))}
+                </div>
+              </div>
+            ))}
             <button onClick={() => setTechOtwarte(o => !o)} className="text-xs font-medium text-gray-700 underline mt-3">
               {techOtwarte ? "Ukryj dane osi" : "Dane do nacisków na osie"}{osie.brak ? " (nieuzupełnione)" : ""}
             </button>
@@ -562,6 +606,13 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
                         <select value={p.rozl} onChange={e => zmien(p.id, "rozl", Number(e.target.value))} className="px-1.5 py-0.5 rounded border border-gray-200 bg-white text-xs">
                           {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>R{n}</option>)}
                         </select></label>
+                      {zestaw && (
+                        <label className="flex items-center gap-1.5">gdzie
+                          <select value={p.gdzie ?? ""} onChange={e => { zmien(p.id, "gdzie", e.target.value); setReczne({}); }} className="px-1.5 py-0.5 rounded border border-gray-200 bg-white text-xs" aria-label={`Gdzie załadować pozycję ${i + 1}`}>
+                            <option value="">automat</option>
+                            {przestrzenie.map(pr => <option key={pr.i} value={String(pr.i)}>{pr.nazwa}</option>)}
+                          </select></label>
+                      )}
                     </div>
                     {(p.uwagi || []).length > 0 && <div className="text-xs mt-1.5" style={{ color: "#b45309" }}>ⓘ {(p.uwagi || []).join(" · ")}</div>}
                   </div>
@@ -586,6 +637,16 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
                   style={tryb === k ? { background: "#111827", color: "#fff", borderColor: "#111827" } : { borderColor: "#e5e7eb", color: "#374151" }}>{l}</button>
               ))}
             </div>
+            {zestaw && (
+              <div className="flex flex-wrap items-center gap-2 mb-3 text-xs text-gray-700">
+                Automat ładuje najpierw:
+                {przestrzenie.map(pr => (
+                  <button key={pr.i} onClick={() => { setNajpierw(pr.i); setReczne({}); }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold border"
+                    style={najpierw === pr.i ? { background: "#111827", color: "#fff", borderColor: "#111827" } : { borderColor: "#e5e7eb", color: "#374151" }}>{pr.nazwa}</button>
+                ))}
+              </div>
+            )}
             <label className="flex items-center gap-2 text-sm text-gray-800 mb-3">
               <input type="checkbox" checked={kolejnosc} onChange={e => { setKolejnosc(e.target.checked); setReczne({}); }} />
               Pilnuj kolejności rozładunku (R1 przy drzwiach)
@@ -614,15 +675,15 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
                 </select></label>
             </div>
             <div ref={holderRef} className="rounded-xl overflow-hidden" style={{ height: 440, background: "#f1f5f9", position: "relative" }}>
-              {!paka && <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-600 p-6 text-center" style={{ zIndex: 1 }}>Wybierz auto albo wpisz wymiary paki.</div>}
+              {!jestPaka && <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-600 p-6 text-center" style={{ zIndex: 1 }}>Wybierz auto albo wpisz wymiary paki.</div>}
               {blad3d && <div className="absolute inset-0 flex items-center justify-center text-sm p-6 text-center" style={{ zIndex: 1, color: "#b45309" }}>{blad3d}</div>}
             </div>
             <p className="text-xs text-gray-600 mt-2">Przeciągnij tło — obrót widoku · kółko — zbliżenie · przeciągnij sztukę — przesunięcie (przyciąga do ścian i sąsiadów).</p>
             {wybranaSzt && (
               <div className="flex flex-wrap items-center gap-3 mt-2 p-2 rounded-lg bg-gray-50 text-xs text-gray-800">
-                <b>Poz. {wybranaSzt.nr}, szt. {wybranaSzt.lp}</b>
+                <b>Poz. {wybranaSzt.nr}, szt. {wybranaSzt.lp}{zestaw ? ` · ${przestrzenie[wybranaSzt.p]?.nazwa}` : ""}</b>
                 <span>{wybranaSzt.dl}×{wybranaSzt.sz}×{wybranaSzt.wys} cm</span>
-                <span>od kabiny {fmt(wybranaSzt.x)} cm · od prawej burty {fmt(wybranaSzt.y)} cm · {wybranaSzt.z > 0 ? `na wys. ${fmt(wybranaSzt.z)} cm` : "na podłodze"}</span>
+                <span>od przedniej ściany {fmt(wybranaSzt.x)} cm · od prawej burty {fmt(wybranaSzt.y)} cm · {wybranaSzt.z > 0 ? `na wys. ${fmt(wybranaSzt.z)} cm` : "na podłodze"}</span>
                 <button onClick={obrocWybrana} className="px-2 py-1 rounded-md border border-gray-300 font-semibold">Obróć 90°</button>
               </div>
             )}
@@ -634,7 +695,7 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
             )}
           </div>
 
-          {suma && (
+          {jestPaka && (
             <div className="bg-white rounded-2xl border border-gray-100 p-4">
               <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-3">Wynik</div>
               {(nieulozone.length > 0 || braki.length > 0) && (
@@ -644,22 +705,21 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
                 </div>
               )}
               {nieulozone.length === 0 && braki.length === 0 && ulozone.length > 0 && (
-                <div className="p-3 rounded-xl mb-3 text-sm font-semibold" style={{ background: "#dcfce7", color: "#14532d" }}>Cały ładunek mieści się na pace ({ulozone.length} szt.).</div>
+                <div className="p-3 rounded-xl mb-3 text-sm font-semibold" style={{ background: "#dcfce7", color: "#14532d" }}>
+                  Cały ładunek mieści się {zestaw ? "na zestawie" : "na pace"} ({ulozone.length} szt.{zestaw ? `: ${przestrzenie.map(pr => `${pr.nazwa} ${ulozone.filter(s => s.p === pr.i).length}`).join(", ")}` : ""}).
+                </div>
               )}
               {wynik.zmienionoTryb && <p className="text-xs mb-3" style={{ color: "#b45309" }}>Na samej podłodze ładunek się nie mieścił — program spiętrował go ciaśniej.</p>}
-              <div className="grid grid-cols-2 gap-3 text-sm" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
-                <Kafel t="Zajęta długość paki" w={`${fmt(suma.dlZajeta)} cm`} d={`wolne ${fmt(suma.dlWolna)} cm`} />
-                <Kafel t="Podłoga" w={`${fmt(suma.podlogaPct)}%`} d={`wolne ${fmt(suma.wolnaPodlogaM2, 1)} m²`} />
-                <Kafel t="Objętość" w={`${fmt(suma.objPct)}%`} d={`wolne ${fmt(suma.wolnaObjM3, 1)} m³`} />
-                <Kafel t="Wolne miejsca paletowe" w={String(suma.wolneEur)} d="europalety 120×80 na wolną podłogę" />
-                <Kafel t="Waga ładunku" w={suma.sztuk > 0 && suma.bezWagi === suma.sztuk ? "brak wag" : `${fmt(suma.waga)} kg`} zle={suma.przeladowane}
-                  d={suma.sztuk > 0 && suma.bezWagi === suma.sztuk ? "wpisz kg / szt. przy pozycjach" : suma.maxWaga ? (suma.przeladowane ? `PRZEKROCZONA o ${fmt(-suma.zapasWagi)} kg` : `zapas ${fmt(suma.zapasWagi)} kg z ${fmt(suma.maxWaga)}`) : "brak ładowności auta"} />
-                <Kafel t="Piętrowane" w={`${suma.pietrowanych} szt.`} d={`z ${suma.sztuk} ułożonych`} />
-              </div>
-              {suma.bezWagi > 0 && ulozone.length > 0 && <p className="text-xs mt-2" style={{ color: "#b45309" }}>{suma.bezWagi} szt. bez wagi — suma kg i naciski na osie są zaniżone.</p>}
+              {przestrzenie.map(pr => sumy[pr.i] && (
+                <div key={pr.i} className={zestaw ? "mb-4" : ""}>
+                  {zestaw && <div className="text-sm font-bold text-gray-900 mb-2">{pr.nazwa}</div>}
+                  <KafleSumy suma={sumy[pr.i]} />
+                </div>
+              ))}
+              {ulozone.some(s => !s.waga) && <p className="text-xs mt-2" style={{ color: "#b45309" }}>{ulozone.filter(s => !s.waga).length} szt. bez wagi — suma kg i naciski na osie są zaniżone{zestaw ? ", a automat nie pilnuje dla nich ładowności" : ""}.</p>}
 
               <div className="mt-4 pt-3 border-t border-gray-100">
-                <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Naciski na osie</div>
+                <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Naciski na osie{zestaw ? ` — ${przestrzenie[0].nazwa}` : ""}</div>
                 {osie.brak ? (
                   <p className="text-sm text-gray-600">Nie liczone — brakuje danych technicznych auta ({osie.brakuje.length} z 6 pól). Uzupełnij „Dane do nacisków na osie" w kroku 1.</p>
                 ) : (
@@ -668,6 +728,7 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
                     <Kafel t="Oś tylna" w={`${fmt(osie.tyl)} kg`} zle={osie.tylPrzekroczony} d={`${fmt(osie.tylPct)}% z ${fmt(osie.dopTyl)} kg`} />
                   </div>
                 )}
+                {zestaw && !osie.brak && <p className="text-xs mt-2" style={{ color: "#b45309" }}>Bez nacisku dyszla przyczepy na hak — realny nacisk na oś tylną jest wyższy.</p>}
               </div>
 
               {ostrzezenia.length > 0 && (
@@ -683,14 +744,17 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
 
       {/* ═══ DOKUMENT DO WYDRUKU (na ekranie ukryty; klonowany do portalu) ═══ */}
       <div id="planer-print" style={{ display: "none" }}>
-        {paka && suma && (
+        {jestPaka && (
           <div className="planer-doc">
             <div className="planer-strona">
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "2px solid #0f172a", paddingBottom: 6, marginBottom: 8 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <img src="/app-fleetstat.png" alt="FleetStat" style={{ height: 34 }} />
                   <div><h1>Plan załadunku</h1>
-                    <div style={{ color: "#475569" }}>{auto ? auto.etykieta : "Auto spoza kartoteki"} · paka {paka.dl}×{paka.sz}×{paka.wys} cm{maxWaga ? ` · ładowność ${fmt(maxWaga)} kg` : ""}</div></div>
+                    <div style={{ color: "#475569" }}>
+                      {auto ? auto.etykieta : "Auto spoza kartoteki"}
+                      {przestrzenie.filter(pr => pr.paka).map(pr => ` · ${zestaw ? pr.nazwa + ": " : "paka "}${pr.paka.dl}×${pr.paka.sz}×${pr.paka.wys} cm${pr.maxWaga ? `, ładowność ${fmt(pr.maxWaga)} kg` : ""}`).join("")}
+                    </div></div>
                 </div>
                 <div style={{ textAlign: "right", color: "#334155" }}>
                   {naglowek.nr && <div><b>Zlecenie:</b> {naglowek.nr}</div>}
@@ -704,51 +768,55 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
                   <img data-planer-3d alt="" style={{ width: "100%", height: "92mm", objectFit: "contain", background: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: 6, display: "block" }} />
                 </div>
                 <div>
-                  <h2>Z góry (kabina po lewej, drzwi po prawej)</h2>
-                  <Rzut paka={paka} ulozone={ulozone} kolor={kolor} os="gora" />
-                  <h2 style={{ marginTop: 8 }}>Z boku</h2>
-                  <Rzut paka={paka} ulozone={ulozone} kolor={kolor} os="bok" />
-                  <div style={{ color: "#475569", fontSize: 9, marginTop: 2 }}>Liczba = numer pozycji z tabeli · ↑ = sztuka stoi na innej</div>
+                  {!zestaw && przestrzenie[0].paka && <RzutyPrzestrzeni pr={przestrzenie[0]} ulozone={ulozone} kolor={kolor} />}
+                  {zestaw && przestrzenie.map(pr => sumy[pr.i] && <TabelaSumy key={pr.i} tytul={`Podsumowanie — ${pr.nazwa}`} suma={sumy[pr.i]} />)}
+                  {zestaw && <OsieWiersz osie={osie} zestaw />}
                 </div>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1.25fr 1fr", gap: 12, marginTop: 8 }}>
+              <div style={{ display: "grid", gridTemplateColumns: zestaw ? "1fr" : "1.25fr 1fr", gap: 12, marginTop: 8 }}>
                 <div>
                   <h2>Ładunek</h2>
                   <table>
-                    <thead><tr><th>Poz.</th><th>Nazwa</th><th>Wymiary cm</th><th>Szt.</th><th>kg/szt.</th><th>Piętr.</th><th>Rozł.</th></tr></thead>
+                    <thead><tr><th>Poz.</th><th>Nazwa</th><th>Wymiary cm</th><th>Szt.</th><th>kg/szt.</th><th>Piętr.</th><th>Rozł.</th>{zestaw && <th>Gdzie</th>}</tr></thead>
                     <tbody>
                       {pozycje.map((p, i) => (
                         <tr key={p.id}>
                           <td><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, marginRight: 4, background: kolorWg === "rozl" ? KOLORY_ROZL[p.rozl] : PALETA[i % PALETA.length] }} />{i + 1}</td>
                           <td>{p.nazwa || "—"}</td><td>{p.dl || "?"}×{p.sz || "?"}×{p.wys || "?"}</td><td>{p.szt}</td>
                           <td>{p.waga || "—"}</td><td>{p.pietrowanie ? "tak" : "nie"}</td><td>R{p.rozl}</td>
+                          {zestaw && <td>{przestrzenie.map(pr => { const n = ulozone.filter(s => s.pozycjaId === p.id && s.p === pr.i).length; return n ? `${pr.nazwa}: ${n} szt.` : null; }).filter(Boolean).join(" · ") || "—"}</td>}
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                  {nieulozone.length > 0 && <div style={{ marginTop: 4, fontWeight: 700, color: "#991b1b" }}>NIE MIEŚCI SIĘ: {nieulozone.length} szt. — {[...new Set(nieulozone.map(s => `poz. ${s.nr} (${s.powod})`))].join(", ")}</div>}
+                  {zestaw && naglowek.uwagi && <div style={{ marginTop: 6 }}><b>Uwagi:</b> {naglowek.uwagi}</div>}
                 </div>
-                <div>
-                  <h2>Podsumowanie</h2>
-                  <table><tbody>
-                    <tr><td>Ułożono</td><td><b>{suma.sztuk} szt.</b>{nieulozone.length ? ` · NIE MIEŚCI SIĘ ${nieulozone.length} szt.` : ""}</td></tr>
-                    <tr><td>Zajęta długość paki</td><td><b>{fmt(suma.dlZajeta)} cm</b> · wolne {fmt(suma.dlWolna)} cm</td></tr>
-                    <tr><td>Podłoga / objętość</td><td>{fmt(suma.podlogaPct)}% / {fmt(suma.objPct)}%</td></tr>
-                    <tr><td>Wolne miejsca paletowe</td><td>{suma.wolneEur} (europalety 120×80 na podłogę)</td></tr>
-                    <tr><td>Waga ładunku</td><td><b>{suma.sztuk > 0 && suma.bezWagi === suma.sztuk ? "nie podano" : `${fmt(suma.waga)} kg`}</b>{suma.maxWaga ? ` z ${fmt(suma.maxWaga)} kg` : ""}{suma.przeladowane ? " — PRZEKROCZONA" : ""}{suma.bezWagi ? ` (${suma.bezWagi} szt. bez wagi)` : ""}</td></tr>
-                    {!osie.brak && <tr><td>Osie: przód / tył</td><td>{fmt(osie.przod)} / {fmt(osie.tyl)} kg (dop. {fmt(osie.dopPrzod)} / {fmt(osie.dopTyl)}){osie.przodPrzekroczony || osie.tylPrzekroczony ? " — PRZEKROCZONE" : ""}</td></tr>}
-                  </tbody></table>
-                  {naglowek.uwagi && <div style={{ marginTop: 6 }}><b>Uwagi:</b> {naglowek.uwagi}</div>}
-                </div>
+                {!zestaw && (
+                  <div>
+                    {sumy[0] && <TabelaSumy tytul="Podsumowanie" suma={sumy[0]} />}
+                    <OsieWiersz osie={osie} />
+                    {naglowek.uwagi && <div style={{ marginTop: 6 }}><b>Uwagi:</b> {naglowek.uwagi}</div>}
+                  </div>
+                )}
               </div>
             </div>
+            {zestaw && (
+              <div className="planer-strona">
+                <h1 style={{ fontSize: 15, marginBottom: 6 }}>Rozmieszczenie — rzuty</h1>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                  {przestrzenie.filter(pr => pr.paka).map(pr => <div key={pr.i}><RzutyPrzestrzeni pr={pr} ulozone={ulozone} kolor={kolor} tytul={pr.nazwa} /></div>)}
+                </div>
+              </div>
+            )}
             <div className="planer-strona">
-              <h1 style={{ fontSize: 15, marginBottom: 6 }}>Kolejność załadunku — od kabiny do drzwi</h1>
+              <h1 style={{ fontSize: 15, marginBottom: 6 }}>Kolejność załadunku — od przedniej ściany do drzwi</h1>
               <table>
-                <thead><tr><th>Krok</th><th>Poz.</th><th>Nazwa</th><th>Wymiary cm (dł.×szer.×wys.)</th><th>Od kabiny</th><th>Od prawej burty</th><th>Poziom</th><th>Rozł.</th></tr></thead>
+                <thead><tr><th>Krok</th>{zestaw && <th>Gdzie</th>}<th>Poz.</th><th>Nazwa</th><th>Wymiary cm (dł.×szer.×wys.)</th><th>Od przedniej ściany</th><th>Od prawej burty</th><th>Poziom</th><th>Rozł.</th></tr></thead>
                 <tbody>
                   {kolejnoscZaladunku.map((s, i) => (
                     <tr key={s.id}>
-                      <td>{i + 1}</td><td>{s.nr}</td><td>{pozycjaPo(s.pozycjaId)?.nazwa || "—"}</td>
+                      <td>{i + 1}</td>{zestaw && <td>{przestrzenie[s.p]?.nazwa}</td>}<td>{s.nr}</td><td>{pozycjaPo(s.pozycjaId)?.nazwa || "—"}</td>
                       <td>{s.dl}×{s.sz}×{s.wys}{s.obr ? " (obrócona)" : ""}</td>
                       <td>{fmt(s.x)} cm</td><td>{fmt(s.y)} cm</td><td>{s.z > 0 ? `na wys. ${fmt(s.z)} cm` : "podłoga"}</td><td>R{s.rozl}</td>
                     </tr>
@@ -762,6 +830,61 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function RzutyPrzestrzeni({ pr, ulozone, kolor, tytul = "" }) {
+  const lista = ulozone.filter(s => s.p === pr.i);
+  return (
+    <>
+      <h2>{tytul ? `${tytul} — z` : "Z"} góry (przód po lewej, drzwi po prawej)</h2>
+      <Rzut paka={pr.paka} ulozone={lista} kolor={kolor} os="gora" />
+      <h2 style={{ marginTop: 8 }}>{tytul ? `${tytul} — z` : "Z"} boku</h2>
+      <Rzut paka={pr.paka} ulozone={lista} kolor={kolor} os="bok" />
+      <div style={{ color: "#475569", fontSize: 9, marginTop: 2 }}>Liczba = numer pozycji z tabeli · ↑ = sztuka stoi na innej</div>
+    </>
+  );
+}
+
+const wagaTxt = (suma) => (suma.sztuk > 0 && suma.bezWagi === suma.sztuk ? "nie podano" : `${fmt(suma.waga)} kg`);
+
+function TabelaSumy({ tytul, suma }) {
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <h2>{tytul}</h2>
+      <table><tbody>
+        <tr><td>Ułożono</td><td><b>{suma.sztuk} szt.</b></td></tr>
+        <tr><td>Zajęta długość paki</td><td><b>{fmt(suma.dlZajeta)} cm</b> · wolne {fmt(suma.dlWolna)} cm</td></tr>
+        <tr><td>Podłoga / objętość</td><td>{fmt(suma.podlogaPct)}% / {fmt(suma.objPct)}%</td></tr>
+        <tr><td>Wolne miejsca paletowe</td><td>{suma.wolneEur} (europalety 120×80 na podłogę)</td></tr>
+        <tr><td>Waga ładunku</td><td><b>{wagaTxt(suma)}</b>{suma.maxWaga ? ` z ${fmt(suma.maxWaga)} kg` : ""}{suma.przeladowane ? " — PRZEKROCZONA" : ""}{suma.bezWagi && suma.bezWagi !== suma.sztuk ? ` (${suma.bezWagi} szt. bez wagi)` : ""}</td></tr>
+      </tbody></table>
+    </div>
+  );
+}
+
+function OsieWiersz({ osie, zestaw = false }) {
+  if (osie.brak) return null;
+  return (
+    <div style={{ marginTop: 4 }}>
+      <b>Osie pojazdu (przód / tył):</b> {fmt(osie.przod)} / {fmt(osie.tyl)} kg, dopuszczalne {fmt(osie.dopPrzod)} / {fmt(osie.dopTyl)} kg
+      {osie.przodPrzekroczony || osie.tylPrzekroczony ? " — PRZEKROCZONE" : ""}{zestaw ? " (bez nacisku dyszla przyczepy)" : ""}
+    </div>
+  );
+}
+
+function KafleSumy({ suma }) {
+  const brakWag = suma.sztuk > 0 && suma.bezWagi === suma.sztuk;
+  return (
+    <div className="grid grid-cols-2 gap-3 text-sm" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
+      <Kafel t="Zajęta długość paki" w={`${fmt(suma.dlZajeta)} cm`} d={`wolne ${fmt(suma.dlWolna)} cm`} />
+      <Kafel t="Podłoga" w={`${fmt(suma.podlogaPct)}%`} d={`wolne ${fmt(suma.wolnaPodlogaM2, 1)} m²`} />
+      <Kafel t="Objętość" w={`${fmt(suma.objPct)}%`} d={`wolne ${fmt(suma.wolnaObjM3, 1)} m³`} />
+      <Kafel t="Wolne miejsca paletowe" w={String(suma.wolneEur)} d="europalety 120×80 na wolną podłogę" />
+      <Kafel t="Waga ładunku" w={brakWag ? "brak wag" : `${fmt(suma.waga)} kg`} zle={suma.przeladowane}
+        d={brakWag ? "wpisz kg / szt. przy pozycjach" : suma.maxWaga ? (suma.przeladowane ? `PRZEKROCZONA o ${fmt(-suma.zapasWagi)} kg` : `zapas ${fmt(suma.zapasWagi)} kg z ${fmt(suma.maxWaga)}`) : "brak ładowności w kartotece"} />
+      <Kafel t="Piętrowane" w={`${suma.pietrowanych} szt.`} d={`z ${suma.sztuk} ułożonych`} />
     </div>
   );
 }

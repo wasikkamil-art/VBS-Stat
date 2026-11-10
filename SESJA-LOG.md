@@ -7684,3 +7684,24 @@ auto bez wymiarów, przyczepa, szerokość telefonu bez poziomego przewijania.
 ❌ **Niesprawdzone**: zakładka w prawdziwej aplikacji po zalogowaniu; wczytanie zlecenia z PDF-a (w atrapie
 AI wyłączone); prawdziwy wydruk do PDF (oglądany jako układ, nie plik z drukarki); zapis danych osi do
 Firestore; wymiary naszych aut — nie wiem, które pojazdy mają wypełnione pole „Wymiary".
+
+## 2026-11-10 cd.4 — Planer załadunku: zestaw auto + przyczepa
+
+User po wejściu na produkcję: auto z przyczepą (TK 314CL + TK 760AP, w kartotece „Bus + Przyczepa")
+pokazywało się jako dwie osobne pozycje, a ma być **jednym zestawem**.
+
+- lista aut: jedna pozycja na pojazd; z przyczepą = zestaw o dwóch przestrzeniach ładunkowych
+- silnik `ulozZestaw`: automat wypełnia przestrzenie po kolei (przełącznik „Automat ładuje najpierw"),
+  a sztuka **nie wchodzi tam, gdzie przekroczyłaby ładowność** — próbuje w następnej; nadmiar ponad
+  cały zestaw zostaje jako „przekroczyłaby ładowność"
+- przy pozycji pole **„gdzie"**: automat / auto / przyczepa (wskazanie człowieka wygrywa z ładownością,
+  wtedy przeładowanie świeci na czerwono)
+- scena 3D pokazuje auto i przyczepę z dyszlem; wynik, rzuty i podsumowanie osobno dla każdej przestrzeni
+- naciski na osie liczone tylko dla pojazdu, z dopiskiem, że **nie uwzględniają nacisku dyszla na hak**
+- testy: 841/841 (w tym zestaw na wymiarach ze zrzutu: 10 × 250 kg → 750 kg w busie przy limicie 895,
+  1 750 kg na przyczepie przy limicie 2 100)
+
+✅ Atrapa z danymi ze zrzutu kartoteki: wybór zestawu, podział ładunku, przeciąganie na przyczepie,
+dokument do druku (3 strony: 510 / 685 / 326 px przy limicie 726).
+❌ Niesprawdzone: prawdziwa aplikacja po zalogowaniu, prawdziwy plik PDF. Założenie do potwierdzenia:
+kolejność rozładunku liczona osobno w aucie i osobno na przyczepie.

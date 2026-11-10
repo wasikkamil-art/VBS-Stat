@@ -105,6 +105,8 @@ export function rozwinPozycje(pozycje) {
         dl, sz, wys, waga,
         pietrowanie: !!p.pietrowanie, obrot: p.obrot !== false,
         rozl: Math.max(1, Math.min(5, Number(p.rozl) || 1)),
+        // Zestaw (auto + przyczepa): wskazana przestrzeń albo null = decyduje automat.
+        gdzie: p.gdzie === "" || p.gdzie == null ? null : Number(p.gdzie),
       });
     }
   });
@@ -191,7 +193,7 @@ function najlepszeMiejsce(paka, ulozone, s, opts) {
 }
 const porownaj = (a, b) => { for (let i = 0; i < a.length; i++) { if (Math.abs(a[i] - b[i]) > EPS) return a[i] - b[i]; } return 0; };
 
-function ulozJedenPrzebieg(paka, sztuki, stale, tryb, kolejnosc) {
+function ulozJedenPrzebieg(paka, sztuki, stale, tryb, kolejnosc, limitWagi = null, dowolne = null) {
   const ulozone = [], nieulozone = [];
   const mapa = new Map(sztuki.map(s => [s.id, s]));
   // 1) Sztuki ustawione ręcznie zostają tam, gdzie postawił je człowiek — od najniższych.
@@ -208,10 +210,14 @@ function ulozJedenPrzebieg(paka, sztuki, stale, tryb, kolejnosc) {
   // 2) Reszta: najpóźniejszy rozładunek idzie pierwszy (pod kabinę), w grupie od największych.
   const kolejka = sztuki.filter(s => wolne.has(s.id)).sort((a, b) =>
     (kolejnosc ? b.rozl - a.rozl : 0) || (b.dl * b.sz - a.dl * a.sz) || (b.wys - a.wys) || ((b.waga || 0) - (a.waga || 0)));
+  let masa = ulozone.reduce((sum, s) => sum + (s.waga || 0), 0);
   for (const s of kolejka) {
+    // Zestaw: sztuka bez wskazanej przestrzeni nie wchodzi tam, gdzie przekroczyłaby ładowność —
+    // spróbuje w następnej. Sztuki przypisane ręcznie wchodzą zawsze (i wtedy świeci ostrzeżenie).
+    if (limitWagi && dowolne?.has(s.id) && masa + (s.waga || 0) > limitWagi + EPS) { nieulozone.push({ ...s, powod: "przekroczyłaby ładowność" }); continue; }
     let m = tryb === "podloga" ? najlepszeMiejsce(paka, ulozone, s, { pietruj: false, kolejnosc }) : null;
     if (!m) m = najlepszeMiejsce(paka, ulozone, s, { pietruj: true, kolejnosc });
-    if (m) ulozone.push({ ...s, x: m.x, y: m.y, z: m.z, dl: m.l, sz: m.w, obr: m.obr, reczna: false });
+    if (m) { ulozone.push({ ...s, x: m.x, y: m.y, z: m.z, dl: m.l, sz: m.w, obr: m.obr, reczna: false }); masa += s.waga || 0; }
     else nieulozone.push({ ...s, powod: s.wys > paka.wys ? "wyższa niż paka" : (Math.min(s.dl, s.sz) > paka.sz || Math.max(s.dl, s.sz) > Math.max(paka.dl, paka.sz)) ? "nie mieści się wymiarem" : "brak miejsca" });
   }
   return { ulozone, nieulozone };
@@ -223,16 +229,59 @@ function ulozJedenPrzebieg(paka, sztuki, stale, tryb, kolejnosc) {
  *       "zwarto"  — piętruje od razu, żeby ładunek zajął jak najkrótszy odcinek paki.
  * stale: { [idSztuki]: { x, y, z, obr } } — pozycje ustawione ręcznie, których automat nie rusza.
  */
-export function uloz(paka, sztuki, { tryb = "podloga", stale = {}, kolejnosc = true } = {}) {
+export function uloz(paka, sztuki, { tryb = "podloga", stale = {}, kolejnosc = true, limitWagi = null, dowolne = null } = {}) {
   if (!paka || !(paka.dl > 0 && paka.sz > 0 && paka.wys > 0)) return { ulozone: [], nieulozone: sztuki.map(s => ({ ...s, powod: "brak wymiarów paki" })), tryb };
-  const a = ulozJedenPrzebieg(paka, sztuki, stale, tryb, kolejnosc);
+  const a = ulozJedenPrzebieg(paka, sztuki, stale, tryb, kolejnosc, limitWagi, dowolne);
   if (tryb === "podloga" && a.nieulozone.length) {
     // „Najpierw podłoga" bywa zachłanne: pierwsze sztuki zajmują podłogę, ostatnim brakuje
     // miejsca. Gdy coś zostało, sprawdzamy układ zwarty i bierzemy ten, który mieści więcej.
-    const b = ulozJedenPrzebieg(paka, sztuki, stale, "zwarto", kolejnosc);
+    const b = ulozJedenPrzebieg(paka, sztuki, stale, "zwarto", kolejnosc, limitWagi, dowolne);
     if (b.nieulozone.length < a.nieulozone.length) return { ...b, tryb: "zwarto", zmienionoTryb: true };
   }
   return { ...a, tryb };
+}
+
+/**
+ * Układa ładunek na ZESTAW: kilka przestrzeni ładunkowych (auto + przyczepa), każda z własnymi
+ * wymiarami, ładownością i własnymi drzwiami (kolejność rozładunku liczy się w każdej osobno).
+ * przestrzenie: [{ paka: {dl,sz,wys}|null, maxWaga: kg|null }]
+ * Sztuka z `gdzie` = indeks trafia tylko tam. Reszta wypełnia przestrzenie po kolei, zaczynając
+ * od `najpierw`; czego pierwsza nie przyjmie (miejsce albo ładowność), próbuje następna.
+ * Każda ułożona i nieułożona sztuka dostaje `p` = indeks przestrzeni (nieułożona: ostatniej próbowanej).
+ */
+export function ulozZestaw(przestrzenie, sztuki, { tryb = "podloga", stale = {}, kolejnosc = true, najpierw = 0 } = {}) {
+  const n = przestrzenie.length;
+  const kolej = przestrzenie.map((_, i) => i).sort((a, b) => (a === najpierw ? -1 : 0) - (b === najpierw ? -1 : 0) || a - b);
+  // Sztuka ustawiona ręcznie należy do przestrzeni, w której ją postawiono.
+  const cel = (s) => (s.gdzie != null && s.gdzie >= 0 && s.gdzie < n ? s.gdzie : (stale[s.id] && (stale[s.id].p ?? 0) < n ? (stale[s.id].p ?? 0) : null));
+  let wolne = sztuki.filter(s => cel(s) == null);
+  const ulozone = [], nieulozone = [];
+  let zmienionoTryb = false;
+  kolej.forEach((pi, k) => {
+    const pr = przestrzenie[pi];
+    const przypisane = sztuki.filter(s => cel(s) === pi);
+    if (!pr.paka) { nieulozone.push(...przypisane.map(s => ({ ...s, p: pi, powod: "brak wymiarów paki" }))); return; }
+    const staleTu = Object.fromEntries(Object.entries(stale).filter(([, v]) => (v.p ?? 0) === pi));
+    const w = uloz(pr.paka, [...przypisane, ...wolne], {
+      tryb, stale: staleTu, kolejnosc,
+      limitWagi: n > 1 && Number(pr.maxWaga) > 0 ? Number(pr.maxWaga) : null,
+      dowolne: new Set(wolne.map(s => s.id)),
+    });
+    if (w.zmienionoTryb) zmienionoTryb = true;
+    const proba = wolne; wolne = [];
+    ulozone.push(...w.ulozone.map(s => ({ ...s, p: pi })));
+    const idWolnych = new Set(proba.map(s => s.id));
+    const ostatnia = k === kolej.length - 1;
+    const dalej = [];
+    for (const s of w.nieulozone) {
+      if (idWolnych.has(s.id) && !ostatnia) dalej.push(sztuki.find(x => x.id === s.id));
+      else nieulozone.push({ ...s, p: pi });
+    }
+    wolne = dalej;
+  });
+  // Zostały tylko wtedy, gdy ostatnia przestrzeń nie ma wymiarów.
+  nieulozone.push(...wolne.map(s => ({ ...s, p: kolej[kolej.length - 1], powod: "brak wymiarów paki" })));
+  return { ulozone, nieulozone, tryb, zmienionoTryb };
 }
 
 /** Ostrzeżenia dla całego układu (po ręcznych poprawkach automat ich nie pilnuje twardo). */
