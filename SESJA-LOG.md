@@ -7783,3 +7783,9 @@ User: głos systemowy „brzmi tragicznie" → lektor z sieci. Wybrał Google Cl
 próbek głos **pl-PL-Chirp3-HD-Leda** (kobiecy). „FleetStat" czytany był „flitstejt" → w tekście lektora
 zapis fonetyczny „Flitstat". Napisy z tytułem kroku **usunięte** na życzenie usera (wracają przez `NAPISY=1`).
 Film: 88,5 s, 1920×1080. ❌ Nadal nie słyszałem lektora — ocenia user. Próbki: `Film_lektor_probki/` (nieśledzone).
+
+## 2026-11-10 cd.14 — Film o planerze: głos Laomedeia, tempo +20%
+
+User chciał dynamiczniejszego lektora; po próbkach wybrał **pl-PL-Chirp3-HD-Laomedeia, tempo 1,2**.
+Film 78,5 s. Dźwięk ściszony w montażu o ok. 2 dB (szczyty na pełnej skali). Styl „promocyjny" przez
+nowszy model Google wymagałby włączenia Agent Platform na `fox-fleetstat` — nie włączone, czeka na decyzję usera.
