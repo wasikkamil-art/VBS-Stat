@@ -7617,3 +7617,22 @@ blokada usuwania klienta z autami nieklikana (okno `alert`).
 - Testowe auto „test solo" → user zakłada klienta „Rad_trans" i przypina auto w „Warunkach auta"
 - Push 3 commitów FleetStata na main (`9eecee0` ostrzeżenie o datach, `3ca7384`, `4aa62a3`) — nadal czeka
 - Październik 2025 bez wpisu o zamknięciu w logu — do potwierdzenia u usera
+
+## 2026-11-10 cd. — FOX Auta: panel sum, tabela jak w FS, trasy z PDF-a, cena przewoźnika z km
+
+Wszystko w repo **fox**, kolejno na produkcji (push robi user — narzędzie ma zablokowany push na main):
+- `22e5123` panel sum: Km suma / ładowne / podlot, Suma dla przewoźnika, Suma za frachty, Suma zysków
+- `5788597` nagłówki tabeli nad kolumnami
+- `9acd2fa` tabela tras jak we FleetStacie (kody zał./rozł., bez nego/wagi/FV), góra modułu = **„Przewoźnik"**,
+  „Klient" = zleceniodawca trasy; funkcja `odczytajZlecenieKlienta` (claude-opus-5-5, structured outputs,
+  `fallbacks: "default"`), PDF dopinany do trasy, PLN → EUR kursem NBP z dnia załadunku
+- `ef0ec9a` funkcja rozpoznaje **zlecenie od klienta** albo **nasze RS** (`rodzaj`)
+- `2298384` 🔑 **cena przewoźnika liczy się SAMA: km wszystkie × stawka auta**; zysk trasy = cena klient − to.
+  Kwota z RS pomijana. Panel sumuje te same wartości co lista.
+
+🚩 Pierwszy test na produkcji: user wgrał **nasze RS** jako „zlecenie od klienta" — model sam to wychwycił
+w uwagach, ale kwota przewoźnika weszła jako przychód. Stąd rozpoznawanie rodzaju i dwie ceny.
+Koszt odczytu: ~3,7 tys. tokenów wejścia, ~0,9 tys. wyjścia (≈3 gr).
+
+❌ Niesprawdzone: rozpoznawanie rodzaju na prawdziwym zleceniu OD KLIENTA; ostrzeżenie o niezgodnym
+przewoźniku z RS; reguły na żywym koncie spedytora. Trasa testowa 5185 (1 200 € jako cena klienta) do poprawy przez usera.
