@@ -7737,3 +7737,15 @@ User: w podsumowaniu ma być, ile miejsc paletowych jest dostępnych i ile zosta
 - przy zestawie dodatkowo wiersz „Razem zestaw"; to samo w PDF-ie
 Testy 847/847. Nasz zestaw: bus 420×225 = 8 miejsc / 3,9 LDM, przyczepa 640×245 = 16 miejsc / 6,5 LDM.
 ✅ Atrapa (ekran + tabele wydruku). ❌ Nie na produkcji.
+
+## 2026-11-10 cd.9 — Planer: wolne miejsca paletowe narysowane na podłodze, LDM = długość
+
+User odrzucił moją definicję LDM (podłoga ÷ 2,4): **LDM to metry długości**, tak podają ogłoszenia.
+Dla nas najważniejsze są **miejsca paletowe 120×80** — mają być narysowane na podłodze.
+- `wolneMiejscaEur` zwraca prostokąty wolnych miejsc (lepszy z: dokładania zachłannego i siatki rzędowej
+  bez zajętych pól); liczba w podsumowaniu = liczba narysowanych pól, więc obraz i liczba się zgadzają
+- scena 3D: zielone pola na podłodze (przełącznik „wolne miejsca paletowe"); to samo na rzucie z góry w PDF-ie
+- podsumowanie: na górze „Miejsca paletowe: wolne X z Y / max Y" i „Waga: … / max …", osobno dla auta
+  i przyczepy + wiersz „Razem zestaw" (palety max/wolne, waga z łączną ładownością)
+- LDM pokazany jako długość ładunku w metrach (z długości paki)
+Testy 850/850. Bus 8 miejsc / 4,2 m, przyczepa 16 miejsc / 6,4 m. ✅ Atrapa. ❌ Nie na produkcji.

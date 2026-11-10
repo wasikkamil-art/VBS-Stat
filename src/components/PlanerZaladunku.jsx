@@ -153,7 +153,7 @@ function kolorSztuki(s, tryb, indeksPozycji) {
 }
 
 // ── Rzuty 2D do wydruku (SVG — ostre w PDF niezależnie od rozdzielczości) ──
-function Rzut({ paka, ulozone, kolor, os }) {
+function Rzut({ paka, ulozone, kolor, os, wolne = [] }) {
   const gora = os === "gora";
   const W = paka.dl, H = gora ? paka.sz : paka.wys;
   const lista = [...ulozone].sort((a, b) => (gora ? a.z - b.z : b.y - a.y));
@@ -161,6 +161,9 @@ function Rzut({ paka, ulozone, kolor, os }) {
   return (
     <svg viewBox={`-4 -4 ${W + 8} ${H + 8}`} style={{ width: "100%", height: "auto", display: "block" }}>
       <rect x="0" y="0" width={W} height={H} fill="#f8fafc" stroke="#0f172a" strokeWidth="2.5" />
+      {gora && wolne.map((m, i) => (
+        <rect key={i} x={m.x + 2} y={m.y + 2} width={m.dl - 4} height={m.sz - 4} fill="#dcfce7" stroke="#15803d" strokeWidth="1.5" strokeDasharray="7 5" />
+      ))}
       {lista.map(s => {
         const x = s.x, y = gora ? s.y : H - s.z - s.wys, w = s.dl, h = gora ? s.sz : s.wys;
         return (
@@ -200,6 +203,7 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
   const [blad3d, setBlad3d] = useState("");
   const [gotowe3d, setGotowe3d] = useState(0); // licznik, nie flaga: każde postawienie sceny od nowa musi ją też od nowa wypełnić
   const [uploadKey, setUploadKey] = useState(0);
+  const [pokazMiejsca, setPokazMiejsca] = useState(true);
 
   // ── Auta z kartoteki. Pojazd z przyczepą to JEDEN zestaw o dwóch przestrzeniach ładunkowych. ──
   const auta = useMemo(() => {
@@ -513,6 +517,14 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
       for (let x = 100; x < paka.dl; x += 100) pkt.push((pr.x0 + x) * S, 0.002, -W / 2, (pr.x0 + x) * S, 0.002, W / 2);
       if (pkt.length) { const gg = new THREE.BufferGeometry(); gg.setAttribute("position", new THREE.Float32BufferAttribute(pkt, 3)); grupa.add(new THREE.LineSegments(gg, new THREE.LineBasicMaterial({ color: 0x94a3b8 }))); }
       napis("DRZWI", cx + L / 2 + 0.3, 0.15, W / 2 + 0.25, 0.026);
+      // wolne miejsca paletowe 120×80 — zielone pola na podłodze (ile jeszcze wejdzie przy doładunku)
+      if (pokazMiejsca) for (const mj of sumy[pr.i]?.wolneMiejsca || []) {
+        const pole = new THREE.Mesh(new THREE.PlaneGeometry((mj.dl - 5) * S, (mj.sz - 5) * S), new THREE.MeshBasicMaterial({ color: 0x22c55e, transparent: true, opacity: 0.3, side: THREE.DoubleSide }));
+        pole.rotation.x = -Math.PI / 2;
+        pole.position.set((pr.x0 + mj.x + mj.dl / 2) * S, 0.006, (mj.y + mj.sz / 2 - paka.sz / 2) * S); grupa.add(pole);
+        const ramka = new THREE.LineSegments(new THREE.EdgesGeometry(pole.geometry), new THREE.LineBasicMaterial({ color: 0x15803d }));
+        ramka.rotation.x = -Math.PI / 2; ramka.position.copy(pole.position); ramka.position.y = 0.008; grupa.add(ramka);
+      }
       if (zestaw) napis(pr.nazwa, cx, H + 0.32, 0, 0.032, "rgba(51,65,85,0.92)");
     }
     for (const s of ulozone) {
@@ -533,7 +545,7 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
     }
     c.podswietl?.();
     rysuj();
-  }, [gotowe3d, przestrzenie, zestaw, ulozone, kolor, wieleRozl, rysuj]);
+  }, [gotowe3d, przestrzenie, zestaw, ulozone, kolor, wieleRozl, sumy, pokazMiejsca, rysuj]);
 
   // Podświetlenie wybranej sztuki NIE przebudowuje sceny — przebudowa w trakcie przeciągania
   // podmieniłaby mesh, który właśnie trzyma mysz.
@@ -777,6 +789,7 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
                   style={widok === k ? { background: "#111827", color: "#fff", borderColor: "#111827" } : { borderColor: "#e5e7eb", color: "#374151" }}>{w.etykieta}</button>
               ))}
               <span className="flex-1" />
+              <label className="flex items-center gap-1.5 text-xs text-gray-700"><input type="checkbox" checked={pokazMiejsca} onChange={e => setPokazMiejsca(e.target.checked)} /> wolne miejsca paletowe</label>
               <label className="flex items-center gap-1.5 text-xs text-gray-700">Kolor wg
                 <select value={kolorWg} onChange={e => setKolorWg(e.target.value)} className="px-1.5 py-0.5 rounded border border-gray-200 bg-white text-xs">
                   <option value="pozycja">pozycji</option><option value="rozl">rozładunku</option>
@@ -786,7 +799,7 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
               {!jestPaka && <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-600 p-6 text-center" style={{ zIndex: 1 }}>Wybierz auto albo wpisz wymiary paki.</div>}
               {blad3d && <div className="absolute inset-0 flex items-center justify-center text-sm p-6 text-center" style={{ zIndex: 1, color: "#b45309" }}>{blad3d}</div>}
             </div>
-            <p className="text-xs text-gray-600 mt-2">Przeciągnij tło — obrót widoku · kółko — zbliżenie · przeciągnij sztukę — przesunięcie (przyciąga do ścian i sąsiadów).</p>
+            <p className="text-xs text-gray-600 mt-2">Zielone pola na podłodze = wolne miejsca na europalety 120×80. Przeciągnij tło — obrót widoku · kółko — zbliżenie · przeciągnij sztukę — przesunięcie (przyciąga do ścian i sąsiadów).</p>
             {wybranaSzt && (
               <div className="flex flex-wrap items-center gap-3 mt-2 p-2 rounded-lg bg-gray-50 text-xs text-gray-800">
                 <b>Poz. {wybranaSzt.nr}, szt. {wybranaSzt.lp}{zestaw ? ` · ${przestrzenie[wybranaSzt.p]?.nazwa}` : ""}</b>
@@ -824,12 +837,7 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
                   <KafleSumy suma={sumy[pr.i]} />
                 </div>
               ))}
-              {zestaw && sumy.every(Boolean) && (
-                <div className="p-3 rounded-xl mb-2 text-sm text-gray-900" style={{ background: "#eff6ff" }}>
-                  <b>Razem zestaw:</b> miejsca paletowe — zostaje {sumy.reduce((a, x) => a + x.wolneEur, 0)} z {sumy.reduce((a, x) => a + x.miejscaEur, 0)} · LDM — zostaje {fmt(sumy.reduce((a, x) => a + x.ldmWolne, 0), 1)} z {fmt(sumy.reduce((a, x) => a + x.ldmPaki, 0), 1)}
-                </div>
-              )}
-              <p className="text-xs text-gray-600 mb-1">LDM = powierzchnia podłogi ÷ 2,4 m (europaleta = 0,4 LDM). Sztuki piętrowane nie zajmują dodatkowych LDM.</p>
+              {zestaw && sumy.every(Boolean) && <RazemZestaw sumy={sumy} ekran />}
               {ulozone.some(s => !s.waga) && <p className="text-xs mt-2" style={{ color: "#b45309" }}>{ulozone.filter(s => !s.waga).length} szt. bez wagi — suma kg i naciski na osie są zaniżone{zestaw ? ", a automat nie pilnuje dla nich ładowności" : ""}.</p>}
 
               <div className="mt-4 pt-3 border-t border-gray-100">
@@ -882,8 +890,9 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
                   <img data-planer-3d alt="" style={{ width: "100%", height: "92mm", objectFit: "contain", background: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: 6, display: "block" }} />
                 </div>
                 <div>
-                  {!zestaw && przestrzenie[0].paka && <RzutyPrzestrzeni pr={przestrzenie[0]} ulozone={ulozone} kolor={kolor} />}
+                  {!zestaw && przestrzenie[0].paka && <RzutyPrzestrzeni pr={przestrzenie[0]} ulozone={ulozone} kolor={kolor} wolne={sumy[0]?.wolneMiejsca} />}
                   {zestaw && przestrzenie.map(pr => sumy[pr.i] && <TabelaSumy key={pr.i} tytul={`Podsumowanie — ${pr.nazwa}`} suma={sumy[pr.i]} />)}
+                  {zestaw && sumy.every(Boolean) && <RazemZestaw sumy={sumy} />}
                   {zestaw && <OsieWiersz osie={osie} zestaw />}
                 </div>
               </div>
@@ -919,7 +928,7 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
               <div className="planer-strona">
                 <h1 style={{ fontSize: 15, marginBottom: 6 }}>Rozmieszczenie — rzuty</h1>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                  {przestrzenie.filter(pr => pr.paka).map(pr => <div key={pr.i}><RzutyPrzestrzeni pr={pr} ulozone={ulozone} kolor={kolor} tytul={pr.nazwa} /></div>)}
+                  {przestrzenie.filter(pr => pr.paka).map(pr => <div key={pr.i}><RzutyPrzestrzeni pr={pr} ulozone={ulozone} kolor={kolor} tytul={pr.nazwa} wolne={sumy[pr.i]?.wolneMiejsca} /></div>)}
                 </div>
               </div>
             )}
@@ -948,15 +957,29 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
   );
 }
 
-function RzutyPrzestrzeni({ pr, ulozone, kolor, tytul = "" }) {
+/** Suma dla całego zestawu: palety max / wolne i waga z rozbiciem widocznym w sekcjach wyżej. */
+function RazemZestaw({ sumy, ekran = false }) {
+  const plus = (k) => sumy.reduce((a, x) => a + (x[k] || 0), 0);
+  const maxKg = sumy.every(x => x.maxWaga) ? plus("maxWaga") : null;
+  const tresc = (
+    <>
+      <b>Razem zestaw:</b> miejsca paletowe — max {plus("miejscaEur")}, wolne {plus("wolneEur")} · waga — {fmt(plus("waga"))} kg{maxKg ? ` z max ${fmt(maxKg)} kg` : ""}
+    </>
+  );
+  return ekran
+    ? <div className="p-3 rounded-xl mb-2 text-sm text-gray-900" style={{ background: "#dbeafe" }}>{tresc}</div>
+    : <div style={{ marginTop: 4, padding: "5px 6px", background: "#dbeafe" }}>{tresc}</div>;
+}
+
+function RzutyPrzestrzeni({ pr, ulozone, kolor, tytul = "", wolne = [] }) {
   const lista = ulozone.filter(s => s.p === pr.i);
   return (
     <>
       <h2>{tytul ? `${tytul} — z` : "Z"} góry (przód po lewej, drzwi po prawej)</h2>
-      <Rzut paka={pr.paka} ulozone={lista} kolor={kolor} os="gora" />
+      <Rzut paka={pr.paka} ulozone={lista} kolor={kolor} os="gora" wolne={wolne} />
       <h2 style={{ marginTop: 8 }}>{tytul ? `${tytul} — z` : "Z"} boku</h2>
       <Rzut paka={pr.paka} ulozone={lista} kolor={kolor} os="bok" />
-      <div style={{ color: "#475569", fontSize: 9, marginTop: 2 }}>Liczba = numer pozycji z tabeli · kg = waga sztuki · ↑ = sztuka stoi na innej</div>
+      <div style={{ color: "#475569", fontSize: 9, marginTop: 2 }}>Liczba = numer pozycji z tabeli · kg = waga sztuki · ↑ = sztuka stoi na innej · zielone pola = wolne miejsca paletowe 120×80</div>
     </>
   );
 }
@@ -969,11 +992,10 @@ function TabelaSumy({ tytul, suma }) {
       <h2>{tytul}</h2>
       <table><tbody>
         <tr><td>Ułożono</td><td><b>{suma.sztuk} szt.</b></td></tr>
-        <tr><td>Zajęta długość paki</td><td><b>{fmt(suma.dlZajeta)} cm</b> · wolne {fmt(suma.dlWolna)} cm</td></tr>
+        <tr><td>Miejsca paletowe 120×80</td><td>max <b>{suma.miejscaEur}</b> · po załadunku wolne <b>{suma.wolneEur}</b></td></tr>
         <tr><td>Podłoga / objętość</td><td>{fmt(suma.podlogaPct)}% / {fmt(suma.objPct)}%</td></tr>
-        <tr><td>Miejsca paletowe (120×80)</td><td>dostępne <b>{suma.miejscaEur}</b> · po załadunku zostaje <b>{suma.wolneEur}</b></td></tr>
-        <tr><td>Metry ładowne (LDM)</td><td>dostępne <b>{fmt(suma.ldmPaki, 1)}</b> · zajęte {fmt(suma.ldmZajete, 1)} · zostaje <b>{fmt(suma.ldmWolne, 1)}</b></td></tr>
-        <tr><td>Waga ładunku</td><td><b>{wagaTxt(suma)}</b>{suma.maxWaga ? ` z ${fmt(suma.maxWaga)} kg` : ""}{suma.przeladowane ? " — PRZEKROCZONA" : ""}{suma.bezWagi && suma.bezWagi !== suma.sztuk ? ` (${suma.bezWagi} szt. bez wagi)` : ""}</td></tr>
+        <tr><td>Długość ładunku (LDM)</td><td>{fmt(suma.ldmZajete, 1)} z {fmt(suma.ldmPaki, 1)} m · wolne {fmt(suma.ldmWolne, 1)} m</td></tr>
+        <tr><td>Waga ładunku</td><td><b>{wagaTxt(suma)}</b>{suma.maxWaga ? ` · max ${fmt(suma.maxWaga)} kg` : ""}{suma.przeladowane ? " — PRZEKROCZONA" : ""}{suma.bezWagi && suma.bezWagi !== suma.sztuk ? ` (${suma.bezWagi} szt. bez wagi)` : ""}</td></tr>
       </tbody></table>
     </div>
   );
@@ -993,21 +1015,20 @@ function KafleSumy({ suma }) {
   const brakWag = suma.sztuk > 0 && suma.bezWagi === suma.sztuk;
   return (
     <div className="grid grid-cols-2 gap-3 text-sm" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
-      <Kafel t="Zajęta długość paki" w={`${fmt(suma.dlZajeta)} cm`} d={`wolne ${fmt(suma.dlWolna)} cm`} />
+      <Kafel t="Miejsca paletowe 120×80" w={`wolne ${suma.wolneEur} z ${suma.miejscaEur}`} d={`max ${suma.miejscaEur} palet na podłodze`} mocny />
+      <Kafel t="Waga ładunku" w={brakWag ? "brak wag" : `${fmt(suma.waga)} kg`} zle={suma.przeladowane} mocny
+        d={brakWag ? "wpisz kg / szt. przy pozycjach" : suma.maxWaga ? (suma.przeladowane ? `PRZEKROCZONA o ${fmt(-suma.zapasWagi)} kg (max ${fmt(suma.maxWaga)})` : `max ${fmt(suma.maxWaga)} kg · zapas ${fmt(suma.zapasWagi)} kg`) : "brak ładowności w kartotece"} />
+      <Kafel t="Długość ładunku (LDM)" w={`${fmt(suma.ldmZajete, 1)} z ${fmt(suma.ldmPaki, 1)} m`} d={`wolne ${fmt(suma.ldmWolne, 1)} m`} />
       <Kafel t="Podłoga" w={`${fmt(suma.podlogaPct)}%`} d={`wolne ${fmt(suma.wolnaPodlogaM2, 1)} m²`} />
       <Kafel t="Objętość" w={`${fmt(suma.objPct)}%`} d={`wolne ${fmt(suma.wolnaObjM3, 1)} m³`} />
-      <Kafel t="Miejsca paletowe" w={`zostaje ${suma.wolneEur} z ${suma.miejscaEur}`} d="europalety 120×80 na podłodze" />
-      <Kafel t="Metry ładowne (LDM)" w={`zostaje ${fmt(suma.ldmWolne, 1)} z ${fmt(suma.ldmPaki, 1)}`} d={`zajęte ${fmt(suma.ldmZajete, 1)} LDM`} />
-      <Kafel t="Waga ładunku" w={brakWag ? "brak wag" : `${fmt(suma.waga)} kg`} zle={suma.przeladowane}
-        d={brakWag ? "wpisz kg / szt. przy pozycjach" : suma.maxWaga ? (suma.przeladowane ? `PRZEKROCZONA o ${fmt(-suma.zapasWagi)} kg` : `zapas ${fmt(suma.zapasWagi)} kg z ${fmt(suma.maxWaga)}`) : "brak ładowności w kartotece"} />
       <Kafel t="Piętrowane" w={`${suma.pietrowanych} szt.`} d={`z ${suma.sztuk} ułożonych`} />
     </div>
   );
 }
 
-function Kafel({ t, w, d, zle = false }) {
+function Kafel({ t, w, d, zle = false, mocny = false }) {
   return (
-    <div className="p-3 rounded-xl" style={{ background: zle ? "#fee2e2" : "#f9fafb" }}>
+    <div className="p-3 rounded-xl" style={{ background: zle ? "#fee2e2" : mocny ? "#eff6ff" : "#f9fafb" }}>
       <div className="text-xs text-gray-600">{t}</div>
       <div className="text-lg font-bold" style={{ color: zle ? "#991b1b" : "#111827" }}>{w}</div>
       <div className="text-xs" style={{ color: zle ? "#991b1b" : "#4b5563" }}>{d}</div>

@@ -14,7 +14,6 @@
 // Układanie to heurystyka — daje dobry, powtarzalny układ, nie dowód, że lepszego nie ma.
 
 const EPS = 0.01;
-const LDM_CM2 = 100 * 240; // 1 metr ładowny = 1 m długości × 2,4 m szerokości
 
 /** „607x243x245" / „6,07 x 2,43 x 2,45 m" → { dl, sz, wys } w cm albo null. */
 export function parsujWymiaryPaki(tekst) {
@@ -305,31 +304,47 @@ export function ostrzezeniaUkladu(paka, ulozone, { kolejnosc = true } = {}) {
   return wynik;
 }
 
-/** Ile jeszcze europalet (120×80) wejdzie na wolną podłogę przy obecnym układzie. */
-export function wolneEuropalety(paka, ulozone, limit = 66) {
-  const stan = [...ulozone];
-  let n = 0;
-  while (n < limit) {
-    const s = { id: `__eur${n}`, dl: 120, sz: 80, wys: 1, obrot: true, rozl: 1, pietrowanie: false, waga: null };
+/** Wolne miejsca na europalety dokładane zachłannie w to, co zostało na podłodze. */
+function miejscaZachlannie(paka, ulozone, limit) {
+  const stan = [...ulozone], wynik = [];
+  while (wynik.length < limit) {
+    const s = { id: `__eur${wynik.length}`, dl: 120, sz: 80, wys: 1, obrot: true, rozl: 1, pietrowanie: false, waga: null };
     const m = najlepszeMiejsce(paka, stan, s, { pietruj: false, kolejnosc: false });
     if (!m) break;
-    stan.push({ ...s, x: m.x, y: m.y, z: 0, dl: m.l, sz: m.w });
-    n++;
+    const r = { x: m.x, y: m.y, dl: m.l, sz: m.w };
+    stan.push({ ...s, ...r, z: 0 }); wynik.push(r);
   }
-  return n;
+  return wynik;
+}
+
+/** Siatka wzorcowa pustej paki: k rzędów palet wzdłuż, reszta długości rzędami w poprzek. */
+function siatkaRzedowa(paka) {
+  const wzdluz = Math.floor(paka.sz / 80), wPoprzek = Math.floor(paka.sz / 120);
+  let bestK = 0, best = -1;
+  for (let k = 0; k * 120 <= paka.dl; k++) {
+    const n = k * wzdluz + Math.floor((paka.dl - k * 120) / 80) * wPoprzek;
+    if (n > best) { best = n; bestK = k; }
+  }
+  const sloty = [];
+  for (let i = 0; i < bestK; i++) for (let j = 0; j < wzdluz; j++) sloty.push({ x: i * 120, y: j * 80, dl: 120, sz: 80 });
+  const reszta = Math.floor((paka.dl - bestK * 120) / 80);
+  for (let r = 0; r < reszta; r++) for (let j = 0; j < wPoprzek; j++) sloty.push({ x: bestK * 120 + r * 80, y: j * 120, dl: 80, sz: 120 });
+  return sloty;
 }
 
 /**
- * Ile europalet mieści PUSTA paka. Układanie zachłanne potrafi zgubić jedno miejsce (naczepa
- * 13,6 m: 33 zamiast 34), więc bierzemy lepszy z dwóch wyników: zachłannego i wzoru na rzędy
- * mieszane — k rzędów palet wzdłuż, reszta długości rzędami w poprzek.
+ * Wolne miejsca paletowe (europalety 120×80 na podłodze) przy obecnym układzie — jako prostokąty
+ * do narysowania na podłodze. Bierzemy lepszy z dwóch wyników: dokładania zachłannego i siatki
+ * rzędowej bez zajętych pól (zachłanne samo gubi miejsce: naczepa 13,6 m dałaby 33 zamiast 34).
+ * Dla pustej paki to po prostu jej pojemność w europaletach.
  */
-export function miejscaEuropalet(paka) {
-  const wzdluz = Math.floor(paka.sz / 80), wPoprzek = Math.floor(paka.sz / 120);
-  let best = 0;
-  for (let k = 0; k * 120 <= paka.dl; k++) best = Math.max(best, k * wzdluz + Math.floor((paka.dl - k * 120) / 80) * wPoprzek);
-  return Math.max(best, wolneEuropalety(paka, []));
+export function wolneMiejscaEur(paka, ulozone, limit = 66) {
+  const a = miejscaZachlannie(paka, ulozone, limit);
+  const b = siatkaRzedowa(paka).filter(sl => !ulozone.some(o => nachodzi(sl.x, sl.x + sl.dl, o.x, o.x + o.dl) && nachodzi(sl.y, sl.y + sl.sz, o.y, o.y + o.sz)));
+  return b.length > a.length ? b : a;
 }
+export const wolneEuropalety = (paka, ulozone, limit = 66) => wolneMiejscaEur(paka, ulozone, limit).length;
+export const miejscaEuropalet = (paka) => wolneMiejscaEur(paka, []).length;
 
 /** Liczby do panelu podsumowania. `maxWaga` w kg (ładowność z kartoteki) albo null. */
 export function podsumowanie(paka, ulozone, nieulozone = [], maxWaga = null) {
@@ -341,6 +356,7 @@ export function podsumowanie(paka, ulozone, nieulozone = [], maxWaga = null) {
   const polePaki = paka.dl * paka.sz, objPaki = polePaki * paka.wys;
   const max = Number(maxWaga) > 0 ? Number(maxWaga) : null;
   const miejscaEur = miejscaEuropalet(paka);
+  const wolne = wolneMiejscaEur(paka, ulozone).slice(0, miejscaEur);
   return {
     sztuk: ulozone.length, nieulozonych: nieulozone.length,
     pietrowanych: ulozone.filter(s => s.z > EPS).length,
@@ -353,13 +369,10 @@ export function podsumowanie(paka, ulozone, nieulozone = [], maxWaga = null) {
     zapasWagi: max ? max - waga : null,
     przeladowane: max ? waga > max + EPS : false,
     // Miejsca paletowe = europalety 120×80 na podłodze: ile mieści pusta paka i ile zostaje po załadunku.
-    miejscaEur,
-    wolneEur: Math.min(miejscaEur, wolneEuropalety(paka, ulozone)),
-    // Metry ładowne (LDM) wg standardu: powierzchnia podłogi / 2,4 m (szerokość naczepy).
-    // Europaleta = 0,4 LDM. Sztuki piętrowane nie zajmują dodatkowych LDM — liczy się podłoga.
-    ldmPaki: polePaki / LDM_CM2,
-    ldmZajete: podloga / LDM_CM2,
-    ldmWolne: Math.max(0, polePaki - podloga) / LDM_CM2,
+    // Miejsca paletowe: pojemność pustej paki i to, co zostaje po załadunku (wraz z prostokątami do rysunku).
+    miejscaEur, wolneEur: wolne.length, wolneMiejsca: wolne,
+    // LDM = metry długości paki (tak podają je ogłoszenia) — decyzja usera 10.11.2026.
+    ldmPaki: paka.dl / 100, ldmZajete: dlZajeta / 100, ldmWolne: Math.max(0, paka.dl - dlZajeta) / 100,
   };
 }
 
