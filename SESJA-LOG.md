@@ -7755,3 +7755,9 @@ Testy 850/850. Bus 8 miejsc / 4,2 m, przyczepa 16 miejsc / 6,4 m. ✅ Atrapa. �
 User: nad grafiką 3D waga dla auta i przyczepy — max / zajęte / wolne i procent. Dodany pasek na każdą
 przestrzeń (zielony, bursztynowy od 90%, czerwony przy przekroczeniu). ✅ Atrapa: 84% i 83% dla
 750/895 i 1750/2100 kg. ❌ Nie na produkcji.
+
+## 2026-11-10 cd.11 — Planer: doładunek w pasku nad 3D
+
+User: w pasku nad grafiką ma być też, ile palet jeszcze wejdzie i ile to LDM — żeby szukać większego
+doładunku na przyczepę. Dopisany wiersz „doładunek: X palet 120×80 · wolna długość Y LDM z Z".
+Wolna długość = ciągły odcinek od końca ładunku do drzwi. ✅ Atrapa (5 palet / 2,6 LDM i 9 palet / 3,2 LDM).

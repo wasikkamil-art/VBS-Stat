@@ -1016,7 +1016,7 @@ function OsieWiersz({ osie, zestaw = false }) {
   );
 }
 
-/** Pasek wagi nad widokiem 3D: max / zajęte / wolne i procent wykorzystania ładowności. */
+/** Pasek nad widokiem 3D: waga (max / zajęte / wolne, %) oraz miejsce na doładunek (palety, LDM). */
 function PasekWagi({ nazwa, suma }) {
   const max = suma.maxWaga, pct = max ? (suma.waga / max) * 100 : null;
   const zle = suma.przeladowane, kolor = zle ? "#b91c1c" : pct != null && pct >= 90 ? "#b45309" : "#15803d";
@@ -1033,6 +1033,10 @@ function PasekWagi({ nazwa, suma }) {
         {max ? <>max <b>{fmt(max)} kg</b> · zajęte <b>{fmt(suma.waga)} kg</b> · {zle ? <b style={{ color: "#991b1b" }}>przekroczone o {fmt(-suma.zapasWagi)} kg</b> : <>wolne <b>{fmt(suma.zapasWagi)} kg</b></>}</>
           : <>zajęte <b>{fmt(suma.waga)} kg</b> · brak ładowności w kartotece</>}
         {suma.bezWagi > 0 && <span style={{ color: "#b45309" }}> · {suma.bezWagi} szt. bez wagi</span>}
+      </div>
+      {/* Doładunek: ile europalet jeszcze wejdzie i ile ciągłej długości zostaje od ładunku do drzwi. */}
+      <div className="text-xs text-gray-700 mt-1 pt-1 border-t border-gray-200">
+        doładunek: <b>{suma.wolneEur} {suma.wolneEur === 1 ? "paleta" : suma.wolneEur >= 2 && suma.wolneEur <= 4 ? "palety" : "palet"}</b> 120×80 · wolna długość <b>{fmt(suma.ldmWolne, 1)} LDM</b> z {fmt(suma.ldmPaki, 1)}
       </div>
     </div>
   );
