@@ -423,7 +423,12 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
     // Kadr obejmuje też kabinę (ok. 2,2 m przed paką), więc środek przesuwamy do przodu.
     const KABINA = 220;
     c.orbit.cel = { x: -KABINA * S / 2, y: wys * S * 0.3, z: 0 };
-    c.orbit.r = Math.max(dl + KABINA, sz * 1.6, wys * 1.6) * S * (zPaka.length > 1 ? 1.35 : 1.6);
+    // Odległość liczona z kąta widzenia i proporcji okna: wąskie okno (telefon, wąska kolumna)
+    // musi odsunąć kamerę dalej, inaczej zestaw z przyczepą nie mieści się w kadrze z boku.
+    const pol = Math.tan((c.camera.fov * Math.PI) / 360);
+    const naDlugosc = ((dl + KABINA) * S * 0.56) / (pol * Math.min(c.camera.aspect || 1, 1.6));
+    const naWysokosc = ((wys + 150) * S * 0.75) / pol;
+    c.orbit.r = Math.min(60, Math.max(naDlugosc, naWysokosc, sz * S * 2));
     rysuj();
   }, [gotowe3d, przestrzenie, rysuj]);
 
@@ -467,10 +472,10 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
         kab.position.set(cx - L / 2 - 0.06, 0, 0); grupa.add(kab);
         grupa.add(zbudujPodwozie(THREE, L, W, cx, [0.62]));
       } else {
-        // dyszel przyczepy + osie tandem pośrodku
+        // dyszel przyczepy + osie na początku i na końcu (przyczepa dwuosiowa z obrotnicą, nie tandem)
         const dyszel = new THREE.Mesh(new THREE.BoxGeometry(ODSTEP * S + 0.3, 0.07, 0.12), new THREE.MeshLambertMaterial({ color: 0x374151 }));
         dyszel.position.set((pr.x0 - ODSTEP / 2) * S, -0.25, 0); grupa.add(dyszel);
-        grupa.add(zbudujPodwozie(THREE, L, W, cx, [0.44, 0.58]));
+        grupa.add(zbudujPodwozie(THREE, L, W, cx, [0.13, 0.85]));
       }
       // siatka co 1 m
       const pkt = [];

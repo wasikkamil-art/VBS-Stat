@@ -7712,3 +7712,9 @@ User: mamy Iveco z nadbudówką sypialną, kabina ma mieć podobny obrys. W scen
 bryłą dostawczaka (maska, pochylona szyba, nadbudówka nad kabiną, szyby boczne, światła, zderzak),
 do tego rama i koła pod paką, a przy przyczepie osie tandem i dyszel. Kadr kamery obejmuje kabinę.
 To ilustracja — nie wchodzi do żadnych obliczeń. ✅ Obejrzane w atrapie (solo i zestaw). ❌ Nie na produkcji.
+
+## 2026-11-10 cd.6 — Planer: osie przyczepy i kadr zestawu
+
+User: przyczepa ma osie na początku i na końcu, nie tandem pośrodku — poprawione (rysunek).
+Przy okazji wyszło, że w widoku „Z boku" zestaw nie mieścił się w kadrze (kabina i tył ucięte):
+odległość kamery liczona teraz z kąta widzenia i proporcji okna. ✅ Atrapa. ❌ Nie na produkcji.
