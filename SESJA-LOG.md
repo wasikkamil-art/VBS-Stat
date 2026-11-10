@@ -7775,3 +7775,11 @@ Wolna długość = ciągły odcinek od końca ładunku do drzwi. ✅ Atrapa (5 p
 głośność lektora niezerowa w każdym 10-sekundowym oknie.
 ❌ **Nie słyszałem lektora i nie oglądałem filmu w ruchu** — wymowa, tempo i zgranie z obrazem do oceny przez usera.
 ⚠️ Dyspozytorzy nadal nie mają zakładki „Planer załadunku" (własne listy zakładek) — film mówi „znajdziesz w menu".
+
+## 2026-11-10 cd.13 — Film o planerze: lektor z Google Cloud, bez napisów
+
+User: głos systemowy „brzmi tragicznie" → lektor z sieci. Wybrał Google Cloud Text-to-Speech
+(włączone na projekcie `fox-fleetstat`, token z zalogowanego gcloud, bez kluczy) i po dwóch rundach
+próbek głos **pl-PL-Chirp3-HD-Leda** (kobiecy). „FleetStat" czytany był „flitstejt" → w tekście lektora
+zapis fonetyczny „Flitstat". Napisy z tytułem kroku **usunięte** na życzenie usera (wracają przez `NAPISY=1`).
+Film: 88,5 s, 1920×1080. ❌ Nadal nie słyszałem lektora — ocenia user. Próbki: `Film_lektor_probki/` (nieśledzone).
