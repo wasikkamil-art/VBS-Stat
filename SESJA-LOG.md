@@ -7761,3 +7761,17 @@ przestrzeń (zielony, bursztynowy od 90%, czerwony przy przekroczeniu). ✅ Atra
 User: w pasku nad grafiką ma być też, ile palet jeszcze wejdzie i ile to LDM — żeby szukać większego
 doładunku na przyczepę. Dopisany wiersz „doładunek: X palet 120×80 · wolna długość Y LDM z Z".
 Wolna długość = ciągły odcinek od końca ładunku do drzwi. ✅ Atrapa (5 palet / 2,6 LDM i 9 palet / 3,2 LDM).
+
+## 2026-11-10 cd.12 — Film szkoleniowy o planerze załadunku (z lektorem)
+
+`Film_planer_zaladunku.mp4` w roocie (nieśledzony): 82 s, 1920×1080, 9 scen z tytułami na ekranie, polski lektor.
+- nagranie: `podglad/planer/film/nagraj.mjs` — Playwright steruje atrapą planera i robi zrzuty klatka po klatce
+  (400 klatek), sztuczny kursor, karty tytułowe z logo; lektor = głos systemowy macOS „Zosia" (`say`)
+- montaż: `podglad/planer/film/zmontuj.swift` — sam AVFoundation (na komputerze nie ma ffmpeg; nic nie instalowałem)
+- oba skrypty w `podglad/` (gitignored); tekst lektora w stałej `TEKSTY`, zmiana tekstu = ponowne uruchomienie
+- w tekście lektora „FleetStat" zapisany fonetycznie („Flitstat"), żeby polski głos nie czytał po literze
+
+✅ Sprawdzone: stykówka 11 klatek z kluczowych scen, ścieżki pliku (obraz 82,4 s, dźwięk 81,1 s),
+głośność lektora niezerowa w każdym 10-sekundowym oknie.
+❌ **Nie słyszałem lektora i nie oglądałem filmu w ruchu** — wymowa, tempo i zgranie z obrazem do oceny przez usera.
+⚠️ Dyspozytorzy nadal nie mają zakładki „Planer załadunku" (własne listy zakładek) — film mówi „znajdziesz w menu".
