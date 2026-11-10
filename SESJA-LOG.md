@@ -7636,3 +7636,18 @@ Koszt odczytu: ~3,7 tys. tokenów wejścia, ~0,9 tys. wyjścia (≈3 gr).
 
 ❌ Niesprawdzone: rozpoznawanie rodzaju na prawdziwym zleceniu OD KLIENTA; ostrzeżenie o niezgodnym
 przewoźniku z RS; reguły na żywym koncie spedytora. Trasa testowa 5185 (1 200 € jako cena klienta) do poprawy przez usera.
+
+## 2026-11-10 cd.2 — FOX Auta: CMR z podmianą, symulator korektora, ikona
+
+Repo **fox**, wszystko na produkcji (push robi user):
+- `279f2d8` CMR dopinany do trasy — kolumna CMR („+ CMR" z listy), „📎 Dołącz CMR" w oknie trasy,
+  licznik „CMR x/N" w panelu. ✅ **Zweryfikowane na produkcji**: CMR usera (JPG 1,9 MB) zapisany przy trasie
+  `ClKgqFe8Cr0qinAOOvC2`, link zwraca 200 `image/jpeg`.
+- `d56f3c3` zdejmowanie/podmiana dokumentów (✕ w tabeli i w oknie). Plik zostaje w Storage (reguły blokują
+  kasowanie), wpis przechodzi do `dokumentyUsuniete` z datą — bez informacji KTO zdjął.
+- `f3d2d60` symulator korektora („Korektor" u góry modułu): suwak przebiegu, parametry z auta, legenda
+  w 5 krokach, osobne opisy dla przebiegu ponad umową i dla granicy „nie niżej niż". Liczy `stawkaPoKorekcie`,
+  niczego nie zapisuje. ⚠️ Panel i trasy NADAL liczą km × stawka bez korekty — symulator to tylko pomoc.
+- `433d9a0` ikona wskaźnika paliwa (`IkonaKorektor.jsx`) zamiast 🧮.
+
+❌ Niesprawdzone na produkcji: zdejmowanie CMR (tylko DEMO), symulator (tylko DEMO).
