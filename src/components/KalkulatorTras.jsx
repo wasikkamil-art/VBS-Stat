@@ -211,6 +211,30 @@ const fmtKiedy = (ms) => new Date(ms).toLocaleString("pl-PL", { weekday: "short"
 const fmtHm = (min) => `${Math.floor(min / 60)} h${min % 60 ? " " + Math.round(min % 60) + " min" : ""}`;
 
 
+// ── Ikony liniowe w stylu menu bocznego (24×24, kreska 2). ──
+const IKONY = {
+  zegar: <><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></>,
+  auto: <><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2" /><path d="M15 18H9" /><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14" /><circle cx="17" cy="18" r="2" /><circle cx="7" cy="18" r="2" /></>,
+  pauza: <><rect x="14" y="4" width="4" height="16" rx="1" /><rect x="6" y="4" width="4" height="16" rx="1" /></>,
+  lozko: <><path d="M2 4v16" /><path d="M2 8h18a2 2 0 0 1 2 2v10" /><path d="M2 17h20" /><path d="M6 8v9" /></>,
+  paczka: <><path d="m7.5 4.27 9 5.15" /><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" /><path d="m3.3 7 8.7 5 8.7-5" /><path d="M12 22V12" /></>,
+  paliwo: <><path d="M3 22h12" /><path d="M4 9h10" /><path d="M14 22V4a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v18" /><path d="M14 13h2a2 2 0 0 1 2 2v2a2 2 0 0 0 2 2a2 2 0 0 0 2-2V9.83a2 2 0 0 0-.59-1.42L18 5" /></>,
+  droga: <><circle cx="6" cy="19" r="3" /><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15" /><circle cx="18" cy="5" r="3" /></>,
+  lisc: <><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z" /><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12" /></>,
+  euro: <><path d="M4 10h12" /><path d="M4 14h9" /><path d="M19 6a7.7 7.7 0 0 0-5.2-2A7.9 7.9 0 0 0 6 12c0 4.4 3.5 8 7.8 8 2 0 3.8-.8 5.2-2" /></>,
+  pinezka: <><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0" /><circle cx="12" cy="10" r="3" /></>,
+  klucz: <><path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4" /><path d="m21 2-9.6 9.6" /><circle cx="7.5" cy="15.5" r="5.5" /></>,
+  odswiez: <><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></>,
+  plus: <><path d="M5 12h14" /><path d="M12 5v14" /></>,
+  iks: <><path d="M18 6 6 18" /><path d="m6 6 12 12" /></>,
+};
+function Ikona({ n, size = 16, className = "" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+      className={`inline-block shrink-0 ${className}`} style={{ verticalAlign: "-0.15em" }} aria-hidden="true">{IKONY[n]}</svg>
+  );
+}
+
 export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverActivities = [], prefill = null, onPrefillUsed = () => {}, onZapiszPlan = null, eurRate = null, canEdit = false, showToast = () => {}, currentUser = null }) {
   const [waypoints, setWaypoints] = useState([]); // {id,label,lat,lon}
   const [addInput, setAddInput] = useState("");
@@ -243,6 +267,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
 
   const mapRef = useRef(null);
   const mapObjRef = useRef(null);
+  const boundsRef = useRef(null); // zasięg narysowanej trasy — do ponownego kadrowania po zmianie rozmiaru mapy
   const layerRef = useRef(null);
 
   // ── Wczytaj stawki z configu (merge nad domyślnymi). ──
@@ -395,7 +420,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
     }
     const map = mapObjRef.current;
     if (layerRef.current) { map.removeLayer(layerRef.current); layerRef.current = null; }
-    if (!result?.geometry) return;
+    if (!result?.geometry) { boundsRef.current = null; return; }
     const group = L.layerGroup();
     L.polyline(result.geometry, { color: "#2563eb", weight: 4, opacity: 0.85 }).addTo(group);
     waypoints.forEach((w, i) => {
@@ -417,9 +442,29 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
     }
     group.addTo(map);
     layerRef.current = group;
-    try { map.fitBounds(L.polyline(result.geometry).getBounds(), { padding: [30, 30] }); } catch { /* pusto */ }
+    boundsRef.current = L.polyline(result.geometry).getBounds();
+    try { map.fitBounds(boundsRef.current, { padding: [30, 30] }); } catch { /* pusto */ }
     setTimeout(() => map.invalidateSize(), 100);
   }, [result, waypoints, plan]);
+
+  // Mapa rozciąga się razem z kartą — Leaflet sam nie zauważa zmiany rozmiaru kontenera.
+  useEffect(() => {
+    if (!mapRef.current || typeof ResizeObserver === "undefined") return;
+    // Po zmianie rozmiaru kadrujemy trasę od nowa — inaczej zostaje poza widokiem.
+    let t = null;
+    const ro = new ResizeObserver(() => {
+      clearTimeout(t);
+      t = setTimeout(() => {
+        const map = mapObjRef.current;
+        if (!map) return;
+        map.invalidateSize();
+        // Bez animacji i po jej zakończeniu — przerwane przybliżanie zostawiało trasę uciętą.
+        if (boundsRef.current) { try { map.fitBounds(boundsRef.current, { padding: [30, 30], animate: false }); } catch { /* pusto */ } }
+      }, 350);
+    });
+    ro.observe(mapRef.current);
+    return () => { clearTimeout(t); ro.disconnect(); };
+  }, []);
 
   const addWaypoint = async () => {
     const q = addInput.trim();
@@ -678,15 +723,17 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
   // Kraje pokazywane w edytorze stawek — te z domyślnych + ewentualne z configu.
   const editorCountries = Object.keys(DEFAULT_RATES.fuelPrice);
 
+  const kafel = "rounded-xl border border-gray-100 bg-gray-50/70 px-3.5 py-3";
+
   return (
     <div>
       <h2 className="text-xl font-bold text-gray-900 mb-1">Kalkulator tras</h2>
       <p className="text-sm text-gray-500 mb-5">Szacunkowy koszt trasy — paliwo per kraj + myto. Wynik orientacyjny, nie 1:1.</p>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-[400px_minmax(0,1fr)] gap-5">
         {/* ── Panel wejścia ── */}
         <div className="bg-white rounded-2xl border border-gray-100 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 mb-3">Trasa</h3>
+          <h3 className="text-sm font-semibold text-gray-700 mb-3"><Ikona n="pinezka" className="mr-1.5 text-blue-600" />Trasa</h3>
           {zFrachtu && (
             <div className="mb-3 text-xs px-3 py-2 rounded-lg bg-teal-50 text-teal-800 border border-teal-100">
               Ze zlecenia <b>{zFrachtu.nr}</b> — {zFrachtu.punktow} pkt trasy
@@ -705,7 +752,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
               <div key={w.id} className="flex items-center gap-2 text-sm">
                 <span className="w-6 h-6 flex items-center justify-center rounded-full bg-blue-50 text-blue-600 text-xs font-semibold shrink-0">{i + 1}</span>
                 <span className="flex-1 truncate text-gray-700" title={w.label}>{w.label}</span>
-                <button onClick={() => removeWaypoint(w.id)} className="text-gray-300 hover:text-red-700 shrink-0" title="Usuń">✕</button>
+                <button onClick={() => removeWaypoint(w.id)} className="text-gray-300 hover:text-red-700 shrink-0" title="Usuń"><Ikona n="iks" /></button>
               </div>
             ))}
             {waypoints.length === 0 && <p className="text-xs text-gray-500">Brak punktów. Dodaj miasto/adres albo „lat, lon".</p>}
@@ -720,7 +767,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
               className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100"
             />
             <button onClick={addWaypoint} disabled={geocoding} className="px-3 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-sm text-gray-700 disabled:opacity-50">
-              {geocoding ? "…" : "+ Dodaj"}
+              {geocoding ? "…" : <><Ikona n="plus" className="mr-1" />Dodaj</>}
             </button>
           </div>
 
@@ -739,7 +786,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
           </div>
 
           <div className="mt-4 pt-4 border-t border-gray-100">
-            <h3 className="text-sm font-semibold text-gray-700 mb-3">Plan czasu (tachograf)</h3>
+            <h3 className="text-sm font-semibold text-gray-700 mb-3"><Ikona n="zegar" className="mr-1.5 text-blue-600" />Plan czasu (tachograf)</h3>
             <label className="block text-xs text-gray-500">Wyjazd</label>
             <input type="datetime-local" value={startAt} onChange={(e) => setStartAt(e.target.value)}
               className="mt-1 w-full px-2 py-2 rounded-lg border border-gray-200 text-sm text-gray-700" />
@@ -767,7 +814,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
             </label>
           </div>
 
-          <button onClick={compute} disabled={computing || waypoints.length < 2 || !vehicleId} className="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium disabled:opacity-50">
+          <button onClick={compute} disabled={computing || waypoints.length < 2 || !vehicleId} className="w-full py-2.5 mt-4 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium disabled:opacity-50">
             {computing ? (progress ? `Analizuję kraje… ${progress.done}/${progress.total}` : "Liczę trasę…")
               : !vehicleId ? "Wybierz pojazd, żeby policzyć"
               : "Oblicz koszt trasy"}
@@ -776,28 +823,45 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
         </div>
 
         {/* ── Mapa ── */}
-        <div className="bg-white rounded-2xl border border-gray-100 p-1.5 overflow-hidden">
-          <div ref={mapRef} style={{ width: "100%", height: 300, borderRadius: 12 }} />
+        <div className="bg-white rounded-2xl border border-gray-100 p-1.5 overflow-hidden flex flex-col">
+          {/* Rozmiar trzyma opakowanie — na samym węźle mapy nie zmieniamy klas, bo należą do Leafleta. */}
+          <div className="flex-1" style={{ position: "relative", minHeight: 420 }}>
+            <div ref={mapRef} style={{ position: "absolute", inset: 0, borderRadius: 12 }} />
+          </div>
         </div>
       </div>
 
       {/* ── Wynik ── */}
       {result && (
         <div className="mt-5 bg-white rounded-2xl border border-gray-100 p-5">
-          <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 mb-4">
-            <div>
-              <span className="text-2xl font-bold text-gray-900">{fmtEUR(result.grand)}</span>
-              {grandPLN != null && <span className="text-sm text-gray-500 ml-2">≈ {grandPLN.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} zł</span>}
-              <span className="text-xs text-gray-500 ml-2">szacunek</span>
+            <div className="grid gap-3 mb-4 grid-cols-2 md:grid-cols-5">
+              <div className="rounded-xl bg-blue-600 text-white px-3.5 py-3 col-span-2 md:col-span-1">
+                <div className="text-[11px] text-blue-100 flex items-center gap-1"><Ikona n="euro" size={13} />Koszt trasy · szacunek</div>
+                <div className="text-2xl font-bold leading-tight mt-0.5">{fmtEUR(result.grand)}</div>
+                {grandPLN != null && <div className="text-xs text-blue-100">≈ {grandPLN.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} zł</div>}
+              </div>
+              <div className={kafel}>
+                <div className="text-[11px] text-gray-500 flex items-center gap-1"><Ikona n="droga" size={13} />Dystans</div>
+                <div className="text-lg font-semibold text-gray-900 leading-tight mt-0.5">{result.distanceKm.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} km</div>
+              </div>
+              <div className={kafel}>
+                <div className="text-[11px] text-gray-500 flex items-center gap-1"><Ikona n="zegar" size={13} />Czas jazdy</div>
+                <div className="text-lg font-semibold text-gray-900 leading-tight mt-0.5">{result.durationH.toFixed(1)} h</div>
+              </div>
+              <div className={kafel}>
+                <div className="text-[11px] text-gray-500 flex items-center gap-1"><Ikona n="paliwo" size={13} />Paliwo</div>
+                <div className="text-lg font-semibold text-gray-900 leading-tight mt-0.5">{fmtEUR2(result.fuelTotal)}</div>
+                <div className="text-[11px] text-gray-500">{result.cons} L/100</div>
+              </div>
+              <div className={kafel}>
+                <div className="text-[11px] text-gray-500 flex items-center gap-1"><Ikona n="droga" size={13} />Myto</div>
+                <div className="text-lg font-semibold text-gray-900 leading-tight mt-0.5">{fmtEUR2(result.tollTotal)}</div>
+                <div className={`text-[11px] font-medium ${result.tollSource === "ptv" ? "text-green-700" : "text-amber-700"}`}>{result.tollSource === "ptv" ? "PTV oficjalne" : "szacunek flat-rate"}</div>
+              </div>
             </div>
-            <div className="text-sm text-gray-500">
-              {result.distanceKm.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} km · {result.durationH.toFixed(1)} h · {result.cons} L/100
-            </div>
-            {result.tollSource === "ptv"
-              ? <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-[11px] font-medium">myto: PTV oficjalne</span>
-              : <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[11px] font-medium">myto: szacunek flat-rate</span>}
-          </div>
 
+          <div className={plan ? "xl:grid xl:grid-cols-2 xl:gap-5 xl:items-start" : ""}>
+          <div>
           {/* ── Box: myto wg zasady floty (płatne w wybranych krajach) vs gdyby wszędzie płatnymi ── */}
           {result.tollSource === "ptv" && result.allTollTotal > result.tollTotal + 0.01 && (() => {
             const save = result.allTollTotal - result.tollTotal;
@@ -807,12 +871,12 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
               <div className="mb-4 rounded-xl border border-gray-100 overflow-hidden">
                 <div className="grid grid-cols-2 text-sm">
                   <div className="p-3 bg-green-50/40 border-r border-gray-100">
-                    <div className="text-[11px] text-gray-500 mb-0.5">🌿 Wg Waszej zasady</div>
+                    <div className="text-[11px] text-gray-500 mb-0.5"><Ikona n="lisc" className="text-green-700" /> Wg Waszej zasady</div>
                     <div className="font-bold text-gray-800">{fmtEUR2(result.tollTotal)} <span className="font-normal text-gray-500 text-xs">myto</span></div>
                     <div className="text-[11px] text-gray-500">płatne: {payCC.join(" · ") || "—"}</div>
                   </div>
                   <div className="p-3 bg-gray-50/60">
-                    <div className="text-[11px] text-gray-500 mb-0.5">🛣️ Gdyby wszędzie płatnymi</div>
+                    <div className="text-[11px] text-gray-500 mb-0.5"><Ikona n="droga" /> Gdyby wszędzie płatnymi</div>
                     <div className="font-bold text-gray-500">{fmtEUR2(result.allTollTotal)} <span className="font-normal text-gray-500 text-xs">myto</span></div>
                     <div className="text-[11px] text-gray-500">landem w: {landCC.length ? landCC.join(" · ") : "—"}</div>
                   </div>
@@ -862,11 +926,12 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
           </div>
           {result.hasUnknown && <p className="text-[11px] text-amber-700 mt-2">⚠️ Część trasy bez rozpoznanego kraju — wyceniona średnią ceną paliwa, bez myta.</p>}
 
+          </div>
           {/* ── Plan przejazdu wg tachografu ── */}
           {plan && (
-            <div className="mt-4 rounded-xl border border-gray-100 overflow-hidden">
+            <div className="mt-4 xl:mt-0 rounded-xl border border-gray-100 overflow-hidden">
               <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 flex flex-wrap items-center justify-between gap-2">
-                <div className="text-sm font-semibold text-gray-800">🕐 Plan przejazdu</div>
+                <div className="text-sm font-semibold text-gray-800"><Ikona n="zegar" className="text-blue-600" /> Plan przejazdu</div>
                 <div className="text-xs text-gray-500">
                   wyjazd <b>{fmtKiedy(new Date(startAt).getTime())}</b> · dojazd <b className="text-gray-800">{fmtKiedy(plan.etaMs)}</b>
                   {plan.dob > 0 && <> · {plan.dob === 1 ? "1 nocleg" : `${plan.dob} noclegi`}</>}
@@ -888,11 +953,11 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
                 <div><div className="text-[11px] text-gray-500">Od wyjazdu do dojazdu</div><div className="text-sm font-semibold text-gray-800">{fmtHm(Math.round((plan.etaMs - new Date(startAt).getTime()) / 60000))}</div></div>
               </div>
 
-              <div className="max-h-64 overflow-y-auto divide-y divide-gray-50">
+              <div className="max-h-[26rem] overflow-y-auto divide-y divide-gray-50">
                 {plan.odcinki.map((o, i) => (
                   <div key={i} className="px-4 py-2 flex items-center gap-3 text-sm">
                     <span className="w-28 shrink-0 text-xs text-gray-500">{fmtKiedy(o.odMs)}</span>
-                    <span className="w-6 text-center">{o.typ === "jazda" ? "🚚" : o.typ === "pauza" ? "⏸️" : o.typ === "odpoczynek" ? "🛌" : "📦"}</span>
+                    <span className="w-6 text-center">{o.typ === "jazda" ? <Ikona n="auto" className="text-blue-600" /> : o.typ === "pauza" ? <Ikona n="pauza" className="text-amber-500" /> : o.typ === "odpoczynek" ? <Ikona n="lozko" className="text-violet-600" /> : <Ikona n="paczka" className="text-gray-500" />}</span>
                     <span className="flex-1 text-gray-700">
                       {o.typ === "jazda" ? <>jazda {fmtHm(Math.round(o.minut))} <span className="text-gray-500">· km {o.kmOd}–{o.kmDo}</span></>
                         : o.typ === "pauza" ? <>pauza 45 min <span className="text-gray-500">· ok. {o.kmOd} km · {o.powod}</span></>
@@ -920,11 +985,12 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
               </div>
             </div>
           )}
+          </div>
 
           {/* ── Podstawa wyliczeń (na czym opiera się szacunek) ── */}
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
-              <div className="text-xs font-semibold text-gray-700 mb-1">⛽ Paliwo — jak liczone</div>
+              <div className="text-xs font-semibold text-gray-700 mb-1"><Ikona n="paliwo" /> Paliwo — jak liczone</div>
               <p className="text-[11px] leading-relaxed text-gray-500">
                 Osobno dla każdego kraju: <b>km w kraju × spalanie ({result.cons} L/100) × cena diesla tego kraju</b>.<br />
                 Spalanie: {result.consBasis}.<br />
@@ -938,7 +1004,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
             </div>
             <div className="rounded-xl bg-gray-50 border border-gray-100 p-3">
               <div className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-2">
-                🛣️ Myto — jak liczone
+                <span><Ikona n="droga" /> Myto — jak liczone</span>
                 {result.tollSource === "ptv"
                   ? <span className="px-1.5 py-0.5 rounded bg-green-100 text-green-700 text-[10px] font-medium">PTV · oficjalne</span>
                   : <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-medium">szacunek · flat-rate</span>}
@@ -979,7 +1045,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
           <div className="mt-4">
             {canEdit && (
               <div className="mb-4 rounded-xl bg-blue-50/50 border border-blue-100 p-3">
-                <div className="text-xs font-semibold text-gray-700 mb-1">🔑 Klucz PTV Developer (realne myto)</div>
+                <div className="text-xs font-semibold text-gray-700 mb-1"><Ikona n="klucz" /> Klucz PTV Developer (realne myto)</div>
                 <p className="text-[11px] text-gray-500 mb-2">
                   Załóż konto na <b>developer.myptv.com</b> (Free Plan, bez karty) → wygeneruj klucz → wklej tutaj. Myto liczy się z <b>oficjalnych stawek UE</b> (w tym Polska). Klucz zapisuje się bezpiecznie (przez serwer, nie w przeglądarce).
                 </p>
@@ -1018,9 +1084,9 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
                           className="w-20 px-2 py-1 rounded border border-gray-200 text-right text-sm disabled:bg-gray-50 disabled:text-gray-500" />
                       </td>
                       <td className="pl-3 text-[11px] text-gray-500 whitespace-nowrap">
-                        <span className={auto?.fuelMeta?.[cc] ? "text-emerald-700" : ""}>⛽ {zrodloPaliwa(cc)}</span>
+                        <span className={auto?.fuelMeta?.[cc] ? "text-emerald-700" : ""}><Ikona n="paliwo" /> {zrodloPaliwa(cc)}</span>
                         <span className="mx-1 text-gray-300">·</span>
-                        <span className={auto?.tollMeta?.[cc] ? "text-emerald-700" : ""}>🛣️ {zrodloMyta(cc)}</span>
+                        <span className={auto?.tollMeta?.[cc] ? "text-emerald-700" : ""}><Ikona n="droga" /> {zrodloMyta(cc)}</span>
                       </td>
                     </tr>
                   ))}
@@ -1031,7 +1097,7 @@ export default function KalkulatorTras({ vehicles = [], operacyjne = [], driverA
               <div className="mt-4 flex justify-end gap-2">
                 <button onClick={odswiezAuto} disabled={refreshingAuto} title="Przelicz ceny diesla i myto z naszych tankowań i faktur (3 ostatnie miesiące)"
                   className="px-4 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 text-sm disabled:opacity-50">
-                  {refreshingAuto ? "Przeliczam…" : "🔄 Przelicz z naszych danych"}
+                  {refreshingAuto ? "Przeliczam…" : <><Ikona n="odswiez" /> Przelicz z naszych danych</>}
                 </button>
                 <button onClick={saveRates} disabled={savingRates} className="px-4 py-2 rounded-lg bg-gray-900 hover:bg-black text-white text-sm disabled:opacity-50">
                   {savingRates ? "Zapisuję…" : "Zapisz stawki"}

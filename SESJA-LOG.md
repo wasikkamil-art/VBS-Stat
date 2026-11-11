@@ -7810,3 +7810,26 @@ Dodatkowo, poza wpisami wyżej:
 - `package-lock.json` nadal ma niewyjaśnione zmiany — nie commitować bez sprawdzenia. three.js zostaje na CDN do tego czasu.
 - Założenie niepotwierdzone: kolejność rozładunku liczona osobno w aucie i osobno na przyczepie.
 - Kabina z nadbudówką jest jedna dla wszystkich aut; położenie osi przyczepy przyjęte na oko (13% / 85%).
+
+## 2026-11-11 cd. — Kalkulator tras: nowy układ (szeroka mapa, kafle wyniku, ikony liniowe)
+
+User: wybieramy jeden panel i testujemy na nim wygląd ikon i rozłożenie danych — **bez zmiany samych danych**.
+Wybrał Kalkulator tras („mapa mała i nierozciągnięta"). W atrapie `podglad/kalkulator` (launch
+„podglad-kalkulator", port 5193) dostał trzy układy pod przełącznikiem: A obecny, B szeroka mapa,
+C mapa z boku na całą wysokość. **Wybrał B** — w kodzie został tylko on.
+
+- formularz w kolumnie 400 px, mapa wypełnia resztę i całą wysokość formularza (było 300 px)
+- wynik: 5 kafli (koszt, dystans, czas jazdy, paliwo, myto) zamiast jednej linijki tekstu;
+  tabela krajów i plan przejazdu obok siebie (od szerokości xl), lista planu wyższa
+- emoji zastąpione ikonami liniowymi w stylu menu bocznego (`Ikona` + `IKONY` w `KalkulatorTras.jsx`);
+  kolory ikon planu = kolory punktów na mapie (pauza bursztyn, odpoczynek fiolet)
+- 🐛 przy okazji: trasa bywała ucięta u dołu mapy (drugi znacznik poza kadrem), gdy po pojawieniu się wyniku
+  zmieniała się szerokość mapy (pasek przewijania) w trakcie animacji przybliżania. Dodany `ResizeObserver`,
+  który po zmianie rozmiaru kadruje trasę od nowa, bez animacji. Na produkcji tego błędu nie potwierdzałem.
+- rozmiar mapy trzyma opakowanie, nie węzeł Leafleta (zmiana `className` na węźle mapy kasowała klasy Leafleta)
+
+✅ Atrapa: tekst tabeli krajów, planu przejazdu i opisów „jak liczone" identyczny w A/B/C (po usunięciu ikon);
+oba znaczniki w kadrze (1440×900: mapa 718×692; telefon 375: mapa 329×420, bez poziomego przewijania);
+lint 0 błędów, build zielony.
+❌ **Niesprawdzone**: produkcja po zalogowaniu; prawdziwe myto z PTV (w atrapie kwoty zmyślone, ramka
+„wg Waszej zasady / gdyby wszędzie płatnymi" nieoglądana w nowym układzie); wejście z okna zlecenia w aplikacji.
