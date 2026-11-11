@@ -7789,3 +7789,24 @@ Film: 88,5 s, 1920×1080. ❌ Nadal nie słyszałem lektora — ocenia user. Pr�
 User chciał dynamiczniejszego lektora; po próbkach wybrał **pl-PL-Chirp3-HD-Laomedeia, tempo 1,2**.
 Film 78,5 s. Dźwięk ściszony w montażu o ok. 2 dB (szczyty na pełnej skali). Styl „promocyjny" przez
 nowszy model Google wymagałby włączenia Agent Platform na `fox-fleetstat` — nie włączone, czeka na decyzję usera.
+
+## 2026-11-11 — Zamknięcie sesji: planer załadunku 3D + film
+
+Cała sesja to jeden moduł: **Planer załadunku 3D** (wpisy 2026-11-10 cd.3 – cd.14) i film szkoleniowy o nim.
+Na produkcji ostatni kod to `02b85eb` (bundle `PlanerZaladunku-DAKdAq-Z.js` potwierdzony curl-em).
+
+Dodatkowo, poza wpisami wyżej:
+- **Kto widzi zakładkę** (odczyt `users`, bez zmian): tylko 3 adminów. Agnieszka, Wioletta i Arek mają własne
+  `allowedTabs` bez `planer` → nie widzą. Decyzja o przyznaniu należy do usera.
+- Plan żyje w `localStorage`, więc każdy użytkownik pracuje niezależnie; planu nie widać na innym komputerze.
+- Google Cloud **Text-to-Speech włączone na `fox-fleetstat`** (zgoda usera) — użyte tylko do lektora filmu.
+- Film: user zamknął temat na wersji Laomedeia / tempo 1,2 (`Film_planer_zaladunku.mp4`, nieśledzony).
+  Nie potwierdził wprost, że jest dobrze — powiedział „tu zamykamy temat".
+
+### Otwarte
+- User zapowiedział „przechodzimy do widoku FleetStat", ale nie doprecyzował, o który widok chodzi.
+- Planer na produkcji **nieobejrzany po zalogowaniu przeze mnie**; user napisał „super działa" po wersji z paskiem wagi.
+  Nadal niepotwierdzone: wczytanie zlecenia z PDF-a, prawdziwy plik PDF z okna druku, zapis danych osi.
+- `package-lock.json` nadal ma niewyjaśnione zmiany — nie commitować bez sprawdzenia. three.js zostaje na CDN do tego czasu.
+- Założenie niepotwierdzone: kolejność rozładunku liczona osobno w aucie i osobno na przyczepie.
+- Kabina z nadbudówką jest jedna dla wszystkich aut; położenie osi przyczepy przyjęte na oko (13% / 85%).
