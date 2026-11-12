@@ -7890,3 +7890,5 @@ policzy tego auta, dopóki user nie poda szerokości i wysokości wnętrza.
 Dowód rejestracyjny, polisy OC/AC/GAP, wymiary wnętrza, wyposażenie i sposób załadunku, kierowca (z e-mailem i kartą),
 data wejścia do floty, przebieg startowy, wartość (EUR czy PLN). Poza kartoteką: blok v7 w arkuszu Total_26,
 `operacyjne`/Rentowność, urządzenie GPS w Atlasie, leasing w VBS Faktury. Pliki dokumentów nie są wgrane do modułu Dokumenty.
+
+**Dopisek 12.11:** user potwierdził `type` „Solo” dla v7 — w bazie bez zmian (już tak było wpisane).
