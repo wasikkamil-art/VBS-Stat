@@ -16,7 +16,7 @@ import { doc, getDoc, setDoc } from "firebase/firestore";
 import ZlecenieUploadBtn from "./ZlecenieUploadBtn";
 import {
   parsujWymiaryPaki, parsujPalety, rozwinPozycje, ulozZestaw, sprawdzMiejsce, podsumowanie, naciskiOsi,
-  ostrzezeniaUkladu, przyciagnij, KOLORY_ROZL, TYPY_PALET,
+  ostrzezeniaUkladu, przyciagnij, KOLORY_ROZL, TYPY_PALET, sposobZaladunku,
 } from "../utils/planerZaladunku";
 
 const THREE_URL = "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js";
@@ -148,6 +148,23 @@ function zbudujPodwozie(THREE, L, W, cx, osie) {
   return g;
 }
 
+/** Winda załadunkowa z tyłu: platforma rozłożona na wysokości podłogi + prowadnice. Ilustracja, bez wpływu na obliczenia. */
+function zbudujWinde(THREE, W, glebokosc) {
+  const g = new THREE.Group();
+  const szer = W * 0.94, stal = new THREE.MeshLambertMaterial({ color: 0x64748b });
+  const platforma = new THREE.Mesh(new THREE.BoxGeometry(glebokosc, 0.06, szer), stal);
+  platforma.position.set(glebokosc / 2, -0.03, 0); g.add(platforma);
+  const pas = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.065, szer), new THREE.MeshLambertMaterial({ color: 0xfacc15 }));
+  pas.position.set(glebokosc - 0.05, -0.03, 0); g.add(pas);
+  for (const strona of [1, -1]) {
+    const prowadnica = new THREE.Mesh(new THREE.BoxGeometry(0.09, PODWOZIE_H * 0.62, 0.09), new THREE.MeshLambertMaterial({ color: 0x374151 }));
+    prowadnica.position.set(0.05, -PODWOZIE_H * 0.31, strona * szer * 0.36); g.add(prowadnica);
+    const ramie = new THREE.Mesh(new THREE.BoxGeometry(glebokosc * 0.62, 0.05, 0.06), new THREE.MeshLambertMaterial({ color: 0x374151 }));
+    ramie.position.set(glebokosc * 0.33, -0.2, strona * szer * 0.36); ramie.rotation.z = 0.28; g.add(ramie);
+  }
+  return g;
+}
+
 function kolorSztuki(s, tryb, indeksPozycji) {
   return tryb === "rozl" ? (KOLORY_ROZL[s.rozl] || "#475569") : PALETA[(indeksPozycji.get(s.pozycjaId) ?? 0) % PALETA.length];
 }
@@ -199,6 +216,7 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
   const [wklejka, setWklejka] = useState("");
   const [tech, setTech] = useState({});
   const [techOtwarte, setTechOtwarte] = useState(false);
+  const [zalOtwarte, setZalOtwarte] = useState(false);
   const [techZapis, setTechZapis] = useState("");
   const [blad3d, setBlad3d] = useState("");
   const [gotowe3d, setGotowe3d] = useState(0); // licznik, nie flaga: każde postawienie sceny od nowa musi ją też od nowa wypełnić
@@ -210,7 +228,7 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
     const out = [];
     for (const v of vehicles || []) {
       if (!v?.id || v.archived) continue;
-      const przestrzenie = [{ nazwa: v.plate || "Auto", wym: parsujWymiaryPaki(v.dimensions), maxWaga: v.maxWeight || "", zrodlo: v.dimensions || "" }];
+      const przestrzenie = [{ nazwa: v.plate || "Auto", wym: parsujWymiaryPaki(v.dimensions), maxWaga: v.maxWeight || "", zrodlo: v.dimensions || "", winda: (v.equipment || []).includes("winda") }];
       if (v.plate2) przestrzenie.push({ nazwa: `${v.plate2} (przyczepa)`, wym: parsujWymiaryPaki(v.dimensions2), maxWaga: v.maxWeight2 || "", zrodlo: v.dimensions2 || "" });
       out.push({
         key: v.id, vehicleId: v.id, przestrzenie,
@@ -241,25 +259,12 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
     return () => { zywy = false; };
   }, [vehicleId]);
 
-  const zapiszTech = async () => {
-    if (!auto?.vehicleId) return;
-    const dane = {};
-    for (const [k] of TECH_POLA) { const v = String(tech[k] ?? "").replace(",", "."); dane[k] = v === "" || !Number.isFinite(Number(v)) ? null : Number(v); }
-    try {
-      await setDoc(doc(db, "planerAuta", auto.vehicleId), { ...dane, updatedAt: new Date().toISOString() }, { merge: true });
-      setTechZapis("ok"); showToast("✅ Zapisano dane osi dla " + auto.etykieta);
-    } catch (e) {
-      console.error("planerAuta: zapis nieudany", e);
-      setTechZapis("blad"); showToast("❌ Nie udało się zapisać danych osi");
-    }
-  };
-
   // ── Przestrzenie ładunkowe i układ ──
   const przestrzenie = useMemo(() => {
     const n = (v) => Number(String(v ?? "").replace(",", "."));
     const lista = pakiTxt.map((t, i) => {
       const pk = { dl: n(t.dl), sz: n(t.sz), wys: n(t.wys) };
-      return { i, nazwa: auto?.przestrzenie[i]?.nazwa || (i ? "Przyczepa" : "Auto"), paka: pk.dl > 0 && pk.sz > 0 && pk.wys > 0 ? pk : null, maxWaga: n(t.maxWaga) || null, x0: 0 };
+      return { i, nazwa: auto?.przestrzenie[i]?.nazwa || (i ? "Przyczepa" : "Auto"), paka: pk.dl > 0 && pk.sz > 0 && pk.wys > 0 ? pk : null, maxWaga: n(t.maxWaga) || null, x0: 0, winda: !!auto?.przestrzenie[i]?.winda };
     });
     // Położenie w scenie: auto z przodu, przyczepa za nim, całość wyśrodkowana.
     const zPaka = lista.filter(pr => pr.paka);
@@ -269,6 +274,30 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
   }, [pakiTxt, auto]);
   const zestaw = przestrzenie.length > 1;
   const jestPaka = przestrzenie.some(pr => pr.paka);
+
+  // Sposób załadunku każdej przestrzeni: zapisane dane auta, a gdy ich nie ma — winda z wyposażenia w kartotece.
+  const zal = useMemo(() => przestrzenie.map(pr => sposobZaladunku({ winda: pr.winda, ...(tech?.zaladunek?.[pr.i] || {}) })), [przestrzenie, tech]);
+  // Rozłożona winda ostatniej przestrzeni wystaje za obrys — kadr kamery musi ją objąć (cm).
+  const windaTyl = zal[zal.length - 1]?.winda && przestrzenie[przestrzenie.length - 1]?.paka ? 180 : 0;
+  const zmienZal = (i, pole, wartosc) => {
+    setTechZapis("");
+    setTech(t => ({ ...t, zaladunek: przestrzenie.map((pr, j) => ({ ...zal[j], ...(j === i ? { [pole]: wartosc } : {}) })) }));
+  };
+
+  const zapiszTech = async () => {
+    if (!auto?.vehicleId) return;
+    const dane = {};
+    for (const [k] of TECH_POLA) { const v = String(tech[k] ?? "").replace(",", "."); dane[k] = v === "" || !Number.isFinite(Number(v)) ? null : Number(v); }
+    // Sposób załadunku: jedna pozycja na przestrzeń. Tylko wartości proste — `undefined` wywala zapis w Firestore.
+    dane.zaladunek = zal.map(({ tyl, bokL, bokP, gora, winda, windaKg, wysokosc }) => ({ tyl, bokL, bokP, gora, winda, windaKg, wysokosc }));
+    try {
+      await setDoc(doc(db, "planerAuta", auto.vehicleId), { ...dane, updatedAt: new Date().toISOString() }, { merge: true });
+      setTechZapis("ok"); showToast("✅ Zapisano dane auta: " + auto.etykieta);
+    } catch (e) {
+      console.error("planerAuta: zapis nieudany", e);
+      setTechZapis("blad"); showToast("❌ Nie udało się zapisać danych auta");
+    }
+  };
 
   const { sztuki, braki } = useMemo(() => rozwinPozycje(pozycje), [pozycje]);
   const wynik = useMemo(() => ulozZestaw(przestrzenie, sztuki, { tryb, stale: reczne, kolejnosc, najpierw }), [przestrzenie, sztuki, tryb, reczne, kolejnosc, najpierw]);
@@ -455,15 +484,15 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
     const sz = Math.max(...zPaka.map(pr => pr.paka.sz)), wys = Math.max(...zPaka.map(pr => pr.paka.wys));
     // Kadr obejmuje też kabinę (ok. 2,2 m przed paką), więc środek przesuwamy do przodu.
     const KABINA = 220;
-    c.orbit.cel = { x: -KABINA * S / 2, y: wys * S * 0.3, z: 0 };
+    c.orbit.cel = { x: (windaTyl - KABINA) * S / 2, y: wys * S * 0.3, z: 0 };
     // Odległość liczona z kąta widzenia i proporcji okna: wąskie okno (telefon, wąska kolumna)
     // musi odsunąć kamerę dalej, inaczej zestaw z przyczepą nie mieści się w kadrze z boku.
     const pol = Math.tan((c.camera.fov * Math.PI) / 360);
-    const naDlugosc = ((dl + KABINA) * S * 0.56) / (pol * Math.min(c.camera.aspect || 1, 1.6));
+    const naDlugosc = ((dl + KABINA + windaTyl) * S * 0.56) / (pol * Math.min(c.camera.aspect || 1, 1.6));
     const naWysokosc = ((wys + 150) * S * 0.75) / pol;
     c.orbit.r = Math.min(60, Math.max(naDlugosc, naWysokosc, sz * S * 2));
     rysuj();
-  }, [gotowe3d, przestrzenie, rysuj]);
+  }, [gotowe3d, przestrzenie, windaTyl, rysuj]);
 
   useEffect(() => {
     const c = g.current;
@@ -516,7 +545,16 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
       const pkt = [];
       for (let x = 100; x < paka.dl; x += 100) pkt.push((pr.x0 + x) * S, 0.002, -W / 2, (pr.x0 + x) * S, 0.002, W / 2);
       if (pkt.length) { const gg = new THREE.BufferGeometry(); gg.setAttribute("position", new THREE.Float32BufferAttribute(pkt, 3)); grupa.add(new THREE.LineSegments(gg, new THREE.LineBasicMaterial({ color: 0x94a3b8 }))); }
+      const z = zal[pr.i];
+      // Winda auta w zestawie mieści się w odstępie przed przyczepą, więc platforma jest krótsza.
+      const glWindy = z?.winda ? (zestaw && pr.i === 0 ? 0.9 : 1.5) : 0;
+      if (glWindy) { const winda = zbudujWinde(THREE, W, glWindy); winda.position.set(cx + L / 2, 0, 0); grupa.add(winda); }
       napis("DRZWI", cx + L / 2 + 0.3, 0.15, W / 2 + 0.25, 0.026);
+      if (glWindy) napis(z.windaKg ? `WINDA ${fmt(z.windaKg)} kg` : "WINDA", cx + L / 2 + glWindy / 2, 0.22, 0, 0.026, "rgba(51,65,85,0.92)");
+      // y = 0 to PRAWA burta, w scenie leży po stronie ujemnej osi z
+      if (z?.bokP) napis("ZAŁADUNEK BOKIEM", cx, 0.15, -(W / 2 + 0.45), 0.022);
+      if (z?.bokL) napis("ZAŁADUNEK BOKIEM", cx, 0.15, W / 2 + 0.45, 0.022);
+      if (z?.gora) napis("ZAŁADUNEK Z GÓRY", cx, H + (zestaw ? 0.75 : 0.3), 0, 0.022);
       // wolne miejsca paletowe 120×80 — zielone pola na podłodze (ile jeszcze wejdzie przy doładunku)
       if (pokazMiejsca) for (const mj of sumy[pr.i]?.wolneMiejsca || []) {
         const pole = new THREE.Mesh(new THREE.PlaneGeometry((mj.dl - 5) * S, (mj.sz - 5) * S), new THREE.MeshBasicMaterial({ color: 0x22c55e, transparent: true, opacity: 0.3, side: THREE.DoubleSide }));
@@ -545,7 +583,7 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
     }
     c.podswietl?.();
     rysuj();
-  }, [gotowe3d, przestrzenie, zestaw, ulozone, kolor, wieleRozl, sumy, pokazMiejsca, rysuj]);
+  }, [gotowe3d, przestrzenie, zestaw, ulozone, kolor, wieleRozl, sumy, pokazMiejsca, zal, rysuj]);
 
   // Podświetlenie wybranej sztuki NIE przebudowuje sceny — przebudowa w trakcie przeciągania
   // podmieniłaby mesh, który właśnie trzyma mysz.
@@ -669,6 +707,38 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
             <button onClick={() => setTechOtwarte(o => !o)} className="text-xs font-medium text-gray-700 underline mt-3">
               {techOtwarte ? "Ukryj dane osi" : "Dane do nacisków na osie"}{osie.brak ? " (nieuzupełnione)" : ""}
             </button>
+            <button onClick={() => setZalOtwarte(o => !o)} className="text-xs font-medium text-gray-700 underline mt-3 ml-4">
+              {zalOtwarte ? "Ukryj sposób załadunku" : "Sposób załadunku i winda"}
+            </button>
+            {zalOtwarte && (
+              <div className="mt-3 p-3 rounded-xl bg-gray-50">
+                <p className="text-xs text-gray-600 mb-2">Skąd można ładować i czym. Trafia na widok 3D i do PDF-a. Winda podpowiada się z wyposażenia w kartotece.</p>
+                {przestrzenie.map(pr => (
+                  <div key={pr.i} className={pr.i ? "mt-3 pt-3 border-t border-gray-200" : ""}>
+                    {zestaw && <div className="text-xs font-semibold text-gray-800 mb-1.5">{pr.nazwa}</div>}
+                    <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                      {[["tyl", "tył"], ["bokL", "bok lewy"], ["bokP", "bok prawy"], ["gora", "góra"], ["winda", "winda"]].map(([k, l]) => (
+                        <label key={k} className="flex items-center gap-1.5 text-xs text-gray-800">
+                          <input type="checkbox" checked={!!zal[pr.i]?.[k]} onChange={e => zmienZal(pr.i, k, e.target.checked)} aria-label={`${l} — ${pr.nazwa}`} /> {l}
+                        </label>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      <label><span className={lbl}>Udźwig windy (kg)</span>
+                        <input className={inp} inputMode="decimal" disabled={!zal[pr.i]?.winda} value={tech.zaladunek?.[pr.i]?.windaKg ?? ""} onChange={e => zmienZal(pr.i, "windaKg", e.target.value)} aria-label={`Udźwig windy — ${pr.nazwa}`} /></label>
+                      <label><span className={lbl}>Wysokość załadunkowa (cm)</span>
+                        <input className={inp} inputMode="decimal" value={tech.zaladunek?.[pr.i]?.wysokosc ?? ""} onChange={e => zmienZal(pr.i, "wysokosc", e.target.value)} aria-label={`Wysokość załadunkowa — ${pr.nazwa}`} /></label>
+                    </div>
+                    <div className="text-xs text-gray-600 mt-1.5">{zal[pr.i]?.opis}</div>
+                  </div>
+                ))}
+                {auto?.vehicleId && canEdit ? (
+                  <button onClick={zapiszTech} className="mt-3 px-3 py-1.5 rounded-lg text-xs font-semibold text-white" style={{ background: "#111827" }}>
+                    Zapisz dla {auto.etykieta}{techZapis === "ok" ? " ✓" : ""}
+                  </button>
+                ) : <p className="text-xs text-gray-600 mt-2">Dane obowiązują tylko w tym planie (zapis na stałe: wybierz pojazd z kartoteki).</p>}
+              </div>
+            )}
             {techOtwarte && (
               <div className="mt-3 p-3 rounded-xl bg-gray-50">
                 <p className="text-xs text-gray-600 mb-2">Z dowodu rejestracyjnego i ważenia pustego auta. Bez kompletu danych nacisków nie liczymy.</p>
@@ -798,6 +868,7 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
             {przestrzenie.some(pr => sumy[pr.i]) && (
               <div className="grid gap-2 mb-2" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
                 {przestrzenie.map(pr => sumy[pr.i] && <PasekWagi key={pr.i} nazwa={zestaw ? pr.nazwa : (auto?.przestrzenie[0]?.nazwa || "Auto")} suma={sumy[pr.i]} />)}
+                {przestrzenie.map(pr => pr.paka && <div key={"z" + pr.i} className="text-xs text-gray-700" data-zaladunek={pr.i} style={zestaw ? undefined : { gridColumn: "1 / -1" }}>{zestaw && <b>{pr.nazwa}: </b>}{zal[pr.i]?.opis}</div>)}
               </div>
             )}
             <div ref={holderRef} className="rounded-xl overflow-hidden" style={{ height: 440, background: "#f1f5f9", position: "relative" }}>
@@ -881,7 +952,8 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
                     <div style={{ color: "#475569" }}>
                       {auto ? auto.etykieta : "Auto spoza kartoteki"}
                       {przestrzenie.filter(pr => pr.paka).map(pr => ` · ${zestaw ? pr.nazwa + ": " : "paka "}${pr.paka.dl}×${pr.paka.sz}×${pr.paka.wys} cm${pr.maxWaga ? `, ładowność ${fmt(pr.maxWaga)} kg` : ""}`).join("")}
-                    </div></div>
+                    </div>
+                    <div style={{ color: "#475569" }}>{przestrzenie.filter(pr => pr.paka).map(pr => `${zestaw ? pr.nazwa + " — " : ""}${zal[pr.i]?.opis}`).join(" | ")}</div></div>
                 </div>
                 <div style={{ textAlign: "right", color: "#334155" }}>
                   {naglowek.nr && <div><b>Zlecenie:</b> {naglowek.nr}</div>}
@@ -938,19 +1010,26 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
               </div>
             )}
             <div className="planer-strona">
-              <h1 style={{ fontSize: 15, marginBottom: 6 }}>Kolejność załadunku — od przedniej ściany do drzwi</h1>
+              <h1 style={{ fontSize: 15, marginBottom: 2 }}>Kolejność załadunku — lista kontrolna</h1>
+              <div style={{ color: "#475569", marginBottom: 6 }}>Ładuj w tej kolejności: od przedniej ściany do drzwi, od podłogi w górę. Odhacz każdą sztukę po ustawieniu na aucie.</div>
               <table>
-                <thead><tr><th>Krok</th>{zestaw && <th>Gdzie</th>}<th>Poz.</th><th>Nazwa</th><th>Wymiary cm (dł.×szer.×wys.)</th><th>Od przedniej ściany</th><th>Od prawej burty</th><th>Poziom</th><th>Rozł.</th></tr></thead>
+                <thead><tr><th style={{ width: 62 }}>Na aucie</th><th>Krok</th>{zestaw && <th>Gdzie</th>}<th>Poz.</th><th>Nazwa</th><th>Wymiary cm (dł.×szer.×wys.)</th><th>Od przedniej ściany</th><th>Od prawej burty</th><th>Poziom</th><th>kg</th><th>Rozł.</th></tr></thead>
                 <tbody>
                   {kolejnoscZaladunku.map((s, i) => (
-                    <tr key={s.id}>
+                    <tr key={s.id} style={{ breakInside: "avoid", pageBreakInside: "avoid" }}>
+                      <td><span data-odhacz style={{ display: "inline-block", width: 13, height: 13, border: "1.5px solid #0f172a", borderRadius: 2, verticalAlign: "middle" }} /></td>
                       <td>{i + 1}</td>{zestaw && <td>{przestrzenie[s.p]?.nazwa}</td>}<td>{s.nr}</td><td>{pozycjaPo(s.pozycjaId)?.nazwa || "—"}</td>
                       <td>{s.dl}×{s.sz}×{s.wys}{s.obr ? " (obrócona)" : ""}</td>
-                      <td>{fmt(s.x)} cm</td><td>{fmt(s.y)} cm</td><td>{s.z > 0 ? `na wys. ${fmt(s.z)} cm` : "podłoga"}</td><td>R{s.rozl}</td>
+                      <td>{fmt(s.x)} cm</td><td>{fmt(s.y)} cm</td><td>{s.z > 0 ? `na wys. ${fmt(s.z)} cm` : "podłoga"}</td><td>{s.waga ? fmt(s.waga) : "—"}</td><td>R{s.rozl}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <div style={{ display: "flex", gap: 28, marginTop: 12, breakInside: "avoid" }}>
+                <div>Załadowano: ______ z {kolejnoscZaladunku.length} szt.</div>
+                <div>Załadował (podpis): ______________________</div>
+                <div>Data i godzina: ________________</div>
+              </div>
               <div style={{ color: "#475569", fontSize: 9, marginTop: 6 }}>
                 „Prawa burta" = prawa strona auta patrząc w kierunku jazdy (na rzucie z góry: górna krawędź). Plan jest propozycją rozmieszczenia — o zamocowaniu ładunku i rozkładzie mas decyduje kierowca.
               </div>

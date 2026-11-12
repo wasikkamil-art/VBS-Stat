@@ -7833,3 +7833,32 @@ oba znaczniki w kadrze (1440×900: mapa 718×692; telefon 375: mapa 329×420, be
 lint 0 błędów, build zielony.
 ❌ **Niesprawdzone**: produkcja po zalogowaniu; prawdziwe myto z PTV (w atrapie kwoty zmyślone, ramka
 „wg Waszej zasady / gdyby wszędzie płatnymi" nieoglądana w nowym układzie); wejście z okna zlecenia w aplikacji.
+
+## 2026-11-12 — Planer załadunku: winda w 3D, sposób załadunku, lista kontrolna w PDF
+
+User (po obejrzeniu planera): kolejność załadunku w PDF z polami do odhaczania, winda przy aucie w 3D,
+informacja, jak można ładować auto (bok / góra / tył, winda albo tylko wózek) + wysokość załadunkowa,
+oraz link dla klienta, w którym klient uzupełnia tylko wymiary paczek. Zrobione trzy pierwsze; **link czeka
+na decyzje usera** (niżej).
+
+- **Sposób załadunku** — nowy panel „Sposób załadunku i winda" w kroku „1 · Auto", osobno dla auta i przyczepy:
+  tył / bok lewy / bok prawy / góra / winda, udźwig windy (kg), wysokość załadunkowa (cm). Zapis razem z danymi
+  osi do `planerAuta/{vehicleId}` jako tablica `zaladunek[]` (reguł nie trzeba było zmieniać). Winda podpowiada się
+  z wyposażenia w kartotece (`equipment` zawiera „winda"); tył domyślnie zaznaczony, reszty nie zgadujemy.
+  Logika: `sposobZaladunku()` w `src/utils/planerZaladunku.js`. Opis widać pod paskiem wagi nad 3D i w nagłówku PDF.
+- **Winda w 3D** — rozłożona platforma z żółtą krawędzią i prowadnicami za drzwiami (`zbudujWinde`), podpis
+  „WINDA 750 kg"; kadr kamery obejmuje platformę. Dopiski „ZAŁADUNEK BOKIEM" / „Z GÓRY" przy burcie i nad paką.
+  To ilustracja — nie wchodzi do obliczeń.
+- **PDF** — strona „Kolejność załadunku — lista kontrolna": kratka „Na aucie" przy każdej sztuce, kolumna kg,
+  na dole „Załadowano ___ z N szt.", podpis i data. Wiersze nie łamią się między stronami.
+- 🐛 lint (React Compiler): funkcja zapisu używała danych zadeklarowanych niżej → kompilator pomijał cały
+  komponent. Przeniesiona pod deklarację.
+
+Testy silnika 855/855. ✅ Atrapa `podglad/planer`: winda solo i w zestawie, formularz, opis nad 3D, treść
+zapisu do bazy (bez `undefined`), 10 kratek na 10 sztuk w dokumencie do druku.
+❌ **Niesprawdzone**: produkcja po zalogowaniu; prawdziwy zapis do Firestore; prawdziwy plik PDF z okna druku
+(oglądana treść dokumentu, nie wydruk); czy nasze auta mają „winda" w wyposażeniu kartoteki.
+
+### Link dla klienta — do ustalenia przed budową
+Dotąd świadomie odłożony (10.11). Wymaga: zapisu planu w bazie (dziś plan żyje tylko w przeglądarce),
+strony publicznej bez logowania i reguł, które pozwolą obcej osobie zmieniać wyłącznie listę ładunku.
