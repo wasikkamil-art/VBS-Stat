@@ -7862,3 +7862,31 @@ zapisu do bazy (bez `undefined`), 10 kratek na 10 sztuk w dokumencie do druku.
 ### Link dla klienta — do ustalenia przed budową
 Dotąd świadomie odłożony (10.11). Wymaga: zapisu planu w bazie (dziś plan żyje tylko w przeglądarce),
 strony publicznej bez logowania i reguł, które pozwolą obcej osobie zmieniać wyłącznie listę ładunku.
+
+## 2026-11-12 cd. — Kartoteka pojazdów: odczyt stanu + nowe auto v7 (WGM 7652V)
+
+User: firma kupiła nowe auta, porządek w zakładce Pojazdy. Najpierw odczyt (bez zmian) całej kartoteki,
+potem user wgrał 5 dokumentów pierwszego nowego auta i kazał dodać je jako v7.
+
+- **Odczyt kartoteki** (6 aut, v2 i v6 w archiwum): terminy w kartotece po dacie przy v1/v3/v4/v5; v3 i v4 mają
+  w Dokumentach polisy do 13.02.2027, a kartoteka stare daty; numer UDT tylko v2 i v3; wszędzie puste: przebieg,
+  daty wejścia/wyjścia z floty, serwis olejowy, gwarancja, norma spalania; `planerAuta` 0 dok. **Nic z tego nie poprawione
+  — czeka na decyzję usera (zakres B/C/D).**
+- **v7 dodane** do `fleet/data.fleetv2_vehicles` skryptem admin w transakcji (asercja 6 → 7, brak duplikatu id/rejestracji/VIN),
+  kopia tablicy sprzed zapisu: `backup_vehicles_przed_v7_2026-11-12T11-49-53-675Z.json` (gitignored), wpis w `auditLog`.
+  Wpisane tylko dane z dokumentów: `plate` „WGM 7652V”, `brand` „Iveco Daily 70C18”, `year` 2026,
+  `vin` ZCFCE72C1T5746021, `maxWeight` „3511”, `type` „Solo”. Reszta pusta.
+- Dokumenty auta: umowa leasingu operacyjnego Impuls-Leasing nr 26/08532/LO z 22.09.2026 (76 974,49 EUR netto,
+  47 rat × 1 471,03 EUR, wykup 3 987,28 EUR), dwa świadectwa zgodności (Iveco podwozie, Lamar zabudowa firanka),
+  oświadczenie do rejestracji (DMC 7200, masa własna 3689, ładowność 3511), karta Vecto.
+
+✅ Odczyt po zapisie: 7 pojazdów, pierwsze 6 bajt w bajt bez zmian, v7 obecne.
+❌ **Niesprawdzone / niepotwierdzone**: widok v7 w aplikacji po zalogowaniu; `type` „Solo” to domyślna wartość formularza
+i moje założenie (ta sama klasa 7,2 t co v1/v3/v5) — user nie potwierdził; rejestracja znana tylko z nazw plików;
+umowa leasingu nie zawiera VIN-u. `dimensions` puste (znana tylko długość skrzyni 6050 mm) → planer załadunku nie
+policzy tego auta, dopóki user nie poda szerokości i wysokości wnętrza.
+
+### Otwarte dla v7
+Dowód rejestracyjny, polisy OC/AC/GAP, wymiary wnętrza, wyposażenie i sposób załadunku, kierowca (z e-mailem i kartą),
+data wejścia do floty, przebieg startowy, wartość (EUR czy PLN). Poza kartoteką: blok v7 w arkuszu Total_26,
+`operacyjne`/Rentowność, urządzenie GPS w Atlasie, leasing w VBS Faktury. Pliki dokumentów nie są wgrane do modułu Dokumenty.

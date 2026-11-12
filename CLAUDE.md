@@ -53,7 +53,7 @@ Po zamknięciu każdego miesiąca — stałe, powtarzalne raporty (pełne workfl
 - **Dedup importów**: klucz `vehicleId::date::amountEUR::note`.
 - **€/km**: licznik **tylko koszty paliwa** (category=`paliwo`), nie wszystkie koszty. Mianownik `kmLicznik`. Liczone per pojazd/miesiąc, potem średnia.
 - **Metryki rate** (`spalanie`, `eurKm`) — agregacja = średnia, NIE suma. Total roczny = średnia z niepustych miesięcy.
-- Flota: 6 pojazdów (v1–v6). Pomijane rejestracje: OKAZICIEL3/4/5, TRUCK, TK135AM, UNIVERSAL5570.
+- Flota: 7 pojazdów (v1–v7; v7 = WGM 7652V dodane 2026-11-12). Pomijane rejestracje: OKAZICIEL3/4/5, TRUCK, TK135AM, UNIVERSAL5570.
 
 ## Komendy
 
