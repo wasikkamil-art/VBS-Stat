@@ -7892,3 +7892,18 @@ data wejścia do floty, przebieg startowy, wartość (EUR czy PLN). Poza kartote
 `operacyjne`/Rentowność, urządzenie GPS w Atlasie, leasing w VBS Faktury. Pliki dokumentów nie są wgrane do modułu Dokumenty.
 
 **Dopisek 12.11:** user potwierdził `type` „Solo” dla v7 — w bazie bez zmian (już tak było wpisane).
+
+## 2026-11-12 cd.2 — v7: VIN na dokumentach + waluta przy wartości pojazdu
+
+User: wartość v7 wpisać w EUR; najpierw formalności (dokumenty, daty, leasing); sprawdzić, na których dokumentach jest VIN.
+Auto nie jest jeszcze gotowe do jazdy — nie ma pośpiechu.
+
+- **VIN ZCFCE72C1T5746021** — obejrzane na obrazach stron, nie tylko OCR: jest na świadectwie Iveco (COC 12621880),
+  świadectwie Lamar i dwa razy na oświadczeniu Lamar. **Nie ma go** na umowie leasingu (poz. 1.4 „Zgodnie z protokołem
+  odbioru”) ani na karcie Vecto (pole VIN = „NA”; kartę z autem wiąże tylko numer 0012621880 = numer COC Iveco;
+  strona 2 ma w nagłówku 0012621879).
+- **Pole „Wartość netto” było na sztywno w zł** (etykieta formularza i „zł” na karcie pojazdu). Dodane `wartoscWaluta`
+  („EUR” albo brak = zł): wybór waluty w panelu edycji, symbol na karcie. Stare auta bez zmian (brak pola = zł).
+- **Wartość v7 (76 974,49 EUR) jeszcze NIE wpisana** — celowo po pushu, żeby produkcja nie pokazała jej jako „zł”.
+
+✅ lint 0 błędów, build zielony. ❌ Niesprawdzone: widok w aplikacji po zalogowaniu (karta i panel edycji).

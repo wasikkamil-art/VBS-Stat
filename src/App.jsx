@@ -3872,7 +3872,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                               {v.wartoscNet && (
                                 <div className="flex items-center gap-2">
                                   <span className="text-xs text-gray-500 w-20 flex-shrink-0">Wartość</span>
-                                  <span className="text-xs font-medium text-gray-700">{Number(v.wartoscNet).toLocaleString("pl-PL")} zł</span>
+                                  <span className="text-xs font-medium text-gray-700">{Number(v.wartoscNet).toLocaleString("pl-PL")} {v.wartoscWaluta === "EUR" ? "€" : "zł"}</span>
                                 </div>
                               )}
                             </div>
@@ -15004,8 +15004,18 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
           <MF label="VIN">
             <MInput value={v.vin} onChange={val=>setF("vin",val)} placeholder="ZCFC672C5R56..." />
           </MF>
-          <MF label="Wartość netto (zł)">
-            <MInput type="number" value={v.wartoscNet} onChange={val=>setF("wartoscNet",val)} placeholder="210000" />
+          <MF label="Wartość netto">
+            <div className="flex gap-2">
+              <div className="flex-1 min-w-0">
+                <MInput type="number" value={v.wartoscNet} onChange={val=>setF("wartoscNet",val)} placeholder="210000" />
+              </div>
+              <div style={{ width: 84 }}>
+                <MSelect value={v.wartoscWaluta === "EUR" ? "EUR" : "PLN"} onChange={val=>setF("wartoscWaluta",val)}>
+                  <option value="PLN">zł</option>
+                  <option value="EUR">EUR</option>
+                </MSelect>
+              </div>
+            </div>
           </MF>
         </div>
       </div>
