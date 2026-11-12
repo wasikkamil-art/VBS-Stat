@@ -7907,3 +7907,18 @@ Auto nie jest jeszcze gotowe do jazdy — nie ma pośpiechu.
 - **Wartość v7 (76 974,49 EUR) jeszcze NIE wpisana** — celowo po pushu, żeby produkcja nie pokazała jej jako „zł”.
 
 ✅ lint 0 błędów, build zielony. ❌ Niesprawdzone: widok w aplikacji po zalogowaniu (karta i panel edycji).
+
+## 2026-11-12 cd.3 — v7: wartość w EUR wpisana, komplet umowy leasingu bez VIN-u, aneks na PLN
+
+- Push `22ec003` zrobił user; produkcja potwierdzona curl-em: bundle `index-DgW8v2Os.js` zawiera `wartoscWaluta`.
+- **v7: `wartoscNet` „76974.49” + `wartoscWaluta` „EUR”** — transakcja z asercją (7 pojazdów, v7 na miejscu, pole było puste),
+  wpis w `auditLog`, odczyt po zapisie: pierwsze 6 aut bez zmian.
+- User dosłał skan 14 stron (`Dokument_2026-11-12_130724.pdf`): deklaracja wekslowa, umowa 26/08532/LO (3 str.),
+  **Aneks nr 1**, zamówienie do dostawcy, Ogólne Warunki Leasingu. **VIN-u nie ma na żadnej stronie** — umowa i zamówienie
+  mają „Nr seryjny: zgodnie z protokołem odbioru”. Protokołu odbioru w skanie nie ma.
+- 🔑 **Aneks nr 1 (22.09.2026)**: waluta dostawy zmieniona na PLN — cena auta **334 000 PLN netto / 410 820 PLN brutto**
+  (wpisane odręcznie). Leasingodawca po zapłacie dostawcy przeliczy wartość na EUR i **zrekalkuluje raty i wykup**;
+  kwoty z umowy (76 974,49 EUR, rata 1 471,03 EUR) są więc wstępne do czasu nowego harmonogramu.
+
+❌ Niesprawdzone: widok karty v7 w aplikacji po zalogowaniu. Otwarte: czy wartość v7 zostaje w EUR (kwota wstępna),
+czy wpisać 334 000 zł jak pozostałe auta — decyzja usera.
