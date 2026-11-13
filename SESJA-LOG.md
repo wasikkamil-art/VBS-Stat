@@ -8068,3 +8068,9 @@ arkusz widział tylko 1 900 €, a `Miki_26` jest podpięta pod blok TK 130EF i 
     **duplikat `stzb67yo`** (ten sam nr zlecenia 2602487 i nr ref., poprawne daty 4–5.11). Po obu poprawkach 7 / 9 930 € = zakładka.
   Kasowanie `4tvxrd2i` i dopisanie dwóch frachtów — czeka na usera (nie zmyślam rekordów, kasowanie wymaga zgody).
 ℹ️ FS per auto liczy poprawnie; per kierowca — reguła „większość dni" (X v1 w całości do Mykoły). Zapis kierowcy na frachcie = osobny temat, niezaczęty.
+
+### 13.11 cd.8 — duplikat `4tvxrd2i` skasowany (zgoda usera)
+`frachty/4tvxrd2i` (CDC, 950 €, v5, błędne daty 4–5.10) usunięty po asercjach: ten sam nr zlecenia 2602487, nr ref., kwota, pojazd
+i trasa co `stzb67yo` (4–5.11, zostaje); zero `driverEvents`, powiązań i podkolekcji; kasowany nie miał żadnego pola, którego nie ma zostający.
+Backup `backup_fracht_4tvxrd2i_*.json`, wpis w `auditLog`. Frachty 782 → 781. **v5 X w FS: 6 szt. / 8 830 €.**
+L107 (ilość frachtów v5) zostaje **7** z notatką — siódmy to CRAFTER 1 100 €, którego brakuje w aplikacji (jest w zakładce kierowcy).
