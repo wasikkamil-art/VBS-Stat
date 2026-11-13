@@ -7960,3 +7960,32 @@ e-TOLL, raport dystansu ww i dwie faktury Andamur (C260044905, C260048227).
 Barbezieux bez faktury DC), paliwo/AdBlue do Total_26, `operacyjne/2026-10`, top-up `costs`.
 
 ❌ **Niesprawdzone**: nic w przeglądarce; poprawka parsera nie jest na produkcji do czasu pusha.
+
+## 2026-11-13 cd. — Październik: paliwo w bazie, Andamur, Total_26, operacyjne, koszty paliwa
+
+Push `a8ed084` przeszedł, produkcja serwuje `index-DHAjzLoM.js`, w `PaliwoTab-LJ6UBTEV.js` jest nowy układ tankpoola.
+
+- 🚩 **Pierwsze „wgrane" userа znów nie zapisało niczego** — brak `fuelTransactions/2026-10` i brak wpisu
+  „import" w `auditLog`. Ten sam objaw co 15.10: podgląd bez kliknięcia „Zapisz N tankowań". Po kliknięciu
+  zapis pojawia się dopiero PO geokodowaniu (ok. 1,5 min) — jeden odczyt za wcześnie pokazał jeszcze zero.
+- **Paliwo X.2026 w bazie: 112 tx, 4 karty.** Litry per auto = pliki co do setnej
+  (v1 794,70 · v3 1 292,77 · v4 1 739,90 · v5 1 482,00). Tankpool 5 tx / 575,04 €.
+  ON per kraj: FR 2,084 · DE 1,954 · BE 2,022 · PL 1,607 · ES 1,530 €/L (trend wzrostowy trwa).
+- **Andamur**: `fix_andamur_2026_10.mjs` (kopia `reconcile_andamur.mjs` ograniczona do faktur
+  C260044905 + C260048227). 12 pozycji ES = 12 tx, **981,39 → 925,24 € (−56,15)**: v3 −41,96, v5 −14,20.
+  Suma ES w bazie = suma `Importe` = 844,73 €. Backup `backup_andamur_reconcile_1794564416446.json`.
+  ⚠️ 2 tx FR (Barbezieux, v5: 37 L ON + 6,58 L AdBlue) bez faktury DC — zostały z ceną z raportu, bez stempla.
+- **Total_26 kol. L** (asercje etykiety i zawartości, kopia `backup_total26_paz_*.json`):
+  Paliwo v3 −2 265,09 · v1 −1 363,64 · v5 −2 790,71 · v4 −3 283,10; litry; Spalanie 1: 13,6 / 12,2 / 14,4 / 16,4;
+  „inne" = AdBlue z notatką (v3 42,17 · v1 25,84 · v5 44,63 · v4 69,73 + A2 2,03 €).
+  **L49 (v1 Paliwo) nadpisane** z −1 796,75 (kopia września) — stara wartość w notatce komórki.
+  ✅ Arkusz potwierdził: „średnia cena za litr" v3 = −1,752, baza 1,752 €/L. Rollup floty bez zepsutych formuł.
+- **`operacyjne`**: 4 nowe dok. `v{n}_2026_10` (km, litry, spalanie), 97 → 101. **Bez `dni`** — czeka na usera.
+- **`costs`**: +7 (paliwo ×4, E-Toll ×3, note „Import Total_26 2026-10"), 1221 → 1228. Reszta po uzupełnieniu arkusza.
+
+**Otwarte**: pełny NegoMetal (myto niezaimportowane, `tollTransactions/2026-10` puste) · nowe auta w e-TOLL ·
+TK 314CL bez e-TOLL · frachty apka/arkusz v1/v4/v5 i „ilość frachtów" (niewpisana) · koszty zmienne i dni w arkuszu ·
+Parking TIR 60 PLN (v1, E100, 31.10) nieksięgowany — brak decyzji, gdzie · faktura DC za Barbezieux ·
+E100 v5 07.10: dwa wiersze po 16,83 L minutę po minucie (Ruffec) — możliwy dubel portalu, bez storna, zostawione ·
+v1 spalanie 12,2 (IX: 15,1) — do sprawdzenia, czy nie było tankowań gotówkowych.
+❌ **Niesprawdzone**: nic w przeglądarce (Paliwo, Rentowność/Trendy za X); stacja „GALP Monegros" bez współrzędnych.
