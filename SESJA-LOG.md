@@ -8008,3 +8008,12 @@ User przysłał 5 zdjęć od kierowcy (zip „22-10-2026 13.03 Mykola Omelianiuk
   w bazie 1,08 także w V–VI i części VIII). `parseE100` dzieli PL zawsze przez 1,23 → **netto E100 w PL zaniżone**.
   X.2026: 5 tx od 7.10 (v4 ×2, v1 ×3) = 2 323,51 PLN brutto, zaniżenie ok. 262 PLN ≈ 60 € (+ tx z 3.10 niepewna).
   V.2026: 2 tx E100 liczone 1,23 przy Eurowagu 1,08. AdBlue zostaje 23%. **Nie poprawiane — okresy stawki do potwierdzenia przez usera.**
+
+### 13.11 cd.3 — tankowania BLIK zaksięgowane na v1 (decyzja usera: „Tak, na v1")
+Trzy paragony poza kartami → **296,39 € netto** (VAT 8%; 14.10 kurs 4,3706 → 113,89 · 15.10 kurs 4,3691 → 98,39 ·
+paragon bez daty, kurs śr. X 4,3815 → 84,11). Litry **175,64**, z czego 49,94 z paragonu, a 67,45 i 58,25
+**SZACOWANE** z kwoty przy 7,97 zł/L (terminal nie drukuje litrów).
+- Total_26: L49 `=-1363,64-296,39` · L80 `=794,7+175,64` = 970,34 L · L81 spalanie 12,2 → **14,9**; notatki w trzech komórkach.
+- `operacyjne/v1_2026_10`: paliwoL 970,34, spalanie 14,9 (transakcja z asercją starych wartości).
+- `costs`: +1 pozycja paliwo v1 296,39 € („…(BLIK, poza kartami)"), 1228 → 1229. **Nie** w `fuelTransactions` — tam tylko karty.
+⚠️ Spalanie v1 jest przybliżone do czasu, aż kierowca poda litry z 14.10 i 15.10.
