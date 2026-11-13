@@ -8047,3 +8047,5 @@ AdBlue/parking/A2 w `costs` (pójdą razem z „inne" przy imporcie kosztów), k
 - **Maj 2026 NIE poprawiony** (zamknięty miesiąc, zasada snapshotu): 2 tx E100 v3 z 4–5.05 liczone 23% w okresie 8%,
   zaniżenie ok. 28 €. Czeka na zgodę usera.
 ❌ Poprawka parsera nie jest na produkcji do pusha; w przeglądarce nic nie oglądane.
+
+**Decyzja usera 13.11: maj zostaje** — 2 tx E100 v3 (4–5.05) liczone 23% w okresie 8% NIE korygujemy (snapshot zamkniętego miesiąca, ~28 €). Nie wracać.
