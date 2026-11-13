@@ -23,6 +23,35 @@ export const VAT = {
   CH: 0.081, DK: 0.25, SE: 0.25, LT: 0.21, LV: 0.21, EE: 0.22, HR: 0.25,
 };
 
+// ── Obniżony VAT na olej napędowy w Polsce (8% zamiast 23%) ────────────────
+// Stawka zmieniała się w ciągu 2026 r. kilka razy. Okresy poniżej NIE pochodzą z ustawy,
+// tylko z danych: Eurowag jako jedyna karta podaje prawdziwe netto, a iloraz brutto/netto
+// dla ON w PL wynosił 1,08 w tych dniach i 1,23 poza nimi (paragony Orlen i Greko z X.2026
+// też pokazują 8%). AdBlue cały czas 23%.
+//
+// Do 13.11.2026 E100 liczone było zawsze przez 1,23 → netto ON w PL zaniżone o ~12%
+// w okresach obniżonej stawki (X.2026: ok. 60 € na flotę).
+//
+// ⚠️ Granice są znane z dokładnością do dni, w których ktoś tankował Eurowagiem w PL:
+//    30.06 → 8%, 06.07 → 23% · 14.08 → 23%, 26.08 → 8% · 28.08 → 8%, 02.09 → 23% ·
+//    02.10 → 23%, 04.10 → 8%. Dni pomiędzy (np. 3.10) liczymy stawką podstawową.
+// ⚠️ Ostatni okres jest OTWARTY (ostatnia obserwacja 31.10.2026). Przy każdym imporcie
+//    sprawdź brutto/netto Eurowagu w PL i w razie zmiany dopisz datę końca.
+export const VAT_PL_ON_8 = [
+  ["2026-05-01", "2026-06-30"],
+  ["2026-08-26", "2026-08-28"],
+  ["2026-10-04", null],
+];
+
+/** Stawka VAT do przeliczenia brutto→netto dla danej transakcji. */
+export function vatOf(country, product, ts) {
+  if (country === "PL" && product === "on") {
+    const d = String(ts || "").slice(0, 10);
+    if (VAT_PL_ON_8.some(([od, dok]) => d >= od && (!dok || d <= dok))) return 0.08;
+  }
+  return VAT[country] ?? 0.21;
+}
+
 export const FLAG = {
   PL: "🇵🇱", DE: "🇩🇪", FR: "🇫🇷", ES: "🇪🇸", CZ: "🇨🇿", BE: "🇧🇪", LU: "🇱🇺", AT: "🇦🇹",
   IT: "🇮🇹", HU: "🇭🇺", RO: "🇷🇴", BG: "🇧🇬", PT: "🇵🇹", NL: "🇳🇱", SK: "🇸🇰", SI: "🇸🇮",
@@ -172,7 +201,7 @@ export function parseE100(aoa) {
       station: [cell(r, I.brand), cell(r, I.station)].filter(Boolean).join(" ").trim(),
       address: String(cell(r, I.addr) || "").trim(),
       currency: String(cell(r, I.cur) || "EUR").toUpperCase(),
-      grossLocal: gross, netLocal: gross / (1 + (VAT[country] ?? 0.21)),
+      grossLocal: gross, netLocal: gross / (1 + vatOf(country, product, ts)),
     });
   }
   return out;

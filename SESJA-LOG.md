@@ -8033,3 +8033,17 @@ paragon bez daty, kurs śr. X 4,3815 → 84,11). Litry **175,64**, z czego 49,94
 **Stan października po dzisiejszym dniu** — w bazie i arkuszu: paliwo, AdBlue, myto (Nego + e-TOLL), km, spalanie.
 **Brakuje**: koszty zmienne (leasing, wypłaty, serwis, imi, OCPD, ZUS v5, hotele), dni w trasie, ilość frachtów,
 AdBlue/parking/A2 w `costs` (pójdą razem z „inne" przy imporcie kosztów), korekta VAT 8% dla E100 w PL.
+
+### 13.11 cd.5 — VAT 8% na ON w PL: parser E100 + korekta października (decyzja usera: „Tak, popraw")
+- **Okresy 8% ustalone z Eurowagu** (brutto/netto ON w PL): 1.05–30.06 · 26–28.08 · od 4.10 (ostatnia obserwacja 31.10).
+  Pomiędzy 23%. Granice znane tylko z dni, w których ktoś tankował Eurowagiem — to obserwacja, nie ustawa.
+- **Kod**: `VAT_PL_ON_8` + `vatOf(country, product, ts)` w `fuelParsers.js`, użyte w `parseE100`. AdBlue i inne kraje bez zmian.
+  ⚠️ **Ostatni okres otwarty** — przy każdym imporcie sprawdzać iloraz Eurowagu w PL i dopisać datę końca.
+  ✅ `diagnose_test_vat_pl.mjs` 11/11, lint 0, build zielony.
+- **Baza X.2026**: 5 tx E100 (v4 7.10 i 28.10; v1 21.10 i 2× 23.10) przeliczone, **+59,83 €** (v1 +34,39, v4 +25,44),
+  stempel `vatFix`, backup `backup_vat_pl_e100_*.json`. Kontrola: stare netEUR odtwarza się tym samym kursem NBP.
+  v4 3.10 (491,79 PLN) **nie ruszone** — dzień między 2.10 (23%) a 4.10 (8%), stawka nieznana.
+- **Total_26**: L49 `=-1398,03-296,39` · L133 −3 308,54 (+ notatki). **`costs`**: v1 paliwo 1 363,64 → 1 398,03 · v4 3 283,10 → 3 308,54.
+- **Maj 2026 NIE poprawiony** (zamknięty miesiąc, zasada snapshotu): 2 tx E100 v3 z 4–5.05 liczone 23% w okresie 8%,
+  zaniżenie ok. 28 €. Czeka na zgodę usera.
+❌ Poprawka parsera nie jest na produkcji do pusha; w przeglądarce nic nie oglądane.
