@@ -8054,3 +8054,17 @@ AdBlue/parking/A2 w `costs` (pójdą razem z „inne" przy imporcie kosztów), k
 L23 v3 **6** · L65 v1 **13** · L107 v5 **7** · L149 v4 **7** (flota 33). Wartość frachtów w arkuszu nadal z zakładek kierowców
 i różni się od FS dla v1/v4/v5 — nie ruszane. ⚠️ v5 = 7 zawiera fracht `4tvxrd2i` (950 €, załadunek 04.10 wg błędnego PDF-a klienta,
 zlecenie 04.11) — po poprawie daty v5 spadnie do 6.
+
+### 13.11 cd.7 — v1: przychód auta z FS (wariant A) + braki frachtów v4/v5 w aplikacji
+**Problem**: Total_26 liczy koszty per AUTO, a wiersz „Frachty" ciągnie z zakładki KIEROWCY (`='V Iwanski 26'!K5`).
+W X.2026 v1 prowadzili Iwansky (do 6.10, 1 fracht 1 900 €) i Mykola (od 12.10, 12 frachtów 3 695,27 €) —
+arkusz widział tylko 1 900 €, a `Miki_26` jest podpięta pod blok TK 130EF i ma za X zero.
+**Decyzja usera: wariant A — „Frachty" auta wpisujemy z FS** (jak ilość frachtów). Zakładki kierowców zostają do rozliczeń.
+- L48 (v1): formuła → `=1900+3695,27` = 5 595,27 € + notatka z rozbiciem na kierowców i starą formułą.
+- v3 zgodne (9 585). **v4 i v5 NIE nadpisane — tu aplikacja jest niekompletna, a zakładki mają rację:**
+  - v4: w FS brak frachtu **1 400 €** (Kielce → DE 37359, załadunek 4.10; w zakładce `Mirek 26` r172 bez klienta i daty zlecenia).
+    Reszta 7/7 zgodna (454,28 vs 454). Po dodaniu: 8 frachtów / 10 744,28 € → L149 trzeba zmienić z 7 na 8.
+  - v5: w FS brak **CRAFTER 1 100 €** (BE 8460 → DE 40723, 15–16.10), a jest nadmiarowy `4tvxrd2i` 950 € —
+    **duplikat `stzb67yo`** (ten sam nr zlecenia 2602487 i nr ref., poprawne daty 4–5.11). Po obu poprawkach 7 / 9 930 € = zakładka.
+  Kasowanie `4tvxrd2i` i dopisanie dwóch frachtów — czeka na usera (nie zmyślam rekordów, kasowanie wymaga zgody).
+ℹ️ FS per auto liczy poprawnie; per kierowca — reguła „większość dni" (X v1 w całości do Mykoły). Zapis kierowcy na frachcie = osobny temat, niezaczęty.
