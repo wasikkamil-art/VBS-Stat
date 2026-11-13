@@ -8049,3 +8049,8 @@ AdBlue/parking/A2 w `costs` (pójdą razem z „inne" przy imporcie kosztów), k
 ❌ Poprawka parsera nie jest na produkcji do pusha; w przeglądarce nic nie oglądane.
 
 **Decyzja usera 13.11: maj zostaje** — 2 tx E100 v3 (4–5.05) liczone 23% w okresie 8% NIE korygujemy (snapshot zamkniętego miesiąca, ~28 €). Nie wracać.
+
+### 13.11 cd.6 — „ilość frachtów" za X wpisana do Total_26 (na polecenie usera, źródło: FS po dacie załadunku)
+L23 v3 **6** · L65 v1 **13** · L107 v5 **7** · L149 v4 **7** (flota 33). Wartość frachtów w arkuszu nadal z zakładek kierowców
+i różni się od FS dla v1/v4/v5 — nie ruszane. ⚠️ v5 = 7 zawiera fracht `4tvxrd2i` (950 €, załadunek 04.10 wg błędnego PDF-a klienta,
+zlecenie 04.11) — po poprawie daty v5 spadnie do 6.
