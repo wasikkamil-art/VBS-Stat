@@ -8074,3 +8074,11 @@ arkusz widział tylko 1 900 €, a `Miki_26` jest podpięta pod blok TK 130EF i 
 i trasa co `stzb67yo` (4–5.11, zostaje); zero `driverEvents`, powiązań i podkolekcji; kasowany nie miał żadnego pola, którego nie ma zostający.
 Backup `backup_fracht_4tvxrd2i_*.json`, wpis w `auditLog`. Frachty 782 → 781. **v5 X w FS: 6 szt. / 8 830 €.**
 L107 (ilość frachtów v5) zostaje **7** z notatką — siódmy to CRAFTER 1 100 €, którego brakuje w aplikacji (jest w zakładce kierowcy).
+
+### 13.11 cd.9 — frachty v4/v5 dopisane przez spedytorów, przychód aut z FS w Total_26
+Po wiadomości do spedytorów: Agnieszka dodała `7q886sxf` (v4, Auto Przemek, Kielce → Effelder, 4–6.10, 1 400 €), Arek `71wrt3sg`
+(v5, CRAFTER, Oudenburg → Hilden, 15–16.10, 1 100 €). (Pierwsze „dopisane" usera nie miało pokrycia w bazie — 781 frachtów, zero `add` w `auditLog`.)
+**FS X.2026: 34 frachty / 35 854,55 €** — v1 13 / 5 595,27 · v3 6 / 9 585 · v4 8 / 10 744,28 · v5 7 / 9 930. Zgodne z zakładkami kierowców co do euro.
+Total_26: L132 (v4) i L90 (v5) — formuły do zakładek zastąpione wartościami z FS + notatki ze starą formułą; L149 ilość frachtów v4 7 → **8**.
+v3 (L6) zostaje na formule `='Siergiej 26'!K5` — kwota identyczna, jeden kierowca.
+ℹ️ Mój wpis `delete` w `auditLog` miał `ts` jako Timestamp, reszta dziennika trzyma ISO string → sortował się na końcu. Poprawione; **w skryptach pisz `ts: new Date().toISOString()`**.
