@@ -8017,3 +8017,19 @@ paragon bez daty, kurs śr. X 4,3815 → 84,11). Litry **175,64**, z czego 49,94
 - `operacyjne/v1_2026_10`: paliwoL 970,34, spalanie 14,9 (transakcja z asercją starych wartości).
 - `costs`: +1 pozycja paliwo v1 296,39 € („…(BLIK, poza kartami)"), 1228 → 1229. **Nie** w `fuelTransactions` — tam tylko karty.
 ⚠️ Spalanie v1 jest przybliżone do czasu, aż kierowca poda litry z 14.10 i 15.10.
+
+### 13.11 cd.4 — myto za październik w bazie, Nego w Total_26 i kosztach
+- **NegoMetal (48) — pełny eksport** (filtr odznaczony): 312 tx, 1–28.10, v1/v3/v5, subtotale 10/10. Poprzedni (47) miał 84.
+- 🚩 **WGM 7652V jest w kartotece (v7), więc import e-TOLL zapisałby jego 28 przejazdów na v7** — wbrew decyzji „pomijamy".
+  Przygotowana kopia `~/Desktop/eTOLL_pazdziernik_2026_bez_nowych_aut.csv` (682 przejazdy). Przy kolejnych miesiącach
+  ten sam problem wróci, dopóki user nie zdecyduje, od kiedy v7 liczymy.
+- User wgrał najpierw sam e-TOLL (Nego nie zaznaczył się w oknie wyboru), potem Nego osobno.
+- **Baza**: `tollTransactions/2026-10` 994 tx (682 e-TOLL + 312 Nego). Nego **1 621,61 €**: v3 715,74 · v1 201,94 · v5 703,93.
+  e-TOLL 388,52 € (kurs dnia; w arkuszu 388,86 po kursie średnim — różnica metody). `tollAnalysis` z podziałem solo/bus.
+  ℹ️ W Nego jest PT VIA-T 48,73 € — Portugalia przestała być ślepą plamą (por. 21.10).
+  ℹ️ `tollAnalysis.grupy`: km solo 24 092 + bus 10 036 ≠ `kmFloty` 36 904 (suma z `operacyjne`) — inne źródło km, nie badane.
+- **Total_26**: Nego L13 −715,74 · L55 −201,94 · L97 −703,93 · L139 0 (bus). **`costs`**: +3 „(Nego)", 1229 → 1232.
+
+**Stan października po dzisiejszym dniu** — w bazie i arkuszu: paliwo, AdBlue, myto (Nego + e-TOLL), km, spalanie.
+**Brakuje**: koszty zmienne (leasing, wypłaty, serwis, imi, OCPD, ZUS v5, hotele), dni w trasie, ilość frachtów,
+AdBlue/parking/A2 w `costs` (pójdą razem z „inne" przy imporcie kosztów), korekta VAT 8% dla E100 w PL.
