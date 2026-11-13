@@ -7989,3 +7989,10 @@ Parking TIR 60 PLN (v1, E100, 31.10) nieksięgowany — brak decyzji, gdzie · f
 E100 v5 07.10: dwa wiersze po 16,83 L minutę po minucie (Ruffec) — możliwy dubel portalu, bez storna, zostawione ·
 v1 spalanie 12,2 (IX: 15,1) — do sprawdzenia, czy nie było tankowań gotówkowych.
 ❌ **Niesprawdzone**: nic w przeglądarce (Paliwo, Rentowność/Trendy za X); stacja „GALP Monegros" bez współrzędnych.
+
+### 13.11 cd. — decyzje usera do października
+- Koszty zmienne i „ilość frachtów" — później (osobny import). Nowe auta 7651V/7652V/7653V w e-TOLL — **pomijamy, jeszcze nie jeżdżą**.
+- TK 314CL bez e-TOLL w X — **tak ma być**. E100 v5 2× 16,83 L (Ruffec) — **oba poprawne**.
+- **Parking TIR przypisujemy do auta**: v1, 60 PLN brutto → 11,10 € netto (kurs 30.10: 4,3955), L58 `=-25,84-11,10` + notatka.
+- v1 spalanie 12,2: user „raczej tak" (tankowania poza kartami) — bez korekty litrów, brak paragonów.
+- NegoMetal: user eksportował Z ZAZNACZONYM „ukryj transakcje…" — czyli plik (47) jest ucięty; myto nadal niezaimportowane.
