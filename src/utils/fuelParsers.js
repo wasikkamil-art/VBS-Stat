@@ -224,7 +224,7 @@ export function parseAndamur(aoa, stationCountry = {}) {
 // co jest niemożliwe. Dlatego netLocal bierzemy wprost, a brutto doliczamy VAT-em kraju.
 export function parseTankpool(aoa) {
   const hi = aoa.findIndex(r => r.some(c => String(c).toLowerCase().includes("kennzeichen")));
-  if (hi < 0) return [];
+  if (hi < 0) return parseTankpoolSurowy(aoa);
   const h = aoa[hi];
   const I = {
     plate: colIdx(h, "kennzeichen"), country: colIdx(h, "land"),
@@ -253,6 +253,47 @@ export function parseTankpool(aoa) {
   return out;
 }
 
+// Drugi układ eksportu tankpoola (od X.2026): plik `transaktionen-*.csv` bez „-view",
+// nagłówki angielskie (CardLicenseTag, Quantity, PreliminaryTotalPrice…), bez wiersza sumy.
+// Pierwszy parser go nie rozpoznawał i import pomijał kartę po cichu.
+//
+// Kwota: `PriceTotalNet`, gdy tankowanie jest już zafakturowane; inaczej
+// `PreliminaryTotalPrice` — to samo pole co „Vorläufiger Gesamtpreis" w układzie
+// niemieckim, czyli NETTO (X.2026: 1,84–1,92 €/L w DE, poniżej cen z VAT).
+// Wiersze z `Deleted = true` są wycofane przez dostawcę — pomijamy.
+function parseTankpoolSurowy(aoa) {
+  const hi = aoa.findIndex(r => r.some(c => String(c).toLowerCase() === "cardlicensetag"));
+  if (hi < 0) return [];
+  const h = aoa[hi].map(c => String(c || "").toLowerCase());
+  const col = nazwa => h.indexOf(nazwa);
+  const I = {
+    plate: col("cardlicensetag"), country: col("countryisocode"), qty: col("quantity"),
+    product: col("productname"), ts: col("datetime"), station: col("placeofdeliveryname"),
+    net: col("pricetotalnet"), prelim: col("preliminarytotalprice"), deleted: col("deleted"),
+  };
+  const out = [];
+  for (let i = hi + 1; i < aoa.length; i++) {
+    const r = aoa[i]; if (!r || !r.length) continue;
+    if (String(cell(r, I.deleted)).toLowerCase() === "true") continue;
+    const product = productOf(cell(r, I.product));
+    if (product !== "on" && product !== "adblue") continue;
+    const liters = numOf(cell(r, I.qty));
+    const zafakturowane = String(cell(r, I.net)).trim() !== "" ? numOf(cell(r, I.net)) : null;
+    const net = zafakturowane ?? numOf(cell(r, I.prelim));
+    const ts = tsOf(cell(r, I.ts));                // „2026-10-22 19:19:00"
+    if (!liters || net == null || !ts) continue;
+    const country = String(cell(r, I.country) || "DE").toUpperCase().slice(0, 2);
+    out.push({
+      card: "tankpool", plateRaw: cell(r, I.plate), ts, product, liters, country,
+      storno: net < 0 || liters < 0,
+      station: String(cell(r, I.station) || "").trim(), address: "",
+      currency: "EUR",
+      netLocal: net, grossLocal: net * (1 + (VAT[country] ?? 0.19)),
+    });
+  }
+  return out;
+}
+
 export function detectAndParse(aoa, stationCountry = {}) {
   const flat = aoa.slice(0, 12).flat().map(c => String(c).toLowerCase()).join(" | ");
   if (flat.includes("tablica rejestracyjna")) return { kind: "eurowag", rows: parseEurowag(aoa) };
@@ -260,6 +301,8 @@ export function detectAndParse(aoa, stationCountry = {}) {
   if (flat.includes("moje zużycie") || (flat.includes("stacja") && flat.includes("litry")))
     return { kind: "andamur", rows: parseAndamur(aoa, stationCountry) };
   if (flat.includes("kennzeichen") && flat.includes("tankmenge"))
+    return { kind: "tankpool", rows: parseTankpool(aoa) };
+  if (flat.includes("cardlicensetag") && flat.includes("preliminarytotalprice"))
     return { kind: "tankpool", rows: parseTankpool(aoa) };
   return { kind: null, rows: [] };
 }
