@@ -7996,3 +7996,15 @@ v1 spalanie 12,2 (IX: 15,1) — do sprawdzenia, czy nie było tankowań gotówko
 - **Parking TIR przypisujemy do auta**: v1, 60 PLN brutto → 11,10 € netto (kurs 30.10: 4,3955), L58 `=-25,84-11,10` + notatka.
 - v1 spalanie 12,2: user „raczej tak" (tankowania poza kartami) — bez korekty litrów, brak paragonów.
 - NegoMetal: user eksportował Z ZAZNACZONYM „ukryj transakcje…" — czyli plik (47) jest ucięty; myto nadal niezaimportowane.
+
+### 13.11 cd.2 — paragony Mykoły (v1) + 🚩 VAT 8% na paliwo w PL, którego parser E100 nie zna
+User przysłał 5 zdjęć od kierowcy (zip „22-10-2026 13.03 Mykola Omelianiuk"). **Nic nie zapisane.**
+- 2 z 5 są już w bazie: AMIC Bielsko 21.10 (E100, 76,85 L) i Orlen Piotrków 20.10 (Eurowag, 58,23 L).
+- **3 tankowania BLIK-iem poza kartami**: Greko-2 Kielce 14.10 — 537,58 PLN (bez litrów na wydruku) ·
+  Alfa Wolbórz 15.10 — 464,25 PLN (bez litrów) · Greko-2 Kielce, data niewidoczna — 49,937 L, 398,00 PLN brutto /
+  368,52 netto. Razem 1 399,83 PLN brutto. To tłumaczy spalanie v1 12,2 (szacunkowo ~175 L brakuje → ok. 14,9).
+  Czeka na usera: litry z dwóch wydruków i decyzja, czy księgować na v1.
+- 🚩 **VAT na ON w Polsce = 8%** — widać na obu paragonach i w Eurowagu (brutto/netto 1,08 od 4.10; 2.10 jeszcze 1,23;
+  w bazie 1,08 także w V–VI i części VIII). `parseE100` dzieli PL zawsze przez 1,23 → **netto E100 w PL zaniżone**.
+  X.2026: 5 tx od 7.10 (v4 ×2, v1 ×3) = 2 323,51 PLN brutto, zaniżenie ok. 262 PLN ≈ 60 € (+ tx z 3.10 niepewna).
+  V.2026: 2 tx E100 liczone 1,23 przy Eurowagu 1,08. AdBlue zostaje 23%. **Nie poprawiane — okresy stawki do potwierdzenia przez usera.**
