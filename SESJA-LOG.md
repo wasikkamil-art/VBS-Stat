@@ -7922,3 +7922,41 @@ Auto nie jest jeszcze gotowe do jazdy — nie ma pośpiechu.
 
 ❌ Niesprawdzone: widok karty v7 w aplikacji po zalogowaniu. Otwarte: czy wartość v7 zostaje w EUR (kwota wstępna),
 czy wpisać 334 000 zł jak pozostałe auta — decyzja usera.
+
+## 2026-11-13 — Zamknięcie października: stan, parser tankpoola, pierwsze wpisy (commit `174f06e`)
+
+User: „przechodzimy do podsumowania października". Dostarczył 4 raporty kart, NegoMetal (47),
+e-TOLL, raport dystansu ww i dwie faktury Andamur (C260044905, C260048227).
+
+**Stan na starcie**: frachty 33 szt. / 34 304,55 € są; `costs` tylko 19 stałych z projekcji v17;
+`fuelTransactions`, `tollTransactions`, `operacyjne` puste; Total_26 kol. L — same stałe i frachty.
+
+**Zrobione**
+- 🐛 **Tankpool zmienił układ eksportu** (`transaktionen-*.csv` bez „-view", nagłówki angielskie).
+  `detectAndParse` zwracał 0 transakcji — import pominąłby kartę po cichu. Dopisany drugi układ
+  (`parseTankpoolSurowy`): kwota `PriceTotalNet`, a gdy pusta — `PreliminaryTotalPrice` (netto).
+  ✅ X: 5 tx, 305,88 L / 575,04 €; wrześniowy plik bez zmian (3 tx, 186,82 L / 347,54 €). Lint 0, build zielony.
+- **Plik zbiorczy** `~/Desktop/Paliwo_pazdziernik_2026_ZBIORCZY.xlsx` (4 arkusze) = cztery osobne:
+  119 tx, zgodność co do grosza i litra per karta i produkt. Storno: zero wierszy ujemnych.
+  ℹ️ Jedna transakcja Eurowag (v4, 15.10) ma w zbiorczym 06:02 zamiast 06:01 — SheetJS ucina sekundy
+  z oryginału, openpyxl zapisuje pełną minutę. Bez znaczenia, dopóki nie wgra się obu wersji.
+  ℹ️ Tankpool psuje „ü" już w eksporcie (`M�cke`) — w zbiorczym poprawione na „Mücke/Atzenhain" pod geokod.
+- **Total_26, kolumna L** (asercja etykiety w kol. B i pustej komórki): KM licznik z raportu ww
+  v3 **9 517** · v1 **6 517** · v5 **10 291** · v4 **10 579**; E-Toll `=-PLN/4,3815` (średni NBP X, 22 notowania):
+  v3 369,15 PLN · v1 1 144,43 PLN · v5 190,19 PLN.
+
+**Czeka na usera**
+1. `git push` (2 commity) → potem import pliku zbiorczego w zakładce Paliwo (**kliknąć „Zapisz N tankowań"**).
+2. 🚩 **NegoMetal (47) wygląda na ucięty filtrem „ukryj zafakturowane"**: 84 tx z 15 dni (IX: 690),
+   tylko v3 i v5. Subtotale zgodne. Potrzebny eksport z odhaczonym filtrem. Myto NIE zaimportowane.
+3. 🚩 **e-TOLL zawiera trzy nowe auta**: WGM 7651V (109,98 PLN), 7652V = v7 (96,71), 7653V (90,41).
+   W kartotece jest tylko v7. Nieksięgowane — decyzja usera.
+4. TK 314CL bez ani jednego przejazdu e-TOLL (VII: 54, VIII: 68) — L140 zostawione puste do potwierdzenia.
+5. Frachty aplikacja vs arkusz: v1 5 595,27 / 1 900 · v4 9 344,28 / 10 744 · v5 9 780 / 9 930 (v3 zgodne).
+   L49 (v1 Paliwo) = −1 796,75, czyli kwota z września — nie ruszane, nadpisze się po imporcie paliwa za zgodą.
+6. Koszty zmienne w Total_26 (leasing, wypłaty, imi, OCPD, ZUS v5, dni w trasie) — wpisuje user.
+
+**Po imporcie paliwa**: `reconcile_andamur.mjs` (12 pozycji ES z faktur = 844,73 € netto; 2 tx FR
+Barbezieux bez faktury DC), paliwo/AdBlue do Total_26, `operacyjne/2026-10`, top-up `costs`.
+
+❌ **Niesprawdzone**: nic w przeglądarce; poprawka parsera nie jest na produkcji do czasu pusha.
