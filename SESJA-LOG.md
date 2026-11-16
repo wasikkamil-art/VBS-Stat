@@ -8126,3 +8126,6 @@ User uzupełnił koszty i dni w kolumnie L. Odczyt wszystkich pięciu bloków (z
 3. Kontrola zamknięcia zgłasza „Andamur po rekoncyliacji" — to 2 tx z Francji (Barbezieux, v5) bez faktury DC. Reszta zielona.
 4. Litry v1 z dwóch paragonów BLIK szacowane.
 ❌ **Niesprawdzone**: Rentowność / Trendy / Koszty za X w przeglądarce.
+
+**16.11 cd.2 — hotele v3**: user potwierdził, że +101,70 to koszt z błędnym znakiem. L20 poprawione na −101,70 (notatka ze starą wartością),
+`costs` +1 (v3 hotele 101,70), 1256 → 1257. **Październik: 55 pozycji / 29 396,91 €; v3 7 885,41 = arkusz. Wynik floty wg bazy +6 457,64 €.**
