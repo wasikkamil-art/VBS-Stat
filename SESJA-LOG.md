@@ -8082,3 +8082,30 @@ Po wiadomości do spedytorów: Agnieszka dodała `7q886sxf` (v4, Auto Przemek, K
 Total_26: L132 (v4) i L90 (v5) — formuły do zakładek zastąpione wartościami z FS + notatki ze starą formułą; L149 ilość frachtów v4 7 → **8**.
 v3 (L6) zostaje na formule `='Siergiej 26'!K5` — kwota identyczna, jeden kierowca.
 ℹ️ Mój wpis `delete` w `auditLog` miał `ts` jako Timestamp, reszta dziennika trzyma ISO string → sortował się na końcu. Poprawione; **w skryptach pisz `ts: new Date().toISOString()`**.
+
+## 2026-11-16 — Październik: podział WGM 0475M na dwóch kierowców w Total_26
+
+User: auto zmieniło kierowcę w trakcie miesiąca (Iwansky zakończył współpracę, wsiadł Mykola) — w arkuszu ma być wynik
+KIEROWCY na aucie. Układ przygotował sam: blok WGM 0475M (r46) = „Ivan", 4 dni; blok TK 130EF (r172) = „Mykola WGM 0475M", 14 dni.
+
+**Zasady (decyzje usera 16.11)**: frachty — czyj fracht · paliwo, myto, AdBlue, parking — wg DATY (Iwansky ≤ 6.10, Mykola ≥ 12.10) ·
+koszty stałe (leasing, ZUS, serwis, polisa, SlickShift, uruchomienie, imi, OCPD) — proporcja dni pracy **4 : 14** ·
+**telefon pełny u obu** („za karty trzeba płacić") · wypłata własna · stawka Mykoły **320 zł/dzień** (L171) · dni Ivana **4** (raport ww pokazuje jazdę w 5 dniach — zostaje 4).
+Dni 7–11.10 bez kierowcy nie mają osobnej pozycji — rozkładają się w proporcji.
+
+| | Iwansky | Mykola | auto |
+|---|---|---|---|
+| Frachty | 1 900,00 (1) | 3 695,27 (12) | 5 595,27 |
+| Paliwo | −663,13 | −1 031,29 (karty 734,90 + BLIK 296,39) | −1 694,42 |
+| Nego / e-TOLL | −201,94 / −11,23 | 0 / −249,97 | −463,14 |
+| Stałe 4:14 | −550,87 | −1 928,03 | −2 478,90 |
+| Wypłata | −357,65 | −1 054,12 | −1 411,77 |
+| **Wynik** | **+94,29** | **−604,18** | **−509,89** |
+
+Km 2 349 / 4 168 (raport dzienny ww; suma dni 6 491,8 ≠ kolumna „całkowity" 6 517,4 — przeskalowane do 6 517), litry 357,86 / 612,48, spalanie 15,2 / 14,7.
+- Skrypt `fix_total26_podzial_v1_2026_10.py` (gitignored): asercje etykiet i stanu wyjściowego, backup `backup_total26_podzial_v1_*.json`,
+  34 komórki + 16 notatek. Stałe jako formuły `=-kwota*4/18` i `*14/18`.
+- ✅ Kontrola: przychód floty bez zmian (35 854,55), koszty floty −21 408,95 → −22 463,06 = dokładnie wypłata Mykoły (1 054,12), suma obu bloków = dawny blok auta.
+- `operacyjne/v1_2026_10`: `dni` = 18 (4 + 14). FS zostaje per AUTO — nic więcej tam nie zmieniane.
+⚠️ **Przy imporcie kosztów X do `costs`: blok TK 130EF za październik to w większości koszty WGM 0475M** → zapisać na `v1`, a na `v2` tylko jego własny telefon 10 €.
+⚠️ Mapowanie „blok = auto" przestało być bezwarunkowe — nagłówek bloku (wiersz +1) mówi, czyj to miesiąc. Sprawdzać go przed każdym odczytem/zapisem.
