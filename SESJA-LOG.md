@@ -8109,3 +8109,20 @@ Km 2 349 / 4 168 (raport dzienny ww; suma dni 6 491,8 ≠ kolumna „całkowity"
 - `operacyjne/v1_2026_10`: `dni` = 18 (4 + 14). FS zostaje per AUTO — nic więcej tam nie zmieniane.
 ⚠️ **Przy imporcie kosztów X do `costs`: blok TK 130EF za październik to w większości koszty WGM 0475M** → zapisać na `v1`, a na `v2` tylko jego własny telefon 10 €.
 ⚠️ Mapowanie „blok = auto" przestało być bezwarunkowe — nagłówek bloku (wiersz +1) mówi, czyj to miesiąc. Sprawdzać go przed każdym odczytem/zapisem.
+
+## 2026-11-16 cd. — Październik: koszty zmienne z Total_26 w bazie, kontrola zamknięcia
+
+User uzupełnił koszty i dni w kolumnie L. Odczyt wszystkich pięciu bloków (z asercją etykiet i nagłówka miesiąca), top-up tylko brakujących.
+- **`costs`: +24 pozycje / 14 910,66 €** (`fix_koszty_2026_10_reszta.mjs`, gitignored), 1232 → 1256. Październik: **54 pozycje / 29 295,21 €**.
+  Blok TK 130EF (Mykola na WGM 0475M) zapisany na **v1**; wypłata v1 jako dwie pozycje („Iwansky, 4 dni" 357,65 · „Mykola, 14 dni" 1 054,12). Na v2 tylko telefon 10 €.
+  ✅ Suma per auto = „suma kosztów" arkusza: v1 6 095,17 (oba bloki − telefon v2; grosz z zaokrągleń podziału) · v4 7 016,43 · v5 8 389,90 · v3 7 783,71 (bez hoteli, niżej).
+- **`operacyjne`**: dni v3 27 · v5 28 · v4 25 (v1 18 wcześniej) — 4/4 z kompletem pól.
+- **Wynik X.2026 wg bazy**: frachty 35 854,55 − koszty 29 295,21 = **+6 559,34 €** (v4 +3 728 · v3 +1 801 · v5 +1 540 · v1 −500).
+
+**Otwarte / wstrzymane**
+1. 🚩 **v3 Hotele w arkuszu = +101,70 (znak dodatni)** — zmniejsza koszty zamiast je zwiększać (suma bloku −7 682,01 zamiast −7 885,41).
+   Nie zaimportowane i nie poprawione — nie wiem, czy to koszt z błędnym znakiem, czy zwrot. Czeka na usera.
+2. **v5 bez imi (13) i OCPD (104)** w październiku — we wrześniu były. Puste = nie wpisuję; do potwierdzenia.
+3. Kontrola zamknięcia zgłasza „Andamur po rekoncyliacji" — to 2 tx z Francji (Barbezieux, v5) bez faktury DC. Reszta zielona.
+4. Litry v1 z dwóch paragonów BLIK szacowane.
+❌ **Niesprawdzone**: Rentowność / Trendy / Koszty za X w przeglądarce.
