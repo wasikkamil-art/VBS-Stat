@@ -8300,3 +8300,7 @@ Uwaga uboczna: w FleetStat `vehicleDocs` skan umowy 08532 leży w oryginale 70,7
 **Dopisek 17.11 (7):** VBS Faktury — na „Tak, odhacz” usera rata nr 1 (1 536,22 EUR) w 08531/08532/08533 oznaczona jako
 zapłacona. `paidAt` = 2026-10-26, czyli **termin z faktury, nie rzeczywista data przelewu** (user jej nie podał) — w notatce raty
 jest to zapisane. Odczyt po zapisie: 48 pozycji w każdej, opłacone nr 0 i 1, reszta pól bez zmian. Następna rata: 25.11.2026.
+
+**Dopisek 17.11 (8):** na polecenie usera skan umowy 08532 w `vehicleDocs` (v7) podmieniony na wersję 150 DPI:
+70,7 MB → 4,2 MB, 14 stron, ta sama ścieżka i ten sam link (token zachowany). Link zwraca 200 / PDF 4 157 559 B.
+Oryginał 70,7 MB zostaje u usera w `~/Downloads/Dokument_2026-11-12_130724.pdf` — w Storage już go nie ma.
