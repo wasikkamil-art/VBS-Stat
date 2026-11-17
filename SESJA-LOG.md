@@ -8272,3 +8272,6 @@ Na „Tak, buduj dalej” usera (układ zaakceptowany w atrapie).
 ❌ **Niesprawdzone**: nowy panel w aplikacji po zalogowaniu (wymaga pusha i obejrzenia przez usera), wgrywanie pliku z przeglądarki
 (reguły Storage w akcji), formularz edycji w nowym miejscu, widok na telefonie, rola `podglad` (zobaczy panel bez dokumentów).
 ⚠️ Umowa leasingu 08532 zawiera deklarację wekslową z PESEL-em — plik dostępny tylko dla biura, w ofercie domyślnie niezaznaczony.
+
+**Dopisek 17.11 (5):** push zrobił user (`3bd0a28..c1a9050`). Produkcja potwierdzona curl-em: bundle `index-BbVMfzwA.js`
+ładuje chunk `PojazdyPanel-BYNBcbS_.js` (200, 24 kB, zawiera „Kopiuj ofertę”). Widok po zalogowaniu — czeka na usera.
