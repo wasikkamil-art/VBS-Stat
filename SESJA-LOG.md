@@ -8352,3 +8352,11 @@ przyjęte jak rata nr 2 (709,22)** — zaznaczone w notatce raty nr 3; do potwie
 suma 41 849,78 EUR** — co do grosza i co do miesiąca zgodne z tym, co wyliczyłem i wpisałem w VBS Faktury (0 różnic).
 Kapitał 37 088,77 = wartość 49 394,16 − wstępna 7 148,64 − wykup 5 156,75. Adnotacja „do potwierdzenia” przy racie nr 3
 zamieniona na „zgodne z harmonogramem z portalu”.
+
+**Dopisek 17.11 (14) — protokoły odbioru wiążą VIN-y z umowami:** user dosłał skan 6 stron (`2026-11-17_140447.pdf`):
+3 protokoły odbioru PL z 06.11.2026 (VIN wpisany odręcznie, obejrzane na obrazie) + 3 upoważnienia leasingodawcy z 28.10.2026
+(ważne 30.09.2026–01.09.2030). **Powiązanie potwierdzone dokumentem**: 26/08531 ↔ ZCFCE72CXT5746020 (WGM 7651V),
+26/08532 ↔ ZCFCE72C1T5746021 (WGM 7652V), 26/08533 ↔ ZCFCE72C8T5746534 (WGM 7653V) — zgodne z tym, co było wpisane z faktur.
+Skan podzielony na strony; wgrane: FleetStat `vehicleDocs` +6 (protokół + upoważnienie przy v7/v8/v9; razem 53: v7 27, v8 13,
+v9 13), VBS Faktury — protokół jako załącznik każdej z trzech umów. User: treść umów jest taka sama dla trzech aut — skanu
+umowy 08532 nie kopiowałem do pozostałych (ma inny numer i deklarację wekslową).
