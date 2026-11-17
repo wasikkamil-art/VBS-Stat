@@ -8296,3 +8296,7 @@ User: w `faktury.fleetstat.pl/leasingi` dodać nowe auta i leasingi. Zapis przez
 Nie dodane: 26/08534/LO (TK 795GM) — brak harmonogramu i nie wiadomo, co to za pojazd. Opłata administracyjna 577,31 EUR
 nie wpisana do `leasingFees`.
 Uwaga uboczna: w FleetStat `vehicleDocs` skan umowy 08532 leży w oryginale 70,7 MB — do podmiany na wersję 4,2 MB.
+
+**Dopisek 17.11 (7):** VBS Faktury — na „Tak, odhacz” usera rata nr 1 (1 536,22 EUR) w 08531/08532/08533 oznaczona jako
+zapłacona. `paidAt` = 2026-10-26, czyli **termin z faktury, nie rzeczywista data przelewu** (user jej nie podał) — w notatce raty
+jest to zapisane. Odczyt po zapisie: 48 pozycji w każdej, opłacone nr 0 i 1, reszta pól bez zmian. Następna rata: 25.11.2026.
