@@ -200,7 +200,123 @@ function OknoOferty({ v, kierowca, docs, onClose, showToast }) {
   );
 }
 
-function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, safeHref }) {
+const POLE = "block w-full mt-1 px-3 py-2 rounded-lg text-sm bg-gray-50 border border-gray-200";
+
+/**
+ * Harmonogram z pliku CSV leasingodawcy: `Lp.;Data płatności;Kapitał;Odsetki;Rata leasingowa netto`.
+ * Wiersz nagłówka i wiersz „SUMA RAT” są pomijane. Zwraca [] gdy plik nie ma ani jednej raty.
+ */
+export function parsujHarmonogramCsv(tekst) {
+  const liczba = (x) => Number(String(x || "").replace(/[^\d,.-]/g, "").replace(/\.(?=\d{3})/g, "").replace(",", "."));
+  return String(tekst || "").split(/\r?\n/).map(l => l.split(/[;\t]/).map(k => k.trim()))
+    .filter(k => /^\d+$/.test(k[0]) && /^\d{4}-\d{2}-\d{2}$/.test(k[1] || ""))
+    .map(k => ({ lp: Number(k[0]), data: k[1], kapital: liczba(k[2]), odsetki: liczba(k[3]), rata: liczba(k[4]) }))
+    .filter(r => r.rata > 0);
+}
+
+function EdycjaDokumentu({ d, onZapisz, onAnuluj }) {
+  const [f, setF] = useState({ label: d.label || "", kind: d.kind || "inne", number: d.number || "", issueDate: d.issueDate || "", expiryDate: d.expiryDate || "", notes: d.notes || "" });
+  const [zapis, setZapis] = useState(false);
+  const ustaw = (k) => (e) => setF(p => ({ ...p, [k]: e.target.value }));
+  const zapisz = async (e) => {
+    e.preventDefault();
+    if (!f.label.trim()) return;
+    setZapis(true);
+    const ok = await onZapisz(d, { ...f, label: f.label.trim(), number: f.number.trim(), notes: f.notes.trim() });
+    setZapis(false);
+    if (ok !== false) onAnuluj();
+  };
+  return (
+    <form onSubmit={zapisz} className="grid sm:grid-cols-6 gap-2 px-3 py-3 bg-gray-50">
+      <label className="text-xs text-gray-600 sm:col-span-4">Opis
+        <input type="text" required value={f.label} onChange={ustaw("label")} className={POLE} style={{ background: "#fff" }} />
+      </label>
+      <label className="text-xs text-gray-600 sm:col-span-2">Rodzaj
+        <select value={f.kind} onChange={ustaw("kind")} className={POLE} style={{ background: "#fff" }}>
+          {GRUPY.map(g => <optgroup key={g} label={g}>{RODZAJE_DOKUMENTOW.filter(r => r.grupa === g).map(r => <option key={r.id} value={r.id}>{r.label}</option>)}</optgroup>)}
+        </select>
+      </label>
+      <label className="text-xs text-gray-600 sm:col-span-2">Numer
+        <input type="text" value={f.number} onChange={ustaw("number")} className={POLE} style={{ background: "#fff" }} />
+      </label>
+      <label className="text-xs text-gray-600 sm:col-span-2">Data dokumentu
+        <input type="date" value={f.issueDate} onChange={ustaw("issueDate")} className={POLE} style={{ background: "#fff" }} />
+      </label>
+      <label className="text-xs text-gray-600 sm:col-span-2">Ważny do
+        <input type="date" value={f.expiryDate} onChange={ustaw("expiryDate")} className={POLE} style={{ background: "#fff" }} />
+      </label>
+      <label className="text-xs text-gray-600 sm:col-span-6">Uwagi
+        <input type="text" value={f.notes} onChange={ustaw("notes")} className={POLE} style={{ background: "#fff" }} />
+      </label>
+      <div className="sm:col-span-6 flex justify-end gap-2">
+        <button type="button" onClick={onAnuluj} className="px-3 py-1.5 rounded-lg text-sm font-medium text-gray-700 bg-gray-200">Anuluj</button>
+        <button type="submit" disabled={zapis} className="px-3 py-1.5 rounded-lg text-sm font-semibold text-white disabled:opacity-60" style={{ background: "#111827" }}>{zapis ? "Zapisuję…" : "Zapisz"}</button>
+      </div>
+    </form>
+  );
+}
+
+const PUSTY_LEASING = { umowa: "", finansujacy: "", waluta: "PLN", zawarta: "", koniec: "", liczbaRat: "", rata: "", oplataWstepna: "", wykup: "", harmonogram: [] };
+
+function EdycjaLeasingu({ leasing, onZapisz, onAnuluj, onUsun, showToast }) {
+  const [f, setF] = useState({ ...PUSTY_LEASING, ...(leasing || {}) });
+  const [zapis, setZapis] = useState(false);
+  const ustaw = (k) => (e) => setF(p => ({ ...p, [k]: e.target.value }));
+  const wczytajCsv = async (e) => {
+    const plik = e.target.files?.[0]; e.target.value = "";
+    if (!plik) return;
+    const raty = parsujHarmonogramCsv(await plik.text());
+    if (!raty.length) { showToast?.("Nie znalazłem rat w tym pliku — oczekuję CSV: Lp.;Data płatności;Kapitał;Odsetki;Rata"); return; }
+    // Rata „typowa” = najczęstsza kwota (pierwsza bywa powiększona o koszt finansowania).
+    const ile = {}; for (const r of raty) ile[r.rata] = (ile[r.rata] || 0) + 1;
+    const typowa = Number(Object.entries(ile).sort((a, b) => b[1] - a[1])[0][0]);
+    setF(p => ({ ...p, harmonogram: raty, liczbaRat: raty.length, rata: typowa }));
+    showToast?.(`Wczytano ${raty.length} rat z pliku`);
+  };
+  const zapisz = async (e) => {
+    e.preventDefault();
+    setZapis(true);
+    const kwota = (x) => (x === "" || x == null || isNaN(Number(String(x).replace(",", "."))) ? "" : Number(String(x).replace(",", ".")));
+    const ok = await onZapisz({
+      umowa: String(f.umowa).trim(), finansujacy: String(f.finansujacy).trim(), waluta: f.waluta === "EUR" ? "EUR" : "PLN",
+      zawarta: f.zawarta || "", koniec: f.koniec || "", liczbaRat: kwota(f.liczbaRat), rata: kwota(f.rata),
+      oplataWstepna: kwota(f.oplataWstepna), wykup: kwota(f.wykup), harmonogram: f.harmonogram || [],
+    });
+    setZapis(false);
+    if (ok !== false) onAnuluj();
+  };
+  return (
+    <form onSubmit={zapisz} className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      <label className="text-xs text-gray-600 col-span-2">Numer umowy<input type="text" required value={f.umowa} onChange={ustaw("umowa")} className={POLE} /></label>
+      <label className="text-xs text-gray-600 col-span-2">Finansujący<input type="text" value={f.finansujacy} onChange={ustaw("finansujacy")} className={POLE} /></label>
+      <label className="text-xs text-gray-600">Waluta
+        <select value={f.waluta} onChange={ustaw("waluta")} className={POLE}><option value="PLN">zł</option><option value="EUR">EUR</option></select>
+      </label>
+      <label className="text-xs text-gray-600">Rata netto<input type="number" step="0.01" min="0" value={f.rata} onChange={ustaw("rata")} className={POLE} /></label>
+      <label className="text-xs text-gray-600">Liczba rat<input type="number" step="1" min="0" value={f.liczbaRat} onChange={ustaw("liczbaRat")} className={POLE} /></label>
+      <label className="text-xs text-gray-600">Opłata wstępna<input type="number" step="0.01" min="0" value={f.oplataWstepna} onChange={ustaw("oplataWstepna")} className={POLE} /></label>
+      <label className="text-xs text-gray-600">Zawarta<input type="date" value={f.zawarta} onChange={ustaw("zawarta")} className={POLE} /></label>
+      <label className="text-xs text-gray-600">Koniec umowy<input type="date" value={f.koniec} onChange={ustaw("koniec")} className={POLE} /></label>
+      <label className="text-xs text-gray-600">Wykup<input type="number" step="0.01" min="0" value={f.wykup} onChange={ustaw("wykup")} className={POLE} /></label>
+      <div className="text-xs text-gray-600 flex flex-col justify-end">
+        Harmonogram: {(f.harmonogram || []).length ? `${f.harmonogram.length} rat` : "brak"}
+        <label className="mt-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-gray-800 bg-gray-100 cursor-pointer">
+          Wczytaj z CSV
+          <input type="file" accept=".csv,text/csv" className="sr-only" onChange={wczytajCsv} />
+        </label>
+      </div>
+      <div className="col-span-2 sm:col-span-4 flex flex-wrap items-center gap-2 pt-1">
+        {leasing && onUsun && <button type="button" onClick={onUsun} className="text-xs font-medium text-gray-600 hover:text-red-700 mr-auto">Usuń dane leasingu…</button>}
+        <span className="flex-1" />
+        <button type="button" onClick={onAnuluj} className="px-3 py-1.5 rounded-lg text-sm font-medium text-gray-700 bg-gray-100">Anuluj</button>
+        <button type="submit" disabled={zapis} className="px-3 py-1.5 rounded-lg text-sm font-semibold text-white disabled:opacity-60" style={{ background: "#111827" }}>{zapis ? "Zapisuję…" : "Zapisz leasing"}</button>
+      </div>
+    </form>
+  );
+}
+
+function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, safeHref }) {
+  const [edytowany, setEdytowany] = useState(null);
   const [rodzaj, setRodzaj] = useState("dowod");
   const [waznyDo, setWaznyDo] = useState("");
   const [opis, setOpis] = useState("");
@@ -213,7 +329,8 @@ function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, safeHref }) {
           <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">{grupa}</div>
           <ul className="divide-y divide-gray-100 rounded-xl border border-gray-100">
             {lista.map(d => (
-              <li key={d.id} className="flex items-center gap-3 px-3 py-2">
+              <li key={d.id}>
+                <div className="flex items-center gap-3 px-3 py-2">
                 <span className="text-gray-400 flex-shrink-0"><Ikona d={I.plik} /></span>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm text-gray-900 truncate">{d.label}</div>
@@ -227,9 +344,14 @@ function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, safeHref }) {
                       <Ikona d={I.pobierz} /> Pobierz
                     </a>
                   : <span className="text-xs text-gray-500 px-2">bez pliku</span>}
+                {canEdit && onEdytuj && (
+                  <button type="button" onClick={() => setEdytowany(e => e === d.id ? null : d.id)} aria-label={`Edytuj opis: ${d.label}`} aria-pressed={edytowany === d.id} className="text-gray-400 hover:text-gray-900 p-1.5"><Ikona d={I.olowek} /></button>
+                )}
                 {canEdit && onUsun && (
                   <button type="button" onClick={() => onUsun(d)} aria-label={`Usuń: ${d.label}`} className="text-gray-400 hover:text-red-700 p-1.5"><Ikona d={I.kosz} /></button>
                 )}
+                </div>
+                {edytowany === d.id && <EdycjaDokumentu d={d} onZapisz={onEdytuj} onAnuluj={() => setEdytowany(null)} />}
               </li>
             ))}
           </ul>
@@ -284,8 +406,10 @@ function Harmonogram({ leasing, dzis }) {
   );
 }
 
-function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, showToast, safeHref }) {
+function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, showToast, safeHref }) {
   const [oferta, setOferta] = useState(false);
+  const [edycjaLeasingu, setEdycjaLeasingu] = useState(false);
+  const mozeLeasing = canEdit && onZapiszLeasing && !v.archived;
   const [edycja, setEdycja] = useState(false);
   const kierowca = (v.driverHistory || []).find(d => !d.to) || null;
   const terminy = terminyPojazdu(v, docs, dzis);
@@ -347,8 +471,13 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
         )}
       </Sekcja>
 
-      <Sekcja tytul="Leasing" licznik={L ? null : 0}>
-        {!L ? <p className="text-sm text-gray-500">Brak danych leasingu.</p> : (
+      <Sekcja tytul="Leasing" licznik={L ? null : 0}
+        akcja={mozeLeasing && !edycjaLeasingu ? <button type="button" onClick={() => setEdycjaLeasingu(true)} className="inline-flex items-center gap-1 text-xs font-medium text-gray-700 px-2 py-1.5 rounded-lg hover:bg-gray-100"><Ikona d={L ? I.olowek : I.plus} /> {L ? "Edytuj leasing" : "Dodaj leasing"}</button> : null}>
+        {edycjaLeasingu ? (
+          <EdycjaLeasingu leasing={L} showToast={showToast} onAnuluj={() => setEdycjaLeasingu(false)}
+            onZapisz={(nowy) => onZapiszLeasing(v, nowy)}
+            onUsun={async () => { if (await onZapiszLeasing(v, null) !== false) setEdycjaLeasingu(false); }} />
+        ) : !L ? <p className="text-sm text-gray-500">Brak danych leasingu.</p> : (
           <>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-5 gap-y-3 mb-4">
               <Fakt etykieta="Umowa">{L.umowa}</Fakt>
@@ -368,7 +497,7 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
       <Sekcja tytul="Dokumenty" licznik={docs.length}>
         <ListaDokumentow docs={docs} canEdit={canEdit} safeHref={safeHref}
           onDodaj={onDodajDokumenty ? (pliki, meta) => onDodajDokumenty(v, pliki, meta) : null}
-          onUsun={onUsunDokument} />
+          onUsun={onUsunDokument} onEdytuj={onEdytujDokument} />
       </Sekcja>
 
       <Sekcja tytul="Ubezpieczenie i UDT">
@@ -408,7 +537,7 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
   );
 }
 
-export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajPojazd, onDodajDokumenty, onUsunDokument, showToast, safeHref }) {
+export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajPojazd, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, showToast, safeHref }) {
   const teraz = useMemo(() => dzis ?? new Date().setHours(0, 0, 0, 0), [dzis]);
   const [archiwum, setArchiwum] = useState(false);
   const [szukaj, setSzukaj] = useState("");
@@ -497,7 +626,7 @@ export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit 
 
         {aktywny
           ? <KartaPojazdu key={aktywny.id} v={aktywny} docs={docsWg[aktywny.id] || []} dzis={teraz} canEdit={canEdit}
-              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} showToast={showToast} safeHref={safeHref} />
+              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} showToast={showToast} safeHref={safeHref} />
           : <div className="bg-white rounded-2xl border border-gray-100 p-8 text-sm text-gray-500">Wybierz pojazd z listy.</div>}
       </div>
     </div>

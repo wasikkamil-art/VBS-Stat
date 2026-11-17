@@ -8304,3 +8304,20 @@ jest to zapisane. Odczyt po zapisie: 48 pozycji w każdej, opłacone nr 0 i 1, r
 **Dopisek 17.11 (8):** na polecenie usera skan umowy 08532 w `vehicleDocs` (v7) podmieniony na wersję 150 DPI:
 70,7 MB → 4,2 MB, 14 stron, ta sama ścieżka i ten sam link (token zachowany). Link zwraca 200 / PDF 4 157 559 B.
 Oryginał 70,7 MB zostaje u usera w `~/Downloads/Dokument_2026-11-12_130724.pdf` — w Storage już go nie ma.
+
+## 2026-11-17 cd.7 — Panel pojazdów: edycja leasingu i opisów dokumentów
+
+User: „dodaj edycję leasingu i opisów dokumentów w panelu”.
+
+- **Dokument**: ołówek przy każdej pozycji → formularz pod wierszem (opis, rodzaj, numer, data dokumentu, ważny do, uwagi);
+  zapis `updateDoc(vehicleDocs/{id})` + `auditLog`. Plik zostaje ten sam.
+- **Leasing**: „Edytuj leasing” / „Dodaj leasing” w sekcji Leasing → umowa, finansujący, waluta, rata, liczba rat, opłata wstępna,
+  daty, wykup; **„Wczytaj z CSV”** czyta harmonogram z pliku leasingodawcy (`Lp.;Data płatności;Kapitał;Odsetki;Rata`) i sam
+  ustawia liczbę rat oraz ratę typową; „Usuń dane leasingu” z potwierdzeniem (dokumenty zostają). Zapis przez
+  `dbUpdateVehicleField(v.id, { leasing })` — ta sama transakcja co reszta karty.
+- `parsujHarmonogramCsv` wyeksportowany z `PojazdyPanel.jsx`.
+
+✅ lint 0 błędów (39 ostrzeżeń, bez zmian), build zielony (chunk 31,6 kB); parser na prawdziwym `Harmonogram.csv`: 47 rat,
+suma 71 767,18; atrapa: zmiana opisu dokumentu widoczna na liście, zapis leasingu z wykupem 3 987,28 (47 rat zachowane).
+❌ Niesprawdzone: zapis na produkcji po zalogowaniu (reguły `vehicleDocs` pozwalają na update dla admin/dyspozytor),
+wczytanie CSV kliknięciem w przeglądarce (parser testowany osobno), widok na telefonie.

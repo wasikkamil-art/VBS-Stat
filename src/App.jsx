@@ -1859,6 +1859,37 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     }
     if (ok) { logAction("add", "vehicleDocs", { vehicleId: v.id, plate: v.plate, kind: meta.kind, count: ok }); showToast(`✅ Wgrano dokumentów: ${ok}`); }
   };
+  const updateVehicleDocMeta = async (d, zmiany) => {
+    try {
+      await updateDoc(doc(db, "vehicleDocs", d.id), {
+        label: zmiany.label, kind: zmiany.kind, number: zmiany.number || "", issueDate: zmiany.issueDate || "",
+        expiryDate: zmiany.expiryDate || "", notes: zmiany.notes || "",
+        updatedAt: new Date().toISOString(), updatedBy: user?.email || "",
+      });
+      logAction("update", "vehicleDocs", { id: d.id, vehicleId: d.vehicleId, label: zmiany.label });
+      showToast("✅ Opis dokumentu zapisany");
+      return true;
+    } catch (e) {
+      console.error("updateVehicleDocMeta", e);
+      showToast(`⚠️ Nie zapisano: ${e?.message || e}`);
+      return false;
+    }
+  };
+  // Leasing żyje w rekordzie pojazdu (`leasing`) — zapis tą samą transakcją co reszta karty.
+  // `null` = usunięcie danych leasingu (pliki umowy i harmonogramu w dokumentach zostają).
+  const saveVehicleLeasing = async (v, leasing) => {
+    if (leasing === null && !window.confirm(`Usunąć dane leasingu przy ${v.plate}? Dokumenty zostaną.`)) return false;
+    try {
+      await dbUpdateVehicleField(v.id, { leasing });
+      logAction("update", "vehicles", { id: v.id, plate: v.plate, action: leasing ? "leasing" : "leasing-usuniety", umowa: leasing?.umowa || "" });
+      showToast(leasing ? "✅ Leasing zapisany" : "Dane leasingu usunięte");
+      return true;
+    } catch (e) {
+      console.error("saveVehicleLeasing", e);
+      showToast("❌ Błąd zapisu: " + (e?.message || e));
+      return false;
+    }
+  };
   const deleteVehicleDoc = async (d) => {
     if (!window.confirm(`Usunąć dokument „${d.label}”? Pliku nie da się odzyskać.`)) return;
     try {
@@ -3879,6 +3910,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                   }
                 }}
                 onDodajDokumenty={addVehicleDocs} onUsunDokument={deleteVehicleDoc}
+                onEdytujDokument={updateVehicleDocMeta} onZapiszLeasing={saveVehicleLeasing}
               />
             </Suspense>
           )}
