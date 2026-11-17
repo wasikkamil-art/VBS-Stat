@@ -182,6 +182,14 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Dokumenty pojazdów (nowy panel pojazdów, XI.2026): dowody, polisy, umowy leasingu,
+    // harmonogramy, UDT. Wpis niesie link do pliku w Storage, więc ODCZYT tylko dla biura —
+    // kierowca i rola `podglad` nie mają po co widzieć umów leasingowych.
+    match /vehicleDocs/{docId} {
+      allow read: if canEdit();
+      allow create, update, delete: if canEdit();
+    }
+
     match /planyTras/{frachtId} {
       allow read: if canRead();
       allow create, update: if canEdit();

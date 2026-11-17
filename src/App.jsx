@@ -40,6 +40,7 @@ const FrachtyModal = lazy(() => import("./components/FrachtyModal"));
 // Kalkulator tras — szacunkowy koszt trasy (paliwo per kraj + myto). Lazy chunk.
 const KalkulatorTras = lazy(() => import("./components/KalkulatorTras"));
 const PlanerZaladunku = lazy(() => import("./components/PlanerZaladunku"));
+const PojazdyPanel = lazy(() => import("./components/PojazdyPanel"));
 const PaliwoTab = lazy(() => import("./components/PaliwoTab"));
 const AnalizyTab = lazy(() => import("./components/AnalizyTab"));
 
@@ -1496,7 +1497,6 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   const [editCostId, setEditCostId]           = useState(null);
   const [showCostsImport, setShowCostsImport]   = useState(false);
   const [showAddVehicle, setShowAddVehicle]   = useState(false);
-  const [editVehicleId, setEditVehicleId]     = useState(null);
   const [deleteVehicleModal, setDeleteVehicleModal] = useState(null); // { id, plate }
   const [czasPracyVehicleId, setCzasPracyVehicleId] = useState(null); // otwarty panel czasu pracy na dashboardzie
   const [filterVehicle, setFilterVehicle]     = useState("all");
@@ -1821,6 +1821,56 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     }, (err) => console.error("sprawy onSnapshot error", err));
     return () => unsub();
   }, []);
+
+  // ── DOKUMENTY POJAZDÓW — kolekcja `vehicleDocs` (nowy panel pojazdów, XI.2026) ──
+  // Czyta tylko biuro (admin/dyspozytor): wpisy niosą linki do umów leasingu i polis,
+  // a reguły odmawiają odczytu pozostałym rolom — bez tego warunku listener sypałby błędem.
+  const [vehicleDocs, setVehicleDocs] = useState([]);
+  useEffect(() => {
+    if (!canEdit) return;
+    const unsub = onSnapshot(collection(db, "vehicleDocs"), (snap) => {
+      setVehicleDocs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error("vehicleDocs onSnapshot error", err));
+    return () => unsub();
+  }, [canEdit]);
+
+  const addVehicleDocs = async (v, pliki, meta) => {
+    let ok = 0;
+    for (const plik of pliki) {
+      try {
+        const id = uid();
+        const ext = (plik.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "");
+        const storagePath = `vehicleDocs/${v.id}/${id}.${ext}`;
+        const r = storageRef(storage, storagePath);
+        await uploadBytes(r, plik, { contentType: plik.type || undefined });
+        const fileUrl = await getDownloadURL(r);
+        await setDoc(doc(db, "vehicleDocs", id), {
+          vehicleId: v.id, kind: meta.kind || "inne",
+          label: (pliki.length === 1 && meta.label) ? meta.label : plik.name.replace(/\.[^.]+$/, ""),
+          expiryDate: meta.expiryDate || "", issueDate: "", number: "", notes: "",
+          fileUrl, storagePath, fileName: plik.name, fileType: plik.type || "",
+          uploadedAt: new Date().toISOString(), uploadedBy: user?.email || "",
+        });
+        ok++;
+      } catch (e) {
+        console.error("addVehicleDocs", e);
+        showToast(`⚠️ Nie wgrano „${plik.name}”: ${e?.message || e}`);
+      }
+    }
+    if (ok) { logAction("add", "vehicleDocs", { vehicleId: v.id, plate: v.plate, kind: meta.kind, count: ok }); showToast(`✅ Wgrano dokumentów: ${ok}`); }
+  };
+  const deleteVehicleDoc = async (d) => {
+    if (!window.confirm(`Usunąć dokument „${d.label}”? Pliku nie da się odzyskać.`)) return;
+    try {
+      await deleteDoc(doc(db, "vehicleDocs", d.id));
+      if (d.storagePath) { try { await deleteObject(storageRef(storage, d.storagePath)); } catch (e) { console.warn("vehicleDocs: plik już nie istnieje", e); } }
+      logAction("delete", "vehicleDocs", { id: d.id, vehicleId: d.vehicleId, label: d.label });
+      showToast("Dokument usunięty");
+    } catch (e) {
+      console.error("deleteVehicleDoc", e);
+      showToast(`⚠️ Nie usunięto: ${e?.message || e}`);
+    }
+  };
 
   // ── CZAT — liczba nieprzeczytanych pokojów (badge w sidebar) ──
   useEffect(() => {
@@ -2611,10 +2661,11 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
       showToast(aktywny && !aktywny.email
         ? "⚠️ Zapisane, ale kierowca nie ma e-maila — Czas pracy i DDD nie zadziałają"
         : "✅ Zmiany zapisane");
-      setEditVehicleId(null);
+      return true;
     } catch (e) {
       console.error("updateVehicle error", e);
       showToast("❌ Błąd zapisu: " + (e?.message || e));
+      return false;
     }
   };
   const addCategory  = (cat)   => setCategories((p) => [...p, cat]);
@@ -3805,235 +3856,31 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
           )}
 
           {/* ══ POJAZDY ═════════════════════════════════════════════════════ */}
+          {/* Nowy panel (XI.2026): lista floty + karta auta. Edycja i serwis to dotychczasowe
+              komponenty wpięte jako sloty — te same pola, ten sam zapis (`updateVehicle`). */}
           {tab === "vehicles" && canSeeTab("vehicles") && (
-            <div>
-              <div className="flex items-center justify-between mb-5">
-                <PageTitle>Flota pojazdów</PageTitle>
-                {canEdit && (
-                <button onClick={() => setShowAddVehicle(true)}
-                  className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
-                  style={{ background: "#111827" }}>
-                  + Dodaj pojazd
-                </button>
+            <Suspense fallback={<div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-sm text-gray-500">Ładowanie pojazdów…</div>}>
+              <PojazdyPanel
+                vehicles={vehicles} vehicleDocs={vehicleDocs} canEdit={canEdit} showToast={showToast} safeHref={safeHref}
+                onDodajPojazd={() => setShowAddVehicle(true)}
+                renderSerwis={(v) => <VehicleServicePanel vehicle={v} />}
+                renderEdycja={(v, zamknij) => (
+                  <VehicleEditPanel vehicle={v} onClose={zamknij}
+                    onSave={async (zmieniony) => { if (await updateVehicle(zmieniony)) zamknij(); }} />
                 )}
-              </div>
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                {vehicles.filter(v => !v.archived).map((v) => {
-                  const hist    = v.driverHistory || [];
-                  const active  = hist.find((d) => !d.to) || null;
-                  const isEditing = editVehicleId === v.id;
-
-                  return (
-                    <div key={v.id} className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-                      {/* ── VEHICLE HEADER ── */}
-                      <div className="flex items-center justify-between px-5 py-4 border-b border-gray-50">
-                        <div className="flex items-center gap-3">
-                          {/* Bez kafelka — spójnie z kartą na Przeglądzie, patrz komentarz tam. */}
-                          <div className="flex items-center flex-shrink-0 text-gray-500" style={{ width: 52, height: 32 }}>
-                            <VehicleIcon v={v} size={20}/>
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-normal text-gray-500 tracking-wide text-sm">{v.plate}</span>
-                              {v.plate2 && (
-                                <>
-                                  <span className="text-gray-300 text-xs">+</span>
-                                  <span className="font-normal tracking-wide text-sm" style={{ color: "#6366f1" }}>{v.plate2}</span>
-                                  <span className="text-xs px-1.5 py-0.5 rounded-md font-medium" style={{ background: "#eef2ff", color: "#6366f1" }}>przyczepa</span>
-                                </>
-                              )}
-                            </div>
-                            <div className="text-xs text-gray-500">{v.brand} · {v.year} · {v.type}{activeDriverName(v) ? ` · ${activeDriverName(v)}` : ""}</div>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => setEditVehicleId(isEditing ? null : v.id)}
-                            className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-                            style={{
-                              background: isEditing ? "#111827" : "#f3f4f6",
-                              color: isEditing ? "#fff" : "#4b5563",
-                            }}>
-                            {isEditing ? "Zamknij" : "✏️ Edytuj"}
-                          </button>
-                          <button onClick={() => setDeleteVehicleModal({ id: v.id, plate: v.plate })}
-                            className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-300 hover:text-red-400 hover:bg-red-50 transition-all text-xs">✕</button>
-                        </div>
-                      </div>
-
-                      {/* ── STATS ROW ── */}
-                      <div className="grid grid-cols-2 divide-x divide-gray-50 border-b border-gray-50">
-                        <div className="px-4 py-3">
-                          <div className="text-xs text-gray-500 mb-0.5">We flocie od</div>
-                          <div className="font-bold text-gray-900 text-sm">{v.fleetJoinDate ? new Date(v.fleetJoinDate).toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric"}) : "—"}</div>
-                          {v.fleetLeaveDate && <div className="text-xs text-red-400">do {new Date(v.fleetLeaveDate).toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric"})}</div>}
-                        </div>
-                        <div className="px-4 py-3">
-                          <div className="text-xs text-gray-500 mb-0.5">Rodzaj</div>
-                          <div className="text-xs font-medium text-gray-700 leading-tight">
-                            {v.type}{v.plate2 ? " + Przyczepa" : ""}
-                            {(v.equipment||[]).includes("winda") ? " + winda" : ""}
-                            {(v.equipment||[]).includes("paleciak") ? " + paleciak" : ""}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* ── TECH SPECS ── */}
-                      <div className="px-5 py-3 border-b border-gray-50">
-                        <div className="grid grid-cols-1 gap-1.5">
-                          {/* VIN + Wartość */}
-                          {(v.vin || v.wartoscNet) && (
-                            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pb-1.5 mb-0.5 border-b border-dashed border-gray-100">
-                              {v.vin && (
-                                <div className="col-span-2 flex items-center gap-2">
-                                  <span className="text-xs text-gray-500 w-20 flex-shrink-0">VIN</span>
-                                  <span className="text-xs font-medium text-gray-700" style={{ fontFamily: "'DM Mono', monospace" }}>{v.vin}</span>
-                                </div>
-                              )}
-                              {v.wartoscNet && (
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs text-gray-500 w-20 flex-shrink-0">Wartość</span>
-                                  <span className="text-xs font-medium text-gray-700">{Number(v.wartoscNet).toLocaleString("pl-PL")} {v.wartoscWaluta === "EUR" ? "€" : "zł"}</span>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                          <div className={`grid gap-x-4 gap-y-1.5 ${v.plate2 ? "grid-cols-2" : "grid-cols-2"}`}>
-                            {v.dimensions && (
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs text-gray-500 w-20 flex-shrink-0">{v.plate2 ? `${v.plate} wym.` : "Wymiary"}</span>
-                                <span className="text-xs font-medium text-gray-700" style={{ fontFamily: "'DM Mono', monospace" }}>{v.dimensions}</span>
-                              </div>
-                            )}
-                            {v.maxWeight && (
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs text-gray-500 w-20 flex-shrink-0">{v.plate2 ? `${v.plate} waga` : "Max waga"}</span>
-                                <span className="text-xs font-medium text-gray-700">{v.maxWeight} kg</span>
-                              </div>
-                            )}
-                          </div>
-                          {/* Ubezpieczenia */}
-                          {(v.ocNumber || v.ocAmount || v.acNumber || v.acAmount || v.caloscPolis || v.gap || v.assistance || v.autoszyba || v.nnw) && (
-                            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-1.5 mt-0.5 border-t border-dashed border-gray-100">
-                              {v.ocNumber && <div className="flex items-center gap-2"><span className="text-xs text-gray-500 w-20 flex-shrink-0">OC nr</span><span className="text-xs font-medium text-gray-700" style={{fontFamily:"'DM Mono',monospace"}}>{v.ocNumber}</span></div>}
-                              {v.ocAmount && <div className="flex items-center gap-2"><span className="text-xs text-gray-500 w-20 flex-shrink-0">OC składka</span><span className="text-xs font-medium text-gray-700">{v.ocAmount} zł</span></div>}
-                              {v.acNumber && <div className="flex items-center gap-2"><span className="text-xs text-gray-500 w-20 flex-shrink-0">AC nr</span><span className="text-xs font-medium text-gray-700" style={{fontFamily:"'DM Mono',monospace"}}>{v.acNumber}</span></div>}
-                              {v.acAmount && <div className="flex items-center gap-2"><span className="text-xs text-gray-500 w-20 flex-shrink-0">AC składka</span><span className="text-xs font-medium text-gray-700">{v.acAmount} zł</span></div>}
-                              {v.assistance && <div className="flex items-center gap-2"><span className="text-xs text-gray-500 w-20 flex-shrink-0">Assistance</span><span className="text-xs font-medium text-gray-700">{v.assistance} zł</span></div>}
-                              {v.autoszyba && <div className="flex items-center gap-2"><span className="text-xs text-gray-500 w-20 flex-shrink-0">Autoszyba</span><span className="text-xs font-medium text-gray-700">{v.autoszyba} zł</span></div>}
-                              {v.nnw && <div className="flex items-center gap-2"><span className="text-xs text-gray-500 w-20 flex-shrink-0">NNW</span><span className="text-xs font-medium text-gray-700">{v.nnw} zł</span></div>}
-                              {v.ochronaZnizki && <div className="flex items-center gap-2"><span className="text-xs text-gray-500 w-20 flex-shrink-0">Ochr. zniżki</span><span className="text-xs font-medium text-gray-700">{v.ochronaZnizki} zł</span></div>}
-                              {v.caloscPolis && <div className="flex items-center gap-2"><span className="text-xs text-gray-500 w-20 flex-shrink-0">Polisy łącznie</span><span className="text-xs font-semibold text-gray-900">{v.caloscPolis} zł</span></div>}
-                              {v.gap && <div className="flex items-center gap-2"><span className="text-xs text-gray-500 w-20 flex-shrink-0">GAP</span><span className="text-xs font-medium text-gray-700">{v.gap} zł{v.gapExpiry ? ` · do ${new Date(v.gapExpiry).toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric"})}` : ""}</span></div>}
-                            </div>
-                          )}
-                          {v.plate2 && (
-                            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-1.5 mt-0.5 border-t border-dashed border-gray-100">
-                              {v.dimensions2 && (
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs w-20 flex-shrink-0" style={{ color: "#6366f1" }}>{v.plate2} wym.</span>
-                                  <span className="text-xs font-medium text-gray-700" style={{ fontFamily: "'DM Mono', monospace" }}>{v.dimensions2}</span>
-                                </div>
-                              )}
-                              {v.maxWeight2 && (
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs w-20 flex-shrink-0" style={{ color: "#6366f1" }}>{v.plate2} waga</span>
-                                  <span className="text-xs font-medium text-gray-700">{v.maxWeight2} kg</span>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                          {v.loadingType && (
-                            <div className="flex items-center gap-2 pt-1">
-                              <span className="text-xs text-gray-500 w-20 flex-shrink-0">Załadunek</span>
-                              <span className="text-xs font-medium text-gray-700">{v.loadingType}</span>
-                            </div>
-                          )}
-                        </div>
-                        {/* WYPOSAŻENIE */}
-                        {((v.equipment?.length > 0) || (v.customEquipment?.length > 0)) && (
-                          <div className="mt-2.5 pt-2.5 border-t border-gray-50">
-                            <div className="text-xs text-gray-500 mb-1.5">Wyposażenie</div>
-                            <div className="flex flex-wrap gap-1.5">
-                              {(v.equipment || []).map((id) => {
-                                const eq = DEFAULT_EQUIPMENT.find((e) => e.id === id);
-                                return eq ? (
-                                  <span key={id} className="px-2 py-0.5 rounded-full text-xs font-medium"
-                                    style={{ background: "#f3f4f6", color: "#374151" }}>
-                                    {eq.label}
-                                  </span>
-                                ) : null;
-                              })}
-                              {(v.customEquipment || []).map((item, i) => (
-                                <span key={i} className="px-2 py-0.5 rounded-full text-xs font-medium"
-                                  style={{ background: "#eff6ff", color: "#1d4ed8" }}>
-                                  {item}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* ── SERVICE & INSURANCE PANEL ── */}
-                      <VehicleServicePanel vehicle={v} />
-
-                      {/* ── CURRENT DRIVER ── */}
-                      <DriverCopyRow vehicle={v} active={active} />
-
-                      {/* ── EDIT PANEL ── */}
-                      {isEditing && (
-                        <VehicleEditPanel
-                          vehicle={v}
-                          onSave={updateVehicle}
-                          onClose={() => setEditVehicleId(null)}
-                        />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* ARCHIWUM POJAZDÓW */}
-              {vehicles.filter(v => v.archived).length > 0 && (
-                <div className="mt-8">
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className="h-px flex-1 bg-gray-100" />
-                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-2">Archiwum pojazdów</span>
-                    <div className="h-px flex-1 bg-gray-100" />
-                  </div>
-                  <div className="space-y-2">
-                    {vehicles.filter(v => v.archived).map(v => (
-                      <div key={v.id} className="flex items-center justify-between px-4 py-3 rounded-xl border border-dashed border-gray-200 bg-gray-50">
-                        <div className="flex items-center gap-3">
-                          <span className="opacity-30"><VehicleIcon v={v} size={20}/></span>
-                          <div>
-                            <div className="text-sm font-semibold text-gray-500">{v.plate}{v.plate2 ? ` / ${v.plate2}` : ""}</div>
-                            <div className="text-xs text-gray-500">{vehicleSubtitle(v)}</div>
-                          </div>
-                        </div>
-                        <div className="flex-1 mx-4 text-right">
-                          {v.archivedReason && <div className="text-xs text-gray-500">{v.archivedReason}</div>}
-                          {v.archivedDate && <div className="text-xs text-gray-300">{v.archivedDate}</div>}
-                        </div>
-                        <button onClick={async () => {
-                          try {
-                            await dbUpdateVehicleField(v.id, { archived: false, archivedDate: "", archivedReason: "" });
-                            logAction("update", "vehicles", { id: v.id, plate: v.plate, action: "restore" });
-                          } catch (e) {
-                            console.error("restore vehicle error", e);
-                            showToast("❌ Błąd zapisu: " + (e?.message || e));
-                          }
-                        }}
-                          className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-500 hover:text-gray-700 hover:border-gray-300 transition-all flex-shrink-0">
-                          Przywróć
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+                onArchiwizuj={(v) => setDeleteVehicleModal({ id: v.id, plate: v.plate })}
+                onPrzywroc={async (v) => {
+                  try {
+                    await dbUpdateVehicleField(v.id, { archived: false, archivedDate: "", archivedReason: "" });
+                    logAction("update", "vehicles", { id: v.id, plate: v.plate, action: "restore" });
+                  } catch (e) {
+                    console.error("restore vehicle error", e);
+                    showToast("❌ Błąd zapisu: " + (e?.message || e));
+                  }
+                }}
+                onDodajDokumenty={addVehicleDocs} onUsunDokument={deleteVehicleDoc}
+              />
+            </Suspense>
           )}
 
           {/* ══ DOKUMENTY ══════════════════════════════════════════════════ */}
@@ -14269,132 +14116,6 @@ function VehicleServicePanel({ vehicle: v }) {
   );
 }
 
-function DriverCopyRow({ vehicle: v, active }) {
-  const [copied, setCopied] = useState(false);
-  const [showText, setShowText] = useState(false);
-  const [offerText, setOfferText] = useState("");
-
-  const buildOffer = () => {
-    const eq = [
-      ...(v.equipment || []).map(id => DEFAULT_EQUIPMENT.find(e => e.id === id)?.label).filter(Boolean),
-      ...(v.customEquipment || []),
-    ];
-    const plate  = v.plate2 ? `${v.plate} / ${v.plate2}` : v.plate;
-    const dims   = v.plate2
-      ? `${v.dimensions || "—"} (${v.plate}) / ${v.dimensions2 || "—"} (${v.plate2})`
-      : (v.dimensions || "—");
-    const weight = v.plate2
-      ? `${v.maxWeight || "—"} kg (${v.plate}) / ${v.maxWeight2 || "—"} kg (${v.plate2})`
-      : `${v.maxWeight || "—"} kg`;
-    return [
-      `${v.brand} ${v.year}`,
-      `📋 Rejestracja: ${plate}`,
-      `👤 Kierowca: ${active.name}`,
-      active.phone ? `📞 Tel: ${active.phone}` : null,
-      `📦 Rodzaj: ${v.type}${v.plate2 ? " + Przyczepa" : ""}`,
-      v.loadingType ? `🔄 Załadunek: ${v.loadingType}` : null,
-      `📐 Wymiary: ${dims}`,
-      `⚖️ Max waga: ${weight}`,
-      eq.length > 0 ? `🔧 Wyposażenie: ${eq.join(", ")}` : null,
-    ].filter(Boolean).join("\n");
-  };
-
-  const copyOffer = () => {
-    if (!active) return;
-    const lines = buildOffer();
-    setOfferText(lines);
-
-    const fallbackCopy = (text) => {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;pointer-events:none;";
-      document.body.appendChild(ta);
-      ta.focus();
-      ta.select();
-      try { document.execCommand("copy"); } catch (_) {}
-      document.body.removeChild(ta);
-    };
-
-    try {
-      if (navigator.clipboard && window.isSecureContext) {
-        navigator.clipboard.writeText(lines).then(() => {
-          setCopied(true);
-          setTimeout(() => setCopied(false), 2500);
-        }).catch(() => {
-          fallbackCopy(lines);
-          setCopied(true);
-          setTimeout(() => { setCopied(false); setShowText(true); }, 2500);
-        });
-      } else {
-        fallbackCopy(lines);
-        setShowText(true);
-      }
-    } catch (_) {
-      setShowText(true);
-    }
-  };
-
-  return (
-    <>
-      <div className="px-5 py-3 border-b border-gray-50 flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-xs text-gray-500 mb-0.5">Aktualny kierowca</div>
-          {active
-            ? <div className="flex items-center gap-2 flex-wrap">
-                <div className="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0" />
-                <span className="text-sm font-semibold text-gray-900">{active.name}</span>
-                {active.phone && (
-                  <span className="text-xs text-gray-500" style={{ fontFamily: "'DM Mono', monospace" }}>{active.phone}</span>
-                )}
-                <span className="text-xs text-gray-500">podjął {fmtDate(active.from)}</span>
-              </div>
-            : <div className="text-sm text-gray-500 italic">Brak przypisanego kierowcy</div>
-          }
-        </div>
-        {active && (
-          <button onClick={copyOffer}
-            className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:opacity-90 active:scale-95"
-            style={{
-              background: copied ? "#f0fdf4" : "#f3f4f6",
-              color: copied ? "#15803d" : "#374151",
-              border:     `1.5px solid ${copied ? "#86efac" : "#e5e7eb"}`,
-            }}>
-            {copied ? "✓ Skopiowano!" : "📋 Kopiuj ofertę"}
-          </button>
-        )}
-      </div>
-
-      {/* FALLBACK MODAL — gdy clipboard zablokowany */}
-      {showText && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ background: "rgba(0,0,0,0.4)", backdropFilter: "blur(4px)" }}>
-          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl overflow-hidden"
-            style={{ fontFamily: "'DM Sans', sans-serif" }}>
-            <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-gray-100">
-              <span className="text-sm font-bold text-gray-900">Oferta — zaznacz i skopiuj</span>
-              <button onClick={() => setShowText(false)}
-                className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 text-xs">✕</button>
-            </div>
-            <div className="px-5 py-4">
-              <textarea readOnly value={offerText} rows={10}
-                onFocus={(e) => e.target.select()}
-                className="w-full text-xs rounded-xl p-3 outline-none resize-none"
-                style={{ background: "#f9fafb", border: "1.5px solid #e5e7eb", fontFamily: "'DM Mono', monospace", color: "#111827", lineHeight: "1.7" }} />
-              <p className="text-xs text-gray-500 mt-2 text-center">Kliknij w pole → Ctrl+A → Ctrl+C</p>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// VEHICLE EDIT PANEL (inline, inside vehicle card)
-// ═══════════════════════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════════════════════
-// CZAS PRACY — Modal z kalendarzem
-// ═══════════════════════════════════════════════════════════════════════════════
 const CZAS_STATUSY = [
   { id: "jazda",    label: "Jazda",       color: "#15803d", bg: "#f0fdf4", border: "#bbf7d0", hours: 0 },
   { id: "pauza9",   label: "Pauza 9h",    color: "#b45309", bg: "#fffbeb", border: "#fde68a", hours: 9 },

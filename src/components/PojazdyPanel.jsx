@@ -203,6 +203,7 @@ function OknoOferty({ v, kierowca, docs, onClose, showToast }) {
 function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, safeHref }) {
   const [rodzaj, setRodzaj] = useState("dowod");
   const [waznyDo, setWaznyDo] = useState("");
+  const [opis, setOpis] = useState("");
   const wGrupach = GRUPY.map(g => [g, docs.filter(d => (RODZAJ[d.kind]?.grupa || "Inne") === g)]).filter(([, l]) => l.length);
   return (
     <div>
@@ -244,10 +245,13 @@ function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, safeHref }) {
           <label className="text-xs text-gray-600">Ważny do (opcjonalnie)
             <input type="date" value={waznyDo} onChange={e => setWaznyDo(e.target.value)} className="block mt-1 px-3 py-2 rounded-lg text-sm bg-gray-50 border border-gray-200" />
           </label>
+          <label className="text-xs text-gray-600 flex-1" style={{ minWidth: 160 }}>Opis (opcjonalnie)
+            <input type="text" value={opis} onChange={e => setOpis(e.target.value)} placeholder="domyślnie nazwa pliku" className="block w-full mt-1 px-3 py-2 rounded-lg text-sm bg-gray-50 border border-gray-200" />
+          </label>
           <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-white cursor-pointer" style={{ background: "#111827" }}>
             <Ikona d={I.plus} /> Dodaj pliki
             <input type="file" multiple className="sr-only" accept=".pdf,image/*,.csv,.xlsx"
-              onChange={e => { const pliki = [...e.target.files]; if (pliki.length) onDodaj(pliki, { kind: rodzaj, expiryDate: waznyDo }); e.target.value = ""; setWaznyDo(""); }} />
+              onChange={e => { const pliki = [...e.target.files]; if (pliki.length) onDodaj(pliki, { kind: rodzaj, expiryDate: waznyDo, label: opis.trim() }); e.target.value = ""; setWaznyDo(""); setOpis(""); }} />
           </label>
         </div>
       )}
@@ -280,8 +284,9 @@ function Harmonogram({ leasing, dzis }) {
   );
 }
 
-function KartaPojazdu({ v, docs, dzis, canEdit, onEdytuj, onDodajDokumenty, onUsunDokument, showToast, safeHref }) {
+function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, showToast, safeHref }) {
   const [oferta, setOferta] = useState(false);
+  const [edycja, setEdycja] = useState(false);
   const kierowca = (v.driverHistory || []).find(d => !d.to) || null;
   const terminy = terminyPojazdu(v, docs, dzis);
   const wyp = [...(v.equipment || []).map(id => WYPOSAZENIE[id] || id), ...(v.customEquipment || [])];
@@ -298,10 +303,14 @@ function KartaPojazdu({ v, docs, dzis, canEdit, onEdytuj, onDodajDokumenty, onUs
           <button type="button" onClick={() => setOferta(true)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold text-white" style={{ background: "#111827" }}>
             <Ikona d={I.kopiuj} /> Kopiuj ofertę
           </button>
-          {canEdit && onEdytuj && (
-            <button type="button" onClick={() => onEdytuj(v)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-gray-800 bg-gray-100">
-              <Ikona d={I.olowek} /> Edytuj
+          {canEdit && renderEdycja && !v.archived && (
+            <button type="button" onClick={() => setEdycja(e => !e)} aria-pressed={edycja} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium"
+              style={edycja ? { background: "#111827", color: "#fff" } : { background: "#f3f4f6", color: "#1f2937" }}>
+              <Ikona d={I.olowek} /> {edycja ? "Zamknij edycję" : "Edytuj"}
             </button>
+          )}
+          {canEdit && v.archived && onPrzywroc && (
+            <button type="button" onClick={() => onPrzywroc(v)} className="px-3 py-2 rounded-lg text-sm font-medium text-gray-800 bg-gray-100">Przywróć z archiwum</button>
           )}
         </div>
       </header>
@@ -311,12 +320,18 @@ function KartaPojazdu({ v, docs, dzis, canEdit, onEdytuj, onDodajDokumenty, onUs
         <Fakt etykieta="Ładowność">{v.maxWeight ? `${v.maxWeight} kg` : ""}</Fakt>
         <Fakt etykieta="Załadunek">{v.loadingType}</Fakt>
         <Fakt etykieta="Wartość netto">{v.wartoscNet ? fmtKwota(v.wartoscNet, v.wartoscWaluta) : ""}</Fakt>
+        {v.plate2 && <Fakt etykieta={`Przyczepa ${v.plate2} (cm)`}>{v.dimensions2}</Fakt>}
+        {v.plate2 && <Fakt etykieta="Ładowność przyczepy">{v.maxWeight2 ? `${v.maxWeight2} kg` : ""}</Fakt>}
+        <Fakt etykieta="We flocie od">{v.fleetJoinDate ? fmtData(v.fleetJoinDate) : ""}</Fakt>
+        {v.archived && <Fakt etykieta="W archiwum od">{[v.archivedDate && fmtData(v.archivedDate), v.archivedReason].filter(Boolean).join(" · ")}</Fakt>}
         <div className="col-span-2 sm:col-span-4"><Fakt etykieta="VIN"><span style={{ fontFamily: "'DM Mono', monospace" }}>{v.vin}</span></Fakt></div>
         <div className="col-span-2 sm:col-span-4">
           <div className="text-xs text-gray-500 mb-1">Wyposażenie</div>
           {wyp.length ? <div className="flex flex-wrap gap-1.5">{wyp.map(w => <span key={w} className="text-xs px-2 py-1 rounded-md bg-gray-100 text-gray-800">{w}</span>)}</div> : <div className="text-sm font-medium text-gray-900">—</div>}
         </div>
       </div>
+
+      {edycja && renderEdycja && <div className="border-t border-gray-100">{renderEdycja(v, () => setEdycja(false))}</div>}
 
       <Sekcja tytul="Terminy i przypomnienia" licznik={terminy.length} domyslnieOtwarta>
         {terminy.length === 0 ? <p className="text-sm text-gray-500">Brak wpisanych terminów.</p> : (
@@ -367,6 +382,8 @@ function KartaPojazdu({ v, docs, dzis, canEdit, onEdytuj, onDodajDokumenty, onUs
         </div>
       </Sekcja>
 
+      {renderSerwis && <Sekcja tytul="Serwis, gwarancja i tachograf">{renderSerwis(v)}</Sekcja>}
+
       <Sekcja tytul="Historia kierowców" licznik={(v.driverHistory || []).length}>
         {(v.driverHistory || []).length === 0 ? <p className="text-sm text-gray-500">Brak wpisów.</p> : (
           <ul className="divide-y divide-gray-100 rounded-xl border border-gray-100">
@@ -380,12 +397,18 @@ function KartaPojazdu({ v, docs, dzis, canEdit, onEdytuj, onDodajDokumenty, onUs
         )}
       </Sekcja>
 
+      {canEdit && onArchiwizuj && !v.archived && (
+        <div className="border-t border-gray-100 px-5 py-3 text-right">
+          <button type="button" onClick={() => onArchiwizuj(v)} className="text-xs font-medium text-gray-600 hover:text-red-700">Przenieś do archiwum lub usuń…</button>
+        </div>
+      )}
+
       {oferta && <OknoOferty v={v} kierowca={kierowca} docs={docs} onClose={() => setOferta(false)} showToast={showToast} />}
     </article>
   );
 }
 
-export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, onEdytuj, onDodajPojazd, onDodajDokumenty, onUsunDokument, showToast, safeHref }) {
+export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajPojazd, onDodajDokumenty, onUsunDokument, showToast, safeHref }) {
   const teraz = useMemo(() => dzis ?? new Date().setHours(0, 0, 0, 0), [dzis]);
   const [archiwum, setArchiwum] = useState(false);
   const [szukaj, setSzukaj] = useState("");
@@ -474,7 +497,7 @@ export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit 
 
         {aktywny
           ? <KartaPojazdu key={aktywny.id} v={aktywny} docs={docsWg[aktywny.id] || []} dzis={teraz} canEdit={canEdit}
-              onEdytuj={onEdytuj} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} showToast={showToast} safeHref={safeHref} />
+              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} showToast={showToast} safeHref={safeHref} />
           : <div className="bg-white rounded-2xl border border-gray-100 p-8 text-sm text-gray-500">Wybierz pojazd z listy.</div>}
       </div>
     </div>

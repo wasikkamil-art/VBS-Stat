@@ -58,6 +58,11 @@ service firebase.storage {
       allow read:  if canEdit();
       allow write: if canEdit() && maxMB(25);
     }
+    // Pliki dokumentów pojazdów: `vehicleDocs/{vehicleId}/{id}.{ext}` (nowy panel pojazdów).
+    match /vehicleDocs/{allPaths=**} {
+      allow read:  if canEdit();
+      allow write: if canEdit() && maxMB(25);
+    }
     match /sprawy/{allPaths=**} {
       allow read:  if canEdit();
       allow write: if canEdit() && maxMB(25);
