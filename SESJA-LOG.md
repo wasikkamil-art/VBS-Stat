@@ -8333,3 +8333,10 @@ pozycja `kind: wykup` nr 48 z terminem 2030-09-01 w 08531/08532/08533 (49 pozycj
 wartość umowy i kapitał pozostały — w notatce pozycji jest to zaznaczone.
 Z list faktur z portalu (08532, 08534): refaktury polis (6 832 / 6 670 zł, termin 02.11.2026) mają status „niezapłacona”;
 rata nr 2 płatna 25.11.2026. Lista 08534 = TK 795GM, rata 709,22 EUR.
+
+**Dopisek 17.11 (11) — TK 795GM:** user: to **laweta, auto spoza floty** — do FleetStata NIE wpisujemy, tylko do VBS Faktury.
+Dodany leasing 26/08534/LO (Impuls, EUR) — 10. umowa. Wpisane wyłącznie to, co wynika z faktur i listy z portalu: opłata
+wstępna 7 148,64 (zapłacona), rata 1 = 715,02 (zapłacona), rata 2 = 709,22 z terminem 25.11.2026. **Harmonogram niepełny**
+(w nazwie przedmiotu jest to napisane wprost): brak liczby rat, końca umowy, wykupu, marki i VIN-u — czeka na „Szczegóły umowy”
+i CSV harmonogramu z portalu. Daty zapłaty = terminy (rzeczywistych nie znam). Do czasu uzupełnienia raport tygodniowy pokaże
+dla tej umowy zaniżoną liczbę pozostałych rat.
