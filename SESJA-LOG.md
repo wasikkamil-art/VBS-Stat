@@ -8324,3 +8324,12 @@ wczytanie CSV kliknięciem w przeglądarce (parser testowany osobno), widok na t
 
 **Dopisek 17.11 (9):** push zrobił user (`c1a9050..62df15c`). Produkcja potwierdzona curl-em: bundle `assets/index-CnSy2tJq.js`
 ładuje chunk `PojazdyPanel-DOKXY9Ra.js` z edycją leasingu („Wczytaj z CSV”). Zapis po zalogowaniu — do sprawdzenia przez usera.
+
+**Dopisek 17.11 (10) — wykup trzech Iveco:** user pokazał „Szczegóły umowy 26/08532/LO” z portalu Impuls: wartość umowy
+79 353,77 EUR, kapitał pozostały 67 334,01 EUR, **wartość końcowa 4 110,53 EUR** (zgodna z moim wcześniejszym wyliczeniem).
+Wpisane: FleetStat `leasing.wykup` = 4110.53 przy v7/v8/v9 (transakcja z asercją, reszta bez zmian); VBS Faktury `wykup` +
+pozycja `kind: wykup` nr 48 z terminem 2030-09-01 w 08531/08532/08533 (49 pozycji, suma netto 85 299,39 EUR).
+⚠️ Dokument potwierdza kwotę tylko dla 08532; dla 08531 i 08533 przyjęta ta sama, bo portal pokazuje dla nich identyczną
+wartość umowy i kapitał pozostały — w notatce pozycji jest to zaznaczone.
+Z list faktur z portalu (08532, 08534): refaktury polis (6 832 / 6 670 zł, termin 02.11.2026) mają status „niezapłacona”;
+rata nr 2 płatna 25.11.2026. Lista 08534 = TK 795GM, rata 709,22 EUR.
