@@ -8275,3 +8275,6 @@ Na „Tak, buduj dalej” usera (układ zaakceptowany w atrapie).
 
 **Dopisek 17.11 (5):** push zrobił user (`3bd0a28..c1a9050`). Produkcja potwierdzona curl-em: bundle `index-BbVMfzwA.js`
 ładuje chunk `PojazdyPanel-BYNBcbS_.js` (200, 24 kB, zawiera „Kopiuj ofertę”). Widok po zalogowaniu — czeka na usera.
+
+**Dopisek 17.11 (6):** user po zalogowaniu na produkcji: nowy panel Pojazdy „Działa”. Nie doprecyzował, które punkty
+z listy sprawdził (wgrywanie pliku, edycja, oferta) — traktować jako potwierdzenie ogólne, nie każdej ścieżki z osobna.
