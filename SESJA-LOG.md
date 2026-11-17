@@ -8217,3 +8217,7 @@ Zrzut z portalu: 79 353,77 EUR to zapewne wartość po rekalkulacji (334 000 PLN
 **nie wpisane**, v7 nadal ma 76 974,49 EUR. Flota: 9 pozycji (7 aktywnych). TK 795GM (08534) nie dodane.
 
 ✅ Odczyt po zapisie: 9 pojazdów, pierwsze 7 bez zmian. ❌ Widok w aplikacji nieoglądany; Total_26, `operacyjne`, Atlas — nietknięte.
+
+**Dopisek 17.11 (3):** na „Tak, wpisz” usera wartość v7, v8, v9 = **79 353,77 EUR** (`wartoscWaluta` „EUR”; v7 poprzednio
+76 974,49 — kwota wstępna sprzed aneksu). Transakcja z asercją (9 pojazdów, VIN-y, stara wartość), wpis w `auditLog`,
+odczyt po zapisie zgodny, reszta pól i aut bez zmian. Źródło: zrzut z portalu Impuls — user potwierdził znaczenie kwoty.
