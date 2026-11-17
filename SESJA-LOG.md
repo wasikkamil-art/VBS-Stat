@@ -8179,3 +8179,6 @@ innych aut mam zapamiętać. Najpierw lista „co to jest”, potem jego decyzja
 Trzy archiwa `inspekcja_17112026*.zip`: decyzja UDT + protokół + raport, badanie odbiorcze 03.11.2026, wynik pozytywny,
 Dhollandia DHSM 1000 kg, dozór ograniczony, eksploatacja do **30.11.2029**. Po VIN-ie: N8712016510 → WGM 7651V,
 **N8712016508 → WGM 7652V (v7)**, N8712016520 → WGM 7653V. To domyka brak „decyzji UDT” z poprzedniego wpisu.
+
+**Dopisek 17.11:** user dosłał zaświadczenie z kalibracji tachografu WGM 7652V (Tacho Fox, 13.10.2026, następna 13.10.2028,
+Continental nr 22620407, licznik 331 km) — dane zgodne z naklejką na słupku. Odczyt, nic nie wgrane.
