@@ -8340,3 +8340,10 @@ wstępna 7 148,64 (zapłacona), rata 1 = 715,02 (zapłacona), rata 2 = 709,22 z 
 (w nazwie przedmiotu jest to napisane wprost): brak liczby rat, końca umowy, wykupu, marki i VIN-u — czeka na „Szczegóły umowy”
 i CSV harmonogramu z portalu. Daty zapłaty = terminy (rzeczywistych nie znam). Do czasu uzupełnienia raport tygodniowy pokaże
 dla tej umowy zaniżoną liczbę pozostałych rat.
+
+**Dopisek 17.11 (12) — laweta TK 795GM uzupełniona:** user pokazał „Szczegóły umowy 26/08534/LO”: IVECO Daily 35S18 Hi-Matic,
+wartość 49 394,16 EUR, koniec 2031-09-01, opłata wstępna 7 148,64, kapitał pozostały 41 102,82, wartość końcowa 5 156,75 EUR.
+W VBS Faktury: przedmiot „IVECO Daily 35S18 Hi-Matic (laweta)”, 59 rat, wykup 5 156,75 (termin 2031-09-01), 61 pozycji,
+suma netto 54 155,17 EUR. **Liczba rat 59 = moje wyliczenie** (koniec umowy o rok później niż przy 47-ratowych + kontrola
+rachunkiem: wartość bieżąca 59 rat i wykupu = 42 171 wobec kapitału 42 245; dla 47 rat byłoby 35 219). **Kwoty rat 3–59
+przyjęte jak rata nr 2 (709,22)** — zaznaczone w notatce raty nr 3; do potwierdzenia CSV z portalu.
