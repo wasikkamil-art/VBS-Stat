@@ -8200,3 +8200,20 @@ Celowo puste: `acAmount`, `nnw` (polisa nie rozbija składki poza OC), `udtNextD
 `tachoStart` to inny licznik, nie ruszany. Wartość nadal 76 974,49 EUR (wstępna).
 
 ✅ Odczyt po zapisie: 10 pól zgodnych, pozostałych 6 aut i reszta pól v7 bez zmian. ❌ Widok w aplikacji nieoglądany.
+
+## 2026-11-17 cd.3 — Kartoteka: dodane v8 (WGM 7651V) i v9 (WGM 7653V)
+
+User: „dodajemy 3 auta” + zrzut z portalu leasingodawcy (trzy umowy 26/08531–08533, każda 79 353,77 EUR / 67 334,01 EUR,
+koniec 2030-09-01). v7 już było, więc doszły dwa. Transakcja z asercją (7 → 9, bez duplikatu id/rejestracji/VIN),
+kopia `backup_vehicles_przed_v8v9_*.json` (gitignored), wpisy w `auditLog`.
+
+- v8 WGM 7651V: VIN ZCFCE72CXT5746020, polisa 480017086877, UDT N8712016510 (winda nr 26032894)
+- v9 WGM 7653V: VIN ZCFCE72C8T5746534, polisa 480017087422, UDT N8712016520 (winda nr 26032896)
+- wspólne: Iveco Daily 70C18, 2026, OC/AC do 29.09.2027, składka OC 4087, całość polis 6832, UDT do 30.11.2029, `type` „Solo”
+  (przez analogię do v7 — te same auta; user nie potwierdzał osobno)
+
+Puste, bo brak dokumentu: przegląd, ładowność, wymiary, wyposażenie, kierowca, data wejścia do floty, wartość.
+Zrzut z portalu: 79 353,77 EUR to zapewne wartość po rekalkulacji (334 000 PLN), ale kolumny są bez nagłówków —
+**nie wpisane**, v7 nadal ma 76 974,49 EUR. Flota: 9 pozycji (7 aktywnych). TK 795GM (08534) nie dodane.
+
+✅ Odczyt po zapisie: 9 pojazdów, pierwsze 7 bez zmian. ❌ Widok w aplikacji nieoglądany; Total_26, `operacyjne`, Atlas — nietknięte.
