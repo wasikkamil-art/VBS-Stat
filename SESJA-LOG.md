@@ -8227,3 +8227,22 @@ odczyt po zapisie zgodny, reszta pól i aut bez zmian. Źródło: zrzut z portal
 Transakcja z asercją, wpis w `auditLog`, odczyt zgodny, reszta bez zmian. Uwaga: ładowność 3511 kg pochodzi z dowodu 7652V —
 dla 7651V/7653V do potwierdzenia w ich dowodach (masa własna egzemplarzy może się różnić). „gps” w wyposażeniu = deklaracja
 z v7, nie sprawdzałem urządzeń w Atlasie.
+
+## 2026-11-17 cd.4 — Nowy panel pojazdów: komponent + atrapa do obejrzenia (NIE podpięty do aplikacji)
+
+User: panel budujemy od nowa, dane starych aut zostają; wszystkie dokumenty opisane, ale schowane w rozwijanej liście
+do pobrania; kopiowanie oferty = dane podstawowe + dokumenty; harmonogramy i umowy; przypomnienia.
+
+- Nowy `src/components/PojazdyPanel.jsx` — czysto prezentacyjny (bez Firebase, dane i zapisy przez propsy): lista floty
+  po lewej (aktywne/archiwum, szukanie, kropka najbliższego terminu), karta auta po prawej; sekcje zwijane: terminy
+  i przypomnienia (pola karty + dokumenty z datą + najbliższa rata), leasing z harmonogramem, **dokumenty pogrupowane
+  z przyciskiem „Pobierz”** (domyślnie zwinięte), ubezpieczenie/UDT, historia kierowców; u góry najbliższe terminy floty (60 dni).
+- **Kopiuj ofertę**: okno z wyborem dokumentów do dołączenia (linki) + podgląd tekstu; ostrzeżenie, że link jest publiczny.
+- Te same pola pojazdu co dotąd → stare auta bez migracji. Nowe w modelu: `leasing` (obiekt z harmonogramem) i dokumenty
+  pojazdu (`{vehicleId, kind, label, number, issueDate, expiryDate, fileUrl}`) — **jeszcze nigdzie nie zapisywane**.
+- Atrapa `podglad/pojazdy` (launch „podglad-pojazdy”, port 5197, gitignored): kartoteka = zrzut z bazy (odczyt),
+  dokumenty i leasing nowych aut = przykładowe wpisy bez plików.
+
+✅ Atrapa: 9 aut, wybór auta, rozwinięcie dokumentów, okno oferty z treścią (sprawdzona wartość pola tekstowego), konsola bez błędów, lint 0.
+❌ Nie zrobione: podpięcie do `App.jsx`, zapis dokumentów (kolekcja + Storage + reguły), edycja pojazdu w nowym układzie,
+widok na telefonie, role. Otwarte decyzje usera — patrz czat.
