@@ -8185,3 +8185,18 @@ Continental nr 22620407, licznik 331 km) — dane zgodne z naklejką na słupku.
 
 **Dopisek 17.11 (2):** user dosłał 3 harmonogramy leasingu (CSV, identyczne): 47 rat 2026-10-01 → 2030-08-01, raty 2–47 po
 1 526,76 EUR netto, suma 71 767,18 EUR. GAP-u jeszcze nie ma (słowa usera). Odczyt, nic nie wgrane.
+
+## 2026-11-17 cd.2 — v7 (WGM 7652V): dane z dokumentów wpisane do karty
+
+Na „Tak, wpisz” usera. Transakcja z asercją (7 pojazdów, VIN v7, pola puste lub równe), kopia tablicy
+`backup_vehicles_przed_v7_dane_*.json` (gitignored), wpis w `auditLog`.
+
+- `inspectionExpiry` 2027-09-30 (dowód rejestracyjny)
+- `ocNumber`/`acNumber` 480017086989, `ocExpiry`/`acExpiry` 2027-09-29, `ocAmount` 4087, `caloscPolis` 6832 (Hestia, OC+AC+NW+ZK)
+- `udtNumber` N8712016508, `udtLiftName` „Dhollandia DHSM.15, 1000 kg, nr fabr. 26032895”, `udtExpiry` 2029-11-30
+
+Celowo puste: `acAmount`, `nnw` (polisa nie rozbija składki poza OC), `udtNextDate` (UDT podaje tylko „listopad 2029”),
+`fleetJoinDate` (nie to samo co data rejestracji), GAP (nie ma). Legalizacja tachografu (13.10.2028) nie ma pola w karcie —
+`tachoStart` to inny licznik, nie ruszany. Wartość nadal 76 974,49 EUR (wstępna).
+
+✅ Odczyt po zapisie: 10 pól zgodnych, pozostałych 6 aut i reszta pól v7 bez zmian. ❌ Widok w aplikacji nieoglądany.
