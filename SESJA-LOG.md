@@ -8221,3 +8221,9 @@ Zrzut z portalu: 79 353,77 EUR to zapewne wartość po rekalkulacji (334 000 PLN
 **Dopisek 17.11 (3):** na „Tak, wpisz” usera wartość v7, v8, v9 = **79 353,77 EUR** (`wartoscWaluta` „EUR”; v7 poprzednio
 76 974,49 — kwota wstępna sprzed aneksu). Transakcja z asercją (9 pojazdów, VIN-y, stara wartość), wpis w `auditLog`,
 odczyt po zapisie zgodny, reszta pól i aut bez zmian. Źródło: zrzut z portalu Impuls — user potwierdził znaczenie kwoty.
+
+**Dopisek 17.11 (4):** user: „3 takie same auta dokładnie” → do v8 i v9 skopiowane z v7: `dimensions` „600x249x240(245)”,
+`equipment` (paleciak, pasy, tachograf, winda, gaśnica, trójkąt, gps, plandeka), `loadingType` „Bok, tył”, `maxWeight` „3511”.
+Transakcja z asercją, wpis w `auditLog`, odczyt zgodny, reszta bez zmian. Uwaga: ładowność 3511 kg pochodzi z dowodu 7652V —
+dla 7651V/7653V do potwierdzenia w ich dowodach (masa własna egzemplarzy może się różnić). „gps” w wyposażeniu = deklaracja
+z v7, nie sprawdzałem urządzeń w Atlasie.
