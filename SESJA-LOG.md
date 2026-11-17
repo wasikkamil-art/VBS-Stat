@@ -8158,3 +8158,18 @@ User zamknął temat planera „na chwilę obecną" i poprosił o zapamiętanie 
 Kalkulator tras (układ B, 11.11): nadal nieobejrzana na produkcji ramka myta PTV i wejście z okna zlecenia.
 Przegląd: poprawka „Baza · od …" potwierdzona przez usera na produkcji („działa, pokazuje baza").
 Następny temat: nowy panel pojazdów (3 nowe auta, wgrywanie dokumentów) — prowadzony w osobnej sesji.
+
+## 2026-11-17 — Nowe auta: spis 52 dokumentów (30 PDF + 22 zdjęcia), nic nie wgrane
+
+User zmienił podejście: wrzucił hurtem wszystkie dokumenty elektroniczne i zdjęcia, zaczynamy od WGM 7652V, a dokumenty
+innych aut mam zapamiętać. Najpierw lista „co to jest”, potem jego decyzja, co gdzie umieścić.
+
+- Odczyt (PDFKit + OCR Vision, zdjęcia dowodu obejrzane na obrazie). **Niczego nie zapisano w bazie ani w Storage.**
+- 🔑 Leasingów Impuls jest **cztery**: 26/08531 (WGM 7651V), 08532 (WGM 7652V = v7), 08533 (WGM 7653V), 08534 (**TK 795GM** —
+  tańszy przedmiot, rodzaj pojazdu nieznany). W bazie jest tylko v7.
+- WGM 7652V z dowodu: I rejestracja 30.09.2026, przegląd do 30.09.2027, ładowność 3511 kg, masa własna 3689 kg; polisa Hestia
+  480017086989 (OC+AC+NW+ZK) 30.09.2026–29.09.2027, 6 832 zł; winda Dhollandia DHSM.15, 1000 kg; protokół przekazania 06.11.2026.
+- VIN ZCFCE72C1T5746021 zgadza się na dowodzie, polisie, protokole przekazania, CEMT, Webasto i poświadczeniu windy.
+- Pełny spis z nazwami plików: pamięć `project_nowe_auta_spis_dokumentow`.
+
+❌ Niezweryfikowane: kwoty z faktur czytane automatem (bez ręcznego sprawdzenia każdej); numer certyfikatu CEMT (OCR daje 888 i 998).
