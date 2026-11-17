@@ -8142,3 +8142,19 @@ Baza to miejsce: auto stoi tam, dopóki nie ruszy go fracht albo nowy wpis. Kole
 „W trasie", aktywnej pauzy i „Załadunek za Xd" — te nadal wygrywają.
 
 ✅ lint 0 błędów, build zielony. ❌ **Niesprawdzone na żywo** — kafel jest za loginem, ogląda user.
+
+## 2026-11-17 cd. — Planer załadunku ZAPARKOWANY (lista do zrobienia)
+
+User zamknął temat planera „na chwilę obecną" i poprosił o zapamiętanie zaległości. Pełna lista jest w pamięci
+`project_planer_zaladunku` (sekcja „ZAPARKOWANE 17.11.2026"). Skrót:
+- **do zbudowania**: link dla klienta (czeka na 4 decyzje: co klient widzi, co zmienia, co po wypełnieniu,
+  ważność linku), zapis planów w bazie, three.js z CDN do npm (po wyjaśnieniu `package-lock.json`)
+- **do potwierdzenia na produkcji**: winda z kartoteki, zapis sposobu załadunku, prawdziwy PDF z listą kontrolną,
+  wczytanie zlecenia z PDF-a, zapis danych osi
+- **niedoróbki**: winda auta w zestawie zasłonięta przyczepą; jedna kabina dla wszystkich aut; osie przyczepy na oko
+- **niepotwierdzone założenie**: kolejność rozładunku osobno w aucie i na przyczepie
+- zakładkę `planer` nadal widzą tylko 3 adminów — decyzja usera
+
+Kalkulator tras (układ B, 11.11): nadal nieobejrzana na produkcji ramka myta PTV i wejście z okna zlecenia.
+Przegląd: poprawka „Baza · od …" potwierdzona przez usera na produkcji („działa, pokazuje baza").
+Następny temat: nowy panel pojazdów (3 nowe auta, wgrywanie dokumentów) — prowadzony w osobnej sesji.
