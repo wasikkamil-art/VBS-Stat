@@ -8182,3 +8182,6 @@ Dhollandia DHSM 1000 kg, dozór ograniczony, eksploatacja do **30.11.2029**. Po 
 
 **Dopisek 17.11:** user dosłał zaświadczenie z kalibracji tachografu WGM 7652V (Tacho Fox, 13.10.2026, następna 13.10.2028,
 Continental nr 22620407, licznik 331 km) — dane zgodne z naklejką na słupku. Odczyt, nic nie wgrane.
+
+**Dopisek 17.11 (2):** user dosłał 3 harmonogramy leasingu (CSV, identyczne): 47 rat 2026-10-01 → 2030-08-01, raty 2–47 po
+1 526,76 EUR netto, suma 71 767,18 EUR. GAP-u jeszcze nie ma (słowa usera). Odczyt, nic nie wgrane.
