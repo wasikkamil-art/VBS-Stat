@@ -8246,3 +8246,29 @@ do pobrania; kopiowanie oferty = dane podstawowe + dokumenty; harmonogramy i umo
 ✅ Atrapa: 9 aut, wybór auta, rozwinięcie dokumentów, okno oferty z treścią (sprawdzona wartość pola tekstowego), konsola bez błędów, lint 0.
 ❌ Nie zrobione: podpięcie do `App.jsx`, zapis dokumentów (kolekcja + Storage + reguły), edycja pojazdu w nowym układzie,
 widok na telefonie, role. Otwarte decyzje usera — patrz czat.
+
+## 2026-11-17 cd.5 — Nowy panel pojazdów podpięty + dokumenty i leasing trzech Iveco wgrane
+
+Na „Tak, buduj dalej” usera (układ zaakceptowany w atrapie).
+
+**Kod (commit `04177e4`, niewypchnięty — push robi user):**
+- zakładka Pojazdy = `PojazdyPanel` (lazy chunk ~24 kB): lista floty + karta auta; `VehicleEditPanel` i `VehicleServicePanel`
+  wpięte jako sloty (te same pola, ten sam `updateVehicle` — stare auta bez migracji); archiwizacja i przywracanie zachowane
+- `updateVehicle` zwraca true/false — edycja zamyka się tylko po udanym zapisie
+- dokumenty pojazdu: kolekcja `vehicleDocs/{id}` + Storage `vehicleDocs/{vehicleId}/{id}.{ext}`; listener tylko dla
+  admin/dyspozytor; wgrywanie wielu plików naraz, usuwanie z potwierdzeniem
+- stary `DriverCopyRow` usunięty — zastępuje go okno oferty z wyborem dokumentów (linki)
+- **Reguły wdrożone** (`firebase deploy --only firestore:rules,storage`): `vehicleDocs` odczyt i zapis tylko `canEdit()`
+
+**Dane (produkcja, skrypt admin):**
+- **47 dokumentów** w `vehicleDocs`: v7 = 25, v8 = 11, v9 = 11. Zdjęcia HEIC złożone w PDF-y (dowód, upoważnienie, protokół,
+  Webasto, CEMT, 3× winda). CEMT: oryginał zielony (0805–0807); biała kopia 0813–0815 to ten sam certyfikat 888/2026 — pominięta.
+- `leasing` przy v7/v8/v9 (umowa, Impuls, EUR, 47 rat, rata 1 526,76, koniec 2030-09-01, harmonogram) — transakcja z asercją,
+  reszta pól bez zmian; `fleet/data` = 59 KB.
+- **Nie wgrane celowo**: karty z kodami radia/immobilizera (IMG_0798–0799); faktury wspólne (Lamineks, Auto Pasja) i Mrówka;
+  umów 08531/08533 nie mam (jest tylko 08532).
+
+✅ lint 0 błędów (39 ostrzeżeń, bez zmian), build zielony; atrapa: edycja, serwis, archiwum, oferta; link do dowodu zwraca 200 / PDF.
+❌ **Niesprawdzone**: nowy panel w aplikacji po zalogowaniu (wymaga pusha i obejrzenia przez usera), wgrywanie pliku z przeglądarki
+(reguły Storage w akcji), formularz edycji w nowym miejscu, widok na telefonie, rola `podglad` (zobaczy panel bez dokumentów).
+⚠️ Umowa leasingu 08532 zawiera deklarację wekslową z PESEL-em — plik dostępny tylko dla biura, w ofercie domyślnie niezaznaczony.
