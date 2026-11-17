@@ -8321,3 +8321,6 @@ User: „dodaj edycję leasingu i opisów dokumentów w panelu”.
 suma 71 767,18; atrapa: zmiana opisu dokumentu widoczna na liście, zapis leasingu z wykupem 3 987,28 (47 rat zachowane).
 ❌ Niesprawdzone: zapis na produkcji po zalogowaniu (reguły `vehicleDocs` pozwalają na update dla admin/dyspozytor),
 wczytanie CSV kliknięciem w przeglądarce (parser testowany osobno), widok na telefonie.
+
+**Dopisek 17.11 (9):** push zrobił user (`c1a9050..62df15c`). Produkcja potwierdzona curl-em: bundle `assets/index-CnSy2tJq.js`
+ładuje chunk `PojazdyPanel-DOKXY9Ra.js` z edycją leasingu („Wczytaj z CSV”). Zapis po zalogowaniu — do sprawdzenia przez usera.
