@@ -8347,3 +8347,8 @@ W VBS Faktury: przedmiot „IVECO Daily 35S18 Hi-Matic (laweta)”, 59 rat, wyku
 suma netto 54 155,17 EUR. **Liczba rat 59 = moje wyliczenie** (koniec umowy o rok później niż przy 47-ratowych + kontrola
 rachunkiem: wartość bieżąca 59 rat i wykupu = 42 171 wobec kapitału 42 245; dla 47 rat byłoby 35 219). **Kwoty rat 3–59
 przyjęte jak rata nr 2 (709,22)** — zaznaczone w notatce raty nr 3; do potwierdzenia CSV z portalu.
+
+**Dopisek 17.11 (13):** user dosłał harmonogram lawety (`Harmonogram (3).csv`): **59 rat, rata 1 = 715,02, raty 2–59 = 709,22,
+suma 41 849,78 EUR** — co do grosza i co do miesiąca zgodne z tym, co wyliczyłem i wpisałem w VBS Faktury (0 różnic).
+Kapitał 37 088,77 = wartość 49 394,16 − wstępna 7 148,64 − wykup 5 156,75. Adnotacja „do potwierdzenia” przy racie nr 3
+zamieniona na „zgodne z harmonogramem z portalu”.
