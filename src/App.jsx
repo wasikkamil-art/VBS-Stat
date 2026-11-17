@@ -3062,6 +3062,18 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                         && lastDoneF?.dataRozladunku && lastDoneF.dataRozladunku <= todayISO
                         && (!nextF || futurePauza.start <= nextF.dataZaladunku);
 
+                      // Baza „trwa dalej": ostatni wpis to Baza, jego zakres już minął, ale od tamtej pory
+                      // auto nie dostało ani frachtu, ani innego wpisu. Baza to MIEJSCE, nie odpoczynek
+                      // na godziny — auto stoi tam, dopóki coś go nie ruszy. Bez tego po jednodniowym
+                      // wpisie kafel wracał do „Czeka na zlecenie · Xd", choć auto stało na bazie.
+                      const ostatniWpis = pauzy
+                        .filter(p => p.vehicleId === v.id && p.start && p.start <= todayISO)
+                        .sort((a, b) => b.start.localeCompare(a.start))[0] || null;
+                      const bazaTrwa = ostatniWpis?.status === "baza"
+                        && (ostatniWpis.end || ostatniWpis.start) < todayISO
+                        && (!lastDoneF || lastDoneF.dataRozladunku <= (ostatniWpis.end || ostatniWpis.start))
+                        ? ostatniWpis : null;
+
                       // PRIORYTET 1: W trasie (z badgem "opóźniony" gdy data rozładunku przekroczona).
                       // Semantyka "1 dzień minął" = >=24h od dataRozladunku → wymaga 2 dni kalendarzowych.
                       // displayedOverdue = daysCalendar - 1 (np. 12.05 vs 11.05 = 1 dzień kalendarzowo,
@@ -3126,6 +3138,15 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                         statusIcon = futurePauza.status === "baza" ? "🏠" : "🛏️";
                         statusColor = "#1d4ed8";
                         statusBg = "#eff6ff";
+                      }
+                      // PRIORYTET 3.7: Baza ustawiona wcześniej i nic po niej — auto nadal na bazie.
+                      else if (bazaTrwa) {
+                        const odKiedy = new Date(bazaTrwa.start + "T00:00:00").toLocaleDateString("pl-PL", { day: "numeric", month: "short" });
+                        status = "pauza";
+                        statusLabel = `Baza · od ${odKiedy}`;
+                        statusIcon = "🏠";
+                        statusColor = "#6b7280";
+                        statusBg = "#f3f4f6";
                       }
                       // PRIORYTET 4: Czeka na zlecenie (z liczbą dni — grace period 1 dzień).
                       // Semantyka "1 dzień minął" = >=24h od rozładunku → 2 dni kalendarzowych.

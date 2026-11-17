@@ -8129,3 +8129,16 @@ User uzupełnił koszty i dni w kolumnie L. Odczyt wszystkich pięciu bloków (z
 
 **16.11 cd.2 — hotele v3**: user potwierdził, że +101,70 to koszt z błędnym znakiem. L20 poprawione na −101,70 (notatka ze starą wartością),
 `costs` +1 (v3 hotele 101,70), 1256 → 1257. **Październik: 55 pozycji / 29 396,91 €; v3 7 885,41 = arkusz. Wynik floty wg bazy +6 457,64 €.**
+
+## 2026-11-17 — Przegląd: auto na bazie nie wraca do „Czeka na zlecenie"
+
+User (zrzut): WGM 0475M ma w Czasie pracy wpis „Baza 13 lis (1 dzień) — czeka na nowego kierowcę", a kafel
+na Przeglądzie pokazuje „Czeka na zlecenie · 4d". Przyczyna: kafel brał bazę tylko wtedy, gdy DZIŚ mieści się
+w zakresie wpisu; wpis jednodniowy wygasał następnego dnia.
+
+Poprawka (`src/App.jsx`, logika statusów kafla): jeśli ostatni wpis czasu pracy auta to Baza, jego zakres minął,
+a po nim nie ma frachtu rozładowanego później ani innego wpisu — kafel pokazuje **„Baza · od 13 lis"**.
+Baza to miejsce: auto stoi tam, dopóki nie ruszy go fracht albo nowy wpis. Kolejność bez zmian dla
+„W trasie", aktywnej pauzy i „Załadunek za Xd" — te nadal wygrywają.
+
+✅ lint 0 błędów, build zielony. ❌ **Niesprawdzone na żywo** — kafel jest za loginem, ogląda user.
