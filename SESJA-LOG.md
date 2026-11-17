@@ -8278,3 +8278,21 @@ Na „Tak, buduj dalej” usera (układ zaakceptowany w atrapie).
 
 **Dopisek 17.11 (6):** user po zalogowaniu na produkcji: nowy panel Pojazdy „Działa”. Nie doprecyzował, które punkty
 z listy sprawdził (wgrywanie pliku, edycja, oferta) — traktować jako potwierdzenie ogólne, nie każdej ścieżki z osobna.
+
+## 2026-11-17 cd.6 — VBS Faktury: trzy leasingi Impuls dodane do modułu Leasingi
+
+User: w `faktury.fleetstat.pl/leasingi` dodać nowe auta i leasingi. Zapis przez Firestore REST projektu `vbs-invoices`
+(token `gcloud`), kolekcja `leasings` — 6 → 9 umów. Kodu Faktur nie ruszałem.
+
+- 26/08531/LO WGM 7651V, 26/08532/LO WGM 7652V (kierowca Mykola Omelianiuk), 26/08533/LO WGM 7653V
+- każda: IMPULS-LEASING Polska, EUR, 47 rat, opłata wstępna 9 421,68 (oznaczona jako zapłacona 23.09.2026 — tak stoi na fakturze
+  WOL), raty z harmonogramu (1. = 1 536,22, dalej 1 526,76), suma netto 81 188,86 EUR; `wykup` 0 (po rekalkulacji nieznany)
+- terminy rat = 25. dzień miesiąca przesuwany na dzień roboczy (umowa art. 2 ust. 4); rata 1 = 26.10.2026, zgodnie z fakturą
+- załącznik tylko przy 08532: skan umowy z aneksem zmniejszony `gs` do 150 DPI (70,7 MB → 4,2 MB; limit modułu 25 MB)
+- auta w Fakturach pochodzą z FleetStata na żywo (CF `getFleetVehicles`) — osobnego dodawania pojazdów tam nie ma
+
+✅ Odczyt po zapisie: 9 umów, 3× Impuls po 48 pozycji, suma zgodna z harmonogramem. ❌ Widok w Fakturach nieoglądany.
+⚠️ Raty nr 1 (26.10.2026) są nieodhaczone → pokażą się jako zaległe, dopóki user ich nie odhaczy albo nie wgra wyciągu.
+Nie dodane: 26/08534/LO (TK 795GM) — brak harmonogramu i nie wiadomo, co to za pojazd. Opłata administracyjna 577,31 EUR
+nie wpisana do `leasingFees`.
+Uwaga uboczna: w FleetStat `vehicleDocs` skan umowy 08532 leży w oryginale 70,7 MB — do podmiany na wersję 4,2 MB.
