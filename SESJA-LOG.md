@@ -8360,3 +8360,20 @@ zamieniona na „zgodne z harmonogramem z portalu”.
 Skan podzielony na strony; wgrane: FleetStat `vehicleDocs` +6 (protokół + upoważnienie przy v7/v8/v9; razem 53: v7 27, v8 13,
 v9 13), VBS Faktury — protokół jako załącznik każdej z trzech umów. User: treść umów jest taka sama dla trzech aut — skanu
 umowy 08532 nie kopiowałem do pozostałych (ma inny numer i deklarację wekslową).
+
+## 2026-11-18 — Planer: strony załadunku czytane z kartoteki pojazdu
+
+User (zrzuty): WGM 7652V ma w kartotece „Załadunek: Bok, tył", a planer pokazywał samo „załadunek: tył · winda".
+Przyczyna: planer brał z kartoteki tylko windę (z wyposażenia), a pole `loadingType` (wolny tekst) pomijał —
+strony załadunku trzeba było zaznaczać w planerze drugi raz.
+
+- `parsujRodzajZaladunku()` w `src/utils/planerZaladunku.js` czyta z tekstu tył / bok / górę (bez polskich znaków,
+  dowolna wielkość liter); pusty lub nierozpoznany tekst nie zmienia nic
+- kartoteka nie mówi, KTÓRY bok → nowa wartość „bok" bez strony; zaznaczenie lewego lub prawego w planerze ją zastępuje
+- sam wpis „Bok" (bez „tył") wyłącza tył — tak jak stoi w kartotece
+- kolejność ważności: zapis z panelu planera > kartoteka > domyślne
+- w zestawie pole dotyczy całego pojazdu, więc trafia i do auta, i do przyczepy
+
+Testy silnika 861/861, lint 0 błędów, build zielony. ✅ Atrapa: auto z „Bok, tył" → „załadunek: tył, bok · winda",
+po zaznaczeniu „bok lewy" → „tył, bok lewy · winda", treść zapisu bez `undefined`.
+❌ Niesprawdzone na produkcji po zalogowaniu.

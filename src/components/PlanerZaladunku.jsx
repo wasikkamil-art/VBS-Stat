@@ -16,7 +16,7 @@ import { doc, getDoc, setDoc } from "firebase/firestore";
 import ZlecenieUploadBtn from "./ZlecenieUploadBtn";
 import {
   parsujWymiaryPaki, parsujPalety, rozwinPozycje, ulozZestaw, sprawdzMiejsce, podsumowanie, naciskiOsi,
-  ostrzezeniaUkladu, przyciagnij, KOLORY_ROZL, TYPY_PALET, sposobZaladunku,
+  ostrzezeniaUkladu, przyciagnij, KOLORY_ROZL, TYPY_PALET, sposobZaladunku, parsujRodzajZaladunku,
 } from "../utils/planerZaladunku";
 
 const THREE_URL = "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.min.js";
@@ -229,9 +229,10 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
     for (const v of vehicles || []) {
       if (!v?.id || v.archived) continue;
       const przestrzenie = [{ nazwa: v.plate || "Auto", wym: parsujWymiaryPaki(v.dimensions), maxWaga: v.maxWeight || "", zrodlo: v.dimensions || "", winda: (v.equipment || []).includes("winda") }];
+      const zKartoteki = parsujRodzajZaladunku(v.loadingType); // pole „Załadunek" w kartotece dotyczy całego pojazdu
       if (v.plate2) przestrzenie.push({ nazwa: `${v.plate2} (przyczepa)`, wym: parsujWymiaryPaki(v.dimensions2), maxWaga: v.maxWeight2 || "", zrodlo: v.dimensions2 || "" });
       out.push({
-        key: v.id, vehicleId: v.id, przestrzenie,
+        key: v.id, vehicleId: v.id, przestrzenie, zKartoteki, rodzajZaladunku: v.loadingType || "",
         etykieta: v.plate2 ? `${v.plate} + ${v.plate2} · ${v.type || "zestaw z przyczepą"}` : [v.plate, v.brand].filter(Boolean).join(" · "),
       });
     }
@@ -264,7 +265,7 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
     const n = (v) => Number(String(v ?? "").replace(",", "."));
     const lista = pakiTxt.map((t, i) => {
       const pk = { dl: n(t.dl), sz: n(t.sz), wys: n(t.wys) };
-      return { i, nazwa: auto?.przestrzenie[i]?.nazwa || (i ? "Przyczepa" : "Auto"), paka: pk.dl > 0 && pk.sz > 0 && pk.wys > 0 ? pk : null, maxWaga: n(t.maxWaga) || null, x0: 0, winda: !!auto?.przestrzenie[i]?.winda };
+      return { i, nazwa: auto?.przestrzenie[i]?.nazwa || (i ? "Przyczepa" : "Auto"), paka: pk.dl > 0 && pk.sz > 0 && pk.wys > 0 ? pk : null, maxWaga: n(t.maxWaga) || null, x0: 0, winda: !!auto?.przestrzenie[i]?.winda, zKartoteki: auto?.zKartoteki || null };
     });
     // Położenie w scenie: auto z przodu, przyczepa za nim, całość wyśrodkowana.
     const zPaka = lista.filter(pr => pr.paka);
@@ -276,12 +277,12 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
   const jestPaka = przestrzenie.some(pr => pr.paka);
 
   // Sposób załadunku każdej przestrzeni: zapisane dane auta, a gdy ich nie ma — winda z wyposażenia w kartotece.
-  const zal = useMemo(() => przestrzenie.map(pr => sposobZaladunku({ winda: pr.winda, ...(tech?.zaladunek?.[pr.i] || {}) })), [przestrzenie, tech]);
+  const zal = useMemo(() => przestrzenie.map(pr => sposobZaladunku({ winda: pr.winda, ...(pr.zKartoteki || {}), ...(tech?.zaladunek?.[pr.i] || {}) })), [przestrzenie, tech]);
   // Rozłożona winda ostatniej przestrzeni wystaje za obrys — kadr kamery musi ją objąć (cm).
   const windaTyl = zal[zal.length - 1]?.winda && przestrzenie[przestrzenie.length - 1]?.paka ? 180 : 0;
   const zmienZal = (i, pole, wartosc) => {
     setTechZapis("");
-    setTech(t => ({ ...t, zaladunek: przestrzenie.map((pr, j) => ({ ...zal[j], ...(j === i ? { [pole]: wartosc } : {}) })) }));
+    setTech(t => ({ ...t, zaladunek: przestrzenie.map((pr, j) => ({ ...zal[j], ...(j === i ? { [pole]: wartosc, ...(pole === "bokL" || pole === "bokP" ? { bok: false } : {}) } : {}) })) }));
   };
 
   const zapiszTech = async () => {
@@ -289,7 +290,7 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
     const dane = {};
     for (const [k] of TECH_POLA) { const v = String(tech[k] ?? "").replace(",", "."); dane[k] = v === "" || !Number.isFinite(Number(v)) ? null : Number(v); }
     // Sposób załadunku: jedna pozycja na przestrzeń. Tylko wartości proste — `undefined` wywala zapis w Firestore.
-    dane.zaladunek = zal.map(({ tyl, bokL, bokP, gora, winda, windaKg, wysokosc }) => ({ tyl, bokL, bokP, gora, winda, windaKg, wysokosc }));
+    dane.zaladunek = zal.map(({ tyl, bok, bokL, bokP, gora, winda, windaKg, wysokosc }) => ({ tyl, bok, bokL, bokP, gora, winda, windaKg, wysokosc }));
     try {
       await setDoc(doc(db, "planerAuta", auto.vehicleId), { ...dane, updatedAt: new Date().toISOString() }, { merge: true });
       setTechZapis("ok"); showToast("✅ Zapisano dane auta: " + auto.etykieta);
@@ -552,8 +553,8 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
       napis("DRZWI", cx + L / 2 + 0.3, 0.15, W / 2 + 0.25, 0.026);
       if (glWindy) napis(z.windaKg ? `WINDA ${fmt(z.windaKg)} kg` : "WINDA", cx + L / 2 + glWindy / 2, 0.22, 0, 0.026, "rgba(51,65,85,0.92)");
       // y = 0 to PRAWA burta, w scenie leży po stronie ujemnej osi z
-      if (z?.bokP) napis("ZAŁADUNEK BOKIEM", cx, 0.15, -(W / 2 + 0.45), 0.022);
-      if (z?.bokL) napis("ZAŁADUNEK BOKIEM", cx, 0.15, W / 2 + 0.45, 0.022);
+      if (z?.bokP || z?.bok) napis("ZAŁADUNEK BOKIEM", cx, 0.15, -(W / 2 + 0.45), 0.022);
+      if (z?.bokL || z?.bok) napis("ZAŁADUNEK BOKIEM", cx, 0.15, W / 2 + 0.45, 0.022);
       if (z?.gora) napis("ZAŁADUNEK Z GÓRY", cx, H + (zestaw ? 0.75 : 0.3), 0, 0.022);
       // wolne miejsca paletowe 120×80 — zielone pola na podłodze (ile jeszcze wejdzie przy doładunku)
       if (pokazMiejsca) for (const mj of sumy[pr.i]?.wolneMiejsca || []) {
@@ -712,7 +713,7 @@ export default function PlanerZaladunku({ vehicles = [], canEdit = false, showTo
             </button>
             {zalOtwarte && (
               <div className="mt-3 p-3 rounded-xl bg-gray-50">
-                <p className="text-xs text-gray-600 mb-2">Skąd można ładować i czym. Trafia na widok 3D i do PDF-a. Winda podpowiada się z wyposażenia w kartotece.</p>
+                <p className="text-xs text-gray-600 mb-2">Skąd można ładować i czym. Trafia na widok 3D i do PDF-a. Strony załadunku i winda podpowiadają się z kartoteki{auto?.rodzajZaladunku ? <> (tam wpisano: „{auto.rodzajZaladunku}")</> : null}; kartoteka nie mówi, który bok — zaznacz lewy lub prawy, jeśli to ważne.</p>
                 {przestrzenie.map(pr => (
                   <div key={pr.i} className={pr.i ? "mt-3 pt-3 border-t border-gray-200" : ""}>
                     {zestaw && <div className="text-xs font-semibold text-gray-800 mb-1.5">{pr.nazwa}</div>}

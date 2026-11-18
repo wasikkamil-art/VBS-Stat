@@ -378,16 +378,28 @@ export function podsumowanie(paka, ulozone, nieulozone = [], maxWaga = null) {
 
 /**
  * Sposób załadunku jednej przestrzeni — porządkuje to, co wpisał człowiek, i składa opis.
- * z: { tyl, bokL, bokP, gora, winda, windaKg, wysokosc }. Tył jest domyślnie dostępny
+ * z: { tyl, bok, bokL, bokP, gora, winda, windaKg, wysokosc }. `bok` = bok bez wskazania strony
+ * (tak podaje kartoteka); wskazanie lewego/prawego go zastępuje. Tył jest domyślnie dostępny
  * (planer i tak zakłada drzwi z tyłu); reszty nie zgadujemy — brak zaznaczenia = nie.
  */
+/**
+ * Pole „Załadunek" z kartoteki pojazdu to wolny tekst („Bok, tył, góra"). Wyciągamy z niego strony.
+ * Kartoteka nie mówi, KTÓRY bok — dlatego `bok` jest ogólny, a nie lewy/prawy.
+ * Pusty albo nierozpoznany tekst → null (wtedy obowiązują domyślne planera).
+ */
+export function parsujRodzajZaladunku(tekst) {
+  const t = String(tekst || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/ł/g, "l");
+  const d = { tyl: /\btyl/.test(t), bok: /\bbok|\bbocz/.test(t), gora: /\bgor/.test(t) };
+  return d.tyl || d.bok || d.gora ? d : null;
+}
+
 export function sposobZaladunku(z) {
   const w = z || {};
   const liczba = (v) => { const n = Number(String(v ?? "").replace(",", ".")); return Number.isFinite(n) && n > 0 ? n : null; };
-  const d = { tyl: w.tyl !== false, bokL: !!w.bokL, bokP: !!w.bokP, gora: !!w.gora, winda: !!w.winda, windaKg: w.winda ? liczba(w.windaKg) : null, wysokosc: liczba(w.wysokosc) };
+  const d = { tyl: w.tyl !== false, bok: !!w.bok && !w.bokL && !w.bokP, bokL: !!w.bokL, bokP: !!w.bokP, gora: !!w.gora, winda: !!w.winda, windaKg: w.winda ? liczba(w.windaKg) : null, wysokosc: liczba(w.wysokosc) };
   const strony = [];
   if (d.tyl) strony.push("tył");
-  if (d.bokL && d.bokP) strony.push("oba boki"); else if (d.bokL) strony.push("bok lewy"); else if (d.bokP) strony.push("bok prawy");
+  if (d.bokL && d.bokP) strony.push("oba boki"); else if (d.bokL) strony.push("bok lewy"); else if (d.bokP) strony.push("bok prawy"); else if (d.bok) strony.push("bok");
   if (d.gora) strony.push("góra");
   const sprzet = d.winda ? `winda${d.windaKg ? ` do ${d.windaKg} kg` : ""}` : "bez windy — wózek widłowy";
   const czesci = [strony.length ? `załadunek: ${strony.join(", ")}` : "załadunek: nie podano", sprzet];
