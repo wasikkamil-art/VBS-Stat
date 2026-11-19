@@ -6,7 +6,7 @@
 //
 // Dane pojazdu to te same pola co dotąd (`fleet/data.fleetv2_vehicles`) — stare auta nie
 // wymagają migracji. Nowe są tylko: `leasing` (obiekt) i dokumenty pojazdu (`docs`).
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import UruchomienieAuta from "./UruchomienieAuta";
 
 // Rodzaje dokumentów pojazdu. `oferta: true` = domyślnie proponowany do dołączenia do oferty.
@@ -407,7 +407,7 @@ function Harmonogram({ leasing, dzis }) {
   );
 }
 
-function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, uruchomienie, showToast, safeHref }) {
+function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, uruchomienie, onBrudne, showToast, safeHref }) {
   const [oferta, setOferta] = useState(false);
   const [uruchom, setUruchom] = useState(false);
   const [edycjaLeasingu, setEdycjaLeasingu] = useState(false);
@@ -417,6 +417,10 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
   const terminy = terminyPojazdu(v, docs, dzis);
   const wyp = [...(v.equipment || []).map(id => WYPOSAZENIE[id] || id), ...(v.customEquipment || [])];
   const L = v.leasing;
+  // „Uruchomienie auta" to pełna strona ZAMIAST karty (nie okno) — lista aut po lewej zostaje.
+  if (uruchom && uruchomienie) {
+    return <UruchomienieAuta v={v} api={uruchomienie} kierowca={kierowca} onClose={() => setUruchom(false)} onBrudne={onBrudne} showToast={showToast} safeHref={safeHref} />;
+  }
   return (
     <article className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
       <header className="flex flex-wrap items-start gap-3 px-5 py-4">
@@ -446,7 +450,6 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
         </div>
       </header>
 
-      {uruchom && uruchomienie && <UruchomienieAuta v={v} api={uruchomienie} kierowca={kierowca} onClose={() => setUruchom(false)} showToast={showToast} safeHref={safeHref} />}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-5 gap-y-3 px-5 pb-5">
         <Fakt etykieta="Wymiary skrzyni (cm)">{v.dimensions}</Fakt>
         <Fakt etykieta="Ładowność">{v.maxWeight ? `${v.maxWeight} kg` : ""}</Fakt>
@@ -550,6 +553,10 @@ export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit 
   const [archiwum, setArchiwum] = useState(false);
   const [szukaj, setSzukaj] = useState("");
   const [wybrany, setWybrany] = useState(null);
+  // Niezapisane zmiany na stronie „Uruchomienie auta" — pytamy, zanim zmiana auta je wyrzuci.
+  const brudne = useRef(false);
+  const onBrudne = useCallback((b) => { brudne.current = b; }, []);
+  const moznaZmienic = () => !brudne.current || window.confirm("Masz niezapisane zmiany w uruchomieniu auta. Przejść bez zapisu?");
 
   const docsWg = useMemo(() => {
     const m = {};
@@ -585,7 +592,7 @@ export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit 
             <ul className="grid sm:grid-cols-2 xl:grid-cols-3 gap-2">
               {flotaTerminy.map((t, i) => (
                 <li key={i}>
-                  <button type="button" onClick={() => { setArchiwum(false); setWybrany(t.id); }}
+                  <button type="button" onClick={() => { if (moznaZmienic()) { setArchiwum(false); setWybrany(t.id); } }}
                     className="w-full flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-100 text-left text-sm hover:bg-gray-50">
                     <span className="font-semibold text-gray-900 whitespace-nowrap">{t.plate}</span>
                     <span className="flex-1 text-gray-700 truncate">{t.nazwa}</span>
@@ -604,7 +611,7 @@ export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit 
             className="w-full px-3 py-2 rounded-lg text-sm bg-gray-50 border border-gray-200 mb-2" />
           <div className="flex gap-1 mb-2" role="tablist">
             {[[false, `Aktywne (${vehicles.length - ileArch})`], [true, `Archiwum (${ileArch})`]].map(([a, opis]) => (
-              <button key={String(a)} type="button" role="tab" aria-selected={archiwum === a} onClick={() => { setArchiwum(a); setWybrany(null); }}
+              <button key={String(a)} type="button" role="tab" aria-selected={archiwum === a} onClick={() => { if (moznaZmienic()) { setArchiwum(a); setWybrany(null); } }}
                 className="flex-1 px-2 py-1.5 rounded-lg text-xs font-medium" style={archiwum === a ? { background: "#111827", color: "#fff" } : { background: "#f3f4f6", color: "#374151" }}>{opis}</button>
             ))}
           </div>
@@ -616,7 +623,7 @@ export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit 
               const kropka = !najblizszy ? "#d1d5db" : najblizszy.dni < 0 ? "#dc2626" : najblizszy.dni <= 30 ? "#d97706" : "#16a34a";
               return (
                 <li key={v.id}>
-                  <button type="button" onClick={() => setWybrany(v.id)} aria-current={wybr ? "true" : undefined}
+                  <button type="button" onClick={() => { if (moznaZmienic()) setWybrany(v.id); }} aria-current={wybr ? "true" : undefined}
                     className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-left" style={wybr ? { background: "#eff6ff", boxShadow: "inset 0 0 0 1.5px #2563eb" } : undefined}>
                     <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: kropka }} aria-hidden="true" />
                     <span className="flex-1 min-w-0">
@@ -634,7 +641,7 @@ export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit 
 
         {aktywny
           ? <KartaPojazdu key={aktywny.id} v={aktywny} docs={docsWg[aktywny.id] || []} dzis={teraz} canEdit={canEdit}
-              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} uruchomienie={uruchomienie} showToast={showToast} safeHref={safeHref} />
+              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} uruchomienie={uruchomienie} onBrudne={onBrudne} showToast={showToast} safeHref={safeHref} />
           : <div className="bg-white rounded-2xl border border-gray-100 p-8 text-sm text-gray-500">Wybierz pojazd z listy.</div>}
       </div>
     </div>

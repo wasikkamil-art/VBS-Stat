@@ -8418,3 +8418,17 @@ User: w arkuszu „Polisa OCR" = **OCZ**, zabezpieczenie zdolności finansowej w
 wykonywanie zawodu przewoźnika drogowego. Moje „OCP" było błędną interpretacją. Wzorzec poprawiony na
 „Polisa OCZ (zabezpieczenie zdolności finansowej)". W bazie nie było jeszcze żadnej zapisanej listy
 (`uruchomienia`: 0 dokumentów), więc nic poza wzorcem nie wymagało zmiany.
+
+## 2026-11-19 cd.2 — Uruchomienie auta: pełna strona zamiast okna (wariant A)
+
+User: panel „jest w małym okienku, a chcę, żeby to był osobny panel". Pokazałem trzy układy (A pełna strona
+przy pojeździe, B osobna zakładka dla floty, C sekcja w karcie) — wybrał **A**.
+- `UruchomienieAuta` nie jest już oknem: w `PojazdyPanel` **zastępuje kartę pojazdu** (lista aut po lewej zostaje),
+  przycisk „← Karta pojazdu" wraca. Lista po lewej, po prawej przyklejona kolumna: postęp odhaczania, sumy,
+  data zakupów, Zapisz, AI, wydruk.
+- Układ na container queries (szerokość strony, nie okna): wąsko → suma nad listą, wiersz w dwóch liniach.
+- Niezapisane zmiany: pytanie przy „← Karta pojazdu", przy zmianie auta lub zakładki Aktywne/Archiwum
+  oraz ostrzeżenie przeglądarki przy zamykaniu karty.
+✅ Atrapa: strona zamiast okna, lista aut widoczna, blokada zmiany auta przy niezapisanych zmianach, zapis,
+powrót, wydruk; układ przy 1500 / 1150 / 375 px bez poziomego przewijania. ❌ Nie na produkcji po zalogowaniu.
+Wariant B (tabela całej floty) user może chcieć dołożyć później — nie robić bez pytania.

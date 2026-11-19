@@ -1,4 +1,5 @@
-// UruchomienieAuta — okno „Uruchomienie auta" przy pojeździe: lista kontrolna wydania
+// UruchomienieAuta — strona „Uruchomienie auta" (zastępuje kartę pojazdu w panelu Pojazdy; wariant A
+// wybrany przez usera 19.11.2026 zamiast małego okna): lista kontrolna wydania
 // (odhaczanie + wydruk do podpisu kierowcy i dyspozytora) i jednocześnie zestawienie kosztów
 // uruchomienia (kwoty przy pozycjach, faktura/zdjęcie z odczytem sumy przez AI).
 //
@@ -15,7 +16,7 @@ import { GRUPY_URUCHOMIENIA, nowaLista, nowaPozycja, liczba, sumyUruchomienia, p
 const fmt = (n, d = 2) => (typeof n === "number" && Number.isFinite(n) ? n.toLocaleString("pl-PL", { minimumFractionDigits: d, maximumFractionDigits: d }) : "—");
 const POLE = "w-full px-2 py-1.5 rounded-lg text-sm bg-white border border-gray-200 text-gray-900 outline-none focus:border-gray-500";
 
-export default function UruchomienieAuta({ v, api, kierowca = null, onClose, showToast = () => {}, safeHref = (u) => u }) {
+export default function UruchomienieAuta({ v, api, kierowca = null, onClose, onBrudne = () => {}, showToast = () => {}, safeHref = (u) => u }) {
   const [pozycje, setPozycje] = useState(null);       // null = jeszcze wczytujemy
   const [domyslnaData, setDomyslnaData] = useState("");
   const [zmienione, setZmienione] = useState(false);
@@ -34,6 +35,15 @@ export default function UruchomienieAuta({ v, api, kierowca = null, onClose, sho
     }).catch(e => { console.error("uruchomienie: odczyt", e); if (zywy) { setBlad("Nie udało się wczytać listy. Zamknij okno i spróbuj ponownie — żeby nie nadpisać zapisanych danych pustą listą."); } });
     return () => { zywy = false; };
   }, [v, api]);
+
+  // Niezapisane zmiany: rodzic pyta przed zmianą auta, przeglądarka przed zamknięciem karty.
+  useEffect(() => {
+    onBrudne(zmienione);
+    if (!zmienione) return;
+    const stop = (e) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", stop);
+    return () => { window.removeEventListener("beforeunload", stop); onBrudne(false); };
+  }, [zmienione, onBrudne]);
 
   const sumy = useMemo(() => sumyUruchomienia(pozycje || []), [pozycje]);
   const zmien = (id, pola) => { setPozycje(l => l.map(p => (p.id === id ? { ...p, ...pola, ...("kwota" in pola || "waluta" in pola || "data" in pola ? { kwotaEur: null } : {}) } : p))); setZmienione(true); };
@@ -104,7 +114,7 @@ export default function UruchomienieAuta({ v, api, kierowca = null, onClose, sho
   const doWydruku = grupy.map(({ g, lista }) => ({ g, lista: lista.filter(p => !p.koszt && p.nazwa) })).filter(x => x.lista.length);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 sm:p-6" style={{ background: "rgba(15,23,42,0.55)" }} role="dialog" aria-modal="true" aria-label={`Uruchomienie auta ${v.plate}`}>
+    <section aria-label={`Uruchomienie auta ${v.plate}`}>
       <style>{`
         #uruchomienie-portal { display: none; }
         @media print {
@@ -113,6 +123,26 @@ export default function UruchomienieAuta({ v, api, kierowca = null, onClose, sho
           body.uruchomienie-printing > *:not(#uruchomienie-portal) { display: none !important; }
           body.uruchomienie-printing #uruchomienie-portal { display: block !important; }
           #uruchomienie-portal, #uruchomienie-portal * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        }
+        /* Układ dopasowuje się do szerokości STRONY UruchomienieAuta (container query), nie okna przeglądarki —
+           obok stoi lista aut i pasek boczny, więc szerokość okna nic nie mówi o miejscu na listę. */
+        .uru-kontener { container-type: inline-size; }
+        .uru-uklad { display: grid; grid-template-columns: minmax(0, 1fr) 270px; gap: 20px; align-items: start; }
+        .uru-bok { position: sticky; top: 12px; }
+        .uru-lista { container-type: inline-size; min-width: 0; }
+        .uru-wiersz { display: grid; align-items: center; gap: 6px; grid-template-columns: 28px minmax(120px, 1.4fr) 56px 92px 68px 136px minmax(170px, 1fr) 24px; }
+        @container (max-width: 760px) {
+          .uru-uklad { grid-template-columns: minmax(0, 1fr); }
+          .uru-bok { position: static; order: -3; }
+        }
+        @container (max-width: 700px) {
+          .uru-wiersz { grid-template-columns: 28px minmax(110px, 1fr) 52px 88px 66px 132px 24px; }
+          .uru-wiersz .uru-dok { grid-column: 2 / 7; grid-row: 2; }
+        }
+        @container (max-width: 520px) {
+          .uru-wiersz { grid-template-columns: 28px minmax(0, 1fr) 24px; }
+          .uru-wiersz > input, .uru-wiersz > select, .uru-wiersz .uru-dok { grid-column: 2; }
+          .uru-wiersz > input[aria-label="Nazwa pozycji"] { grid-row: 1; }
         }
         .uru-doc { font-family: 'DM Sans', system-ui, sans-serif; color: #0f172a; font-size: 11.5px; }
         .uru-doc h1 { font-size: 19px; font-weight: 700; margin: 0; }
@@ -123,18 +153,12 @@ export default function UruchomienieAuta({ v, api, kierowca = null, onClose, sho
         .uru-kratka { display: inline-block; width: 13px; height: 13px; border: 1.5px solid #0f172a; border-radius: 2px; text-align: center; line-height: 11px; font-size: 11px; font-weight: 700; }
       `}</style>
 
-      <div className="bg-white rounded-2xl w-full max-w-5xl shadow-xl">
-        <header className="flex flex-wrap items-start gap-3 px-5 py-4 border-b border-gray-100">
+      <article className="bg-white rounded-2xl border border-gray-100 uru-kontener">
+        <header className="flex flex-wrap items-center gap-3 px-5 py-4 border-b border-gray-100">
+          <button type="button" onClick={zamknij} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-gray-900 bg-gray-100">← Karta pojazdu</button>
           <div className="flex-1 min-w-0">
-            <h2 className="text-lg font-bold text-gray-900">Uruchomienie auta — {v.plate}</h2>
-            <p className="text-sm text-gray-600">Lista kontrolna wydania i koszty uruchomienia. Do panelu Koszty trafia tylko suma, nie pojedyncze pozycje.</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={drukuj} disabled={!pozycje} className="px-3 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-900 disabled:opacity-40">Drukuj listę do podpisu</button>
-            <button type="button" onClick={zapisz} disabled={!pozycje || !zmienione || zapisuje} className="px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40" style={{ background: "#111827" }}>
-              {zapisuje ? "Zapisuję…" : zmienione ? "Zapisz" : "Zapisane"}
-            </button>
-            <button type="button" onClick={zamknij} className="px-3 py-2 rounded-lg text-sm font-medium text-gray-800 bg-gray-100">Zamknij</button>
+            <h2 className="text-lg font-bold text-gray-900">Uruchomienie auta — {v.plate}{v.plate2 && <span className="text-gray-500 font-medium"> + {v.plate2}</span>}</h2>
+            <p className="text-sm text-gray-600">{[v.brand, v.year, kierowca?.name && `kierowca: ${kierowca.name}`].filter(Boolean).join(" · ")}</p>
           </div>
         </header>
 
@@ -142,38 +166,44 @@ export default function UruchomienieAuta({ v, api, kierowca = null, onClose, sho
         {!pozycje && !blad && <p className="p-8 text-center text-sm text-gray-600">Wczytuję listę…</p>}
 
         {pozycje && (
-          <div className="px-5 py-4">
-            <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
+          <div className="uru-uklad px-5 py-4">
+            <input ref={plikRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden" onChange={poWyborzePliku} />
+            {/* ═══ PRAWA KOLUMNA (w kodzie pierwsza, żeby na wąskim ekranie suma i przyciski były nad listą) ═══ */}
+            <aside className="space-y-3 uru-bok" style={{ gridColumn: "auto" }}>
               <div className="p-3 rounded-xl" style={{ background: "#eff6ff" }}>
                 <div className="text-xs text-gray-600">Wyposażenie na aucie</div>
-                <div className="text-lg font-bold text-gray-900">{sumy.odhaczone} z {sumy.doOdhaczenia}</div>
-                <div className="text-xs text-gray-700">odhaczone pozycje listy kontrolnej</div>
+                <div className="text-xl font-bold text-gray-900">{sumy.odhaczone} z {sumy.doOdhaczenia}</div>
+                <div className="h-1.5 rounded-full mt-1.5" style={{ background: "#dbeafe" }} role="img" aria-label={`Odhaczone ${sumy.odhaczone} z ${sumy.doOdhaczenia}`}>
+                  <div className="h-1.5 rounded-full" style={{ width: `${sumy.doOdhaczenia ? (sumy.odhaczone / sumy.doOdhaczenia) * 100 : 0}%`, background: "#1d4ed8" }} />
+                </div>
               </div>
               <div className="p-3 rounded-xl" style={{ background: "#f9fafb" }}>
                 <div className="text-xs text-gray-600">Koszt uruchomienia (netto)</div>
-                <div className="text-lg font-bold text-gray-900">{Object.keys(sumy.wgWaluty).length ? Object.entries(sumy.wgWaluty).map(([w, k]) => `${fmt(k)} ${w}`).join(" + ") : "—"}</div>
+                <div className="text-xl font-bold text-gray-900">{Object.keys(sumy.wgWaluty).length ? Object.entries(sumy.wgWaluty).map(([w, k]) => `${fmt(k)} ${w}`).join(" + ") : "—"}</div>
                 <div className="text-xs text-gray-700">{sumy.zKwota} poz. z kwotą</div>
               </div>
               <div className="p-3 rounded-xl" style={{ background: sumy.bezKursu ? "#fef3c7" : "#f9fafb" }}>
                 <div className="text-xs text-gray-600">Razem w euro (kurs NBP)</div>
-                <div className="text-lg font-bold text-gray-900">{sumy.zKwota ? `${fmt(sumy.eur)} €` : "—"}</div>
+                <div className="text-xl font-bold text-gray-900">{sumy.zKwota ? `${fmt(sumy.eur)} €` : "—"}</div>
                 <div className="text-xs" style={{ color: sumy.bezKursu ? "#78350f" : "#4b5563" }}>
                   {sumy.bezKursu ? `niepełna: ${sumy.bezKursu} poz. czeka na przeliczenie (zapisz; potrzebna data)` : "przeliczane przy zapisie"}
                 </div>
+                <div className="text-xs text-gray-600 mt-1">Do panelu Koszty trafia tylko ta suma, nie pojedyncze pozycje.</div>
               </div>
-            </div>
-
-            <div className="flex flex-wrap items-end gap-3 mb-4 p-3 rounded-xl bg-gray-50">
-              <label className="text-xs text-gray-700">Data zakupów do kursu NBP
-                <input type="date" className={POLE + " mt-1"} style={{ width: 170 }} value={domyslnaData} onChange={e => { setDomyslnaData(e.target.value); setPozycje(l => l.map(p => (p.data ? p : { ...p, kwotaEur: null }))); setZmienione(true); }} />
+              <label className="block text-xs text-gray-700">Data zakupów do kursu NBP
+                <input type="date" className={POLE + " mt-1"} value={domyslnaData} onChange={e => { setDomyslnaData(e.target.value); setPozycje(l => l.map(p => (p.data ? p : { ...p, kwotaEur: null }))); setZmienione(true); }} />
+                <span className="block text-gray-600 mt-1">Dla pozycji bez własnej daty. Pozycja z własną datą liczy się kursem z tamtego dnia.</span>
               </label>
-              <p className="text-xs text-gray-600 flex-1" style={{ minWidth: 220 }}>Używana dla pozycji bez własnej daty. Pozycja z własną datą liczy się kursem z tamtego dnia.</p>
-              <button type="button" onClick={() => wybierzPlik(null)} disabled={!!czyta} className="px-3 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#6d28d9" }}>
+              <button type="button" onClick={zapisz} disabled={!zmienione || zapisuje} className="w-full px-4 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-40" style={{ background: "#111827" }}>
+                {zapisuje ? "Zapisuję…" : zmienione ? "Zapisz zmiany" : "Zapisane"}
+              </button>
+              <button type="button" onClick={() => wybierzPlik(null)} disabled={!!czyta} className="w-full px-3 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#6d28d9" }}>
                 {czyta === "nowy" ? "AI czyta dokument…" : "Wgraj fakturę lub zdjęcie — AI przypisze"}
               </button>
-            </div>
-            <input ref={plikRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden" onChange={poWyborzePliku} />
+              <button type="button" onClick={drukuj} className="w-full px-3 py-2.5 rounded-lg text-sm font-medium bg-gray-100 text-gray-900">Drukuj listę do podpisu</button>
+            </aside>
 
+            <div className="uru-lista" style={{ order: -2 }}>
             <p className="text-xs text-gray-600 mb-3">Kratka = pozycja jest na aucie (trafia na wydruk do podpisu). Kreska = sam koszt, bez odhaczania — przełączysz linkiem po prawej.</p>
             {grupy.map(({ g, lista }) => (
               <section key={g} className="mb-4">
@@ -184,7 +214,7 @@ export default function UruchomienieAuta({ v, api, kierowca = null, onClose, sho
                 {lista.length === 0 && <p className="text-xs text-gray-600 py-1">Brak pozycji.</p>}
                 <div className="space-y-1.5">
                   {lista.map(p => (
-                    <div key={p.id} className="grid items-center gap-1.5 p-1.5 rounded-xl border border-gray-100" style={{ gridTemplateColumns: "28px minmax(140px, 1.4fr) 60px 96px 70px 138px minmax(190px, 1.2fr) 24px", background: p.jest ? "#f0fdf4" : "#fff" }}>
+                    <div key={p.id} className="uru-wiersz p-1.5 rounded-xl border border-gray-100" style={{ background: p.jest ? "#f0fdf4" : "#fff" }}>
                       {p.koszt
                         ? <span className="text-xs text-gray-500 text-center" title="Pozycja tylko kosztowa — nie ma jej na liście wydania">—</span>
                         : <input type="checkbox" className="w-5 h-5 mx-auto" checked={!!p.jest} onChange={e => zmien(p.id, { jest: e.target.checked })} aria-label={`${p.nazwa || "pozycja"} jest na aucie`} />}
@@ -193,7 +223,7 @@ export default function UruchomienieAuta({ v, api, kierowca = null, onClose, sho
                       <input className={POLE} placeholder="netto" inputMode="decimal" value={p.kwota} onChange={e => zmien(p.id, { kwota: e.target.value })} aria-label={`Kwota netto — ${p.nazwa}`} />
                       <select className={POLE} value={p.waluta || "PLN"} onChange={e => zmien(p.id, { waluta: e.target.value })} aria-label={`Waluta — ${p.nazwa}`}><option>PLN</option><option>EUR</option></select>
                       <input type="date" className={POLE} value={p.data || ""} onChange={e => zmien(p.id, { data: e.target.value })} aria-label={`Data zakupu — ${p.nazwa}`} />
-                      <div className="flex items-center gap-1.5 min-w-0 text-xs">
+                      <div className="uru-dok flex items-center gap-1.5 min-w-0 text-xs">
                         {p.plikUrl
                           ? <a href={safeHref(p.plikUrl)} target="_blank" rel="noopener noreferrer" className="underline text-gray-900 truncate" title={p.plikNazwa}>{p.plikNazwa || "dokument"}</a>
                           : <button type="button" onClick={() => wybierzPlik(p.id)} disabled={!!czyta} className="px-2 py-1 rounded-md bg-gray-100 text-gray-800 font-medium disabled:opacity-50">{czyta === p.id ? "AI czyta…" : "+ dokument"}</button>}
@@ -209,9 +239,10 @@ export default function UruchomienieAuta({ v, api, kierowca = null, onClose, sho
                 </div>
               </section>
             ))}
+            </div>
           </div>
         )}
-      </div>
+      </article>
 
       {/* ═══ LISTA KONTROLNA DO WYDRUKU — bez kwot ═══ */}
       <div id="uruchomienie-print" style={{ display: "none" }}>
@@ -247,6 +278,6 @@ export default function UruchomienieAuta({ v, api, kierowca = null, onClose, sho
           <div style={{ color: "#475569", fontSize: 9.5, marginTop: 8 }}>Kierowca potwierdza odbiór zaznaczonego wyposażenia.</div>
         </div>
       </div>
-    </div>
+    </section>
   );
 }
