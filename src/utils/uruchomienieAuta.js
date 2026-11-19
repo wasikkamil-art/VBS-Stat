@@ -25,7 +25,9 @@ export const GRUPY_URUCHOMIENIA = [
 const W = (grupa, nazwa, koszt = false) => ({ grupa, nazwa, koszt });
 export const WZORZEC_URUCHOMIENIA = [
   W("Dokumenty i karty", "Polisa", true),
-  W("Dokumenty i karty", "Polisa OCP", true),
+  // OCZ = zabezpieczenie zdolności finansowej wymagane przy zezwoleniu na wykonywanie zawodu przewoźnika
+  // drogowego (w arkuszu zapisane jako „Polisa OCR" — wyjaśnione przez usera 19.11.2026; to NIE jest OCP).
+  W("Dokumenty i karty", "Polisa OCZ (zabezpieczenie zdolności finansowej)", true),
   W("Dokumenty i karty", "Wypis z licencji"),
   W("Dokumenty i karty", "Karta paliwowa 1"),
   W("Dokumenty i karty", "Karta paliwowa 2"),

@@ -8411,3 +8411,10 @@ prawdziwy zapis do `uruchomienia` i wgranie pliku; wydruk na papierze (czy mieś
   cztery razy „Karta paliwowa 1" → karty 1–4. Do potwierdzenia.
 - Kwoty z wklejki (20 058,36) nie są nigdzie wpisane — nie wiem, którego auta dotyczą ani czy to PLN netto.
 - Podział na „na liście wydania" i „tylko koszt" ustawiłem sam (polisa, Autopasja, reklama, paliwo = tylko koszt).
+
+## 2026-11-19 cd. — Uruchomienie auta: „Polisa OCR" to OCZ, nie OCP
+
+User: w arkuszu „Polisa OCR" = **OCZ**, zabezpieczenie zdolności finansowej wymagane przy zezwoleniu na
+wykonywanie zawodu przewoźnika drogowego. Moje „OCP" było błędną interpretacją. Wzorzec poprawiony na
+„Polisa OCZ (zabezpieczenie zdolności finansowej)". W bazie nie było jeszcze żadnej zapisanej listy
+(`uruchomienia`: 0 dokumentów), więc nic poza wzorcem nie wymagało zmiany.
