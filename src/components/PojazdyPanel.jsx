@@ -7,6 +7,7 @@
 // Dane pojazdu to te same pola co dotąd (`fleet/data.fleetv2_vehicles`) — stare auta nie
 // wymagają migracji. Nowe są tylko: `leasing` (obiekt) i dokumenty pojazdu (`docs`).
 import { useMemo, useState } from "react";
+import UruchomienieAuta from "./UruchomienieAuta";
 
 // Rodzaje dokumentów pojazdu. `oferta: true` = domyślnie proponowany do dołączenia do oferty.
 export const RODZAJE_DOKUMENTOW = [
@@ -406,8 +407,9 @@ function Harmonogram({ leasing, dzis }) {
   );
 }
 
-function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, showToast, safeHref }) {
+function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, uruchomienie, showToast, safeHref }) {
   const [oferta, setOferta] = useState(false);
+  const [uruchom, setUruchom] = useState(false);
   const [edycjaLeasingu, setEdycjaLeasingu] = useState(false);
   const mozeLeasing = canEdit && onZapiszLeasing && !v.archived;
   const [edycja, setEdycja] = useState(false);
@@ -427,6 +429,11 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
           <button type="button" onClick={() => setOferta(true)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold text-white" style={{ background: "#111827" }}>
             <Ikona d={I.kopiuj} /> Kopiuj ofertę
           </button>
+          {canEdit && uruchomienie && (
+            <button type="button" onClick={() => setUruchom(true)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-900">
+              Uruchomienie auta
+            </button>
+          )}
           {canEdit && renderEdycja && !v.archived && (
             <button type="button" onClick={() => setEdycja(e => !e)} aria-pressed={edycja} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium"
               style={edycja ? { background: "#111827", color: "#fff" } : { background: "#f3f4f6", color: "#1f2937" }}>
@@ -439,6 +446,7 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
         </div>
       </header>
 
+      {uruchom && uruchomienie && <UruchomienieAuta v={v} api={uruchomienie} kierowca={kierowca} onClose={() => setUruchom(false)} showToast={showToast} safeHref={safeHref} />}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-5 gap-y-3 px-5 pb-5">
         <Fakt etykieta="Wymiary skrzyni (cm)">{v.dimensions}</Fakt>
         <Fakt etykieta="Ładowność">{v.maxWeight ? `${v.maxWeight} kg` : ""}</Fakt>
@@ -537,7 +545,7 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
   );
 }
 
-export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajPojazd, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, showToast, safeHref }) {
+export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajPojazd, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, uruchomienie, showToast, safeHref }) {
   const teraz = useMemo(() => dzis ?? new Date().setHours(0, 0, 0, 0), [dzis]);
   const [archiwum, setArchiwum] = useState(false);
   const [szukaj, setSzukaj] = useState("");
@@ -626,7 +634,7 @@ export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit 
 
         {aktywny
           ? <KartaPojazdu key={aktywny.id} v={aktywny} docs={docsWg[aktywny.id] || []} dzis={teraz} canEdit={canEdit}
-              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} showToast={showToast} safeHref={safeHref} />
+              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} uruchomienie={uruchomienie} showToast={showToast} safeHref={safeHref} />
           : <div className="bg-white rounded-2xl border border-gray-100 p-8 text-sm text-gray-500">Wybierz pojazd z listy.</div>}
       </div>
     </div>

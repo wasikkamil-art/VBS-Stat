@@ -51,6 +51,7 @@ import { db, auth, storage, functions, messaging, pushDiag, reinitMessaging, cal
 import { doc, getDoc, setDoc, onSnapshot, collection, getDocs, addDoc, updateDoc, deleteDoc, query, where, orderBy, arrayUnion, serverTimestamp, writeBatch, runTransaction, limit as firestoreLimit } from "firebase/firestore";
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
+import { toEUR as toEurNbp } from "./utils/nbp";
 import { getToken, onMessage } from "firebase/messaging";
 import { httpsCallable } from "firebase/functions";
 
@@ -1877,6 +1878,51 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   };
   // Leasing żyje w rekordzie pojazdu (`leasing`) — zapis tą samą transakcją co reszta karty.
   // `null` = usunięcie danych leasingu (pliki umowy i harmonogramu w dokumentach zostają).
+  // ── Uruchomienie auta: lista kontrolna wydania + koszty uruchomienia (kolekcja `uruchomienia/{vehicleId}`). ──
+  // Obiekt ma STAŁĄ tożsamość (useMemo) — okno wczytuje listę w efekcie zależnym od `api`,
+  // a App re-renderuje się przy każdym onSnapshot; bez tego lista wczytywałaby się w kółko.
+  const emailUzytkownika = user?.email || "";
+  const uruchomienieApi = useMemo(() => ({
+    wczytaj: async (v) => { const s = await getDoc(doc(db, "uruchomienia", v.id)); return s.exists() ? s.data() : null; },
+    zapisz: async (v, dane) => {
+      await setDoc(doc(db, "uruchomienia", v.id), { ...dane, vehicleId: v.id, plate: v.plate || "", updatedAt: new Date().toISOString(), updatedBy: emailUzytkownika });
+      logAction("update", "uruchomienia", { vehicleId: v.id, plate: v.plate, pozycji: dane.pozycje.length, sumaEur: dane.sumaEur });
+      return true;
+    },
+    wgraj: async (v, plik) => {
+      const ext = (plik.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "");
+      const r = storageRef(storage, `vehicleDocs/${v.id}/uruchomienie_${uid()}.${ext}`);
+      await uploadBytes(r, plik, { contentType: plik.type || undefined });
+      return { url: await getDownloadURL(r), nazwa: plik.name };
+    },
+    // AI czyta SUMĘ z faktury/paragonu i wskazuje, której pozycji listy dotyczy. Plik idzie URL-em
+    // ze Storage (nie base64) — ten sam powód co przy zleceniach: limit body funkcji Vercela.
+    odczytaj: async (url, czyPdf, nazwy) => {
+      const resp = await callClaude({
+        model: "claude-sonnet-4-6", max_tokens: 500,
+        messages: [{ role: "user", content: [
+          { type: czyPdf ? "document" : "image", source: { type: "url", url } },
+          { type: "text", text: `To faktura, paragon albo zdjęcie dokumentu zakupu wyposażenia lub usługi dla samochodu ciężarowego.
+Odpowiedz TYLKO w formacie JSON (bez markdown):
+{
+  "pozycja": "DOKŁADNIE jedna nazwa z listy poniżej, której dotyczy ten zakup, albo null, gdy żadna nie pasuje",
+  "opis": "krótko, co kupiono (2–5 słów)",
+  "kwotaNetto": "łączna kwota NETTO dokumentu, sama liczba z kropką dziesiętną, albo null gdy dokument nie podaje netto",
+  "kwotaBrutto": "łączna kwota BRUTTO, sama liczba, albo null",
+  "waluta": "PLN albo EUR",
+  "data": "data sprzedaży lub wystawienia YYYY-MM-DD albo null"
+}
+Lista pozycji: ${JSON.stringify(nazwy)}
+Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto z brutto — gdy netto nie ma, zwróć null.` },
+        ] }],
+      });
+      const data = await resp.json();
+      const text = data.content?.find(b => b.type === "text")?.text || "";
+      return JSON.parse(text.replace(/```json|```/g, "").trim());
+    },
+    naEur: (kwota, waluta, data) => toEurNbp(kwota, waluta, data),
+  }), [emailUzytkownika]);
+
   const saveVehicleLeasing = async (v, leasing) => {
     if (leasing === null && !window.confirm(`Usunąć dane leasingu przy ${v.plate}? Dokumenty zostaną.`)) return false;
     try {
@@ -3911,6 +3957,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
                 }}
                 onDodajDokumenty={addVehicleDocs} onUsunDokument={deleteVehicleDoc}
                 onEdytujDokument={updateVehicleDocMeta} onZapiszLeasing={saveVehicleLeasing}
+                uruchomienie={uruchomienieApi}
               />
             </Suspense>
           )}

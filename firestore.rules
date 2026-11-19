@@ -190,6 +190,14 @@ service cloud.firestore {
       allow create, update, delete: if canEdit();
     }
 
+    // URUCHOMIENIE AUTA — lista kontrolna wydania + koszty uruchomienia, dokument per pojazd.
+    // Zawiera kwoty, więc tak jak `vehicleDocs` tylko dla admina i dyspozytora (kierowca nie czyta).
+    match /uruchomienia/{vehicleId} {
+      allow read: if canEdit();
+      allow create, update: if canEdit();
+      allow delete: if isAdmin();
+    }
+
     match /planyTras/{frachtId} {
       allow read: if canRead();
       allow create, update: if canEdit();

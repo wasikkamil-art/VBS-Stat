@@ -8377,3 +8377,37 @@ strony załadunku trzeba było zaznaczać w planerze drugi raz.
 Testy silnika 861/861, lint 0 błędów, build zielony. ✅ Atrapa: auto z „Bok, tył" → „załadunek: tył, bok · winda",
 po zaznaczeniu „bok lewy" → „tył, bok lewy · winda", treść zapisu bez `undefined`.
 ❌ Niesprawdzone na produkcji po zalogowaniu.
+
+## 2026-11-19 — Pojazdy: panel „Uruchomienie auta" (lista kontrolna wydania + koszty uruchomienia)
+
+Słowa usera: dodatkowe wyposażenie ma być do wglądu / odhaczenia przez dyspozytora wydającego auto, jako
+lista do podpisu kierowcy i dyspozytora; ta sama lista to koszty uruchomienia auta. **Osobny panel**, bo
+drobnicy nie chce w kosztach — w panelu Koszty ma być przy aucie tylko „koszt uruchomienia" jako całość.
+Dokument/zdjęcie/faktura → AI wyciąga sumę i przypisuje do pozycji. Pola do odhaczenia + „dodaj inne".
+Kwoty z arkusza są „różne" dla aut — więc wzorzec bez kwot.
+
+- `src/utils/uruchomienieAuta.js` — wzorzec 43 pozycji w 8 grupach, przepisany z arkusza „Auta VBS 2025",
+  karta „(auta/wymiar/wysyłka)", kolumna F; sumy, przeliczenie na euro, wpisywanie odczytu AI.
+  Testy `diagnose_uruchomienie_auta.mjs` (gitignored) 24/24 — w tym: kwoty z kolumny G sumują się do 20 058,36.
+- `src/components/UruchomienieAuta.jsx` — okno przy pojeździe (przycisk „Uruchomienie auta" na karcie):
+  kratka = pozycja jest na aucie, kreska = sam koszt; kwota netto, waluta PLN/EUR, data, dokument;
+  „Wgraj fakturę lub zdjęcie — AI przypisze" albo „+ dokument" przy pozycji; „+ Dodaj inne" w każdej grupie;
+  wydruk „Protokół wydania wyposażenia" **bez kwot**, z miejscem na dwa podpisy.
+- Komponent prezentacyjny (jak `PojazdyPanel`); baza, pliki i AI w `uruchomienieApi` w `App.jsx`.
+- Dane: kolekcja **`uruchomienia/{vehicleId}`** (reguły wdrożone: admin + dyspozytor, kierowca nie czyta);
+  pliki w Storage `vehicleDocs/{vehicleId}/uruchomienie_*`. Euro liczone przy zapisie kursem NBP z daty pozycji
+  albo z „daty zakupów"; bez daty/kursu brak liczby i suma oznaczona jako niepełna.
+- AI nie nadpisuje kwoty wpisanej wcześniej — druga faktura na tę samą rzecz tworzy nową pozycję.
+
+✅ Atrapa `podglad/pojazdy` (fałszywe API, zapis wyłączony): otwarcie, odhaczanie, kwoty PLN+EUR, zapis
+i ponowne otwarcie, trzy ścieżki dokumentu, „Dodaj inne", przełącznik „tylko koszt", protokół (36 wierszy, 2 podpisy, bez kwot).
+❌ **Niesprawdzone**: produkcja po zalogowaniu; prawdziwy odczyt AI z faktury (w atrapie odpowiedź udawana);
+prawdziwy zapis do `uruchomienia` i wgranie pliku; wydruk na papierze (czy mieści się na jednej stronie A4).
+
+### Otwarte — decyzje usera
+- **Suma w panelu Koszty NIE jest jeszcze podpięta.** Trzeba ustalić: jednorazowo (z jaką datą?) czy w ratach
+  miesięcznych — v3 ma dziś w kosztach `uruchomienie` 250 € co miesiąc.
+- Moje interpretacje nazw z arkusza: „Polisa OCR" → „Polisa OCP", „Wypis" → „Wypis z licencji",
+  cztery razy „Karta paliwowa 1" → karty 1–4. Do potwierdzenia.
+- Kwoty z wklejki (20 058,36) nie są nigdzie wpisane — nie wiem, którego auta dotyczą ani czy to PLN netto.
+- Podział na „na liście wydania" i „tylko koszt" ustawiłem sam (polisa, Autopasja, reklama, paliwo = tylko koszt).
