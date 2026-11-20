@@ -1,4 +1,4 @@
-// ZadaniaAuta — okno „Do zrobienia na bazie" otwierane z kafelka Przeglądu: prace przy aucie
+// ZadaniaAuta — okno „Check lista" (do 20.11.2026 nazywane „Do zrobienia na bazie"; nazwę zmienił user) otwierane z kafelka Przeglądu: prace przy aucie
 // (opony, olej, naprawy) z terminem, odhaczaniem, zdjęciami/dokumentami i chronologią zdarzeń.
 //
 // Układ = wariant A wybrany przez usera 20.11.2026: duże okno z TABELĄ jak w Excelu. Kto i kiedy dodał
@@ -197,12 +197,12 @@ export default function ZadaniaAuta({ v, zadania, api, osoby = [], ja = "", naBa
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-2 md:p-6 overflow-y-auto"
       style={{ background: "rgba(17,24,39,0.45)" }} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div role="dialog" aria-modal="true" aria-label={`Do zrobienia na bazie — ${v.plate}`}
+      <div role="dialog" aria-modal="true" aria-label={`Check lista — ${v.plate}`}
         className="bg-white rounded-2xl w-full flex flex-col" style={{ maxWidth: 1180 }}>
 
         <div className="px-5 pt-4 pb-3 flex items-start justify-between gap-3" style={{ borderBottom: "1px solid #f3f4f6" }}>
           <div>
-            <div className="text-base font-bold text-gray-900">Do zrobienia na bazie — {v.plate}</div>
+            <div className="text-base font-bold text-gray-900">Check lista — {v.plate}</div>
             <div className="text-xs text-gray-600 mt-0.5">
               {v.brand ? `${v.brand} · ` : ""}{naBazie ? "auto jest na bazie" : "auto poza bazą — lista czeka na powrót"}
               {" · "}do zrobienia: {otwarte.length}{poTerminieIle ? `, po terminie: ${poTerminieIle}` : ""} · zrobione: {zrobione.length}

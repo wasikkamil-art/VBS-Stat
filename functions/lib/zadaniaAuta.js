@@ -32,14 +32,14 @@ function odbiorcy(zadanie, biuro) {
 
 const ramka = (tytul, tresc) => `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111827;max-width:640px">
 <h2 style="font-size:17px;margin:0 0 12px">${tytul}</h2>${tresc}
-<p style="margin:18px 0 0"><a href="https://fleetstat.pl" style="color:#1d4ed8">Otwórz FleetStat</a> → Przegląd → „Do zrobienia” na kafelku auta.</p>
+<p style="margin:18px 0 0"><a href="https://fleetstat.pl" style="color:#1d4ed8">Otwórz FleetStat</a> → Przegląd → „Check lista” na kafelku auta.</p>
 <p style="font-size:12px;color:#4b5563;margin:14px 0 0">Dostajesz tę wiadomość, bo zaznaczono Cię przy zadaniu. Przypomnienia przychodzą codziennie o 7:00 (pon–pt), dopóki zadanie nie zostanie odhaczone.</p></div>`;
 const wiersz = (k, w) => `<tr><td style="padding:4px 14px 4px 0;color:#4b5563;vertical-align:top;white-space:nowrap">${k}</td><td style="padding:4px 0">${w}</td></tr>`;
 
 function mailNowe(z, dzis) {
   return {
-    subject: `🔧 ${z.plate}: do zrobienia — ${z.tytul} (termin ${dzien(z.termin)})`,
-    html: ramka(`Nowe zadanie przy aucie ${esc(z.plate)}`, `<table style="border-collapse:collapse">
+    subject: `🔧 ${z.plate}: check lista — ${z.tytul} (termin ${dzien(z.termin)})`,
+    html: ramka(`Check lista — nowe zadanie przy aucie ${esc(z.plate)}`, `<table style="border-collapse:collapse">
 ${wiersz("Zadanie", `<b>${esc(z.tytul)}</b>`)}${z.opis ? wiersz("Opis", esc(z.opis)) : ""}
 ${wiersz("Termin", `${dzien(z.termin)} — ${ileCzasu(z.termin, dzis)}`)}
 ${wiersz("Dodał(a)", esc(krotko(z.createdBy)))}</table>`),
@@ -76,8 +76,8 @@ function mailePoranne(zadania, biuro, dzis) {
 <td style="padding:6px 0;border-top:1px solid #e5e7eb;white-space:nowrap;${zle ? "color:#b91c1c;font-weight:bold" : ""}">${ileCzasu(z.termin, dzis)}</td></tr>`;
     }).join("");
     wynik[email] = {
-      subject: `🔧 Do zrobienia przy autach: ${lista.length}${po ? ` (po terminie: ${po})` : ""} · ${dzien(dzis)}`,
-      html: ramka(`Nieodhaczone zadania przy autach — ${dzien(dzis)}`, `<table style="border-collapse:collapse;width:100%">
+      subject: `🔧 Check lista aut — do zrobienia: ${lista.length}${po ? ` (po terminie: ${po})` : ""} · ${dzien(dzis)}`,
+      html: ramka(`Check lista — nieodhaczone zadania przy autach, ${dzien(dzis)}`, `<table style="border-collapse:collapse;width:100%">
 <tr><th align="left" style="padding:4px 12px 4px 0;font-size:12px;color:#4b5563">Auto</th><th align="left" style="padding:4px 12px 4px 0;font-size:12px;color:#4b5563">Zadanie</th><th align="left" style="padding:4px 12px 4px 0;font-size:12px;color:#4b5563">Termin</th><th align="left" style="padding:4px 0;font-size:12px;color:#4b5563">Stan</th></tr>${wiersze}</table>`),
     };
   }

@@ -3596,7 +3596,7 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
                             </div>
                           )}
 
-                          {/* PRZYCISKI: Czas pracy + Do zrobienia na bazie (lista prac przy aucie, tylko biuro) */}
+                          {/* PRZYCISKI: Czas pracy + Check lista (dawniej „Do zrobienia na bazie” — nazwa zmieniona przez usera 20.11.2026; lista prac przy aucie, tylko biuro) */}
                           <div className="px-4 pb-3 flex gap-2">
                             {canEdit && (() => {
                               const lz = licznikiZadanAut[v.id] || { otwarte: 0, poTerminie: 0 };
@@ -3606,11 +3606,11 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
                                 : { background: "#f3f4f6", color: "#4b5563" };
                               return (
                                 <button onClick={() => setZadaniaOkno({ vehicleId: v.id, naBazie })}
-                                  title={lz.poTerminie ? `Po terminie: ${lz.poTerminie}` : "Prace do wykonania przy aucie na bazie"}
+                                  title={lz.poTerminie ? `Po terminie: ${lz.poTerminie}` : "Check lista — prace do wykonania przy aucie na bazie"}
                                   className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all"
                                   style={styl}>
                                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-                                  Do zrobienia{lz.otwarte ? ` · ${lz.otwarte}` : ""}
+                                  Check lista{lz.otwarte ? ` · ${lz.otwarte}` : ""}
                                 </button>
                               );
                             })()}
