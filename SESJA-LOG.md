@@ -8432,3 +8432,10 @@ przy pojeździe, B osobna zakładka dla floty, C sekcja w karcie) — wybrał **
 ✅ Atrapa: strona zamiast okna, lista aut widoczna, blokada zmiany auta przy niezapisanych zmianach, zapis,
 powrót, wydruk; układ przy 1500 / 1150 / 375 px bez poziomego przewijania. ❌ Nie na produkcji po zalogowaniu.
 Wariant B (tabela całej floty) user może chcieć dołożyć później — nie robić bez pytania.
+
+## 2026-11-20 — składki polis w „Uruchomienie auta” (v7, v8, v9)
+
+- User podesłał 4 polisy Ergo Hestia (okres 30.09.2026–29.09.2027). Trzy WGM (7652V/7651V/7653V) miały już w kartotece numery, składki, terminy i PDF-y — nic tam nie zmieniane.
+- **Zapisane w bazie** (`uruchomienia/v7`, `v8`, `v9`, skrypt jednorazowy `fix_uruchomienie_polisy.mjs`, gitignored): świeża lista z wzorca (43 poz.) + pozycja „Polisa” = 6 832 PLN, data 30.09.2026, kurs NBP z tego dnia → 1 564,39 EUR, link do PDF polisy już leżącego w `vehicleDocs`. Transakcja z warunkiem „dokument nie istnieje”. Odczyt kontrolny z bazy OK.
+- Kwota wzięta z POLISY (user: „wpisz składki”). Przy autach leży też „Faktura — ubezpieczenie” od Impulsu (26/10/UBP/…) — nie porównana z polisą; jeśli faktyczny koszt to faktura, kwotę trzeba poprawić.
+- **Otwarte:** TK 795GM (Iveco Daily 35S18, VIN ZCFCE35C1T5755550, polisa 480017080895, składka 6 670 zł) — auta nie ma w Pojazdach, polisa nigdzie nie wpisana. Niesprawdzone w UI po zalogowaniu.
