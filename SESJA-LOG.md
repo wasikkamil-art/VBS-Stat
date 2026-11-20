@@ -8485,3 +8485,27 @@ User po teście na produkcji: zapis i zdjęcie działają, ale (1) zdjęcie się
 → podgląd pokazuje zdjęcie. ❌ Niesprawdzone na produkcji po zalogowaniu; telefon (tabela przewija się w poziomie).
 Uwaga: konwerter HEIC sypie w konsoli „Failed to load resource” (wnętrze biblioteki), wynik poprawny.
 Dwa próbne zadania „Zmiana opon” przy WGM 0475M mają stare pliki HEIC — te nadal się pobierają.
+
+## 2026-11-20 cd.4 — „Do zrobienia na bazie”: przypomnienia mailem, obowiązkowy termin, zmiana terminu z notatką
+
+Słowa usera: do podpowiedzi dodać „inne” (żeby lista nie wyglądała na zamkniętą); pole przypomnień mailem —
+od razu po dodaniu i codziennie rano, dopóki nieodhaczone; przy dodawaniu trzeba podać, ile jest czasu (auto
+stoi na bazie np. 3 dni); termin można przedłużyć tylko z notatką — ślad kto i dlaczego.
+Decyzje usera (pytania): odbiorcy **wybierani przy zadaniu**; poranne **codziennie od dodania**;
+zmiana terminu **też wysyła maila od razu**; **7:00, pon–pt**.
+- Front: chip „Inne — wpisz własne”; termin wymagany (nie da się dodać bez, nie da się wybrać daty wstecz);
+  „Powiadom e-mailem” — kratki z kontami admin/dyspozytor (domyślnie dodający), edytowalne w „Edytuj”;
+  zmiana terminu odsłania wymagane pole „Dlaczego zmieniasz termin?” — bez niego Zapisz jest nieaktywne.
+  Pod terminem w tabeli: „zmieniony z … · kto, kiedy · „powód””. Wpis typu `termin` w chronologii (z, na, powod).
+- `functions/lib/zadaniaAuta.js` + 3 funkcje (**wdrożone**, europe-west1): `zadanieAutaDodane` (onCreate),
+  `zadanieAutaZmienione` (onUpdate, tylko gdy zmienił się termin i zadanie otwarte), `zadaniaAutaPoranne`
+  (`0 7 * * 1-5` Europe/Warsaw — JEDEN zbiorczy mail na osobę ze wszystkimi jej otwartymi zadaniami).
+  Wysyłka Resend, nadawca z `config/email`. Maile idą TYLKO na adresy kont admin/dyspozytor, nawet gdy
+  w `powiadom` jest inny adres (żeby pole w dokumencie nie robiło z nas przekaźnika poczty).
+✅ Testy logiki (front 6/6, treść maili i dobór odbiorców), atrapa: brak terminu blokuje dodanie, zmiana terminu
+bez powodu blokuje zapis, z powodem — ślad w tabeli i chronologii. W bazie: 6 kont biura z polem email, klucz poczty jest.
+❌ **Niesprawdzone: żaden prawdziwy mail jeszcze nie wyszedł** (ani po dodaniu, ani po zmianie terminu, ani poranny —
+pierwszy poranny w poniedziałek 23.11 o 7:00). Front na produkcji po zalogowaniu nieklikany.
+Uwagi: konta w `users` nie mają pola z imieniem → na liście odbiorców widać początek adresu e-mail.
+Dwa stare próbne zadania nie mają terminu ani odbiorców — maili nie dostaną; przy edycji aplikacja zażąda terminu i powodu.
+Sprostowanie do cd.3: błędy „Failed to load resource” w konsoli atrapy to był zatrzymany serwer podglądu, nie konwerter HEIC.

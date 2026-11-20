@@ -10,9 +10,11 @@
 //   dodaj(v, { tytul, opis, termin }) → zadanie | null     edytuj(z, pola) → true/false
 //   oznacz(z, czyZrobione) → true/false                     usun(z) → true/false
 //   wgraj(z, plik) → true/false
+// `osoby` = [{ email, nazwa }] osób z biura do wyboru w „Powiadom e-mailem"; `ja` = e-mail zalogowanego.
+// Termin jest obowiązkowy, a jego zmiana wymaga notatki „dlaczego" (ustalenia usera 20.11.2026).
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PODPOWIEDZI_ZADAN, TYPY_ZDARZEN, czyPoTerminie, dzisIso, podzielZadania, chronologiaZadan } from "../utils/zadaniaAuta";
+import { PODPOWIEDZI_ZADAN, TYPY_ZDARZEN, czyPoTerminie, dzisIso, podzielZadania, chronologiaZadan, ostatniaZmianaTerminu } from "../utils/zadaniaAuta";
 import { czyObraz } from "../utils/heicNaJpg";
 
 const POLE = "px-2.5 py-2 rounded-lg text-sm bg-white border border-gray-300 text-gray-900 outline-none focus:border-gray-600";
@@ -22,11 +24,25 @@ const fmtDzien = (iso) => { if (!iso) return ""; const [y, m, d] = iso.slice(0, 
 const fmtChwila = (iso) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? "" : d.toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); };
 const ktoKrotko = (email) => (email || "").split("@")[0] || "—";
 
-export default function ZadaniaAuta({ v, zadania, api, naBazie = false, onClose, safeHref = (u) => u }) {
+export default function ZadaniaAuta({ v, zadania, api, osoby = [], ja = "", naBazie = false, onClose, safeHref = (u) => u }) {
   const [tytul, setTytul] = useState("");
   const [termin, setTermin] = useState("");
   const [opis, setOpis] = useState("");
   const [pliki, setPliki] = useState([]);
+  const [powiadom, setPowiadom] = useState(() => (ja ? [ja.toLowerCase()] : []));
+  const tytulRef = useRef(null);
+  const przelacz = (lista, email) => (lista.includes(email) ? lista.filter(e => e !== email) : [...lista, email]);
+  const wyborOsob = (lista, ustaw, idPrefix) => (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-700">
+      <span className="font-semibold">Powiadom e-mailem:</span>
+      {osoby.length ? osoby.map(o => (
+        <label key={o.email} className="flex items-center gap-1 cursor-pointer" htmlFor={`${idPrefix}-${o.email}`}>
+          <input id={`${idPrefix}-${o.email}`} type="checkbox" checked={lista.includes(o.email)} onChange={() => ustaw(przelacz(lista, o.email))} />
+          {o.nazwa}
+        </label>
+      )) : <span className="text-gray-600">brak listy osób</span>}
+    </div>
+  );
   const [zajete, setZajete] = useState("");                 // "nowe" albo id zadania w trakcie zapisu
   const [edycja, setEdycja] = useState(null);               // { id, tytul, termin, opis }
   const [pokazOs, setPokazOs] = useState(false);            // chronologia zdarzeń
@@ -49,10 +65,10 @@ export default function ZadaniaAuta({ v, zadania, api, naBazie = false, onClose,
 
   const dodaj = async (e) => {
     e.preventDefault();
-    if (!tytul.trim() || zajete) return;
+    if (!tytul.trim() || !termin || zajete) return;
     setZajete("nowe");
     try {
-      const nowe = await api.dodaj(v, { tytul, opis, termin });
+      const nowe = await api.dodaj(v, { tytul, opis, termin, powiadom });
       if (nowe) {
         for (const p of pliki) await api.wgraj(nowe, p);
         setTytul(""); setTermin(""); setOpis(""); setPliki([]);
@@ -74,9 +90,12 @@ export default function ZadaniaAuta({ v, zadania, api, naBazie = false, onClose,
 
   const zapiszEdycje = () => {
     const z = zadania.find(x => x.id === edycja.id);
-    if (!z || !edycja.tytul.trim()) return;
-    zRobota(z.id, async () => { if (await api.edytuj(z, { tytul: edycja.tytul, termin: edycja.termin, opis: edycja.opis })) setEdycja(null); });
+    if (!z || !edycjaGotowa(z)) return;
+    zRobota(z.id, async () => { if (await api.edytuj(z, { tytul: edycja.tytul, termin: edycja.termin, opis: edycja.opis, powod: edycja.powod, powiadom: edycja.powiadom })) setEdycja(null); });
   };
+
+  const terminZmieniony = (z) => !!edycja && edycja.termin !== (z.termin || "");
+  const edycjaGotowa = (z) => !!edycja.tytul.trim() && !!edycja.termin && (!terminZmieniony(z) || !!edycja.powod.trim());
 
   const zalacznik = (a) => {
     const styl = { background: "#eff6ff", color: "#1d4ed8", maxWidth: 150 };
@@ -90,6 +109,7 @@ export default function ZadaniaAuta({ v, zadania, api, naBazie = false, onClose,
     const poTerminie = czyPoTerminie(z, dzis);
     const zrobioneJuz = z.status === "zrobione";
     const wEdycji = edycja?.id === z.id;
+    const zmianaT = ostatniaZmianaTerminu(z);
     return (
       <tr key={z.id} style={{ borderTop: "1px solid #e5e7eb", background: zrobioneJuz ? "#f9fafb" : "#fff", opacity: zajete === z.id ? 0.55 : 1 }}>
         <td className={TD} style={{ width: 40 }}>
@@ -103,20 +123,41 @@ export default function ZadaniaAuta({ v, zadania, api, naBazie = false, onClose,
             <div className="space-y-2">
               <input className={`${POLE} w-full`} value={edycja.tytul} onChange={e => setEdycja({ ...edycja, tytul: e.target.value })} aria-label="Nazwa zadania" />
               <textarea className={`${POLE} w-full`} rows={2} placeholder="Opis (opcjonalnie)" value={edycja.opis} onChange={e => setEdycja({ ...edycja, opis: e.target.value })} aria-label="Opis" />
+              {wyborOsob(edycja.powiadom, (l) => setEdycja({ ...edycja, powiadom: l }), `e-${z.id}`)}
             </div>
           ) : (
             <>
               <div className={`font-semibold ${zrobioneJuz ? "text-gray-600 line-through" : "text-gray-900"}`}>{z.tytul}</div>
               {z.opis && <div className="text-xs text-gray-700 mt-0.5 whitespace-pre-wrap break-words">{z.opis}</div>}
+              <div className="text-xs text-gray-600 mt-0.5">
+                {(z.powiadom || []).length ? `Maile: ${z.powiadom.map(ktoKrotko).join(", ")}` : "Maile: nikt nie jest powiadamiany"}
+              </div>
             </>
           )}
         </td>
-        <td className={`${TD} whitespace-nowrap`}>
-          {wEdycji
-            ? <input type="date" className={POLE} value={edycja.termin} onChange={e => setEdycja({ ...edycja, termin: e.target.value })} aria-label="Termin" />
-            : !z.termin ? <span className="text-gray-600">—</span>
-            : poTerminie ? <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "#fef2f2", color: "#b91c1c" }}>po terminie · {fmtDzien(z.termin)}</span>
-            : <span className={zrobioneJuz ? "text-gray-600" : "text-gray-900"}>{fmtDzien(z.termin)}</span>}
+        <td className={TD} style={{ minWidth: 150, maxWidth: 230 }}>
+          {wEdycji ? (
+            <div className="space-y-2">
+              <input type="date" className={POLE} value={edycja.termin} onChange={e => setEdycja({ ...edycja, termin: e.target.value })} aria-label="Termin" />
+              {terminZmieniony(z) && (
+                <textarea className={`${POLE} w-full`} rows={2} value={edycja.powod} onChange={e => setEdycja({ ...edycja, powod: e.target.value })}
+                  placeholder="Dlaczego zmieniasz termin? (wymagane)" aria-label="Powód zmiany terminu" maxLength={300}
+                  style={edycja.powod.trim() ? undefined : { borderColor: "#b91c1c" }} />
+              )}
+            </div>
+          ) : (
+            <>
+              {!z.termin ? <span className="text-gray-600">—</span>
+                : poTerminie ? <span className="text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: "#fef2f2", color: "#b91c1c" }}>po terminie · {fmtDzien(z.termin)}</span>
+                : <span className={zrobioneJuz ? "text-gray-600" : "text-gray-900"}>{fmtDzien(z.termin)}</span>}
+              {zmianaT && (
+                <div className="text-xs text-gray-700 mt-1 break-words">
+                  zmieniony z {zmianaT.z ? fmtDzien(zmianaT.z) : "braku"} · {ktoKrotko(zmianaT.kto)}, {fmtChwila(zmianaT.ts)}
+                  <div className="text-gray-600">„{zmianaT.powod}”</div>
+                </div>
+              )}
+            </>
+          )}
         </td>
         <td className={`${TD} whitespace-nowrap`}>
           <div className="text-gray-900">{ktoKrotko(z.createdBy)}</div>
@@ -139,12 +180,12 @@ export default function ZadaniaAuta({ v, zadania, api, naBazie = false, onClose,
         <td className={`${TD} whitespace-nowrap text-xs`}>
           {wEdycji ? (
             <div className="flex flex-col gap-1 items-start">
-              <button type="button" onClick={zapiszEdycje} disabled={!edycja.tytul.trim() || !!zajete} className="px-3 py-1.5 rounded-lg font-semibold text-white disabled:opacity-50" style={{ background: "#111827" }}>Zapisz</button>
+              <button type="button" onClick={zapiszEdycje} disabled={!edycjaGotowa(z) || !!zajete} className="px-3 py-1.5 rounded-lg font-semibold text-white disabled:opacity-50" style={{ background: "#111827" }}>Zapisz</button>
               <button type="button" onClick={() => setEdycja(null)} className="px-3 py-1.5 rounded-lg font-semibold text-gray-700 bg-gray-100">Anuluj</button>
             </div>
           ) : (
             <div className="flex flex-col gap-1 items-start">
-              <button type="button" onClick={() => setEdycja({ id: z.id, tytul: z.tytul, termin: z.termin || "", opis: z.opis || "" })} disabled={!!zajete} className="font-semibold text-gray-700 hover:text-gray-900">Edytuj</button>
+              <button type="button" onClick={() => setEdycja({ id: z.id, tytul: z.tytul, termin: z.termin || "", opis: z.opis || "", powod: "", powiadom: z.powiadom || [] })} disabled={!!zajete} className="font-semibold text-gray-700 hover:text-gray-900">Edytuj</button>
               <button type="button" onClick={() => zRobota(z.id, () => api.usun(z))} disabled={!!zajete} className="font-semibold text-red-700 hover:text-red-900">Usuń</button>
             </div>
           )}
@@ -197,14 +238,14 @@ export default function ZadaniaAuta({ v, zadania, api, naBazie = false, onClose,
 
         <form onSubmit={dodaj} className="px-5 py-3 space-y-2" style={{ borderBottom: "1px solid #f3f4f6" }}>
           <div className="flex flex-wrap gap-2 items-center">
-            <input className={`${POLE} flex-1`} style={{ minWidth: 200 }} placeholder="Co jest do zrobienia? np. zmiana opon"
+            <input ref={tytulRef} className={`${POLE} flex-1`} style={{ minWidth: 200 }} placeholder="Co jest do zrobienia? np. zmiana opon"
               value={tytul} onChange={e => setTytul(e.target.value)} aria-label="Nowe zadanie" maxLength={120} />
             <input className={`${POLE} flex-1`} style={{ minWidth: 200 }} placeholder="Opis (opcjonalnie) — co dokładnie, części"
               value={opis} onChange={e => setOpis(e.target.value)} aria-label="Opis zadania" />
-            <label className="text-xs text-gray-700 flex items-center gap-1.5">Termin
-              <input type="date" className={POLE} value={termin} onChange={e => setTermin(e.target.value)} aria-label="Termin wykonania" />
+            <label className="text-xs text-gray-700 flex items-center gap-1.5">Termin (wymagany)
+              <input type="date" required min={dzis} className={POLE} value={termin} onChange={e => setTermin(e.target.value)} aria-label="Termin wykonania" />
             </label>
-            <button type="submit" disabled={!tytul.trim() || !!zajete}
+            <button type="submit" disabled={!tytul.trim() || !termin || !!zajete}
               className="px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#111827" }}>
               {zajete === "nowe" ? "Zapisuję…" : "+ Dodaj"}
             </button>
@@ -214,9 +255,15 @@ export default function ZadaniaAuta({ v, zadania, api, naBazie = false, onClose,
               <button key={p} type="button" onClick={() => setTytul(p)}
                 className="text-xs px-2 py-1 rounded-full bg-white border border-gray-300 text-gray-700 hover:border-gray-600">{p}</button>
             ))}
+            <button type="button" onClick={() => { setTytul(""); tytulRef.current?.focus(); }}
+              className="text-xs px-2 py-1 rounded-full bg-white border border-dashed border-gray-500 text-gray-700 hover:border-gray-800">Inne — wpisz własne</button>
             <input ref={plikNowyRef} type="file" multiple accept="image/*,.heic,.heif,application/pdf" className="text-xs text-gray-700 ml-auto"
               onChange={e => setPliki(Array.from(e.target.files || []))} aria-label="Zdjęcie lub dokument do zadania" />
           </div>
+          {wyborOsob(powiadom, setPowiadom, "n")}
+          <p className="text-xs text-gray-600">
+            Zaznaczone osoby dostają maila od razu po dodaniu, po każdej zmianie terminu i codziennie o 7:00 (pon–pt), dopóki zadanie nie zostanie odhaczone.
+          </p>
         </form>
 
         <div className="overflow-x-auto pb-3">

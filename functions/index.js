@@ -9,7 +9,7 @@
  * Nowi użytkownicy obsługiwani przez App.jsx + onRoleChange trigger.
  */
 
-const { onDocumentWritten, onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onDocumentWritten, onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onCall, HttpsError }  = require("firebase-functions/v2/https");
 const { defineSecret }        = require("firebase-functions/params");
 const { initializeApp }       = require("firebase-admin/app");
@@ -654,6 +654,67 @@ async function sendFleetStatusEmail() {
     return { success: false, error: e.message };
   }
 }
+
+// ═══════════════════════════════════════════════════════════════
+// 3b. „DO ZROBIENIA NA BAZIE" — maile o zadaniach przy autach (kolekcja `zadaniaAuta`).
+//     Treść i dobór odbiorców: lib/zadaniaAuta.js. Reguły (user, 20.11.2026): od razu po dodaniu,
+//     od razu po zmianie terminu, codziennie 7:00 pon–pt aż do odhaczenia.
+// ═══════════════════════════════════════════════════════════════
+const zadaniaMail = require("./lib/zadaniaAuta");
+
+async function zadaniaKontekst() {
+  const db = getFirestore();
+  const cfg = (await db.doc("config/email").get()).data() || {};
+  const apiKey = cfg.resendApiKey || cfg.sendgridApiKey;
+  const usersSnap = await db.collection("users").where("role", "in", ["admin", "dyspozytor"]).get();
+  const biuro = new Set(usersSnap.docs.map(d => String(d.data().email || "").trim().toLowerCase()).filter(Boolean));
+  return { db, apiKey, from: cfg.senderEmail || "flotaVBS@fleetstat.pl", biuro };
+}
+
+async function zadaniaWyslij(ctx, doKogo, mail, opis) {
+  if (!ctx.apiKey) { console.error(`zadaniaAuta [${opis}]: brak klucza API email w config/email`); return; }
+  if (!doKogo.length) { console.log(`zadaniaAuta [${opis}]: brak odbiorców — nic nie wysyłam`); return; }
+  await sendEmailsResend(ctx.apiKey, doKogo.map(to => ({ from: ctx.from, to: [to], subject: mail.subject, html: mail.html })));
+  console.log(`✅ zadaniaAuta [${opis}]: wysłano do ${doKogo.join(", ")}`);
+}
+
+exports.zadanieAutaDodane = onDocumentCreated(
+  { document: "zadaniaAuta/{zadanieId}", region: "europe-west1" },
+  async (event) => {
+    const z = event.data?.data();
+    if (!z || z.status !== "otwarte") return;
+    const ctx = await zadaniaKontekst();
+    await zadaniaWyslij(ctx, zadaniaMail.odbiorcy(z, ctx.biuro), zadaniaMail.mailNowe(z, getTodayISO()), `nowe ${event.params.zadanieId}`);
+  }
+);
+
+exports.zadanieAutaZmienione = onDocumentUpdated(
+  { document: "zadaniaAuta/{zadanieId}", region: "europe-west1" },
+  async (event) => {
+    const przed = event.data?.before?.data(), po = event.data?.after?.data();
+    if (!przed || !po || po.status !== "otwarte" || (przed.termin || "") === (po.termin || "")) return;
+    const zmiana = zadaniaMail.ostatniaZmianaTerminu(po) || { z: przed.termin || "", na: po.termin || "", kto: po.updatedBy || "", powod: "" };
+    const ctx = await zadaniaKontekst();
+    await zadaniaWyslij(ctx, zadaniaMail.odbiorcy(po, ctx.biuro), zadaniaMail.mailTermin(po, zmiana, getTodayISO()), `termin ${event.params.zadanieId}`);
+  }
+);
+
+async function zadaniaPoranne() {
+  const ctx = await zadaniaKontekst();
+  const snap = await ctx.db.collection("zadaniaAuta").where("status", "==", "otwarte").get();
+  const maile = zadaniaMail.mailePoranne(snap.docs.map(d => d.data()), ctx.biuro, getTodayISO());
+  const adresy = Object.keys(maile);
+  if (!ctx.apiKey) { console.error("zadaniaAuta [poranne]: brak klucza API email w config/email"); return { wyslano: 0, blad: "brak klucza" }; }
+  if (!adresy.length) { console.log(`zadaniaAuta [poranne]: ${snap.size} otwartych, nikt do powiadomienia`); return { wyslano: 0, otwarte: snap.size }; }
+  await sendEmailsResend(ctx.apiKey, adresy.map(to => ({ from: ctx.from, to: [to], subject: maile[to].subject, html: maile[to].html })));
+  console.log(`✅ zadaniaAuta [poranne]: ${snap.size} otwartych → ${adresy.join(", ")}`);
+  return { wyslano: adresy.length, otwarte: snap.size };
+}
+
+exports.zadaniaAutaPoranne = onSchedule(
+  { schedule: "0 7 * * 1-5", timeZone: "Europe/Warsaw", region: "europe-west1" },
+  async () => { await zadaniaPoranne(); }
+);
 
 // SCHEDULER: 8:00 CET
 exports.sendFleetEmail8 = onSchedule(

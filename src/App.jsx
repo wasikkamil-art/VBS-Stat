@@ -13,7 +13,7 @@ import { logAction, logFleetWrite } from "./utils/logAction";
 import { logLoginEvent } from "./utils/loginLog";
 // safeHref — sanityzacja URL (wydzielone 2026-04-29 #5c krok 6, 10 użyć)
 import { safeHref } from "./utils/safeHref";
-import { licznikiZadan, noweZadanie, opisZmian, wpisHistorii } from "./utils/zadaniaAuta";
+import { licznikiZadan, noweZadanie, przygotujEdycje, wpisHistorii } from "./utils/zadaniaAuta";
 import { naJpgJesliHeic } from "./utils/heicNaJpg";
 import { tekstowy, zmieszaj, alfaZSufiksu } from "./utils/kolorTekstu";
 // ZlecenieUploadBtn — przycisk uploadu PDF zlecenia (wydzielone 2026-04-29 #5c krok 6)
@@ -1939,11 +1939,23 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
     return () => unsub();
   }, [canEdit]);
   const licznikiZadanAut = useMemo(() => licznikiZadan(zadaniaAuta), [zadaniaAuta]);
+  // Osoby z biura do wyboru w „Powiadom e-mailem" (maile wysyła Cloud Function i sama sprawdza role).
+  const [biuroOsoby, setBiuroOsoby] = useState([]);
+  useEffect(() => {
+    if (!canEdit) return;
+    getDocs(collection(db, "users")).then(snap => {
+      const m = new Map();
+      snap.docs.forEach(d => { const u = d.data(); const e = (u.email || "").trim().toLowerCase(); if (e && (u.role === "admin" || u.role === "dyspozytor")) m.set(e, { email: e, nazwa: u.name || u.displayName || e.split("@")[0] }); });
+      setBiuroOsoby([...m.values()].sort((a, b) => a.nazwa.localeCompare(b.nazwa)));
+    }).catch(e => console.error("zadaniaAuta: lista osób", e));
+  }, [canEdit]);
   const zadaniaApi = useMemo(() => {
     const kto = emailUzytkownika;
-    const zmien = async (z, pola, wpis, extra = {}) => {
+    const zmien = async (z, pola, wpisLubWpisy, extra = {}) => {
+      const wpisy = [].concat(wpisLubWpisy);
+      const wpis = wpisy[0];
       try {
-        await updateDoc(doc(db, "zadaniaAuta", z.id), { ...pola, ...extra, historia: arrayUnion(wpis), updatedAt: wpis.ts, updatedBy: kto });
+        await updateDoc(doc(db, "zadaniaAuta", z.id), { ...pola, ...extra, historia: arrayUnion(...wpisy), updatedAt: wpis.ts, updatedBy: kto });
         logAction("update", "zadaniaAuta", { id: z.id, vehicleId: z.vehicleId, plate: z.plate, tytul: z.tytul, typ: wpis.typ });
         return true;
       } catch (e) {
@@ -1955,7 +1967,7 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
     return {
       dodaj: async (v, dane) => {
         const nowe = noweZadanie(v, dane, kto);
-        if (!nowe) return null;
+        if (!nowe) { showToast("⚠️ Zadanie musi mieć nazwę i termin"); return null; }
         try {
           const r = await addDoc(collection(db, "zadaniaAuta"), nowe);
           logAction("add", "zadaniaAuta", { id: r.id, vehicleId: v.id, plate: v.plate, tytul: nowe.tytul, termin: nowe.termin });
@@ -1966,11 +1978,11 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
           return null;
         }
       },
-      edytuj: (z, pola) => {
-        const czyste = { tytul: (pola.tytul || "").trim(), termin: pola.termin || "", opis: (pola.opis || "").trim() };
-        const co = opisZmian(z, czyste);
-        if (!co) return Promise.resolve(true);
-        return zmien(z, czyste, wpisHistorii("edytowano", kto, co));
+      edytuj: (z, nowe) => {
+        const e = przygotujEdycje(z, nowe, kto);
+        if (e.blad) { showToast(`⚠️ ${e.blad}`); return Promise.resolve(false); }
+        if (!e.wpisy.length) return Promise.resolve(true);
+        return zmien(z, e.pola, e.wpisy);
       },
       oznacz: (z, zrobione) => {
         const wpis = wpisHistorii(zrobione ? "zrobione" : "cofnieto", kto);
@@ -2970,7 +2982,7 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
         if (!zV) return null;
         return (
           <Suspense fallback={null}>
-            <ZadaniaAuta v={zV} zadania={zadaniaAuta.filter(z => z.vehicleId === zV.id)} api={zadaniaApi}
+            <ZadaniaAuta v={zV} zadania={zadaniaAuta.filter(z => z.vehicleId === zV.id)} api={zadaniaApi} osoby={biuroOsoby} ja={emailUzytkownika}
               naBazie={zadaniaOkno.naBazie} onClose={() => setZadaniaOkno(null)} safeHref={safeHref} />
           </Suspense>
         );
