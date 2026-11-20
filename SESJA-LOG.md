@@ -8439,3 +8439,14 @@ Wariant B (tabela całej floty) user może chcieć dołożyć później — nie 
 - **Zapisane w bazie** (`uruchomienia/v7`, `v8`, `v9`, skrypt jednorazowy `fix_uruchomienie_polisy.mjs`, gitignored): świeża lista z wzorca (43 poz.) + pozycja „Polisa” = 6 832 PLN, data 30.09.2026, kurs NBP z tego dnia → 1 564,39 EUR, link do PDF polisy już leżącego w `vehicleDocs`. Transakcja z warunkiem „dokument nie istnieje”. Odczyt kontrolny z bazy OK.
 - Kwota wzięta z POLISY (user: „wpisz składki”). Przy autach leży też „Faktura — ubezpieczenie” od Impulsu (26/10/UBP/…) — nie porównana z polisą; jeśli faktyczny koszt to faktura, kwotę trzeba poprawić.
 - **Otwarte:** TK 795GM (Iveco Daily 35S18, VIN ZCFCE35C1T5755550, polisa 480017080895, składka 6 670 zł) — auta nie ma w Pojazdach, polisa nigdzie nie wpisana. Niesprawdzone w UI po zalogowaniu.
+
+## 2026-11-20 cd. — mail z Vercela „not a member of the team” to backup Faktur, nie awaria
+
+User dostał mail: `backup@faktury.fleetstat.pl attempted to deploy a commit…`. Przyczyna: nocny workflow
+`vbs-invoices/.github/workflows/backup.yml` wypycha commit bota na gałąź `backups`, Vercel próbuje z niej zbudować
+podgląd i odrzuca autora. **Backup się wykonał** (commity 18/19/20.11 na `origin/backups`), produkcja Faktur
+(gałąź `main`) nietknięta. Te same boty mają FleetStat, FOX i FreeTruck — żadne repo nie ma wyłączonych wdrożeń
+dla `backups`.
+- **Nic nie zmienione.** Propozycja (user nie zdecydował): `git.deploymentEnabled` dla `backups` w `vercel.json`.
+  Niesprawdzone, czy Vercel czyta to z `main`, czy z gałęzi `backups` — po zmianie zweryfikować po kolejnym nocnym backupie.
+- Nie kupować Pro i nie dodawać bota do zespołu.
