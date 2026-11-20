@@ -8450,3 +8450,23 @@ dla `backups`.
 - **Nic nie zmienione.** Propozycja (user nie zdecydował): `git.deploymentEnabled` dla `backups` w `vercel.json`.
   Niesprawdzone, czy Vercel czyta to z `main`, czy z gałęzi `backups` — po zmianie zweryfikować po kolejnym nocnym backupie.
 - Nie kupować Pro i nie dodawać bota do zespołu.
+
+## 2026-11-20 cd.2 — Przegląd: „Do zrobienia na bazie” (lista prac przy aucie)
+
+Słowa usera: przy kafelku auta przycisk „to do na bazie” — co jest do zrobienia przy aucie (zmiana opon, wymiana
+oleju, naprawy), z datami, odhaczeniem „zrobione”, zdjęciem lub dokumentem i chronologią zdarzeń.
+Decyzje usera: przycisk **zawsze, z licznikiem** (nie tylko przy statusie Baza); wpisuje **biuro: admin + dyspozytor**
+(kierowca nie widzi listy).
+- `src/utils/zadaniaAuta.js` — logika (nowe zadanie, opis zmian, podział otwarte/zrobione, liczniki, chronologia).
+- `src/components/ZadaniaAuta.jsx` — okno (prezentacyjne, lazy): formularz z podpowiedziami, termin, opis, pliki;
+  zakładki Do zrobienia / Zrobione / Chronologia; edycja, odhaczanie, „Usuń”.
+- `App.jsx`: nasłuch `zadaniaAuta` (tylko `canEdit`), `zadaniaApi`, przycisk „Do zrobienia · N” obok „Czas pracy”
+  (czerwony = po terminie, żółty = są zadania i auto na bazie).
+- Dane: kolekcja **`zadaniaAuta`**, jedno zadanie = jeden dokument; historia i załączniki przez `arrayUnion`.
+  „Usuń” = status `usuniete` (wpis zostaje w chronologii), twarde kasowanie tylko admin. Pliki:
+  Storage `vehicleDocs/{vehicleId}/zadanie_*` (istniejąca reguła). **Reguły Firestore wdrożone.**
+✅ Atrapa `podglad/zadania` (zapis do pamięci karty): dodanie z podpowiedzi, termin przeszły → „po terminie”,
+licznik, odhaczenie, edycja nazwy, chronologia 4 zdarzeń, konsola bez błędów. Lint 0 błędów, build zielony.
+❌ **Niesprawdzone**: produkcja po zalogowaniu — prawdziwy zapis do `zadaniaAuta`, wgranie pliku do Storage,
+wygląd dwóch przycisków na kafelku (w atrapie jest samo okno, nie kafelek), „Usuń” i cofnięcie odhaczenia, telefon.
+Otwarte: kierowca nie ma dostępu (świadomie); brak przypomnień o terminie poza kolorem przycisku.

@@ -13,6 +13,7 @@ import { logAction, logFleetWrite } from "./utils/logAction";
 import { logLoginEvent } from "./utils/loginLog";
 // safeHref — sanityzacja URL (wydzielone 2026-04-29 #5c krok 6, 10 użyć)
 import { safeHref } from "./utils/safeHref";
+import { licznikiZadan, noweZadanie, opisZmian, wpisHistorii } from "./utils/zadaniaAuta";
 import { tekstowy, zmieszaj, alfaZSufiksu } from "./utils/kolorTekstu";
 // ZlecenieUploadBtn — przycisk uploadu PDF zlecenia (wydzielone 2026-04-29 #5c krok 6)
 // Używane w 3 miejscach (FVTab, FrachtyTab, FrachtyModal). Nie lazy — używane stale.
@@ -41,6 +42,7 @@ const FrachtyModal = lazy(() => import("./components/FrachtyModal"));
 const KalkulatorTras = lazy(() => import("./components/KalkulatorTras"));
 const PlanerZaladunku = lazy(() => import("./components/PlanerZaladunku"));
 const PojazdyPanel = lazy(() => import("./components/PojazdyPanel"));
+const ZadaniaAuta = lazy(() => import("./components/ZadaniaAuta"));
 const PaliwoTab = lazy(() => import("./components/PaliwoTab"));
 const AnalizyTab = lazy(() => import("./components/AnalizyTab"));
 
@@ -1923,6 +1925,77 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
     naEur: (kwota, waluta, data) => toEurNbp(kwota, waluta, data),
   }), [emailUzytkownika]);
 
+  // ── „Do zrobienia na bazie" — prace przy aucie wpisywane z kafelka Przeglądu (kolekcja `zadaniaAuta`). ──
+  // Jedno zadanie = jeden dokument; historia i załączniki dopisywane przez arrayUnion, żeby dwie osoby
+  // klikające naraz nie nadpisały sobie wpisów. Czyta i pisze tylko biuro (reguły: canEdit).
+  const [zadaniaAuta, setZadaniaAuta] = useState([]);
+  const [zadaniaOkno, setZadaniaOkno] = useState(null); // { vehicleId, naBazie }
+  useEffect(() => {
+    if (!canEdit) return;
+    const unsub = onSnapshot(collection(db, "zadaniaAuta"), (snap) => {
+      setZadaniaAuta(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error("zadaniaAuta onSnapshot error", err));
+    return () => unsub();
+  }, [canEdit]);
+  const licznikiZadanAut = useMemo(() => licznikiZadan(zadaniaAuta), [zadaniaAuta]);
+  const zadaniaApi = useMemo(() => {
+    const kto = emailUzytkownika;
+    const zmien = async (z, pola, wpis, extra = {}) => {
+      try {
+        await updateDoc(doc(db, "zadaniaAuta", z.id), { ...pola, ...extra, historia: arrayUnion(wpis), updatedAt: wpis.ts, updatedBy: kto });
+        logAction("update", "zadaniaAuta", { id: z.id, vehicleId: z.vehicleId, plate: z.plate, tytul: z.tytul, typ: wpis.typ });
+        return true;
+      } catch (e) {
+        console.error("zadaniaAuta: zapis", e);
+        showToast(`⚠️ Nie zapisano: ${e?.message || e}`);
+        return false;
+      }
+    };
+    return {
+      dodaj: async (v, dane) => {
+        const nowe = noweZadanie(v, dane, kto);
+        if (!nowe) return null;
+        try {
+          const r = await addDoc(collection(db, "zadaniaAuta"), nowe);
+          logAction("add", "zadaniaAuta", { id: r.id, vehicleId: v.id, plate: v.plate, tytul: nowe.tytul, termin: nowe.termin });
+          return { id: r.id, ...nowe };
+        } catch (e) {
+          console.error("zadaniaAuta: dodanie", e);
+          showToast(`⚠️ Nie dodano: ${e?.message || e}`);
+          return null;
+        }
+      },
+      edytuj: (z, pola) => {
+        const czyste = { tytul: (pola.tytul || "").trim(), termin: pola.termin || "", opis: (pola.opis || "").trim() };
+        const co = opisZmian(z, czyste);
+        if (!co) return Promise.resolve(true);
+        return zmien(z, czyste, wpisHistorii("edytowano", kto, co));
+      },
+      oznacz: (z, zrobione) => {
+        const wpis = wpisHistorii(zrobione ? "zrobione" : "cofnieto", kto);
+        return zmien(z, zrobione ? { status: "zrobione", zrobioneAt: wpis.ts, zrobioneBy: kto } : { status: "otwarte", zrobioneAt: null, zrobioneBy: "" }, wpis);
+      },
+      usun: (z) => {
+        if (!window.confirm(`Usunąć „${z.tytul}” z listy? Wpis zostanie w chronologii.`)) return Promise.resolve(false);
+        return zmien(z, { status: "usuniete" }, wpisHistorii("usunieto", kto));
+      },
+      wgraj: async (z, plik) => {
+        try {
+          const ext = (plik.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "");
+          const path = `vehicleDocs/${z.vehicleId}/zadanie_${uid()}.${ext}`;
+          const r = storageRef(storage, path);
+          await uploadBytes(r, plik, { contentType: plik.type || undefined });
+          const wpis = wpisHistorii("zalacznik", kto, plik.name);
+          return await zmien(z, {}, wpis, { zalaczniki: arrayUnion({ id: wpis.id, url: await getDownloadURL(r), nazwa: plik.name, path, ts: wpis.ts, kto }) });
+        } catch (e) {
+          console.error("zadaniaAuta: plik", e);
+          showToast(`⚠️ Nie wgrano pliku ${plik.name}: ${e?.message || e}`);
+          return false;
+        }
+      },
+    };
+  }, [emailUzytkownika]);
+
   const saveVehicleLeasing = async (v, leasing) => {
     if (leasing === null && !window.confirm(`Usunąć dane leasingu przy ${v.plate}? Dokumenty zostaną.`)) return false;
     try {
@@ -2886,6 +2959,16 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
         />
       )}
       {showAddVehicle && <AddVehicleModal onSave={addVehicle} onClose={() => setShowAddVehicle(false)} />}
+      {zadaniaOkno && (() => {
+        const zV = vehicles.find(x => x.id === zadaniaOkno.vehicleId);
+        if (!zV) return null;
+        return (
+          <Suspense fallback={null}>
+            <ZadaniaAuta v={zV} zadania={zadaniaAuta.filter(z => z.vehicleId === zV.id)} api={zadaniaApi}
+              naBazie={zadaniaOkno.naBazie} onClose={() => setZadaniaOkno(null)} safeHref={safeHref} />
+          </Suspense>
+        );
+      })()}
       {czasPracyVehicleId && (() => {
         const czV = vehicles.find(x => x.id === czasPracyVehicleId);
         if (!czV) return null;
@@ -3495,10 +3578,26 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
                             </div>
                           )}
 
-                          {/* PRZYCISK CZAS PRACY — otwiera modal */}
-                          <div className="px-4 pb-3">
+                          {/* PRZYCISKI: Czas pracy + Do zrobienia na bazie (lista prac przy aucie, tylko biuro) */}
+                          <div className="px-4 pb-3 flex gap-2">
+                            {canEdit && (() => {
+                              const lz = licznikiZadanAut[v.id] || { otwarte: 0, poTerminie: 0 };
+                              const naBazie = status === "pauza" && statusIcon === "🏠";
+                              const styl = lz.poTerminie ? { background: "#fef2f2", color: "#b91c1c" }
+                                : lz.otwarte && naBazie ? { background: "#fef3c7", color: "#92400e" }
+                                : { background: "#f3f4f6", color: "#4b5563" };
+                              return (
+                                <button onClick={() => setZadaniaOkno({ vehicleId: v.id, naBazie })}
+                                  title={lz.poTerminie ? `Po terminie: ${lz.poTerminie}` : "Prace do wykonania przy aucie na bazie"}
+                                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all"
+                                  style={styl}>
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                                  Do zrobienia{lz.otwarte ? ` · ${lz.otwarte}` : ""}
+                                </button>
+                              );
+                            })()}
                             <button onClick={() => setCzasPracyVehicleId(v.id)}
-                              className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all"
+                              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all"
                               style={{ background: "#f3f4f6", color: "#4b5563" }}>
                               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                               Czas pracy

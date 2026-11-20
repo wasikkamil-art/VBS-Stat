@@ -198,6 +198,15 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // DO ZROBIENIA NA BAZIE — prace przy aucie (opony, olej, naprawy) wpisywane z kafelka Przeglądu.
+    // Decyzja usera 2026-11-20: tylko biuro (admin + dyspozytor); kierowca nie czyta i nie pisze.
+    // „Usunięcie" w aplikacji to status `usuniete` (wpis zostaje w chronologii) — twarde kasowanie tylko admin.
+    match /zadaniaAuta/{zadanieId} {
+      allow read: if canEdit();
+      allow create, update: if canEdit();
+      allow delete: if isAdmin();
+    }
+
     match /planyTras/{frachtId} {
       allow read: if canRead();
       allow create, update: if canEdit();

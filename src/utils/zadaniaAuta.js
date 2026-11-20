@@ -1,0 +1,83 @@
+// zadaniaAuta — „Do zrobienia na bazie": lista prac przy aucie (opony, olej, naprawy) wpisywana
+// przez biuro z kafelka Przeglądu. Jedno zadanie = jeden dokument w kolekcji `zadaniaAuta`:
+//   { vehicleId, plate, tytul, opis, termin: "YYYY-MM-DD" | "", status: "otwarte" | "zrobione" | "usuniete",
+//     zrobioneAt, zrobioneBy, zalaczniki: [{ id, url, nazwa, path, ts, kto }],
+//     historia: [{ id, ts, kto, typ, opis }], createdAt, createdBy, updatedAt, updatedBy }
+// „Usunięcie" to status, nie skasowanie dokumentu — inaczej zdarzenia znikałyby z chronologii.
+// Tu sama logika (bez Firebase i bez Reacta), żeby dało się ją sprawdzić skryptem.
+
+export const PODPOWIEDZI_ZADAN = ["Zmiana opon", "Wymiana oleju", "Przegląd", "Naprawa", "Mycie"];
+
+const losowe = () => Math.random().toString(36).slice(2, 10);
+
+export const TYPY_ZDARZEN = {
+  dodano: "Dodano",
+  edytowano: "Zmieniono",
+  zrobione: "Zrobione",
+  cofnieto: "Cofnięto wykonanie",
+  zalacznik: "Dodano plik",
+  usunieto: "Usunięto",
+};
+
+// Wpis do chronologii. `ts` w ISO — wpisy idą do tablicy przez arrayUnion, a tam serverTimestamp nie działa.
+export const wpisHistorii = (typ, kto, opis = "", teraz = new Date()) => ({
+  id: losowe(), ts: teraz.toISOString(), kto: kto || "", typ, opis: opis || "",
+});
+
+export const dzisIso = (d = new Date()) => {
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; // data LOKALNA, nie UTC
+};
+
+export const czyPoTerminie = (z, dzis = dzisIso()) => z.status === "otwarte" && !!z.termin && z.termin < dzis;
+
+// Nowe zadanie gotowe do zapisu. Zwraca null, gdy nie ma tytułu.
+export const noweZadanie = (v, { tytul, opis = "", termin = "" }, kto, teraz = new Date()) => {
+  const t = (tytul || "").trim();
+  if (!t) return null;
+  const ts = teraz.toISOString();
+  return {
+    vehicleId: v.id, plate: v.plate || "", tytul: t, opis: (opis || "").trim(), termin: termin || "",
+    status: "otwarte", zrobioneAt: null, zrobioneBy: "", zalaczniki: [],
+    historia: [wpisHistorii("dodano", kto, termin ? `termin ${termin}` : "bez terminu", teraz)],
+    createdAt: ts, createdBy: kto || "", updatedAt: ts, updatedBy: kto || "",
+  };
+};
+
+// Co się zmieniło przy edycji — tekst do chronologii. Pusty string = nic się nie zmieniło.
+export const opisZmian = (stare, nowe) => {
+  const z = [];
+  if ("tytul" in nowe && (nowe.tytul || "").trim() !== (stare.tytul || "")) z.push(`nazwa: „${stare.tytul || ""}” → „${(nowe.tytul || "").trim()}”`);
+  if ("termin" in nowe && (nowe.termin || "") !== (stare.termin || "")) z.push(`termin: ${stare.termin || "brak"} → ${nowe.termin || "brak"}`);
+  if ("opis" in nowe && (nowe.opis || "").trim() !== (stare.opis || "")) z.push("opis");
+  return z.join("; ");
+};
+
+// Otwarte: najpierw z terminem (najbliższy na górze), potem bez terminu wg kolejności dodania.
+// Zrobione: ostatnio wykonane na górze.
+export const podzielZadania = (zadania) => {
+  const otwarte = zadania.filter(z => z.status === "otwarte").sort((a, b) => {
+    if (!!a.termin !== !!b.termin) return a.termin ? -1 : 1;
+    return (a.termin || "").localeCompare(b.termin || "") || (a.createdAt || "").localeCompare(b.createdAt || "");
+  });
+  const zrobione = zadania.filter(z => z.status === "zrobione")
+    .sort((a, b) => (b.zrobioneAt || "").localeCompare(a.zrobioneAt || ""));
+  return { otwarte, zrobione };
+};
+
+// Licznik na kafelek Przeglądu: { [vehicleId]: { otwarte, poTerminie } }
+export const licznikiZadan = (zadania, dzis = dzisIso()) => {
+  const m = {};
+  for (const z of zadania) {
+    if (z.status !== "otwarte") continue;
+    const l = m[z.vehicleId] || (m[z.vehicleId] = { otwarte: 0, poTerminie: 0 });
+    l.otwarte++;
+    if (czyPoTerminie(z, dzis)) l.poTerminie++;
+  }
+  return m;
+};
+
+// Chronologia auta: zdarzenia wszystkich zadań (także usuniętych) w jednej osi, najnowsze na górze.
+export const chronologiaZadan = (zadania) => zadania
+  .flatMap(z => (z.historia || []).map(h => ({ ...h, zadanieId: z.id, tytul: z.tytul })))
+  .sort((a, b) => (b.ts || "").localeCompare(a.ts || ""));
