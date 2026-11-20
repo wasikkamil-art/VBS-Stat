@@ -14,6 +14,7 @@ import { logLoginEvent } from "./utils/loginLog";
 // safeHref — sanityzacja URL (wydzielone 2026-04-29 #5c krok 6, 10 użyć)
 import { safeHref } from "./utils/safeHref";
 import { licznikiZadan, noweZadanie, opisZmian, wpisHistorii } from "./utils/zadaniaAuta";
+import { naJpgJesliHeic } from "./utils/heicNaJpg";
 import { tekstowy, zmieszaj, alfaZSufiksu } from "./utils/kolorTekstu";
 // ZlecenieUploadBtn — przycisk uploadu PDF zlecenia (wydzielone 2026-04-29 #5c krok 6)
 // Używane w 3 miejscach (FVTab, FrachtyTab, FrachtyModal). Nie lazy — używane stale.
@@ -1979,7 +1980,12 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
         if (!window.confirm(`Usunąć „${z.tytul}” z listy? Wpis zostanie w chronologii.`)) return Promise.resolve(false);
         return zmien(z, { status: "usuniete" }, wpisHistorii("usunieto", kto));
       },
-      wgraj: async (z, plik) => {
+      wgraj: async (z, oryginal) => {
+        // HEIC z iPhone'a → JPG, bo Chrome nie wyświetla HEIC (link pobierał plik zamiast go otworzyć).
+        // Gdy konwersja się nie uda, wgrywamy oryginał — lepszy plik do pobrania niż żaden.
+        let plik = oryginal;
+        try { plik = await naJpgJesliHeic(oryginal); }
+        catch (e) { console.warn("zadaniaAuta: konwersja HEIC nieudana, wgrywam oryginał", e); showToast(`⚠️ ${oryginal.name}: nie udało się zamienić na JPG — wgrywam oryginał`); }
         try {
           const ext = (plik.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "");
           const path = `vehicleDocs/${z.vehicleId}/zadanie_${uid()}.${ext}`;

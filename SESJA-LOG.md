@@ -8470,3 +8470,18 @@ licznik, odhaczenie, edycja nazwy, chronologia 4 zdarzeń, konsola bez błędów
 ❌ **Niesprawdzone**: produkcja po zalogowaniu — prawdziwy zapis do `zadaniaAuta`, wgranie pliku do Storage,
 wygląd dwóch przycisków na kafelku (w atrapie jest samo okno, nie kafelek), „Usuń” i cofnięcie odhaczenia, telefon.
 Otwarte: kierowca nie ma dostępu (świadomie); brak przypomnień o terminie poza kolorem przycisku.
+
+## 2026-11-20 cd.3 — „Do zrobienia na bazie”: duża tabela (wariant A) + zdjęcia HEIC
+
+User po teście na produkcji: zapis i zdjęcie działają, ale (1) zdjęcie się pobiera zamiast otwierać,
+(2) po odhaczeniu zadanie znika z widoku, (3) kto i kiedy dodał ma być widoczne od razu, nie w zakładkach —
+„jak tabelka w Excelu”. Pokazałem trzy układy (A tabela, B tabela + chronologia obok, C lista z historią) — wybrał **A**.
+- `ZadaniaAuta.jsx` przepisane: okno do 1180 px, tabela Zadanie / Termin / Dodał(a) / Zrobił(a) / Zdjęcia i dokumenty;
+  odhaczone zostają w tabeli (wyszarzone, na dole); zakładki usunięte; chronologia pod przyciskiem w nagłówku.
+- Przyczyna (1): plik `IMG_0765.HEIC` z iPhone'a (contentType `image/heic`) — Chrome nie wyświetla HEIC.
+  `src/utils/heicNaJpg.js`: HEIC → JPG przed wgraniem (heic2any 0.0.4 z cdnjs, ładowane na żądanie, przypięte SRI;
+  bez nowej zależności npm, bo `package-lock.json` ma niewyjaśnione zmiany). Zdjęcia otwierają się w podglądzie w oknie.
+✅ Atrapa: tabela, „po terminie”, odhaczenie zostaje w tabeli z „Zrobił(a)”, prawdziwy HEIC usera → `IMG_0765.jpg`
+→ podgląd pokazuje zdjęcie. ❌ Niesprawdzone na produkcji po zalogowaniu; telefon (tabela przewija się w poziomie).
+Uwaga: konwerter HEIC sypie w konsoli „Failed to load resource” (wnętrze biblioteki), wynik poprawny.
+Dwa próbne zadania „Zmiana opon” przy WGM 0475M mają stare pliki HEIC — te nadal się pobierają.
