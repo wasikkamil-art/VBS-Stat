@@ -8509,3 +8509,5 @@ pierwszy poranny w poniedziałek 23.11 o 7:00). Front na produkcji po zalogowani
 Uwagi: konta w `users` nie mają pola z imieniem → na liście odbiorców widać początek adresu e-mail.
 Dwa stare próbne zadania nie mają terminu ani odbiorców — maili nie dostaną; przy edycji aplikacja zażąda terminu i powodu.
 Sprostowanie do cd.3: błędy „Failed to load resource” w konsoli atrapy to był zatrzymany serwer podglądu, nie konwerter HEIC.
+
+- **cd.5:** konto `deoen` (zapasowy admin na wypadek zgubienia hasła — słowa usera) usunięte z listy „Powiadom e-mailem” i pomijane przy wysyłce (stała `KONTA_BEZ_POWIADOMIEN` we froncie i w `functions/lib/zadaniaAuta.js`; dokumentu w `users` nie ruszałem). Funkcje wdrożone ponownie.

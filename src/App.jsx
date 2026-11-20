@@ -13,7 +13,7 @@ import { logAction, logFleetWrite } from "./utils/logAction";
 import { logLoginEvent } from "./utils/loginLog";
 // safeHref — sanityzacja URL (wydzielone 2026-04-29 #5c krok 6, 10 użyć)
 import { safeHref } from "./utils/safeHref";
-import { licznikiZadan, noweZadanie, przygotujEdycje, wpisHistorii } from "./utils/zadaniaAuta";
+import { licznikiZadan, noweZadanie, przygotujEdycje, wpisHistorii, czyPowiadamiac } from "./utils/zadaniaAuta";
 import { naJpgJesliHeic } from "./utils/heicNaJpg";
 import { tekstowy, zmieszaj, alfaZSufiksu } from "./utils/kolorTekstu";
 // ZlecenieUploadBtn — przycisk uploadu PDF zlecenia (wydzielone 2026-04-29 #5c krok 6)
@@ -1945,7 +1945,7 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
     if (!canEdit) return;
     getDocs(collection(db, "users")).then(snap => {
       const m = new Map();
-      snap.docs.forEach(d => { const u = d.data(); const e = (u.email || "").trim().toLowerCase(); if (e && (u.role === "admin" || u.role === "dyspozytor")) m.set(e, { email: e, nazwa: u.name || u.displayName || e.split("@")[0] }); });
+      snap.docs.forEach(d => { const u = d.data(); const e = (u.email || "").trim().toLowerCase(); if (e && czyPowiadamiac(e) && (u.role === "admin" || u.role === "dyspozytor")) m.set(e, { email: e, nazwa: u.name || u.displayName || e.split("@")[0] }); });
       setBiuroOsoby([...m.values()].sort((a, b) => a.nazwa.localeCompare(b.nazwa)));
     }).catch(e => console.error("zadaniaAuta: lista osób", e));
   }, [canEdit]);

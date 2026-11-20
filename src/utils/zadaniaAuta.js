@@ -37,6 +37,12 @@ export const dzisIso = (d = new Date()) => {
 
 export const czyPoTerminie = (z, dzis = dzisIso()) => z.status === "otwarte" && !!z.termin && z.termin < dzis;
 
+// Konta, których NIE pokazujemy na liście „Powiadom e-mailem" i na które maile nie idą.
+// `deoen` = zapasowy admin na wypadek zgubienia hasła (user, 20.11.2026) — nikt tej skrzynki nie czyta.
+// Dopasowanie po części adresu przed „@". Ta sama lista jest w `functions/lib/zadaniaAuta.js`.
+export const KONTA_BEZ_POWIADOMIEN = ["deoen"];
+export const czyPowiadamiac = (email) => !KONTA_BEZ_POWIADOMIEN.includes(String(email || "").trim().toLowerCase().split("@")[0]);
+
 export const czystaLista = (emaile) => [...new Set((emaile || []).map(e => (e || "").trim().toLowerCase()).filter(Boolean))].sort();
 
 // Nowe zadanie gotowe do zapisu. Zwraca null, gdy nie ma tytułu albo terminu.

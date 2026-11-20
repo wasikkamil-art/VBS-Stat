@@ -20,9 +20,14 @@ function ileCzasu(termin, dzis) {
   return Math.abs(d) === 1 ? "PO TERMINIE 1 dzień" : `PO TERMINIE ${Math.abs(d)} dni`;
 }
 
-// Odbiorcy zadania ograniczeni do adresów biura (Set małymi literami).
+// Konta pomijane w powiadomieniach — `deoen` to zapasowy admin na wypadek zgubienia hasła (user, 20.11.2026).
+// Ta sama lista jest we froncie: `src/utils/zadaniaAuta.js` (KONTA_BEZ_POWIADOMIEN).
+const KONTA_BEZ_POWIADOMIEN = ["deoen"];
+const czyPowiadamiac = (email) => !KONTA_BEZ_POWIADOMIEN.includes(String(email || "").split("@")[0]);
+
+// Odbiorcy zadania ograniczeni do adresów biura (Set małymi literami), bez kont pomijanych.
 function odbiorcy(zadanie, biuro) {
-  return [...new Set((zadanie.powiadom || []).map(e => String(e || "").trim().toLowerCase()))].filter(e => e && biuro.has(e));
+  return [...new Set((zadanie.powiadom || []).map(e => String(e || "").trim().toLowerCase()))].filter(e => e && biuro.has(e) && czyPowiadamiac(e));
 }
 
 const ramka = (tytul, tresc) => `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111827;max-width:640px">
