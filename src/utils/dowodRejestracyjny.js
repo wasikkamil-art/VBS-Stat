@@ -79,3 +79,44 @@ export function porownajZDowodem(v, dane) {
     pola, opisDokumentu,
   };
 }
+
+// ── Pozostałe dokumenty pojazdu (kalibracja tachografu, polisa, UDT, CEMT…) ──
+// Zgłoszenie usera 23.11.2026: po wgraniu zaświadczenia z kalibracji tachografu aplikacja nie zaczytała
+// daty ani ważności — odczyt działał tylko dla dowodu. Tu AI czyta trzy rzeczy wspólne dla każdego
+// dokumentu: numer, datę wystawienia i termin ważności; trafiają do OPISU DOKUMENTU (nie do karty auta),
+// a dokument z datą ważności sam pojawia się w „Terminach” i w mailu z terminami.
+
+export const promptDokumentu = (rodzaj) => `To skan lub zdjęcie dokumentu pojazdu ciężarowego. Rodzaj wg użytkownika: „${rodzaj || "inny dokument"}”.
+Odpowiedz TYLKO w formacie JSON (bez markdown):
+{
+  "numer": "numer dokumentu (np. numer zaświadczenia, zlecenia, polisy, decyzji, certyfikatu) albo null",
+  "dataDokumentu": "data wystawienia / wykonania YYYY-MM-DD albo null",
+  "waznyDo": "termin ważności albo data następnej czynności YYYY-MM-DD albo null",
+  "rejestracja": "numer rejestracyjny pojazdu z dokumentu albo null",
+  "vin": "numer VIN z dokumentu albo null"
+}
+Wskazówki do pola waznyDo:
+- zaświadczenie z kalibracji / sprawdzenia tachografu: „Data nast. kalibracji” (Next calibration date); dataDokumentu = data kalibracji,
+- polisa OC/AC/GAP: koniec okresu ubezpieczenia,
+- decyzja lub protokół UDT: termin następnego badania,
+- certyfikat, zezwolenie, upoważnienie: data, do której jest ważne.
+Przepisuj DOKŁADNIE z dokumentu. Jeśli dokument nie podaje terminu ważności, zwróć null — NIE wyliczaj go samodzielnie.`;
+
+/** Zestawia odczyt z opisem dokumentu `d`. Ten sam kształt wyniku co `porownajZDowodem`. */
+export function porownajZDokumentem(v, d, dane) {
+  const x = dane || {};
+  const pola = [];
+  const dodaj = (klucz, etykieta, wartosc, pokaz = String) => {
+    if (!wartosc) return;
+    const jest = czysty(d?.[klucz]);
+    const stan = !jest ? "nowe" : jest.toLowerCase() === String(wartosc).toLowerCase() ? "zgodne" : "rozni";
+    pola.push({ klucz, etykieta, teraz: jest ? pokaz(jest) : "", zDowodu: pokaz(wartosc), wartosc, stan, domyslnie: stan === "nowe" });
+  };
+  dodaj("number", "Numer dokumentu", czysty(x.numer));
+  dodaj("issueDate", "Data dokumentu", data(x.dataDokumentu), fmtData);
+  dodaj("expiryDate", "Ważny do", data(x.waznyDo), fmtData);
+  const rej = czysty(x.rejestracja), vin = bezOdstepow(x.vin);
+  const rejOk = !rej || [v.plate, v.plate2].some(p => p && bezOdstepow(p) === bezOdstepow(rej));
+  const vinOk = !poprawnyVin(vin) || !v.vin || bezOdstepow(v.vin) === vin;
+  return { czyDowod: true, rejestracja: { zDowodu: rej || vin, zgodna: rejOk && vinOk }, pola, opisDokumentu: {} };
+}

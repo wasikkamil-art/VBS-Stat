@@ -8,7 +8,7 @@
 // wymagają migracji. Nowe są tylko: `leasing` (obiekt) i dokumenty pojazdu (`docs`).
 import { useCallback, useMemo, useRef, useState } from "react";
 import UruchomienieAuta from "./UruchomienieAuta";
-import { porownajZDowodem } from "../utils/dowodRejestracyjny";
+import { porownajZDowodem, porownajZDokumentem } from "../utils/dowodRejestracyjny";
 
 // Rodzaje dokumentów pojazdu. `oferta: true` = domyślnie proponowany do dołączenia do oferty.
 export const RODZAJE_DOKUMENTOW = [
@@ -444,8 +444,8 @@ function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, onOdczytaj,
                       <Ikona d={I.pobierz} /> Pobierz
                     </a>
                   : <span className="text-xs text-gray-500 px-2">bez pliku</span>}
-                {canEdit && onOdczytaj && d.kind === "dowod" && d.fileUrl && (
-                  <button type="button" onClick={() => onOdczytaj(d)} className="flex items-center gap-1 text-xs font-medium text-gray-800 px-2 py-1.5 rounded-lg hover:bg-gray-100" aria-label={`Odczytaj dane auta z dokumentu: ${d.label}`}>
+                {canEdit && onOdczytaj && d.fileUrl && /\.(pdf|jpe?g|png|webp)$/i.test(d.fileName || d.storagePath || "") && (
+                  <button type="button" onClick={() => onOdczytaj(d)} className="flex items-center gap-1 text-xs font-medium text-gray-800 px-2 py-1.5 rounded-lg hover:bg-gray-100" aria-label={`Odczytaj dane z dokumentu: ${d.label}`}>
                     <Ikona d={I.skan} /> Odczytaj dane
                   </button>
                 )}
@@ -487,7 +487,9 @@ function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, onOdczytaj,
               }} />
           </label>
           <p className="w-full text-xs text-gray-500">„Podgląd” pokazuje dokument z logo VBS (bez daty). „Pobierz” daje plik z logo i datą pobrania; jedno i drugie zapisuje się w dzienniku. Czysty oryginał zostaje w pamięci — do pobrania przez ołówek przy dokumencie.</p>
-          {rodzaj === "dowod" && <p className="w-full text-xs text-gray-500">Po wgraniu dowodu aplikacja odczyta z niego dane auta (VIN, przegląd, rok…) i pokaże je do zatwierdzenia.</p>}
+          <p className="w-full text-xs text-gray-500">{rodzaj === "dowod"
+            ? "Po wgraniu dowodu aplikacja odczyta z niego dane auta (VIN, przegląd, rok…) i pokaże je do zatwierdzenia."
+            : "Po wgraniu jednego pliku aplikacja odczyta numer, datę i termin ważności dokumentu i pokaże je do zatwierdzenia."}</p>
           {doOznaczenia.length > 0 && (
             <p className="w-full text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
               Bez znaku wodnego: {doOznaczenia.map(d => d.label).join(", ")}. Usuń taki dokument i wgraj go ponownie — znak nakłada się przy wgrywaniu.
@@ -504,7 +506,9 @@ function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, onOdczytaj,
  * `odczyt`: { doc, stan: "czytam" | "gotowe" | "blad", dane?, blad? }.
  */
 function OknoDanychZDowodu({ v, odczyt, onZapisz, onPonow, onClose }) {
-  const wynik = useMemo(() => (odczyt.stan === "gotowe" ? porownajZDowodem(v, odczyt.dane) : null), [v, odczyt]);
+  // Dowód rejestracyjny zasila KARTĘ AUTA; każdy inny dokument — własny opis (numer, data, ważność).
+  const zDowodu = odczyt.doc?.kind === "dowod";
+  const wynik = useMemo(() => (odczyt.stan !== "gotowe" ? null : zDowodu ? porownajZDowodem(v, odczyt.dane) : porownajZDokumentem(v, odczyt.doc, odczyt.dane)), [v, odczyt, zDowodu]);
   const [wybrane, setWybrane] = useState(null);
   const [zapis, setZapis] = useState(false);
   const zaznaczone = wybrane ?? new Set((wynik?.pola || []).filter(p => p.domyslnie).map(p => p.klucz));
@@ -514,23 +518,26 @@ function OknoDanychZDowodu({ v, odczyt, onZapisz, onPonow, onClose }) {
   const opis = Object.fromEntries(Object.entries(wynik?.opisDokumentu || {}).filter(([k]) => !odczyt.doc?.[k]));
   const zapisz = async () => {
     setZapis(true);
-    const ok = await onZapisz(Object.fromEntries(doZapisu.map(p => [p.klucz, p.wartosc])), opis);
+    const wybranePola = Object.fromEntries(doZapisu.map(p => [p.klucz, p.wartosc]));
+    const ok = zDowodu ? await onZapisz(wybranePola, opis) : await onZapisz({}, wybranePola);
     setZapis(false);
     if (ok !== false) onClose();
   };
-  const STAN = { nowe: ["#dcfce7", "#166534", "puste w karcie"], zgodne: ["#f3f4f6", "#374151", "zgodne"], rozni: ["#fef3c7", "#92400e", "inna wartość w karcie"] };
+  const gdzie = zDowodu ? "w karcie" : "przy dokumencie";
+  const STAN = { nowe: ["#dcfce7", "#166534", `puste ${gdzie}`], zgodne: ["#f3f4f6", "#374151", "zgodne"], rozni: ["#fef3c7", "#92400e", `inna wartość ${gdzie}`] };
+  const tytul = zDowodu ? `Dane z dowodu rejestracyjnego — ${v.plate}` : `Dane z dokumentu — ${odczyt.doc?.label || ""}`;
   return (
     <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center p-0 sm:p-4" style={{ background: "rgba(0,0,0,0.35)" }}>
-      <div role="dialog" aria-label="Dane z dowodu rejestracyjnego" className="w-full sm:max-w-2xl bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col" style={{ maxHeight: "90vh" }}>
+      <div role="dialog" aria-label={tytul} className="w-full sm:max-w-2xl bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col" style={{ maxHeight: "90vh" }}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <h3 className="text-base font-bold text-gray-900">Dane z dowodu rejestracyjnego — {v.plate}</h3>
+          <h3 className="text-base font-bold text-gray-900 min-w-0 truncate">{tytul}</h3>
           <button type="button" onClick={onClose} aria-label="Zamknij" className="w-8 h-8 rounded-lg bg-gray-100 text-gray-600 text-sm">✕</button>
         </div>
         <div className="p-5 overflow-y-auto">
-          {odczyt.stan === "czytam" && <p className="text-sm text-gray-700" role="status">Czytam dowód… to trwa kilkanaście sekund.</p>}
+          {odczyt.stan === "czytam" && <p className="text-sm text-gray-700" role="status">Czytam dokument… to trwa kilkanaście sekund.</p>}
           {odczyt.stan === "blad" && (
             <div className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-              Nie udało się odczytać dowodu: {odczyt.blad}. Plik jest wgrany — dane możesz wpisać ręcznie przez „Edytuj”.
+              Nie udało się odczytać dokumentu: {odczyt.blad}. Plik jest wgrany — dane możesz wpisać ręcznie (ołówek przy dokumencie).
             </div>
           )}
           {wynik && !wynik.czyDowod && (
@@ -538,12 +545,12 @@ function OknoDanychZDowodu({ v, odczyt, onZapisz, onPonow, onClose }) {
           )}
           {wynik && !wynik.rejestracja.zgodna && (
             <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">
-              Uwaga: dowód jest wystawiony na <b>{wynik.rejestracja.zDowodu}</b>, a to karta auta <b>{v.plate}</b>. Sprawdź, czy to dokument tego pojazdu, zanim cokolwiek zapiszesz.
+              Uwaga: dokument jest wystawiony na <b>{wynik.rejestracja.zDowodu}</b>, a to karta auta <b>{v.plate}</b>. Sprawdź, czy to dokument tego pojazdu, zanim cokolwiek zapiszesz.
             </p>
           )}
-          {wynik && (wynik.pola.length === 0 ? <p className="text-sm text-gray-600">Nie odczytałem z tego pliku żadnych danych do karty auta.</p> : (
+          {wynik && (wynik.pola.length === 0 ? <p className="text-sm text-gray-600">{zDowodu ? "Nie odczytałem z tego pliku żadnych danych do karty auta." : "Nie znalazłem w tym pliku numeru, daty ani terminu ważności."}</p> : (
             <>
-              <p className="text-xs text-gray-600 mb-2">Zaznacz, co zapisać w karcie auta. Nic nie zapisuje się samo; pola, które mają już inną wartość, są odznaczone.</p>
+              <p className="text-xs text-gray-600 mb-2">Zaznacz, co zapisać {zDowodu ? "w karcie auta" : "przy dokumencie"}. Nic nie zapisuje się samo; pola, które mają już inną wartość, są odznaczone.{!zDowodu && " Dokument z datą ważności pojawi się w „Terminach” i w mailu z terminami."}</p>
               <ul className="divide-y divide-gray-100 rounded-xl border border-gray-100">
                 {wynik.pola.map(p => {
                   const [tlo, kolor, tekst] = STAN[p.stan];
@@ -554,7 +561,7 @@ function OknoDanychZDowodu({ v, odczyt, onZapisz, onPonow, onClose }) {
                         <span className="flex-1 min-w-0">
                           <span className="block text-xs text-gray-500">{p.etykieta}</span>
                           <span className="block text-sm font-medium text-gray-900 break-words">{p.zDowodu}</span>
-                          {p.stan === "rozni" && <span className="block text-xs text-gray-600">w karcie teraz: {p.teraz}</span>}
+                          {p.stan === "rozni" && <span className="block text-xs text-gray-600">{gdzie} teraz: {p.teraz}</span>}
                         </span>
                         <span className="text-xs font-medium px-2 py-0.5 rounded-md whitespace-nowrap" style={{ background: tlo, color: kolor }}>{tekst}</span>
                       </label>
@@ -573,7 +580,7 @@ function OknoDanychZDowodu({ v, odczyt, onZapisz, onPonow, onClose }) {
           <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium text-gray-700 bg-gray-100">{wynik ? "Nie zapisuj" : "Zamknij"}</button>
           {wynik && (doZapisu.length > 0 || Object.keys(opis).length > 0) && (
             <button type="button" onClick={zapisz} disabled={zapis} className="px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-60" style={{ background: "#111827" }}>
-              {zapis ? "Zapisuję…" : doZapisu.length ? `Zapisz w karcie (${doZapisu.length})` : "Zapisz opis dokumentu"}
+              {zapis ? "Zapisuję…" : !doZapisu.length ? "Zapisz opis dokumentu" : zDowodu ? `Zapisz w karcie (${doZapisu.length})` : `Zapisz przy dokumencie (${doZapisu.length})`}
             </button>
           )}
         </div>
@@ -613,7 +620,7 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
   const mozeCzytacDowod = canEdit && onOdczytajDowod && onZapiszZDowodu && !v.archived;
   const czytajDowod = async (d) => {
     setOdczyt({ doc: d, stan: "czytam" });
-    try { const dane = await onOdczytajDowod(d); setOdczyt(o => (o?.doc.id === d.id ? { doc: d, stan: "gotowe", dane } : o)); }
+    try { const dane = await onOdczytajDowod({ ...d, rodzajOpis: RODZAJ[d.kind]?.label || "" }); setOdczyt(o => (o?.doc.id === d.id ? { doc: d, stan: "gotowe", dane } : o)); }
     catch (e) { console.error("odczyt dowodu", e); setOdczyt(o => (o?.doc.id === d.id ? { doc: d, stan: "blad", blad: e?.message || String(e) } : o)); }
   };
   const [uruchom, setUruchom] = useState(false);
@@ -718,8 +725,11 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
         <ListaDokumentow docs={docs} canEdit={canEdit} safeHref={safeHref}
           onDodaj={onDodajDokumenty ? async (pliki, meta) => {
             const wgrane = await onDodajDokumenty(v, pliki, meta);
-            const dowod = (wgrane || []).find(d => d.kind === "dowod" && d.fileUrl);
-            if (dowod && mozeCzytacDowod) czytajDowod(dowod);
+            // Po wgraniu od razu czytamy dane: dowód zawsze, inny dokument — gdy wgrano jeden plik
+            // (przy kilku naraz okna wyskakiwałyby jedno po drugim; zostaje przycisk „Odczytaj dane”).
+            const czytelne = (wgrane || []).filter(d => d.fileUrl && /\.(pdf|jpe?g|png|webp)$/i.test(d.fileName || ""));
+            const doOdczytu = czytelne.find(d => d.kind === "dowod") || (czytelne.length === 1 ? czytelne[0] : null);
+            if (doOdczytu && mozeCzytacDowod) czytajDowod(doOdczytu);
           } : null}
           onOdczytaj={mozeCzytacDowod ? czytajDowod : null} onOryginal={canEdit ? onPobierzOryginal : null} onPobierz={onPobierzDokument} onPodglad={onPodgladDokumentu}
           onUsun={onUsunDokument} onEdytuj={onEdytujDokument} />

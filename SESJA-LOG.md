@@ -8657,3 +8657,19 @@ Safari/iPhone (pamięć canvasa przy dużym skanie).
     + auditLog) oraz pole w „Edytuj” (wcześniej formularz edycji nie miał tego pola w ogóle).
   ✅ Atrapa: nagłówek, fakty, ustawienie daty. Lint 0 błędów, build zielony. ❌ Niesprawdzone po zalogowaniu (zapis daty,
   nowe pole w „Edytuj”), telefon.
+
+- **cd.9 — odczyt danych z KAŻDEGO dokumentu, nie tylko dowodu.** Zgłoszenie usera: „wgrałem ZAŚWIADCZENIE Z KALIBRACJI
+  TACHOGRAFU CYFROWEGO do WGM 7651V i nie zaczytało z niej danych, czyli daty oraz ważności”. To nie był błąd — odczyt istniał
+  tylko dla dowodu rejestracyjnego; teraz jest dla wszystkich PDF-ów i zdjęć.
+  - `promptDokumentu(rodzaj)` + `porownajZDokumentem` w `src/utils/dowodRejestracyjny.js`: AI czyta **numer, datę dokumentu,
+    termin ważności** (+ rejestrację/VIN do sprawdzenia, czy to dokument tego auta). Wynik trafia do OPISU DOKUMENTU
+    (`number`, `issueDate`, `expiryDate`), nie do karty auta; dokument z datą ważności sam wchodzi do „Terminów” i maila.
+    Terminu AI nie wylicza — gdy dokument go nie podaje, pole zostaje puste.
+  - Przycisk „Odczytaj dane” przy każdym pliku PDF/zdjęciu; automatycznie po wgraniu, gdy wgrano jeden plik (dowód — zawsze).
+    To samo okno zatwierdzania co przy dowodzie (pola z inną wartością odznaczone, ostrzeżenie przy innej rejestracji/VIN).
+  - Świadomie NIE ruszone: `tachoStart`/`tachoCardStart` w karcie auta („tacho to świętość”) ani pola polis/UDT w karcie —
+    odczyt uzupełnia tylko opis dokumentu.
+  ✅ Prawdziwy odczyt AI na zaświadczeniu usera (czysty oryginał, ten sam model, klucz z `.env.local`): numer ZTA/00986/26,
+  data 13.10.2026, ważny do 13.10.2028, auto zgodne — wszystko poprawnie. Atrapa: okno, stany pól, ostrzeżenie o innym aucie.
+  Lint 0 błędów, build zielony. ❌ Niesprawdzone po zalogowaniu (tam AI czyta kopię ze znakiem wodnym, nie czysty oryginał);
+  inne rodzaje dokumentów (polisa, UDT, CEMT) — prompt ma wskazówki, ale testu na prawdziwych plikach nie było.

@@ -16,7 +16,7 @@ import { safeHref } from "./utils/safeHref";
 import { licznikiZadan, noweZadanie, przygotujEdycje, wpisHistorii, czyPowiadamiac } from "./utils/zadaniaAuta";
 import { naJpgJesliHeic } from "./utils/heicNaJpg";
 import { zmniejszPdf, czyPdf, fmtMB, LIMIT_PLIKU } from "./utils/zmniejszPdf";
-import { PROMPT_DOWOD } from "./utils/dowodRejestracyjny";
+import { PROMPT_DOWOD, promptDokumentu } from "./utils/dowodRejestracyjny";
 import { nalozZnakWodny, tekstZnaku, czyDaSieOznaczyc } from "./utils/znakWodny";
 import { tekstowy, zmieszaj, alfaZSufiksu } from "./utils/kolorTekstu";
 // ZlecenieUploadBtn — przycisk uploadu PDF zlecenia (wydzielone 2026-04-29 #5c krok 6)
@@ -1914,7 +1914,8 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
       model: "claude-sonnet-4-6", max_tokens: 700,
       messages: [{ role: "user", content: [
         { type: czyDokument ? "document" : "image", source: { type: "url", url: d.fileUrl } },
-        { type: "text", text: PROMPT_DOWOD },
+        // Dowód ma własny, szczegółowy odczyt (dane auta); każdy inny dokument — numer, datę i ważność.
+        { type: "text", text: d.kind === "dowod" ? PROMPT_DOWOD : promptDokumentu(d.rodzajOpis || d.kind) },
       ] }],
     });
     if (!resp.ok) throw new Error(`skaner AI odpowiedział błędem ${resp.status}`);
@@ -1933,7 +1934,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
       if (d?.id && opisDokumentu && Object.keys(opisDokumentu).length) {
         await updateDoc(doc(db, "vehicleDocs", d.id), { ...opisDokumentu, updatedAt: new Date().toISOString(), updatedBy: user?.email || "" });
       }
-      showToast(Object.keys(patch).length ? `✅ Zapisano w karcie ${v.plate}: ${Object.keys(patch).length} pól z dowodu` : "✅ Opis dowodu uzupełniony");
+      showToast(Object.keys(patch).length ? `✅ Zapisano w karcie ${v.plate}: ${Object.keys(patch).length} pól z dowodu` : "✅ Opis dokumentu uzupełniony");
       return true;
     } catch (e) {
       console.error("zapiszDaneZDowodu", e);
