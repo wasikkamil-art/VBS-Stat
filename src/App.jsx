@@ -15,6 +15,8 @@ import { logLoginEvent } from "./utils/loginLog";
 import { safeHref } from "./utils/safeHref";
 import { licznikiZadan, noweZadanie, przygotujEdycje, wpisHistorii, czyPowiadamiac } from "./utils/zadaniaAuta";
 import { naJpgJesliHeic } from "./utils/heicNaJpg";
+import { zmniejszPdf, czyPdf, fmtMB, LIMIT_PLIKU } from "./utils/zmniejszPdf";
+import { PROMPT_DOWOD } from "./utils/dowodRejestracyjny";
 import { tekstowy, zmieszaj, alfaZSufiksu } from "./utils/kolorTekstu";
 // ZlecenieUploadBtn — przycisk uploadu PDF zlecenia (wydzielone 2026-04-29 #5c krok 6)
 // Używane w 3 miejscach (FVTab, FrachtyTab, FrachtyModal). Nie lazy — używane stale.
@@ -1838,30 +1840,84 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     return () => unsub();
   }, [canEdit]);
 
+  // Plik przed wgraniem: HEIC z iPhone'a → JPG (Chrome nie wyświetla HEIC), a PDF ponad limit Storage
+  // (25 MB) → lżejszy skan. Bez tego ciężki skan dowodu kończył się odmową „storage/unauthorized”.
+  const przygotujPlikPojazdu = async (oryginal) => {
+    let plik = oryginal;
+    try { plik = await naJpgJesliHeic(oryginal); }
+    catch (e) { console.warn("vehicleDocs: konwersja HEIC nieudana, wgrywam oryginał", e); }
+    if (plik.size > LIMIT_PLIKU && czyPdf(plik)) {
+      showToast(`⏳ „${plik.name}” ma ${fmtMB(plik.size)} — zmniejszam skan przed wgraniem…`);
+      try { plik = await zmniejszPdf(plik); }
+      catch (e) { console.error("vehicleDocs: zmniejszanie PDF", e); throw new Error(`plik ma ${fmtMB(oryginal.size)}, a limit to 25 MB — nie udało się go zmniejszyć (${e?.message || e})`); }
+    }
+    if (plik.size > LIMIT_PLIKU) throw new Error(`plik ma ${fmtMB(plik.size)}, a limit to 25 MB — zeskanuj w niższej rozdzielczości lub jako JPG`);
+    return plik;
+  };
+  // Zwraca listę wgranych dokumentów (panel po dowodzie rejestracyjnym od razu czyta z niego dane).
   const addVehicleDocs = async (v, pliki, meta) => {
-    let ok = 0;
-    for (const plik of pliki) {
+    const wgrane = [];
+    for (const oryginal of pliki) {
       try {
+        const plik = await przygotujPlikPojazdu(oryginal);
         const id = uid();
         const ext = (plik.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "");
         const storagePath = `vehicleDocs/${v.id}/${id}.${ext}`;
         const r = storageRef(storage, storagePath);
         await uploadBytes(r, plik, { contentType: plik.type || undefined });
         const fileUrl = await getDownloadURL(r);
-        await setDoc(doc(db, "vehicleDocs", id), {
+        const wpis = {
           vehicleId: v.id, kind: meta.kind || "inne",
-          label: (pliki.length === 1 && meta.label) ? meta.label : plik.name.replace(/\.[^.]+$/, ""),
+          label: (pliki.length === 1 && meta.label) ? meta.label : oryginal.name.replace(/\.[^.]+$/, ""),
           expiryDate: meta.expiryDate || "", issueDate: "", number: "", notes: "",
           fileUrl, storagePath, fileName: plik.name, fileType: plik.type || "",
           uploadedAt: new Date().toISOString(), uploadedBy: user?.email || "",
-        });
-        ok++;
+        };
+        await setDoc(doc(db, "vehicleDocs", id), wpis);
+        wgrane.push({ id, ...wpis });
+        if (plik.size < oryginal.size && czyPdf(plik)) showToast(`„${oryginal.name}”: zmniejszono z ${fmtMB(oryginal.size)} do ${fmtMB(plik.size)}`);
       } catch (e) {
         console.error("addVehicleDocs", e);
-        showToast(`⚠️ Nie wgrano „${plik.name}”: ${e?.message || e}`);
+        showToast(`⚠️ Nie wgrano „${oryginal.name}”: ${e?.message || e}`);
       }
     }
-    if (ok) { logAction("add", "vehicleDocs", { vehicleId: v.id, plate: v.plate, kind: meta.kind, count: ok }); showToast(`✅ Wgrano dokumentów: ${ok}`); }
+    if (wgrane.length) { logAction("add", "vehicleDocs", { vehicleId: v.id, plate: v.plate, kind: meta.kind, count: wgrane.length }); showToast(`✅ Wgrano dokumentów: ${wgrane.length}`); }
+    return wgrane;
+  };
+  // AI czyta dowód rejestracyjny. Plik idzie URL-em ze Storage (limit body funkcji Vercela).
+  // Niczego nie zapisuje — wynik trafia do okna, w którym user zatwierdza pole po polu.
+  const odczytajDowod = async (d) => {
+    const czyDokument = /pdf/i.test(d.fileType || "") || /\.pdf$/i.test(d.fileName || d.storagePath || "");
+    const resp = await callClaude({
+      model: "claude-sonnet-4-6", max_tokens: 700,
+      messages: [{ role: "user", content: [
+        { type: czyDokument ? "document" : "image", source: { type: "url", url: d.fileUrl } },
+        { type: "text", text: PROMPT_DOWOD },
+      ] }],
+    });
+    if (!resp.ok) throw new Error(`skaner AI odpowiedział błędem ${resp.status}`);
+    const data = await resp.json();
+    const text = data.content?.find(b => b.type === "text")?.text || "";
+    return JSON.parse(text.replace(/```json|```/g, "").trim());
+  };
+  // Zapis pól ZATWIERDZONYCH w oknie: `patch` to tylko zaznaczone pola karty auta,
+  // `opisDokumentu` uzupełnia numer i datę wydania przy samym dowodzie.
+  const zapiszDaneZDowodu = async (v, patch, d, opisDokumentu) => {
+    try {
+      if (Object.keys(patch).length) {
+        await dbUpdateVehicleField(v.id, patch);
+        logAction("update", "vehicles", { id: v.id, plate: v.plate, action: "dane-z-dowodu", pola: Object.keys(patch).join(", ") });
+      }
+      if (d?.id && opisDokumentu && Object.keys(opisDokumentu).length) {
+        await updateDoc(doc(db, "vehicleDocs", d.id), { ...opisDokumentu, updatedAt: new Date().toISOString(), updatedBy: user?.email || "" });
+      }
+      showToast(Object.keys(patch).length ? `✅ Zapisano w karcie ${v.plate}: ${Object.keys(patch).length} pól z dowodu` : "✅ Opis dowodu uzupełniony");
+      return true;
+    } catch (e) {
+      console.error("zapiszDaneZDowodu", e);
+      showToast(`⚠️ Nie zapisano: ${e?.message || e}`);
+      return false;
+    }
   };
   const updateVehicleDocMeta = async (d, zmiany) => {
     try {
@@ -4073,6 +4129,7 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
                   }
                 }}
                 onDodajDokumenty={addVehicleDocs} onUsunDokument={deleteVehicleDoc}
+                onOdczytajDowod={odczytajDowod} onZapiszZDowodu={zapiszDaneZDowodu}
                 onEdytujDokument={updateVehicleDocMeta} onZapiszLeasing={saveVehicleLeasing}
                 uruchomienie={uruchomienieApi}
               />

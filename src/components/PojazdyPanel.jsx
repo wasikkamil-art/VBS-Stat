@@ -8,6 +8,7 @@
 // wymagają migracji. Nowe są tylko: `leasing` (obiekt) i dokumenty pojazdu (`docs`).
 import { useCallback, useMemo, useRef, useState } from "react";
 import UruchomienieAuta from "./UruchomienieAuta";
+import { porownajZDowodem } from "../utils/dowodRejestracyjny";
 
 // Rodzaje dokumentów pojazdu. `oferta: true` = domyślnie proponowany do dołączenia do oferty.
 export const RODZAJE_DOKUMENTOW = [
@@ -31,6 +32,9 @@ export const RODZAJE_DOKUMENTOW = [
 ];
 const RODZAJ = Object.fromEntries(RODZAJE_DOKUMENTOW.map(r => [r.id, r]));
 const GRUPY = [...new Set(RODZAJE_DOKUMENTOW.map(r => r.grupa))];
+// Kolejność na liście = kolejność rodzajów powyżej: dowód rejestracyjny (główny dokument auta) zawsze pierwszy.
+const KOLEJNOSC = Object.fromEntries(RODZAJE_DOKUMENTOW.map((r, i) => [r.id, i]));
+const wKolejnosci = (lista) => [...lista].sort((a, b) => (KOLEJNOSC[a.kind] ?? 99) - (KOLEJNOSC[b.kind] ?? 99));
 
 const WYPOSAZENIE = {
   paleciak: "Paleciak", winda: "Winda załadunkowa", pasy: "Pasy mocujące", gasnica: "Gaśnica",
@@ -96,6 +100,7 @@ const I = {
   olowek: <><path d="M4 20h4L19 9l-4-4L4 16z" /><path d="m13 7 4 4" /></>,
   plus: <><path d="M12 5v14" /><path d="M5 12h14" /></>,
   kosz: <><path d="M4 7h16" /><path d="M9 7V4h6v3" /><path d="M6 7l1 13h10l1-13" /></>,
+  skan: <><path d="M4 8V6a2 2 0 0 1 2-2h2" /><path d="M16 4h2a2 2 0 0 1 2 2v2" /><path d="M20 16v2a2 2 0 0 1-2 2h-2" /><path d="M8 20H6a2 2 0 0 1-2-2v-2" /><path d="M7 12h10" /></>,
 };
 
 function Sekcja({ tytul, licznik, domyslnieOtwarta = false, children, akcja }) {
@@ -316,12 +321,13 @@ function EdycjaLeasingu({ leasing, onZapisz, onAnuluj, onUsun, showToast }) {
   );
 }
 
-function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, safeHref }) {
+function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, onOdczytaj, safeHref }) {
   const [edytowany, setEdytowany] = useState(null);
+  const [wgrywam, setWgrywam] = useState(false);
   const [rodzaj, setRodzaj] = useState("dowod");
   const [waznyDo, setWaznyDo] = useState("");
   const [opis, setOpis] = useState("");
-  const wGrupach = GRUPY.map(g => [g, docs.filter(d => (RODZAJ[d.kind]?.grupa || "Inne") === g)]).filter(([, l]) => l.length);
+  const wGrupach = GRUPY.map(g => [g, wKolejnosci(docs.filter(d => (RODZAJ[d.kind]?.grupa || "Inne") === g))]).filter(([, l]) => l.length);
   return (
     <div>
       {docs.length === 0 && <p className="text-sm text-gray-500 mb-3">Brak dokumentów przy tym aucie.</p>}
@@ -334,7 +340,10 @@ function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, safeHref })
                 <div className="flex items-center gap-3 px-3 py-2">
                 <span className="text-gray-400 flex-shrink-0"><Ikona d={I.plik} /></span>
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm text-gray-900 truncate">{d.label}</div>
+                  <div className="text-sm text-gray-900 truncate">
+                    {d.label}
+                    {d.kind === "dowod" && <span className="ml-2 text-xs font-medium px-1.5 py-0.5 rounded-md align-middle" style={{ background: "#dbeafe", color: "#1e40af" }}>główny dokument</span>}
+                  </div>
                   <div className="text-xs text-gray-500 truncate">
                     {[d.number && `nr ${d.number}`, d.issueDate && `z ${fmtData(d.issueDate)}`, d.expiryDate && `ważne do ${fmtData(d.expiryDate)}`, d.notes].filter(Boolean).join(" · ") || RODZAJ[d.kind]?.label}
                   </div>
@@ -345,6 +354,11 @@ function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, safeHref })
                       <Ikona d={I.pobierz} /> Pobierz
                     </a>
                   : <span className="text-xs text-gray-500 px-2">bez pliku</span>}
+                {canEdit && onOdczytaj && d.kind === "dowod" && d.fileUrl && (
+                  <button type="button" onClick={() => onOdczytaj(d)} className="flex items-center gap-1 text-xs font-medium text-gray-800 px-2 py-1.5 rounded-lg hover:bg-gray-100" aria-label={`Odczytaj dane auta z dokumentu: ${d.label}`}>
+                    <Ikona d={I.skan} /> Odczytaj dane
+                  </button>
+                )}
                 {canEdit && onEdytuj && (
                   <button type="button" onClick={() => setEdytowany(e => e === d.id ? null : d.id)} aria-label={`Edytuj opis: ${d.label}`} aria-pressed={edytowany === d.id} className="text-gray-400 hover:text-gray-900 p-1.5"><Ikona d={I.olowek} /></button>
                 )}
@@ -371,13 +385,103 @@ function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, safeHref })
           <label className="text-xs text-gray-600 flex-1" style={{ minWidth: 160 }}>Opis (opcjonalnie)
             <input type="text" value={opis} onChange={e => setOpis(e.target.value)} placeholder="domyślnie nazwa pliku" className="block w-full mt-1 px-3 py-2 rounded-lg text-sm bg-gray-50 border border-gray-200" />
           </label>
-          <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-white cursor-pointer" style={{ background: "#111827" }}>
-            <Ikona d={I.plus} /> Dodaj pliki
-            <input type="file" multiple className="sr-only" accept=".pdf,image/*,.csv,.xlsx"
-              onChange={e => { const pliki = [...e.target.files]; if (pliki.length) onDodaj(pliki, { kind: rodzaj, expiryDate: waznyDo, label: opis.trim() }); e.target.value = ""; setWaznyDo(""); setOpis(""); }} />
+          <label className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-white ${wgrywam ? "opacity-60 cursor-wait" : "cursor-pointer"}`} style={{ background: "#111827" }}>
+            <Ikona d={I.plus} /> {wgrywam ? "Wgrywam…" : "Dodaj pliki"}
+            <input type="file" multiple className="sr-only" accept=".pdf,image/*,.heic,.heif,.csv,.xlsx" disabled={wgrywam}
+              onChange={async (e) => {
+                const pliki = [...e.target.files]; e.target.value = "";
+                if (!pliki.length) return;
+                setWgrywam(true);
+                try { await onDodaj(pliki, { kind: rodzaj, expiryDate: waznyDo, label: opis.trim() }); }
+                finally { setWgrywam(false); setWaznyDo(""); setOpis(""); }
+              }} />
           </label>
+          {rodzaj === "dowod" && <p className="w-full text-xs text-gray-500">Po wgraniu dowodu aplikacja odczyta z niego dane auta (VIN, przegląd, rok…) i pokaże je do zatwierdzenia.</p>}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Dane auta odczytane z dowodu rejestracyjnego — do zatwierdzenia pole po polu.
+ * `odczyt`: { doc, stan: "czytam" | "gotowe" | "blad", dane?, blad? }.
+ */
+function OknoDanychZDowodu({ v, odczyt, onZapisz, onPonow, onClose }) {
+  const wynik = useMemo(() => (odczyt.stan === "gotowe" ? porownajZDowodem(v, odczyt.dane) : null), [v, odczyt]);
+  const [wybrane, setWybrane] = useState(null);
+  const [zapis, setZapis] = useState(false);
+  const zaznaczone = wybrane ?? new Set((wynik?.pola || []).filter(p => p.domyslnie).map(p => p.klucz));
+  const przelacz = (k) => { const n = new Set(zaznaczone); if (n.has(k)) n.delete(k); else n.add(k); setWybrane(n); };
+  const doZapisu = (wynik?.pola || []).filter(p => p.stan !== "zgodne" && zaznaczone.has(p.klucz));
+  // Opis dokumentu uzupełniamy tylko tam, gdzie jest pusty — ręcznego wpisu nie ruszamy.
+  const opis = Object.fromEntries(Object.entries(wynik?.opisDokumentu || {}).filter(([k]) => !odczyt.doc?.[k]));
+  const zapisz = async () => {
+    setZapis(true);
+    const ok = await onZapisz(Object.fromEntries(doZapisu.map(p => [p.klucz, p.wartosc])), opis);
+    setZapis(false);
+    if (ok !== false) onClose();
+  };
+  const STAN = { nowe: ["#dcfce7", "#166534", "puste w karcie"], zgodne: ["#f3f4f6", "#374151", "zgodne"], rozni: ["#fef3c7", "#92400e", "inna wartość w karcie"] };
+  return (
+    <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center p-0 sm:p-4" style={{ background: "rgba(0,0,0,0.35)" }}>
+      <div role="dialog" aria-label="Dane z dowodu rejestracyjnego" className="w-full sm:max-w-2xl bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col" style={{ maxHeight: "90vh" }}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <h3 className="text-base font-bold text-gray-900">Dane z dowodu rejestracyjnego — {v.plate}</h3>
+          <button type="button" onClick={onClose} aria-label="Zamknij" className="w-8 h-8 rounded-lg bg-gray-100 text-gray-600 text-sm">✕</button>
+        </div>
+        <div className="p-5 overflow-y-auto">
+          {odczyt.stan === "czytam" && <p className="text-sm text-gray-700" role="status">Czytam dowód… to trwa kilkanaście sekund.</p>}
+          {odczyt.stan === "blad" && (
+            <div className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              Nie udało się odczytać dowodu: {odczyt.blad}. Plik jest wgrany — dane możesz wpisać ręcznie przez „Edytuj”.
+            </div>
+          )}
+          {wynik && !wynik.czyDowod && (
+            <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">Ten plik nie wygląda na dowód rejestracyjny — sprawdź, czy wgrałeś właściwy dokument.</p>
+          )}
+          {wynik && !wynik.rejestracja.zgodna && (
+            <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">
+              Uwaga: dowód jest wystawiony na <b>{wynik.rejestracja.zDowodu}</b>, a to karta auta <b>{v.plate}</b>. Sprawdź, czy to dokument tego pojazdu, zanim cokolwiek zapiszesz.
+            </p>
+          )}
+          {wynik && (wynik.pola.length === 0 ? <p className="text-sm text-gray-600">Nie odczytałem z tego pliku żadnych danych do karty auta.</p> : (
+            <>
+              <p className="text-xs text-gray-600 mb-2">Zaznacz, co zapisać w karcie auta. Nic nie zapisuje się samo; pola, które mają już inną wartość, są odznaczone.</p>
+              <ul className="divide-y divide-gray-100 rounded-xl border border-gray-100">
+                {wynik.pola.map(p => {
+                  const [tlo, kolor, tekst] = STAN[p.stan];
+                  return (
+                    <li key={p.klucz}>
+                      <label className={`flex items-start gap-3 px-3 py-2.5 ${p.stan === "zgodne" ? "" : "cursor-pointer"}`}>
+                        <input type="checkbox" className="mt-1" disabled={p.stan === "zgodne"} checked={p.stan !== "zgodne" && zaznaczone.has(p.klucz)} onChange={() => przelacz(p.klucz)} aria-label={`Zapisz: ${p.etykieta}`} />
+                        <span className="flex-1 min-w-0">
+                          <span className="block text-xs text-gray-500">{p.etykieta}</span>
+                          <span className="block text-sm font-medium text-gray-900 break-words">{p.zDowodu}</span>
+                          {p.stan === "rozni" && <span className="block text-xs text-gray-600">w karcie teraz: {p.teraz}</span>}
+                        </span>
+                        <span className="text-xs font-medium px-2 py-0.5 rounded-md whitespace-nowrap" style={{ background: tlo, color: kolor }}>{tekst}</span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+              {Object.keys(opis).length > 0 && (
+                <p className="text-xs text-gray-600 mt-3">Przy dokumencie zapiszę też: {[opis.number && `nr ${opis.number}`, opis.issueDate && `wydany ${fmtData(opis.issueDate)}`, opis.notes].filter(Boolean).join(" · ")}.</p>
+              )}
+            </>
+          ))}
+        </div>
+        <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-100">
+          {odczyt.stan === "blad" && <button type="button" onClick={onPonow} className="px-4 py-2 rounded-lg text-sm font-medium text-gray-800 bg-gray-100 mr-auto">Spróbuj ponownie</button>}
+          <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium text-gray-700 bg-gray-100">{wynik ? "Nie zapisuj" : "Zamknij"}</button>
+          {wynik && (doZapisu.length > 0 || Object.keys(opis).length > 0) && (
+            <button type="button" onClick={zapisz} disabled={zapis} className="px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-60" style={{ background: "#111827" }}>
+              {zapis ? "Zapisuję…" : doZapisu.length ? `Zapisz w karcie (${doZapisu.length})` : "Zapisz opis dokumentu"}
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -407,8 +511,15 @@ function Harmonogram({ leasing, dzis }) {
   );
 }
 
-function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, uruchomienie, onBrudne, showToast, safeHref }) {
+function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, uruchomienie, onBrudne, showToast, safeHref }) {
   const [oferta, setOferta] = useState(false);
+  const [odczyt, setOdczyt] = useState(null);
+  const mozeCzytacDowod = canEdit && onOdczytajDowod && onZapiszZDowodu && !v.archived;
+  const czytajDowod = async (d) => {
+    setOdczyt({ doc: d, stan: "czytam" });
+    try { const dane = await onOdczytajDowod(d); setOdczyt(o => (o?.doc.id === d.id ? { doc: d, stan: "gotowe", dane } : o)); }
+    catch (e) { console.error("odczyt dowodu", e); setOdczyt(o => (o?.doc.id === d.id ? { doc: d, stan: "blad", blad: e?.message || String(e) } : o)); }
+  };
   const [uruchom, setUruchom] = useState(false);
   const [edycjaLeasingu, setEdycjaLeasingu] = useState(false);
   const mozeLeasing = canEdit && onZapiszLeasing && !v.archived;
@@ -507,7 +618,12 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
 
       <Sekcja tytul="Dokumenty" licznik={docs.length}>
         <ListaDokumentow docs={docs} canEdit={canEdit} safeHref={safeHref}
-          onDodaj={onDodajDokumenty ? (pliki, meta) => onDodajDokumenty(v, pliki, meta) : null}
+          onDodaj={onDodajDokumenty ? async (pliki, meta) => {
+            const wgrane = await onDodajDokumenty(v, pliki, meta);
+            const dowod = (wgrane || []).find(d => d.kind === "dowod" && d.fileUrl);
+            if (dowod && mozeCzytacDowod) czytajDowod(dowod);
+          } : null}
+          onOdczytaj={mozeCzytacDowod ? czytajDowod : null}
           onUsun={onUsunDokument} onEdytuj={onEdytujDokument} />
       </Sekcja>
 
@@ -543,12 +659,14 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
         </div>
       )}
 
+      {odczyt && <OknoDanychZDowodu key={`${odczyt.doc.id}-${odczyt.stan}`} v={v} odczyt={odczyt} onClose={() => setOdczyt(null)}
+        onPonow={() => czytajDowod(odczyt.doc)} onZapisz={(patch, opis) => onZapiszZDowodu(v, patch, odczyt.doc, opis)} />}
       {oferta && <OknoOferty v={v} kierowca={kierowca} docs={docs} onClose={() => setOferta(false)} showToast={showToast} />}
     </article>
   );
 }
 
-export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajPojazd, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, uruchomienie, showToast, safeHref }) {
+export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajPojazd, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, uruchomienie, showToast, safeHref }) {
   const teraz = useMemo(() => dzis ?? new Date().setHours(0, 0, 0, 0), [dzis]);
   const [archiwum, setArchiwum] = useState(false);
   const [szukaj, setSzukaj] = useState("");
@@ -641,7 +759,7 @@ export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit 
 
         {aktywny
           ? <KartaPojazdu key={aktywny.id} v={aktywny} docs={docsWg[aktywny.id] || []} dzis={teraz} canEdit={canEdit}
-              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} uruchomienie={uruchomienie} onBrudne={onBrudne} showToast={showToast} safeHref={safeHref} />
+              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} onOdczytajDowod={onOdczytajDowod} onZapiszZDowodu={onZapiszZDowodu} uruchomienie={uruchomienie} onBrudne={onBrudne} showToast={showToast} safeHref={safeHref} />
           : <div className="bg-white rounded-2xl border border-gray-100 p-8 text-sm text-gray-500">Wybierz pojazd z listy.</div>}
       </div>
     </div>

@@ -8518,3 +8518,29 @@ Sprostowanie do cd.3: błędy „Failed to load resource” w konsoli atrapy to 
 - **cd.7:** pisownia nazwy ostatecznie **„Checklista”** (jedno słowo — user). Lektor filmu: ElevenLabs, głos **Piotr - Engaging, Reassuring Storyteller** (`o2xdfKUpc1Bwq7RchZuW`), wybrany przez usera z próbek; w tekście lektora fonetycznie „czeklista” i „Flitstat”.
 
 - **cd.8:** user na iPhonie: „słabo to wygląda” (zrzut: tytuł pod wyspą, z tabeli widać 2 kolumny z 7, puste pole daty). Poniżej 768 px okno Checklisty ma teraz osobny układ: pełny ekran z przyklejonym nagłówkiem (safe-area), **karty zamiast tabeli** (termin, kto dodał, kto zrobił, maile, pliki, duże przyciski), pola 16 px (iOS nie powiększa strony po dotknięciu), formularz dodawania schowany pod „+ Dodaj zadanie”, gdy są już zadania; własny przycisk „+ zdjęcie / dokument” zamiast systemowego „Wybierz pliki” (także na komputerze). Komputer: tabela bez zmian. ✅ atrapa 402×874: nic nie wystaje poza ekran, dodanie/odhaczenie/edycja z powodem działają; komputer sprawdzony. ❌ Na prawdziwym iPhonie nikt jeszcze nie widział (wyspa, klawiatura, systemowy wybór daty).
+
+## 2026-11-23 — Pojazdy: dowód rejestracyjny (nie dało się wgrać, pierwszy na liście, odczyt danych przez AI)
+
+Słowa usera: „chce dodac dowód rejestracyjny i się nie da, ogólnie powinien być na górze listy, jak go wgrywamy
+powinien zaczytać pola do danych auta ważności Vin itd, on jest głównym dokumentem”; plus znak wodny na każdym dokumencie.
+- **Przyczyna błędu**: `~/Downloads/Dowód WGM 7651V.pdf` (z dziś, 11:33) ma **45,6 MB** — jedna strona zapisana przez skaner
+  jako bezstratny obraz 3504×2546. `storage.rules` przyjmuje do 25 MB, więc Storage odmawiał („storage/unauthorized”).
+  To wniosek z kodu i pliku na dysku — komunikatu, który zobaczył user, nie znam.
+- **Naprawa**: `src/utils/zmniejszPdf.js` — PDF ponad limit jest przed wgraniem przepisywany w przeglądarce (pdf.js 3.11.174
+  z cdnjs na żądanie, SRI na skrypcie, worker sprawdzany sumą SHA-384 i uruchamiany z Blob URL; strony → JPG 2200 px → nowy PDF
+  składany własnym kodem, bez pdf-lib i bez zależności npm). Pliki poniżej limitu idą bez zmian. HEIC → JPG także tutaj.
+  Zamiast „unauthorized” czytelny komunikat z rozmiarem. Limitu w regułach NIE ruszałem.
+- **Dowód pierwszy**: lista sortowana kolejnością rodzajów (dowód → COC → …), znaczek „główny dokument”.
+- **Odczyt danych**: po wgraniu dowodu (i przyciskiem „Odczytaj dane” przy już wgranym) AI czyta VIN, markę/model, rok,
+  termin przeglądu, ładowność; okno pokazuje pole po polu ze stanem „puste w karcie / zgodne / inna wartość w karcie”.
+  Zaznaczone domyślnie tylko pola puste; różniące się trzeba zaznaczyć świadomie. Numeru rejestracyjnego nie zmieniamy nigdy —
+  inny numer na dowodzie = czerwone ostrzeżenie. VIN niespełniający wzorca (17 znaków, bez I/O/Q) nie jest proponowany.
+  Przy dokumencie uzupełniane (tylko puste): seria i numer, data wydania, w uwagach 1. rejestracja / DMC / masa własna.
+  Logika: `src/utils/dowodRejestracyjny.js` (czysta), zapis `dbUpdateVehicleField` (transakcja) + `logAction`.
+✅ Atrapa `podglad/pojazdy` z PRAWDZIWYM plikiem usera: 45,6 MB → 0,79 MB w 4,7 s, tekst i kod QR czytelne przy 1:1,
+plik otwiera pdf.js i CoreGraphics (sips); dowód wskakuje na górę; okno: zapis tylko zaznaczonych pól, błąd AI + „Spróbuj
+ponownie”, ostrzeżenie o innym numerze. Test logiki w Node. Lint 0 błędów, build zielony.
+❌ **Niesprawdzone**: prawdziwy odczyt AI (w atrapie odpowiedź jest podstawiona — nie wiem, jak dokładnie model czyta
+polski dowód, zwłaszcza pieczątkę z terminem badania), prawdziwe wgranie do Storage i zapis do karty po zalogowaniu,
+Safari/iPhone (pamięć canvasa przy dużym skanie).
+⏳ **Znak wodny** — czeka na decyzje usera (treść, na stałe czy przy pobieraniu, stare pliki, które moduły). Nie zaczęty.
