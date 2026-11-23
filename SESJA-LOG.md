@@ -8717,3 +8717,14 @@ Safari/iPhone (pamięć canvasa przy dużym skanie).
   W umowach CNH jest data zawarcia (05.12.2024) i harmonogram z kapitałem/odsetkami — do ewentualnego dopisania w kartach.
 - **cd.16:** na polecenie usera w karcie WGM 0475M zapisane z dowodu: rok produkcji 2021 → **2024**, ładowność wg dowodu **3587 kg**
   (transakcja, 9 → 9, auditLog). Ładowność rzeczywista (3000 kg) i przegląd (03.11.2026, po terminie) bez zmian — przegląd czeka na datę nowego badania.
+
+- **cd.17 — leasingi CNH uzupełnione z umów.** User: „dopisz datę zawarcia i podział rat z umów CNH do kart”. Źródło: skany umów
+  podpięte w VBS Faktury (26–28 stron), odczyt AI całego pliku + kontrola rachunkowa (kapitał + odsetki = rata w każdym wierszu,
+  sumy = „RAZEM” z dokumentu; dwie bliźniacze umowy odczytane niezależnie dały identyczne harmonogramy).
+  - WGM 0475M i WGM 0507M: zawarta **05.12.2024**; harmonogram z załącznika nr 6 (zawiadomienie z 16.12.2024) — **47 rat** po 1461,79 EUR
+    (13.01.2025 → 13.11.2028) z podziałem na kapitał i odsetki; `liczbaRat` 46 → 47.
+  - WGM 5367K: zawarta **02.02.2024**; harmonogram w umowie NIE ma podziału na kapitał/odsetki (zmienna stopa, EURIBOR 1M) — zostaje 46 rat bez podziału.
+  - Transakcja z kontrolą stanu, 9 → 9 pojazdów, wpis w auditLog.
+  ⚠️ **Rozbieżność w VBS Faktury (nie ruszałem):** przy obu umowach z XII.2024 jest 46 rat + „wykup 71,41” z datą 13.11.2028, a wg umowy
+  13.11.2028 przypada 47. zwykła rata 1461,79 EUR, a 71,41 to wartość końcowa PO niej. W Fakturach brakuje więc po jednej racie
+  (2 × 1461,79 EUR w prognozie zobowiązań). Do decyzji usera.
