@@ -8697,3 +8697,15 @@ Safari/iPhone (pamięć canvasa przy dużym skanie).
   `terminyFlotyMail` **wdrożona ponownie**). Jedna data na auto — jeśli gaśnic z różnymi datami jest kilka, wpisujemy najwcześniejszą.
   ✅ Test maila (po terminie / w ciągu 30 dni / dalej), lint 0 błędów, build zielony. ❌ Niesprawdzone po zalogowaniu;
   daty przy autach do wpisania przez usera (dziś puste wszędzie).
+
+- **cd.14 — leasingi starych aut z VBS Faktury.** User: „brakujące leasingi możemy zaciągnąć z faktur dla pozostałych aut, tam są te dane”.
+  Źródło: aplikacja VBS Faktury (projekt `vbs-invoices`, kolekcja `leasings`, odczyt REST tokenem `gcloud` — tylko odczyt).
+  Zapisane w kartach (transakcja, 9 → 9 pojazdów, tylko gdy auto nie miało leasingu; wpis w auditLog):
+  WGM 0475M `ILO/2024/33743116`, WGM 0507M `ILO/2024/33743161` (rata 1461,79 EUR, wstępna 9600, wykup 71,41, koniec 13.11.2028),
+  WGM 5367K `ILO/2024/02954849` (rata 1336,39 EUR, wstępna 9423,77, wykup 659,01, koniec 13.01.2028). Finansujący: CNH Industrial
+  Capital Europe. Harmonogram: 46 rat z datami i kwotą netto (bez podziału kapitał/odsetki — w Fakturach go nie ma).
+  Moje decyzje do wiadomości usera: „Liczba rat” = 46 zwykłych rat (umowa mówi 47, licząc opłatę wstępną jako ratę nr 1);
+  „Koniec umowy” = termin wykupu (ostatnia pozycja harmonogramu); „Zawarta” pusta — w danych nie ma daty zawarcia.
+  Bez leasingu zostają: TK 314CL (w Fakturach nie ma umowy; koszty leasingu w FleetStat kończą się na XII.2025) oraz auta
+  w archiwum. Uwaga: umowa WGM 0475M w VBS Faktury ma ten sam błędny VIN (…C5R…), który dziś poprawiliśmy w FleetStat — tam nie ruszałem.
+  ❌ Niesprawdzone po zalogowaniu (wygląd sekcji Leasing, termin „Rata leasingu nr …” w karcie).
