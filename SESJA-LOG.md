@@ -8592,3 +8592,21 @@ Safari/iPhone (pamięć canvasa przy dużym skanie).
   ✅ Atrapa: dowód 45,6 MB, PDF 4-stronicowy, zdjęcie CMR — logo i data czytelne, treść pod spodem czytelna. Lint 0 błędów, build zielony.
   ❌ Niesprawdzone po zalogowaniu: wgranie nowego pliku z zapisem oryginału, przycisk „Pobierz oryginał” (otwarcie karty
   przed pobraniem linku — możliwa blokada wyskakujących okien w Safari), odczyt AI dowodu przez znak z logo.
+
+- **cd.4 — znak z datą POBRANIA + ślad, kto pobrał.** Pytanie usera: „czy znak wodny może się generować z datą kiedy jest
+  pobierany? oraz zapisywać się w logach kto go pobrał?”. Decyzje: **A — tylko pobrania w aplikacji** (linki w ofertach
+  dla klientów zostają przy stałej kopii ze znakiem z dnia wgrania), w znaku **samo logo z datą**.
+  - Cloud Function **`pobierzDokumentPojazdu`** (onCall, europe-west1, admin/dyspozytor) — **wdrożona**. Bierze czysty oryginał
+    (`oryginalPath`), nakłada logo VBS + dzisiejszą datę (Europe/Warsaw), zapisuje plik tymczasowy `pobrania/{uid}/…` z tokenem
+    i nagłówkiem „załącznik”, zwraca link. Wpis w `auditLog`: `action: "download"`, `module: "vehicleDocs"`, kto (uid, e-mail),
+    który dokument, jaki znak — pisze go SERWER, front nie może go pominąć. Pliki tymczasowe starsze niż 1 h kasowane przy
+    kolejnych wywołaniach. Zdjęcie JPG/PNG wychodzi jako jednostronicowy PDF ze znakiem (serwer nie ma biblioteki do obrazów);
+    CSV i pliki, których nie da się oznaczyć (np. PDF zaszyfrowany) — oddawana zapisana kopia, pobranie i tak w dzienniku.
+  - `functions/lib/znakWodnyPobrania.js` (układ znaku = KOPIA `src/utils/znakWodny.js` — zmiana wyglądu w obu miejscach),
+    `functions/assets/vbs-logo.png`, nowa zależność **`pdf-lib` w `functions/package.json`** (lock funkcji, nie główny).
+  - Front: „Pobierz” na liście dokumentów woła funkcję (ukryta ramka, bez nowej karty), stan „Przygotowuję…”.
+    „Kopiuj ofertę” i `fileUrl` bez zmian.
+  ✅ Lokalnie: nakładanie na prawdziwą umowę leasingu (4,2 MB, 0,24 s) i na JPG→PDF, podgląd; funkcja po wdrożeniu odrzuca
+  wywołanie bez logowania (`UNAUTHENTICATED`). Lint 0 błędów, build zielony.
+  ❌ Niesprawdzone: prawdziwe pobranie po zalogowaniu (czy przeglądarka zapisuje plik z ukrytej ramki, zwłaszcza Safari),
+  wpis w dzienniku zdarzeń, czas przy zimnym starcie funkcji, sprzątanie plików tymczasowych.

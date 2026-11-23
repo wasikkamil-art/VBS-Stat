@@ -2105,6 +2105,29 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
       return false;
     }
   };
+  // „Pobierz" w aplikacji: serwer nakłada znak wodny z DATĄ POBRANIA i zapisuje w dzienniku, kto pobrał
+  // (Cloud Function `pobierzDokumentPojazdu`). Plik przychodzi jako załącznik, więc wystarczy ukryta ramka —
+  // bez nowej karty (blokady wyskakujących okien) i bez opuszczania strony.
+  const pobierzDokumentPojazdu = async (d) => {
+    try {
+      const { data } = await httpsCallable(functions, "pobierzDokumentPojazdu")({ docId: d.id });
+      const url = safeHref(data?.url || "");
+      if (!url || url === "#") throw new Error("serwer nie zwrócił pliku");
+      if (data.znak) {
+        const ramka = document.createElement("iframe");
+        ramka.style.display = "none"; ramka.src = url;
+        document.body.appendChild(ramka);
+        setTimeout(() => ramka.remove(), 60000);
+        showToast(`⬇️ „${d.label}” — znak wodny z datą ${data.data}`);
+      } else {
+        // Plik, na który nie da się nałożyć znaku (np. CSV) — otwieramy zapisany, pobranie i tak jest w dzienniku.
+        window.open(url, "_blank", "noopener");
+      }
+    } catch (e) {
+      console.error("pobierzDokumentPojazdu", e);
+      showToast(`⚠️ Nie udało się pobrać „${d.label}”: ${e?.message || e}`);
+    }
+  };
   // Czysty oryginał (bez znaku wodnego) — link tworzony na żądanie, po ścieżce; reguły Storage wpuszczają
   // tu tylko admina i dyspozytora. Kartę otwieramy PRZED awaitem, inaczej przeglądarka zablokuje okno.
   const pobierzOryginalDokumentu = async (d) => {
@@ -4168,7 +4191,7 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
                   }
                 }}
                 onDodajDokumenty={addVehicleDocs} onUsunDokument={deleteVehicleDoc}
-                onOdczytajDowod={odczytajDowod} onZapiszZDowodu={zapiszDaneZDowodu} onPobierzOryginal={pobierzOryginalDokumentu}
+                onOdczytajDowod={odczytajDowod} onZapiszZDowodu={zapiszDaneZDowodu} onPobierzOryginal={pobierzOryginalDokumentu} onPobierzDokument={pobierzDokumentPojazdu}
                 onEdytujDokument={updateVehicleDocMeta} onZapiszLeasing={saveVehicleLeasing}
                 uruchomienie={uruchomienieApi}
               />

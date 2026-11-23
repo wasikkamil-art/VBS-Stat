@@ -4161,3 +4161,87 @@ exports.finalizeTrip = onCall(
     }
   }
 );
+
+// ═══════════════════════════════════════════════════════════════
+// pobierzDokumentPojazdu — dokument pojazdu ze znakiem wodnym Z DATĄ POBRANIA + ślad w auditLog
+// ═══════════════════════════════════════════════════════════════
+// Decyzja usera 23.11.2026: w aplikacji „Pobierz" ma dawać plik z logo VBS i datą pobrania, a w dzienniku
+// ma zostać, kto i kiedy go pobrał. Linki w ofertach dla klientów zostają przy stałej kopii (`fileUrl`).
+//
+// Dlaczego serwer: przeglądarka nie pobierze pliku ze Storage (brak CORS), a ślad zapisany przez serwer
+// jest wiarygodny — front nie może go pominąć ani podmienić.
+// Jak: czysty oryginał (`oryginalPath`) → znak → plik tymczasowy `pobrania/{uid}/…` z jednorazowym tokenem
+// → front dostaje link. Pliki tymczasowe starsze niż godzina kasujemy przy kolejnych wywołaniach;
+// reguły Storage nie wpuszczają do `pobrania/` nikogo po ścieżce (domyślne „nic").
+const { dataPobrania, rodzajPliku, oznaczDoPobrania, nazwaPliku } = require("./lib/znakWodnyPobrania");
+
+exports.pobierzDokumentPojazdu = onCall(
+  { region: "europe-west1", memory: "1GiB", timeoutSeconds: 120 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Musisz być zalogowany.");
+    if (!["admin", "dyspozytor"].includes(request.auth.token.role)) {
+      throw new HttpsError("permission-denied", "Brak dostępu do dokumentów pojazdów.");
+    }
+    const docId = String(request.data?.docId || "");
+    if (!docId || docId.includes("/")) throw new HttpsError("invalid-argument", "Wymagany: docId");
+
+    const db = getFirestore();
+    const snap = await db.collection("vehicleDocs").doc(docId).get();
+    if (!snap.exists) throw new HttpsError("not-found", "Nie ma takiego dokumentu.");
+    const d = snap.data();
+    const bucket = getStorage().bucket();
+    const kto = request.auth.token.email || "";
+    const slad = (details) => db.collection("auditLog").add({
+      action: "download", module: "vehicleDocs",
+      details: { id: docId, vehicleId: d.vehicleId || "", label: d.label || "", kind: d.kind || "", ...details },
+      uid: request.auth.uid, email: kto, displayName: request.auth.token.name || kto, ts: new Date().toISOString(),
+    });
+
+    // Źródło = czysty oryginał. Gdy go nie ma, a plik główny nie ma znaku (nakładanie przy wgrywaniu
+    // się nie udało) — plik główny. Plik główny JUŻ ze znakiem oddajemy bez zmian, żeby nie nakładać dwóch.
+    const zrodlo = d.oryginalPath || (!d.znakWodny ? d.storagePath : "");
+    const rodzaj = rodzajPliku(zrodlo);
+    const data = dataPobrania();
+    if (!zrodlo || !rodzaj) {
+      if (!d.fileUrl) throw new HttpsError("failed-precondition", "Ten dokument nie ma pliku.");
+      await slad({ znak: d.znakWodny || "bez znaku" });
+      return { url: d.fileUrl, znak: false };
+    }
+
+    let wynik;
+    try {
+      const [bufor] = await bucket.file(zrodlo).download();
+      wynik = await oznaczDoPobrania(bufor, rodzaj, data);
+    } catch (e) {
+      // Np. PDF zaszyfrowany — oddajemy stałą kopię, ale ślad pobrania i tak zostaje.
+      console.error(`[pobierzDokumentPojazdu] ${docId}: znak się nie nałożył`, e);
+      if (!d.fileUrl) throw new HttpsError("internal", "Nie udało się przygotować pliku.");
+      await slad({ znak: d.znakWodny || "bez znaku", blad: String(e?.message || e).slice(0, 200) });
+      return { url: d.fileUrl, znak: false };
+    }
+
+    const sciezka = `pobrania/${request.auth.uid}/${Date.now()}_${crypto.randomBytes(6).toString("hex")}.pdf`;
+    const token = crypto.randomUUID();
+    await bucket.file(sciezka).save(wynik, {
+      contentType: "application/pdf",
+      metadata: {
+        contentDisposition: `attachment; filename="${nazwaPliku(d.label)}.pdf"`,
+        cacheControl: "private, no-store",
+        metadata: { firebaseStorageDownloadTokens: token },
+      },
+    });
+    await slad({ znak: `logo VBS · ${data}` });
+
+    // Sprzątanie po poprzednich pobraniach — błąd tutaj nie może zepsuć bieżącego pobrania.
+    try {
+      const [stare] = await bucket.getFiles({ prefix: "pobrania/" });
+      const granica = Date.now() - 60 * 60 * 1000;
+      await Promise.all(stare.filter(f => new Date(f.metadata.timeCreated).getTime() < granica).map(f => f.delete().catch(() => {})));
+    } catch (e) { console.warn("[pobierzDokumentPojazdu] sprzątanie", e); }
+
+    return {
+      url: `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(sciezka)}?alt=media&token=${token}`,
+      znak: true, data,
+    };
+  }
+);
