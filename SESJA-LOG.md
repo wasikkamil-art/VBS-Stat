@@ -8685,3 +8685,8 @@ Safari/iPhone (pamięć canvasa przy dużym skanie).
 - **cd.11:** user potwierdził z dowodem, że poprawny VIN WGM 0475M to wersja z „1” → w karcie (v1) poprawione
   `ZCFC672C5R5615130` → `ZCFC672C1R5615130` (transakcja z asercją długości tablicy, 9 → 9 pojazdów; wpis `korekta-vin` w auditLog).
   Poprawka cd.10 (żółta uwaga o różnicy VIN) wypchnięta, bundle `index-hGYgcIy8.js` potwierdzony.
+- **cd.12:** user (zrzut karty WGM 7652V): „ładowność rzeczywista jest uzupełniana przez admina ręcznie, a z dowodu jest
+  zaczytywana — popraw, bo tu jest ładowność rzeczywista wzięta z dowodu”. W bazie przy v7, v8, v9 (nowe Iveco) 3511 kg
+  przeniesione z `maxWeight` do `maxWeightDowod`, `maxWeight` puste do wpisania przez admina (transakcja, 9 → 9 pojazdów,
+  wpis w auditLog). Starych aut (3000 / 895 / 820 kg) nie ruszałem — to wartości wpisane ręcznie.
+  ⚠️ Skutek do czasu uzupełnienia: w „Kopiuj ofertę” i w planerze załadunku te trzy auta nie mają wagi maksymalnej.
