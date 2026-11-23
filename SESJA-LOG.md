@@ -8709,3 +8709,9 @@ Safari/iPhone (pamięć canvasa przy dużym skanie).
   Bez leasingu zostają: TK 314CL (w Fakturach nie ma umowy; koszty leasingu w FleetStat kończą się na XII.2025) oraz auta
   w archiwum. Uwaga: umowa WGM 0475M w VBS Faktury ma ten sam błędny VIN (…C5R…), który dziś poprawiliśmy w FleetStat — tam nie ruszałem.
   ❌ Niesprawdzone po zalogowaniu (wygląd sekcji Leasing, termin „Rata leasingu nr …” w karcie).
+- **cd.15 — VIN WGM 0475M domknięty.** Skan aktualnego dowodu (`~/Downloads/Zeskanowany dokument 2.pdf`) i umowa leasingu
+  (skan 28 stron w VBS Faktury) mają `ZCFC672C1R5615130`. Błąd był tylko w polach wpisanych ręcznie/przez AI: karta FleetStat
+  (poprawiona w cd.11) i pole `vin` umowy `ILO/2024/33743116` w VBS Faktury — **poprawione REST PATCH** (tylko `vin`, `updatedBy`,
+  `updatedAt`; po zapisie 48 rat i 22 pola bez zmian). Z dowodu wynikają też rozbieżności w karcie, NIEzapisane (czekają na usera):
+  rok produkcji 2024 (karta: 2021), ładowność wg dowodu 3587 kg (puste), przegląd ważny do 03.11.2026 (po terminie).
+  W umowach CNH jest data zawarcia (05.12.2024) i harmonogram z kapitałem/odsetkami — do ewentualnego dopisania w kartach.
