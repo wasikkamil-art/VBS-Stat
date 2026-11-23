@@ -76,14 +76,14 @@ export function pdfZJpg(strony) {
 }
 
 /**
- * Zwraca lżejszy PDF (ta sama nazwa) albo TEN SAM plik, gdy zmniejszanie nic nie dało.
- * Rzuca wyjątek, gdy pliku nie da się przeczytać — wołający decyduje, co dalej.
+ * Rysuje każdą stronę PDF na canvasie i składa z nich nowy PDF. `naStronie(ctx, w, h)` pozwala
+ * dorysować coś na każdej stronie (znak wodny), zanim strona zostanie zapisana jako JPG.
  */
-export async function zmniejszPdf(plik) {
+export async function rasteryzujPdf(plik, naStronie) {
   const pdfjs = await zaladuj();
   const pdf = await pdfjs.getDocument({ data: await plik.arrayBuffer() }).promise;
   try {
-    if (pdf.numPages > MAKS_STRON) throw new Error(`plik ma ${pdf.numPages} stron — za dużo, żeby zmniejszyć w przeglądarce`);
+    if (pdf.numPages > MAKS_STRON) throw new Error(`plik ma ${pdf.numPages} stron — za dużo, żeby przerobić w przeglądarce`);
     const strony = [];
     for (let i = 1; i <= pdf.numPages; i++) {
       const strona = await pdf.getPage(i);
@@ -91,14 +91,24 @@ export async function zmniejszPdf(plik) {
       const widok = strona.getViewport({ scale: DLUZSZY_BOK / Math.max(bazowy.width, bazowy.height) });
       const canvas = document.createElement("canvas");
       canvas.width = Math.round(widok.width); canvas.height = Math.round(widok.height);
-      await strona.render({ canvasContext: canvas.getContext("2d"), viewport: widok }).promise;
+      const ctx = canvas.getContext("2d");
+      await strona.render({ canvasContext: ctx, viewport: widok }).promise;
+      if (naStronie) { ctx.setTransform(1, 0, 0, 1, 0, 0); naStronie(ctx, canvas.width, canvas.height); }
       const blob = await new Promise((ok, zle) => canvas.toBlob(b => (b ? ok(b) : zle(new Error("nie udało się zapisać strony"))), "image/jpeg", 0.82));
       strony.push({ jpg: new Uint8Array(await blob.arrayBuffer()), px: [canvas.width, canvas.height], pt: [bazowy.width, bazowy.height] });
       canvas.width = canvas.height = 0; // Safari trzyma pamięć canvasa, dopóki go nie wyzerujemy
     }
-    const wynik = pdfZJpg(strony);
-    return wynik.size < plik.size ? new File([wynik], plik.name, { type: "application/pdf" }) : plik;
+    return new File([pdfZJpg(strony)], plik.name, { type: "application/pdf" });
   } finally {
     pdf.destroy();
   }
+}
+
+/**
+ * Zwraca lżejszy PDF (ta sama nazwa) albo TEN SAM plik, gdy zmniejszanie nic nie dało.
+ * Rzuca wyjątek, gdy pliku nie da się przeczytać — wołający decyduje, co dalej.
+ */
+export async function zmniejszPdf(plik) {
+  const wynik = await rasteryzujPdf(plik);
+  return wynik.size < plik.size ? wynik : plik;
 }

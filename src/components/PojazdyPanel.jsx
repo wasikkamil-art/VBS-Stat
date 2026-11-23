@@ -321,9 +321,14 @@ function EdycjaLeasingu({ leasing, onZapisz, onAnuluj, onUsun, showToast }) {
   );
 }
 
-function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, onOdczytaj, safeHref }) {
+// Pliki, na które da się nałożyć znak wodny, a jeszcze go nie mają (wgrane przed 23.11.2026 albo nieudane).
+const bezZnaku = (docs) => docs.filter(d => d.fileUrl && !d.znakWodny && /\.(pdf|jpe?g|png|webp)$/i.test(d.fileName || d.storagePath || ""));
+
+function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, onOdczytaj, onOznacz, safeHref }) {
   const [edytowany, setEdytowany] = useState(null);
   const [wgrywam, setWgrywam] = useState(false);
+  const [oznaczam, setOznaczam] = useState(false);
+  const doOznaczenia = bezZnaku(docs);
   const [rodzaj, setRodzaj] = useState("dowod");
   const [waznyDo, setWaznyDo] = useState("");
   const [opis, setOpis] = useState("");
@@ -396,7 +401,17 @@ function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, onOdczytaj,
                 finally { setWgrywam(false); setWaznyDo(""); setOpis(""); }
               }} />
           </label>
+          <p className="w-full text-xs text-gray-500">Każdy wgrany PDF i zdjęcie dostaje na stałe znak wodny z nazwą firmy i datą wgrania.</p>
           {rodzaj === "dowod" && <p className="w-full text-xs text-gray-500">Po wgraniu dowodu aplikacja odczyta z niego dane auta (VIN, przegląd, rok…) i pokaże je do zatwierdzenia.</p>}
+          {onOznacz && doOznaczenia.length > 0 && (
+            <div className="w-full flex flex-wrap items-center gap-2 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              <span className="flex-1" style={{ minWidth: 180 }}>Bez znaku wodnego: {doOznaczenia.length} {doOznaczenia.length === 1 ? "dokument" : "dokumentów"} tego auta.</span>
+              <button type="button" disabled={oznaczam} onClick={async () => { setOznaczam(true); try { await onOznacz(doOznaczenia); } finally { setOznaczam(false); } }}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white disabled:opacity-60" style={{ background: "#92400e" }}>
+                {oznaczam ? "Nakładam znak…" : "Nałóż znak wodny"}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -511,7 +526,7 @@ function Harmonogram({ leasing, dzis }) {
   );
 }
 
-function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, uruchomienie, onBrudne, showToast, safeHref }) {
+function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onOznaczWgrane, uruchomienie, onBrudne, showToast, safeHref }) {
   const [oferta, setOferta] = useState(false);
   const [odczyt, setOdczyt] = useState(null);
   const mozeCzytacDowod = canEdit && onOdczytajDowod && onZapiszZDowodu && !v.archived;
@@ -624,6 +639,7 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
             if (dowod && mozeCzytacDowod) czytajDowod(dowod);
           } : null}
           onOdczytaj={mozeCzytacDowod ? czytajDowod : null}
+          onOznacz={canEdit && onOznaczWgrane ? (lista) => onOznaczWgrane(v, lista) : null}
           onUsun={onUsunDokument} onEdytuj={onEdytujDokument} />
       </Sekcja>
 
@@ -666,7 +682,7 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
   );
 }
 
-export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajPojazd, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, uruchomienie, showToast, safeHref }) {
+export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajPojazd, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onOznaczWgrane, uruchomienie, showToast, safeHref }) {
   const teraz = useMemo(() => dzis ?? new Date().setHours(0, 0, 0, 0), [dzis]);
   const [archiwum, setArchiwum] = useState(false);
   const [szukaj, setSzukaj] = useState("");
@@ -759,7 +775,7 @@ export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit 
 
         {aktywny
           ? <KartaPojazdu key={aktywny.id} v={aktywny} docs={docsWg[aktywny.id] || []} dzis={teraz} canEdit={canEdit}
-              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} onOdczytajDowod={onOdczytajDowod} onZapiszZDowodu={onZapiszZDowodu} uruchomienie={uruchomienie} onBrudne={onBrudne} showToast={showToast} safeHref={safeHref} />
+              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} onOdczytajDowod={onOdczytajDowod} onZapiszZDowodu={onZapiszZDowodu} onOznaczWgrane={onOznaczWgrane} uruchomienie={uruchomienie} onBrudne={onBrudne} showToast={showToast} safeHref={safeHref} />
           : <div className="bg-white rounded-2xl border border-gray-100 p-8 text-sm text-gray-500">Wybierz pojazd z listy.</div>}
       </div>
     </div>

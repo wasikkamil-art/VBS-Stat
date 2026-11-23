@@ -8543,4 +8543,21 @@ ponownie”, ostrzeżenie o innym numerze. Test logiki w Node. Lint 0 błędów,
 ❌ **Niesprawdzone**: prawdziwy odczyt AI (w atrapie odpowiedź jest podstawiona — nie wiem, jak dokładnie model czyta
 polski dowód, zwłaszcza pieczątkę z terminem badania), prawdziwe wgranie do Storage i zapis do karty po zalogowaniu,
 Safari/iPhone (pamięć canvasa przy dużym skanie).
-⏳ **Znak wodny** — czeka na decyzje usera (treść, na stałe czy przy pobieraniu, stare pliki, które moduły). Nie zaczęty.
+- **cd. — znak wodny.** Decyzje usera (pytania A/B/C): treść **nazwa firmy + data**, nakładany **na stałe przy wgrywaniu**,
+  **także pliki już wgrane**, zakres **tylko dokumenty pojazdu** (Checklista i faktury uruchomienia bez znaku).
+  - `src/utils/znakWodny.js`: napis „VBS · dd.mm.rrrr” (data wgrania) ukośnie, powtarzany na całej stronie, krycie 26%.
+    PDF → pdf-lib 1.17.1 (cdnjs na żądanie, SRI) dopisuje warstwę wektorową, treść i tekst dokumentu zostają;
+    gdy pdf-lib nie otworzy pliku → strony przerysowane na obrazy razem ze znakiem. Zdjęcia → canvas. CSV/XLSX bez znaku.
+    „VBS” to moja decyzja wg przykładu z pytania — stała `ZNAK_FIRMA`, jedno miejsce do zmiany.
+  - Wgrywanie: znak nakładany po ewentualnym zmniejszeniu skanu, wpis dostaje pole `znakWodny`. Gdy się nie uda —
+    plik wchodzi bez znaku, z ostrzeżeniem, i trafia na listę „bez znaku wodnego”.
+  - Stare pliki (w bazie 53 dokumenty: 50 PDF, 3 CSV): **nic nie przerobiłem sam**. W sekcji Dokumenty auta jest żółty pasek
+    „Bez znaku wodnego: N” z przyciskiem „Nałóż znak wodny” (z potwierdzeniem). Oznaczona kopia idzie pod nową ścieżkę,
+    wpis dostaje nowy link i `oryginalPath`; **stary plik zostaje w Storage** (nic nie kasujemy → da się cofnąć).
+    ⚠️ Linki rozesłane wcześniej w ofertach nadal otwierają czysty oryginał — żeby je unieważnić, trzeba by skasować
+    oryginały; to osobna decyzja usera.
+  ✅ Atrapa na prawdziwych plikach: skan dowodu 45,6 MB → 0,79 MB ze znakiem, PDF 10 MB/4 strony (+4 kB, tekst zostaje),
+  skan 5 MB (+1 kB), JPG; pasek i przycisk dla pliku bez znaku. Lint 0 błędów, build zielony.
+  ❌ Niesprawdzone: produkcja po zalogowaniu (wgranie, przycisk na 50 prawdziwych plikach — pobranie z Storage przez `fetch`
+  sprawdziłem tylko po nagłówkach CORS, `access-control-allow-origin: *`), PDF zaszyfrowany/ze stronami obróconymi,
+  czy AI czyta dowód równie dobrze przez znak wodny, Safari/iPhone.
