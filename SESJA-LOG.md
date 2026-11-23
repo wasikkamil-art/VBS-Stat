@@ -8728,3 +8728,7 @@ Safari/iPhone (pamięć canvasa przy dużym skanie).
   ⚠️ **Rozbieżność w VBS Faktury (nie ruszałem):** przy obu umowach z XII.2024 jest 46 rat + „wykup 71,41” z datą 13.11.2028, a wg umowy
   13.11.2028 przypada 47. zwykła rata 1461,79 EUR, a 71,41 to wartość końcowa PO niej. W Fakturach brakuje więc po jednej racie
   (2 × 1461,79 EUR w prognozie zobowiązań). Do decyzji usera.
+- **cd.18:** na polecenie usera w VBS Faktury dopisana brakująca rata nr 48 (13.11.2028, 1461,79 EUR netto / 1798 brutto, niezapłacona)
+  przy umowach WGM 0475M i WGM 0507M; wykup 71,41 EUR przenumerowany na nr 49, data wykupu bez zmian (umowa jej osobno nie podaje).
+  REST PATCH tylko pola `raty` (+ `updatedBy`, `updatedAt`), z warunkiem na `updateTime`. Przed/po: 48 → 49 pozycji, zapłaconych 24 = 24,
+  22 pola dokumentu bez zmian. ❌ Nie sprawdzone w interfejsie VBS Faktury (widok umowy, cotygodniowy raport leasingów).
