@@ -1898,39 +1898,6 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     if (wgrane.length) { logAction("add", "vehicleDocs", { vehicleId: v.id, plate: v.plate, kind: meta.kind, count: wgrane.length }); showToast(`✅ Wgrano dokumentów: ${wgrane.length}`); }
     return wgrane;
   };
-  // Znak wodny na dokumentach wgranych PRZED 23.11.2026 (user: „także już wgrane”). Oznaczona kopia idzie
-  // pod NOWĄ ścieżkę, a wpis dostaje nowy link; stary plik ZOSTAJE w Storage (`oryginalPath`) — niczego
-  // nie kasujemy, więc da się to cofnąć. Uwaga: linki rozesłane wcześniej nadal otwierają czysty oryginał.
-  const oznaczWgraneDokumenty = async (v, lista) => {
-    if (!lista.length) return;
-    if (!window.confirm(`Nałożyć znak wodny na ${lista.length} wcześniej wgranych dokumentów ${v.plate}?\n\nLinki w aplikacji zaczną prowadzić do kopii ze znakiem. Oryginalne pliki zostają w magazynie (nic nie jest kasowane).`)) return;
-    let ok = 0; const bledy = [];
-    for (const d of lista) {
-      try {
-        const resp = await fetch(d.fileUrl);
-        if (!resp.ok) throw new Error(`pobranie pliku: błąd ${resp.status}`);
-        const blob = await resp.blob();
-        const nazwa = d.fileName || d.storagePath?.split("/").pop() || "dokument.pdf";
-        const tekst = tekstZnaku(d.uploadedAt || undefined);
-        const plik = await nalozZnakWodny(new File([blob], nazwa, { type: d.fileType || blob.type }), tekst);
-        if (plik.size > LIMIT_PLIKU) throw new Error(`po nałożeniu znaku plik ma ${fmtMB(plik.size)}`);
-        const ext = (plik.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "");
-        const storagePath = `vehicleDocs/${d.vehicleId}/${d.id}_zw${uid()}.${ext}`;
-        const r = storageRef(storage, storagePath);
-        await uploadBytes(r, plik, { contentType: plik.type || undefined });
-        await updateDoc(doc(db, "vehicleDocs", d.id), {
-          fileUrl: await getDownloadURL(r), storagePath, fileType: plik.type || "", znakWodny: tekst,
-          oryginalPath: d.oryginalPath || d.storagePath || "", updatedAt: new Date().toISOString(), updatedBy: user?.email || "",
-        });
-        ok++;
-      } catch (e) {
-        console.error("oznaczWgraneDokumenty", d.id, e);
-        bledy.push(`${d.label}: ${e?.message || e}`);
-      }
-    }
-    logAction("update", "vehicleDocs", { vehicleId: v.id, plate: v.plate, action: "znak-wodny", count: ok, bledy: bledy.length });
-    showToast(bledy.length ? `Znak wodny: ${ok} z ${lista.length}. Nie udało się: ${bledy.slice(0, 3).join("; ")}` : `✅ Znak wodny nałożony na ${ok} dokumentów`);
-  };
   // AI czyta dowód rejestracyjny. Plik idzie URL-em ze Storage (limit body funkcji Vercela).
   // Niczego nie zapisuje — wynik trafia do okna, w którym user zatwierdza pole po polu.
   const odczytajDowod = async (d) => {
@@ -4176,7 +4143,7 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
                   }
                 }}
                 onDodajDokumenty={addVehicleDocs} onUsunDokument={deleteVehicleDoc}
-                onOdczytajDowod={odczytajDowod} onZapiszZDowodu={zapiszDaneZDowodu} onOznaczWgrane={oznaczWgraneDokumenty}
+                onOdczytajDowod={odczytajDowod} onZapiszZDowodu={zapiszDaneZDowodu}
                 onEdytujDokument={updateVehicleDocMeta} onZapiszLeasing={saveVehicleLeasing}
                 uruchomienie={uruchomienieApi}
               />

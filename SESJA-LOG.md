@@ -8561,3 +8561,17 @@ Safari/iPhone (pamięć canvasa przy dużym skanie).
   ❌ Niesprawdzone: produkcja po zalogowaniu (wgranie, przycisk na 50 prawdziwych plikach — pobranie z Storage przez `fetch`
   sprawdziłem tylko po nagłówkach CORS, `access-control-allow-origin: *`), PDF zaszyfrowany/ze stronami obróconymi,
   czy AI czyta dowód równie dobrze przez znak wodny, Safari/iPhone.
+
+- **cd.2 — po pushu (`f862c5f`), test usera na produkcji:** „działa, czyta, ale nie nałożyło znaków wodnych na wszystkie dokumenty”.
+  Wgranie dowodu, znak przy wgrywaniu i odczyt AI — **potwierdzone przez usera**. Przycisk „Nałóż znak wodny” przy WGM 7651V:
+  0 z 12 (auditLog). **Przyczyna — mój błąd weryfikacji:** przeglądarka nie może pobrać pliku ze Storage przez `fetch`
+  (pobranie `alt=media` nie zwraca `access-control-allow-origin`; nagłówek, który widziałem wcześniej, był na odpowiedzi 403
+  z innego adresu). Bucket nie ma skonfigurowanego CORS.
+  - Znak na starych plikach nałożony skryptem z Node (admin SDK + pdf-lib 1.17.1 zainstalowane poza repo, ta sama siatka i treść
+    co w aplikacji; najpierw próba na sucho 50/50, podgląd jednej strony, dopiero potem zapis). **50 z 50 PDF-ów** (v7: 26, v8: 12,
+    v9: 12), data w znaku = data wgrania (17.11.2026). Kopie pod `…/{id}_zw{hex}.pdf`, wpisy mają nowy `fileUrl`, `znakWodny`,
+    `oryginalPath`; **50 oryginałów nadal leży w Storage**. Bez znaku zostały tylko 3 harmonogramy CSV (nie da się).
+  - Przycisk i `oznaczWgraneDokumenty` usunięte z aplikacji (nie mogły działać bez CORS). Gdyby nakładanie przy wgrywaniu się
+    nie udało, lista pokazuje, które pliki są bez znaku, i radzi wgrać ponownie.
+  - CORS bucketa NIE ruszany (ustawienie infrastruktury — decyzja usera, dziś niepotrzebne).
+  ❌ Nikt nie otworzył oznaczonych plików w aplikacji po zalogowaniu (sprawdzone: nowy link zwraca 200 i poprawny PDF, podgląd strony).
