@@ -8715,3 +8715,5 @@ Safari/iPhone (pamięć canvasa przy dużym skanie).
   `updatedAt`; po zapisie 48 rat i 22 pola bez zmian). Z dowodu wynikają też rozbieżności w karcie, NIEzapisane (czekają na usera):
   rok produkcji 2024 (karta: 2021), ładowność wg dowodu 3587 kg (puste), przegląd ważny do 03.11.2026 (po terminie).
   W umowach CNH jest data zawarcia (05.12.2024) i harmonogram z kapitałem/odsetkami — do ewentualnego dopisania w kartach.
+- **cd.16:** na polecenie usera w karcie WGM 0475M zapisane z dowodu: rok produkcji 2021 → **2024**, ładowność wg dowodu **3587 kg**
+  (transakcja, 9 → 9, auditLog). Ładowność rzeczywista (3000 kg) i przegląd (03.11.2026, po terminie) bez zmian — przegląd czeka na datę nowego badania.
