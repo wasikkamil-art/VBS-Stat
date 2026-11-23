@@ -8575,3 +8575,20 @@ Safari/iPhone (pamięć canvasa przy dużym skanie).
     nie udało, lista pokazuje, które pliki są bez znaku, i radzi wgrać ponownie.
   - CORS bucketa NIE ruszany (ustawienie infrastruktury — decyzja usera, dziś niepotrzebne).
   ❌ Nikt nie otworzył oznaczonych plików w aplikacji po zalogowaniu (sprawdzone: nowy link zwraca 200 i poprawny PDF, podgląd strony).
+
+- **cd.3 — znak wodny z logo + oryginały.** Słowa usera: „oryginały zostawiamy w pamięci żeby w razie czego dało się je pobrać
+  bez znaków wodnych, widoczne mają być wszystkie ze znakami wodnymi — dodatkowo znaki wodne zrób z logiem VBS i datą”.
+  - Znak = **logo VBS (`public/vbs-logo.png`) + data wgrania pod spodem**, ukośnie, powtarzane; krycie logo 22%, daty 32%.
+    `znakWodny.js`: `ukladZnaku` (wspólny układ), `znakNaDokumenciePdf(lib, pdf, logoPng, data)` — ten sam kod w przeglądarce i w Node.
+  - **Oryginał przy wgrywaniu**: obok kopii ze znakiem zapisuje się czysty plik `vehicleDocs/{v}/{id}_oryginal.{ext}` → pole
+    `oryginalPath`. Przy skanie ponad 25 MB „oryginałem” jest wersja zmniejszona (pełna nie mieści się w limicie Storage).
+    Pobranie: ołówek przy dokumencie → „Pobierz oryginał bez znaku wodnego” (link po ścieżce, tylko admin/dyspozytor, wpis w auditLog).
+    Usunięcie dokumentu kasuje oba pliki (komunikat „Pliku nie da się odzyskać” bez zmian).
+  - **Stare pliki**: 51 PDF-ów oznaczonych ponownie skryptem z czystych oryginałów (próba na sucho 51/51, podgląd faktury i dowodu,
+    potem zapis). Kopie nadpisane POD TĄ SAMĄ ścieżką i tokenem — linki w aplikacji bez zmian, poprzednia wersja z napisem
+    „VBS · data” już nie istnieje. Dowód WGM 7651V (wgrany 23.11 przez aplikację przed tą zmianą, bez oryginału w Storage):
+    czysta wersja odtworzona z pliku usera w `~/Downloads` (sips → 2200 px, jak w aplikacji) i wgrana jako oryginał.
+    Stan bazy: znak z logo 51, oryginał na miejscu 51, każdy link zwraca 200; bez znaku 3 harmonogramy CSV.
+  ✅ Atrapa: dowód 45,6 MB, PDF 4-stronicowy, zdjęcie CMR — logo i data czytelne, treść pod spodem czytelna. Lint 0 błędów, build zielony.
+  ❌ Niesprawdzone po zalogowaniu: wgranie nowego pliku z zapisem oryginału, przycisk „Pobierz oryginał” (otwarcie karty
+  przed pobraniem linku — możliwa blokada wyskakujących okien w Safari), odczyt AI dowodu przez znak z logo.

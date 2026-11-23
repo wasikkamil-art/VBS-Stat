@@ -1860,13 +1860,15 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
     const wgrane = [];
     for (const oryginal of pliki) {
       try {
-        let plik = await przygotujPlikPojazdu(oryginal);
-        // Znak wodny na stałe („VBS · data wgrania”). Gdy się nie uda albo to arkusz/CSV, plik wchodzi
-        // bez znaku, a `znakWodny: ""` zostawia ślad — lista pokazuje takie pliki do oznaczenia później.
+        const czysty = await przygotujPlikPojazdu(oryginal);
+        let plik = czysty;
+        // Znak wodny na stałe (logo VBS + data wgrania). Widoczna jest kopia ze znakiem, a czysty plik
+        // zostaje obok pod `oryginalPath` (user: „żeby w razie czego dało się je pobrać bez znaków”).
+        // Gdy się nie uda albo to arkusz/CSV, plik wchodzi bez znaku, a `znakWodny: ""` zostawia ślad.
         let znakWodny = "";
         if (czyDaSieOznaczyc(plik)) {
           try {
-            const oznaczony = await nalozZnakWodny(plik, tekstZnaku());
+            const oznaczony = await nalozZnakWodny(plik);
             if (oznaczony.size > LIMIT_PLIKU) throw new Error(`po nałożeniu znaku plik ma ${fmtMB(oznaczony.size)}`);
             plik = oznaczony; znakWodny = tekstZnaku();
           } catch (e) {
@@ -1880,11 +1882,17 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
         const r = storageRef(storage, storagePath);
         await uploadBytes(r, plik, { contentType: plik.type || undefined });
         const fileUrl = await getDownloadURL(r);
+        let oryginalPath = "";
+        if (znakWodny) {
+          const extO = (czysty.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "");
+          oryginalPath = `vehicleDocs/${v.id}/${id}_oryginal.${extO}`;
+          await uploadBytes(storageRef(storage, oryginalPath), czysty, { contentType: czysty.type || undefined });
+        }
         const wpis = {
           vehicleId: v.id, kind: meta.kind || "inne",
           label: (pliki.length === 1 && meta.label) ? meta.label : oryginal.name.replace(/\.[^.]+$/, ""),
           expiryDate: meta.expiryDate || "", issueDate: "", number: "", notes: "",
-          fileUrl, storagePath, fileName: plik.name, fileType: plik.type || "", znakWodny,
+          fileUrl, storagePath, fileName: plik.name, fileType: plik.type || "", znakWodny, oryginalPath,
           uploadedAt: new Date().toISOString(), uploadedBy: user?.email || "",
         };
         await setDoc(doc(db, "vehicleDocs", id), wpis);
@@ -2097,11 +2105,28 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
       return false;
     }
   };
+  // Czysty oryginał (bez znaku wodnego) — link tworzony na żądanie, po ścieżce; reguły Storage wpuszczają
+  // tu tylko admina i dyspozytora. Kartę otwieramy PRZED awaitem, inaczej przeglądarka zablokuje okno.
+  const pobierzOryginalDokumentu = async (d) => {
+    if (!d.oryginalPath) return;
+    const karta = window.open("", "_blank");
+    try {
+      const url = safeHref(await getDownloadURL(storageRef(storage, d.oryginalPath)));
+      if (karta) karta.location.href = url; else window.location.href = url;
+      logAction("read", "vehicleDocs", { id: d.id, vehicleId: d.vehicleId, label: d.label, action: "oryginal-bez-znaku" });
+    } catch (e) {
+      karta?.close();
+      console.error("pobierzOryginalDokumentu", e);
+      showToast(`⚠️ Nie udało się otworzyć oryginału: ${e?.message || e}`);
+    }
+  };
   const deleteVehicleDoc = async (d) => {
     if (!window.confirm(`Usunąć dokument „${d.label}”? Pliku nie da się odzyskać.`)) return;
     try {
       await deleteDoc(doc(db, "vehicleDocs", d.id));
-      if (d.storagePath) { try { await deleteObject(storageRef(storage, d.storagePath)); } catch (e) { console.warn("vehicleDocs: plik już nie istnieje", e); } }
+      for (const sciezka of [d.storagePath, d.oryginalPath]) {
+        if (sciezka) { try { await deleteObject(storageRef(storage, sciezka)); } catch (e) { console.warn("vehicleDocs: plik już nie istnieje", e); } }
+      }
       logAction("delete", "vehicleDocs", { id: d.id, vehicleId: d.vehicleId, label: d.label });
       showToast("Dokument usunięty");
     } catch (e) {
@@ -4143,7 +4168,7 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
                   }
                 }}
                 onDodajDokumenty={addVehicleDocs} onUsunDokument={deleteVehicleDoc}
-                onOdczytajDowod={odczytajDowod} onZapiszZDowodu={zapiszDaneZDowodu}
+                onOdczytajDowod={odczytajDowod} onZapiszZDowodu={zapiszDaneZDowodu} onPobierzOryginal={pobierzOryginalDokumentu}
                 onEdytujDokument={updateVehicleDocMeta} onZapiszLeasing={saveVehicleLeasing}
                 uruchomienie={uruchomienieApi}
               />

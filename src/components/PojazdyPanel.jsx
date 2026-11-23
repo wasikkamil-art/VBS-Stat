@@ -220,7 +220,7 @@ export function parsujHarmonogramCsv(tekst) {
     .filter(r => r.rata > 0);
 }
 
-function EdycjaDokumentu({ d, onZapisz, onAnuluj }) {
+function EdycjaDokumentu({ d, onZapisz, onAnuluj, onOryginal }) {
   const [f, setF] = useState({ label: d.label || "", kind: d.kind || "inne", number: d.number || "", issueDate: d.issueDate || "", expiryDate: d.expiryDate || "", notes: d.notes || "" });
   const [zapis, setZapis] = useState(false);
   const ustaw = (k) => (e) => setF(p => ({ ...p, [k]: e.target.value }));
@@ -254,7 +254,10 @@ function EdycjaDokumentu({ d, onZapisz, onAnuluj }) {
       <label className="text-xs text-gray-600 sm:col-span-6">Uwagi
         <input type="text" value={f.notes} onChange={ustaw("notes")} className={POLE} style={{ background: "#fff" }} />
       </label>
-      <div className="sm:col-span-6 flex justify-end gap-2">
+      <div className="sm:col-span-6 flex flex-wrap items-center justify-end gap-2">
+        {onOryginal && d.oryginalPath && (
+          <button type="button" onClick={() => onOryginal(d)} className="mr-auto text-xs font-medium text-gray-700 underline">Pobierz oryginał bez znaku wodnego</button>
+        )}
         <button type="button" onClick={onAnuluj} className="px-3 py-1.5 rounded-lg text-sm font-medium text-gray-700 bg-gray-200">Anuluj</button>
         <button type="submit" disabled={zapis} className="px-3 py-1.5 rounded-lg text-sm font-semibold text-white disabled:opacity-60" style={{ background: "#111827" }}>{zapis ? "Zapisuję…" : "Zapisz"}</button>
       </div>
@@ -324,7 +327,7 @@ function EdycjaLeasingu({ leasing, onZapisz, onAnuluj, onUsun, showToast }) {
 // Pliki, na które da się nałożyć znak wodny, a go nie mają (nakładanie przy wgrywaniu się nie udało).
 const bezZnaku = (docs) => docs.filter(d => d.fileUrl && !d.znakWodny && /\.(pdf|jpe?g|png|webp)$/i.test(d.fileName || d.storagePath || ""));
 
-function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, onOdczytaj, safeHref }) {
+function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, onOdczytaj, onOryginal, safeHref }) {
   const [edytowany, setEdytowany] = useState(null);
   const [wgrywam, setWgrywam] = useState(false);
   const doOznaczenia = bezZnaku(docs);
@@ -370,7 +373,7 @@ function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, onOdczytaj,
                   <button type="button" onClick={() => onUsun(d)} aria-label={`Usuń: ${d.label}`} className="text-gray-400 hover:text-red-700 p-1.5"><Ikona d={I.kosz} /></button>
                 )}
                 </div>
-                {edytowany === d.id && <EdycjaDokumentu d={d} onZapisz={onEdytuj} onAnuluj={() => setEdytowany(null)} />}
+                {edytowany === d.id && <EdycjaDokumentu d={d} onZapisz={onEdytuj} onAnuluj={() => setEdytowany(null)} onOryginal={onOryginal} />}
               </li>
             ))}
           </ul>
@@ -400,7 +403,7 @@ function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, onOdczytaj,
                 finally { setWgrywam(false); setWaznyDo(""); setOpis(""); }
               }} />
           </label>
-          <p className="w-full text-xs text-gray-500">Każdy wgrany PDF i zdjęcie dostaje na stałe znak wodny z nazwą firmy i datą wgrania.</p>
+          <p className="w-full text-xs text-gray-500">Każdy wgrany PDF i zdjęcie dostaje znak wodny (logo VBS i data wgrania). Czysty oryginał zostaje w pamięci — do pobrania przez ołówek przy dokumencie.</p>
           {rodzaj === "dowod" && <p className="w-full text-xs text-gray-500">Po wgraniu dowodu aplikacja odczyta z niego dane auta (VIN, przegląd, rok…) i pokaże je do zatwierdzenia.</p>}
           {doOznaczenia.length > 0 && (
             <p className="w-full text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
@@ -521,7 +524,7 @@ function Harmonogram({ leasing, dzis }) {
   );
 }
 
-function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, uruchomienie, onBrudne, showToast, safeHref }) {
+function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, uruchomienie, onBrudne, showToast, safeHref }) {
   const [oferta, setOferta] = useState(false);
   const [odczyt, setOdczyt] = useState(null);
   const mozeCzytacDowod = canEdit && onOdczytajDowod && onZapiszZDowodu && !v.archived;
@@ -633,7 +636,7 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
             const dowod = (wgrane || []).find(d => d.kind === "dowod" && d.fileUrl);
             if (dowod && mozeCzytacDowod) czytajDowod(dowod);
           } : null}
-          onOdczytaj={mozeCzytacDowod ? czytajDowod : null}
+          onOdczytaj={mozeCzytacDowod ? czytajDowod : null} onOryginal={canEdit ? onPobierzOryginal : null}
           onUsun={onUsunDokument} onEdytuj={onEdytujDokument} />
       </Sekcja>
 
@@ -676,7 +679,7 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
   );
 }
 
-export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajPojazd, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, uruchomienie, showToast, safeHref }) {
+export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajPojazd, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, uruchomienie, showToast, safeHref }) {
   const teraz = useMemo(() => dzis ?? new Date().setHours(0, 0, 0, 0), [dzis]);
   const [archiwum, setArchiwum] = useState(false);
   const [szukaj, setSzukaj] = useState("");
@@ -769,7 +772,7 @@ export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit 
 
         {aktywny
           ? <KartaPojazdu key={aktywny.id} v={aktywny} docs={docsWg[aktywny.id] || []} dzis={teraz} canEdit={canEdit}
-              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} onOdczytajDowod={onOdczytajDowod} onZapiszZDowodu={onZapiszZDowodu} uruchomienie={uruchomienie} onBrudne={onBrudne} showToast={showToast} safeHref={safeHref} />
+              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} onOdczytajDowod={onOdczytajDowod} onZapiszZDowodu={onZapiszZDowodu} onPobierzOryginal={onPobierzOryginal} uruchomienie={uruchomienie} onBrudne={onBrudne} showToast={showToast} safeHref={safeHref} />
           : <div className="bg-white rounded-2xl border border-gray-100 p-8 text-sm text-gray-500">Wybierz pojazd z listy.</div>}
       </div>
     </div>
