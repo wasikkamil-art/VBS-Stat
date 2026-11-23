@@ -8690,3 +8690,10 @@ Safari/iPhone (pamięć canvasa przy dużym skanie).
   przeniesione z `maxWeight` do `maxWeightDowod`, `maxWeight` puste do wpisania przez admina (transakcja, 9 → 9 pojazdów,
   wpis w auditLog). Starych aut (3000 / 895 / 820 kg) nie ruszałem — to wartości wpisane ręcznie.
   ⚠️ Skutek do czasu uzupełnienia: w „Kopiuj ofertę” i w planerze załadunku te trzy auta nie mają wagi maksymalnej.
+
+- **cd.13 — ważność gaśnicy.** User: „ważność gaśnic trzeba jeszcze dodać”. Nowe pole pojazdu **`gasnicaExpiry`**
+  („Gaśnica — ważna do (legalizacja)”, „Edytuj” → sekcja Przegląd). Termin „Gaśnica” wchodzi do: „Terminów” w karcie auta,
+  bloku terminów floty, starych alertów pojazdu (`getVehicleAlerts`) oraz maila z terminami (`lib/terminyFloty.js`,
+  `terminyFlotyMail` **wdrożona ponownie**). Jedna data na auto — jeśli gaśnic z różnymi datami jest kilka, wpisujemy najwcześniejszą.
+  ✅ Test maila (po terminie / w ciągu 30 dni / dalej), lint 0 błędów, build zielony. ❌ Niesprawdzone po zalogowaniu;
+  daty przy autach do wpisania przez usera (dziś puste wszędzie).

@@ -64,6 +64,7 @@ export function terminyPojazdu(v, docs, dzis) {
     { nazwa: "AC", data: v.acExpiry },
     { nazwa: "GAP", data: v.gapExpiry },
     { nazwa: "UDT windy", data: v.udtExpiry },
+    { nazwa: "Gaśnica", data: v.gasnicaExpiry },
     { nazwa: "Koniec leasingu", data: v.leasing?.koniec },
   ];
   const nastepnaRata = (v.leasing?.harmonogram || []).find(r => dniDo(r.data, dzis) >= 0);

@@ -14091,6 +14091,7 @@ function ServisTab({ vehicles, onUpdateVehicle }) {
     push("AC",          daysUntilD(v.acExpiry));
     push("Przegląd",    daysUntilD(v.inspectionExpiry));
     push("UDT ważność", daysUntilD(v.udtExpiry));
+    push("Gaśnica",     daysUntilD(v.gasnicaExpiry));
     push("UDT przegląd",daysUntilD(v.udtNextDate));
 
     const currKm = Number(v.currentKm) || 0;
@@ -14790,6 +14791,7 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
     // UDT
     udtNumber:       vehicle.udtNumber       || "",
     udtExpiry:       vehicle.udtExpiry       || "",
+    gasnicaExpiry:   vehicle.gasnicaExpiry   || "",
     udtNextDate:     vehicle.udtNextDate     || "",
     udtLiftName:     vehicle.udtLiftName     || "",
     // Oil service - warranty
@@ -15157,6 +15159,9 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
         <div className="grid grid-cols-1 gap-3">
           <MF label="Przegląd techniczny — ważny do">
             <MInput type="date" value={v.inspectionExpiry} onChange={val=>setF("inspectionExpiry",val)} />
+          </MF>
+          <MF label="Gaśnica — ważna do (legalizacja)">
+            <MInput type="date" value={v.gasnicaExpiry} onChange={val=>setF("gasnicaExpiry",val)} />
           </MF>
         </div>
         <div className="flex gap-2 mt-4">

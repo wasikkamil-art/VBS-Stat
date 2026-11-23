@@ -25,6 +25,7 @@ function terminyDoMaila(pojazdy, docs, dzis) {
     dodaj("AC", v.acExpiry);
     dodaj("GAP", v.gapExpiry);
     dodaj("UDT windy", v.udtExpiry);
+    dodaj("Gaśnica", v.gasnicaExpiry);
     dodaj("Koniec leasingu", v.leasing?.koniec);
     for (const d of docs || []) {
       if (d.vehicleId !== v.id || !d.expiryDate) continue;
