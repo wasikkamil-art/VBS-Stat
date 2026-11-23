@@ -8622,3 +8622,19 @@ Safari/iPhone (pamięć canvasa przy dużym skanie).
   ładowania, PDF w ramce. Lint 0 błędów, build zielony.
   ❌ Niesprawdzone po zalogowaniu: podgląd z prawdziwego linku Storage w ramce (Safari/iPhone zwykle nie pokazuje PDF w ramce —
   zostaje „Otwórz w nowej karcie”), wpis `preview` w dzienniku.
+
+- **cd.6 — terminy floty: na dół strony + mail 2× w tygodniu.** Słowa usera: „nie chcę u góry tych przypomnień, one mają być
+  na dole i przypomnienia mają przychodzić na @ 2x w tygodniu na wszystkie @, w treści ma być napisane że po terminie lub
+  termin się zbliża (ustawiamy przypomnienie 30 dni przed)”. Decyzje (pytania): odbiorcy **konta biura** (admin + dyspozytor,
+  bez zapasowego `deoen` — dziś 5 adresów), **poniedziałek i czwartek 7:00**.
+  - Panel Pojazdy: blok „Najbliższe terminy we flocie (60 dni)” przeniesiony pod listę aut i kartę; kliknięcie terminu wybiera
+    auto i przewija do karty. Okno 60 dni w panelu bez zmian (30 dni dotyczy maila).
+  - CF **`terminyFlotyMail`** (`0 7 * * 1,4` Europe/Warsaw) — **wdrożona**. `functions/lib/terminyFloty.js`: te same terminy co
+    panel (przegląd, OC, AC, GAP, UDT, koniec leasingu, dokumenty z datą ważności; bez rat leasingu), tylko aktywne auta;
+    dwie sekcje „PO TERMINIE” i „TERMIN SIĘ ZBLIŻA — najbliższe 30 dni”. Gdy nic nie ma — mail nie wychodzi. Jeden mail
+    na osobę, Resend. Lista terminów to kopia logiki z `PojazdyPanel.jsx` (nowy termin trzeba dodać w obu miejscach).
+  ✅ Na prawdziwych danych (bez wysyłki): 11 pozycji — identycznie jak na zrzucie usera (8 po terminie, 3 w ciągu 30 dni),
+  5 odbiorców, podgląd HTML maila obejrzany. Atrapa: blok na dole, kliknięcie wybiera auto. Lint 0 błędów, build zielony.
+  ❌ **Żaden mail jeszcze nie wyszedł** — pierwszy w czwartek 26.11.2026 o 7:00. Nie wysłałem próbnego, bo poszedłby do 5 osób.
+  Uwaga dla usera: 8 terminów „po terminie” to stare daty w kartach (np. OC WGM 0507M z 10.12.2025) — dopóki nie zostaną
+  poprawione, mail będzie je wymieniał dwa razy w tygodniu.

@@ -87,4 +87,4 @@ function mailePoranne(zadania, biuro, dzis) {
 // Ostatni wpis „termin" z historii — to on niesie kto/z/na/powód.
 const ostatniaZmianaTerminu = (z) => (z.historia || []).filter(h => h.typ === "termin").sort((a, b) => String(b.ts || "").localeCompare(String(a.ts || "")))[0] || null;
 
-module.exports = { odbiorcy, ileCzasu, mailNowe, mailTermin, mailePoranne, ostatniaZmianaTerminu };
+module.exports = { czyPowiadamiac, odbiorcy, ileCzasu, mailNowe, mailTermin, mailePoranne, ostatniaZmianaTerminu };

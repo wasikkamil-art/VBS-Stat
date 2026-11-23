@@ -741,6 +741,8 @@ export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit 
   const [wybrany, setWybrany] = useState(null);
   // Niezapisane zmiany na stronie „Uruchomienie auta" — pytamy, zanim zmiana auta je wyrzuci.
   const brudne = useRef(false);
+  // Lista terminów jest na dole strony — po kliknięciu terminu przewijamy do karty auta.
+  const gora = useRef(null);
   const onBrudne = useCallback((b) => { brudne.current = b; }, []);
   const moznaZmienic = () => !brudne.current || window.confirm("Masz niezapisane zmiany w uruchomieniu auta. Przejść bez zapisu?");
 
@@ -772,26 +774,7 @@ export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit 
         )}
       </div>
 
-      {flotaTerminy.length > 0 && (
-        <div className="bg-white rounded-2xl border border-gray-100 mb-4">
-          <Sekcja tytul="Najbliższe terminy we flocie (60 dni)" licznik={flotaTerminy.length} domyslnieOtwarta={flotaTerminy.some(t => t.dni <= 30)}>
-            <ul className="grid sm:grid-cols-2 xl:grid-cols-3 gap-2">
-              {flotaTerminy.map((t, i) => (
-                <li key={i}>
-                  <button type="button" onClick={() => { if (moznaZmienic()) { setArchiwum(false); setWybrany(t.id); } }}
-                    className="w-full flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-100 text-left text-sm hover:bg-gray-50">
-                    <span className="font-semibold text-gray-900 whitespace-nowrap">{t.plate}</span>
-                    <span className="flex-1 text-gray-700 truncate">{t.nazwa}</span>
-                    <Znaczek dni={t.dni} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </Sekcja>
-        </div>
-      )}
-
-      <div className="grid lg:grid-cols-[280px_minmax(0,1fr)] gap-4 items-start">
+      <div ref={gora} className="grid lg:grid-cols-[280px_minmax(0,1fr)] gap-4 items-start">
         <aside className="bg-white rounded-2xl border border-gray-100 p-3 lg:sticky lg:top-4">
           <input type="search" value={szukaj} onChange={e => setSzukaj(e.target.value)} placeholder="Szukaj: rejestracja, kierowca" aria-label="Szukaj pojazdu"
             className="w-full px-3 py-2 rounded-lg text-sm bg-gray-50 border border-gray-200 mb-2" />
@@ -830,6 +813,27 @@ export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit 
               renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} onOdczytajDowod={onOdczytajDowod} onZapiszZDowodu={onZapiszZDowodu} onPobierzOryginal={onPobierzOryginal} onPobierzDokument={onPobierzDokument} onPodgladDokumentu={onPodgladDokumentu} uruchomienie={uruchomienie} onBrudne={onBrudne} showToast={showToast} safeHref={safeHref} />
           : <div className="bg-white rounded-2xl border border-gray-100 p-8 text-sm text-gray-500">Wybierz pojazd z listy.</div>}
       </div>
+
+      {/* Terminy całej floty — na dole strony (user, 23.11.2026: „nie chcę u góry tych przypomnień”);
+          to samo zestawienie biuro dostaje mailem w poniedziałki i czwartki (CF `terminyFlotyMail`). */}
+      {flotaTerminy.length > 0 && (
+        <div className="bg-white rounded-2xl border border-gray-100 mt-4">
+          <Sekcja tytul="Najbliższe terminy we flocie (60 dni)" licznik={flotaTerminy.length} domyslnieOtwarta={flotaTerminy.some(t => t.dni <= 30)}>
+            <ul className="grid sm:grid-cols-2 xl:grid-cols-3 gap-2">
+              {flotaTerminy.map((t, i) => (
+                <li key={i}>
+                  <button type="button" onClick={() => { if (moznaZmienic()) { setArchiwum(false); setWybrany(t.id); gora.current?.scrollIntoView({ behavior: "smooth", block: "start" }); } }}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-100 text-left text-sm hover:bg-gray-50">
+                    <span className="font-semibold text-gray-900 whitespace-nowrap">{t.plate}</span>
+                    <span className="flex-1 text-gray-700 truncate">{t.nazwa}</span>
+                    <Znaczek dni={t.dni} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </Sekcja>
+        </div>
+      )}
     </div>
   );
 }

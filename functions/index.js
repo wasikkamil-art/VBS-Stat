@@ -716,6 +716,32 @@ exports.zadaniaAutaPoranne = onSchedule(
   async () => { await zadaniaPoranne(); }
 );
 
+// ── Terminy aut: przypomnienie mailem w poniedziałki i czwartki 7:00 (user, 23.11.2026) ──
+// Odbiorcy: wszystkie konta biura (admin + dyspozytor), bez kont pomijanych w powiadomieniach.
+// Treść: co jest PO TERMINIE i czemu termin SIĘ ZBLIŻA (30 dni przed). Gdy nie ma nic — mail nie wychodzi.
+const terminyFloty = require("./lib/terminyFloty");
+
+async function terminyFlotyWyslij() {
+  const ctx = await zadaniaKontekst();
+  const dzis = getTodayISO();
+  const pojazdy = (await ctx.db.doc("fleet/data").get()).data()?.fleetv2_vehicles || [];
+  const docs = (await ctx.db.collection("vehicleDocs").get()).docs.map(d => d.data());
+  const lista = terminyFloty.terminyDoMaila(pojazdy, docs, dzis);
+  const doKogo = [...ctx.biuro].filter(zadaniaMail.czyPowiadamiac);
+  if (!lista.length) { console.log("terminyFloty: nic po terminie ani w ciągu 30 dni — mail nie wychodzi"); return { wyslano: 0, terminow: 0 }; }
+  if (!ctx.apiKey) { console.error("terminyFloty: brak klucza API email w config/email"); return { wyslano: 0, blad: "brak klucza" }; }
+  if (!doKogo.length) { console.log("terminyFloty: brak odbiorców"); return { wyslano: 0, terminow: lista.length }; }
+  const mail = terminyFloty.mailTerminy(lista, dzis);
+  await sendEmailsResend(ctx.apiKey, doKogo.map(to => ({ from: ctx.from, to: [to], subject: mail.subject, html: mail.html })));
+  console.log(`✅ terminyFloty: ${lista.length} terminów → ${doKogo.length} odbiorców`);
+  return { wyslano: doKogo.length, terminow: lista.length };
+}
+
+exports.terminyFlotyMail = onSchedule(
+  { schedule: "0 7 * * 1,4", timeZone: "Europe/Warsaw", region: "europe-west1" },
+  async () => { await terminyFlotyWyslij(); }
+);
+
 // SCHEDULER: 8:00 CET
 exports.sendFleetEmail8 = onSchedule(
   { schedule: "0 8 * * *", timeZone: "Europe/Warsaw", region: "europe-west1" },
