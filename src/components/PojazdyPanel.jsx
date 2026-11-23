@@ -548,6 +548,13 @@ function OknoDanychZDowodu({ v, odczyt, onZapisz, onPonow, onClose }) {
               Uwaga: dokument jest wystawiony na <b>{wynik.rejestracja.zDowodu}</b>, a to karta auta <b>{v.plate}</b>. Sprawdź, czy to dokument tego pojazdu, zanim cokolwiek zapiszesz.
             </p>
           )}
+          {wynik?.vinRozny && (
+            <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+              To dokument tego auta (rejestracja się zgadza), ale <b>VIN jest inny niż w karcie</b>: w dokumencie{" "}
+              <span style={{ fontFamily: "'DM Mono', monospace" }}>{wynik.vinRozny.zDokumentu}</span>, w karcie{" "}
+              <span style={{ fontFamily: "'DM Mono', monospace" }}>{wynik.vinRozny.wKarcie}</span>. Sprawdź z dowodem rejestracyjnym, który numer jest poprawny.
+            </p>
+          )}
           {wynik && (wynik.pola.length === 0 ? <p className="text-sm text-gray-600">{zDowodu ? "Nie odczytałem z tego pliku żadnych danych do karty auta." : "Nie znalazłem w tym pliku numeru, daty ani terminu ważności."}</p> : (
             <>
               <p className="text-xs text-gray-600 mb-2">Zaznacz, co zapisać {zDowodu ? "w karcie auta" : "przy dokumencie"}. Nic nie zapisuje się samo; pola, które mają już inną wartość, są odznaczone.{!zDowodu && " Dokument z datą ważności pojawi się w „Terminach” i w mailu z terminami."}</p>

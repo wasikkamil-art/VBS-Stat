@@ -116,7 +116,16 @@ export function porownajZDokumentem(v, d, dane) {
   dodaj("issueDate", "Data dokumentu", data(x.dataDokumentu), fmtData);
   dodaj("expiryDate", "Ważny do", data(x.waznyDo), fmtData);
   const rej = czysty(x.rejestracja), vin = bezOdstepow(x.vin);
-  const rejOk = !rej || [v.plate, v.plate2].some(p => p && bezOdstepow(p) === bezOdstepow(rej));
+  // Auto rozpoznajemy po REJESTRACJI (spacje i myślniki bez znaczenia); VIN jest zapasem, gdy dokument rejestracji
+  // nie podaje. Zgłoszenie usera 23.11.2026 (WGM 0475M): rejestracja zgodna, a okno straszyło „innym autem” i pokazywało
+  // dwie takie same rejestracje — bo różnił się VIN (w karcie …C5R…, w zaświadczeniu …C1R…). To osobna, spokojniejsza
+  // uwaga (`vinRozny`): auto to samo, ale jeden z numerów VIN ma błąd i trzeba sprawdzić kartę.
+  const rejOk = [v.plate, v.plate2].some(p => p && bezOdstepow(p) === bezOdstepow(rej));
   const vinOk = !poprawnyVin(vin) || !v.vin || bezOdstepow(v.vin) === vin;
-  return { czyDowod: true, rejestracja: { zDowodu: rej || vin, zgodna: rejOk && vinOk }, pola, opisDokumentu: {} };
+  return {
+    czyDowod: true,
+    rejestracja: rej ? { zDowodu: rej, zgodna: rejOk } : { zDowodu: `VIN ${vin}`, zgodna: vinOk },
+    vinRozny: rej && rejOk && !vinOk ? { zDokumentu: vin, wKarcie: bezOdstepow(v.vin) } : null,
+    pola, opisDokumentu: {},
+  };
 }

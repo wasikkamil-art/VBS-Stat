@@ -8673,3 +8673,12 @@ Safari/iPhone (pamięć canvasa przy dużym skanie).
   data 13.10.2026, ważny do 13.10.2028, auto zgodne — wszystko poprawnie. Atrapa: okno, stany pól, ostrzeżenie o innym aucie.
   Lint 0 błędów, build zielony. ❌ Niesprawdzone po zalogowaniu (tam AI czyta kopię ze znakiem wodnym, nie czysty oryginał);
   inne rodzaje dokumentów (polisa, UDT, CEMT) — prompt ma wskazówki, ale testu na prawdziwych plikach nie było.
+
+- **cd.10 — fałszywe „inne auto” przy zgodnej rejestracji.** Zrzut usera (zaświadczenie kalibracji, WGM 0475M): okno ostrzegało
+  „dokument jest wystawiony na WGM0475M, a to karta auta WGM 0475M”. User podejrzewał spację — spacje były porównywane dobrze.
+  **Prawdziwa przyczyna: różni się VIN.** W zaświadczeniu `ZCFC672C1R5615130`, w karcie auta `ZCFC672C5R5615130` (9. znak: 1 vs 5).
+  Sprawdziłem cyfrę kontrolną VIN: wersja z zaświadczenia ją spełnia, wersja z karty NIE (VIN-y pozostałych Iveco we flocie spełniają)
+  → najpewniej literówka w karcie. **Karty nie zmieniałem** — to dana auta, decyzja usera (najlepiej z dowodu rejestracyjnego).
+  - Poprawka: auto rozpoznawane po rejestracji; VIN decyduje tylko, gdy dokument rejestracji nie podaje. Różnica VIN przy zgodnej
+    rejestracji to osobna, żółta uwaga z oboma numerami („sprawdź z dowodem, który jest poprawny”), nie czerwone „inne auto”.
+  ✅ Test logiki (5 przypadków), lint 0 błędów, build zielony. ❌ Niesprawdzone po zalogowaniu.
