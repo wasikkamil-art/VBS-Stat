@@ -8638,3 +8638,6 @@ Safari/iPhone (pamięć canvasa przy dużym skanie).
   ❌ **Żaden mail jeszcze nie wyszedł** — pierwszy w czwartek 26.11.2026 o 7:00. Nie wysłałem próbnego, bo poszedłby do 5 osób.
   Uwaga dla usera: 8 terminów „po terminie” to stare daty w kartach (np. OC WGM 0507M z 10.12.2025) — dopóki nie zostaną
   poprawione, mail będzie je wymieniał dwa razy w tygodniu.
+- **cd.7:** po pushu `9d9e32b` user potwierdził układ na produkcji i poprosił o próbny mail tylko do siebie — wysłany skryptem
+  (ta sama treść z `lib/terminyFloty.js`, temat z „[PRÓBA]”), **user potwierdził, że dotarł i wygląda dobrze**. Nadal
+  niesprawdzone: automatyczna wysyłka z harmonogramu do 5 kont (pierwsza w czwartek 26.11.2026, 7:00).
