@@ -2128,6 +2128,14 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
       showToast(`⚠️ Nie udało się pobrać „${d.label}”: ${e?.message || e}`);
     }
   };
+  // Podgląd w aplikacji: ta sama funkcja z `podglad: true` → plik z samym logo (bez daty), do wyświetlenia w oknie.
+  // Zwraca { url, znak } albo rzuca wyjątek — okno podglądu samo pokazuje błąd.
+  const podgladDokumentuPojazdu = async (d) => {
+    const { data } = await httpsCallable(functions, "pobierzDokumentPojazdu")({ docId: d.id, podglad: true });
+    const url = safeHref(data?.url || "");
+    if (!url || url === "#") throw new Error("serwer nie zwrócił pliku");
+    return { url, znak: !!data.znak };
+  };
   // Czysty oryginał (bez znaku wodnego) — link tworzony na żądanie, po ścieżce; reguły Storage wpuszczają
   // tu tylko admina i dyspozytora. Kartę otwieramy PRZED awaitem, inaczej przeglądarka zablokuje okno.
   const pobierzOryginalDokumentu = async (d) => {
@@ -4191,7 +4199,7 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
                   }
                 }}
                 onDodajDokumenty={addVehicleDocs} onUsunDokument={deleteVehicleDoc}
-                onOdczytajDowod={odczytajDowod} onZapiszZDowodu={zapiszDaneZDowodu} onPobierzOryginal={pobierzOryginalDokumentu} onPobierzDokument={pobierzDokumentPojazdu}
+                onOdczytajDowod={odczytajDowod} onZapiszZDowodu={zapiszDaneZDowodu} onPobierzOryginal={pobierzOryginalDokumentu} onPobierzDokument={pobierzDokumentPojazdu} onPodgladDokumentu={podgladDokumentuPojazdu}
                 onEdytujDokument={updateVehicleDocMeta} onZapiszLeasing={saveVehicleLeasing}
                 uruchomienie={uruchomienieApi}
               />

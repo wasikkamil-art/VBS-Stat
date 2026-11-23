@@ -100,6 +100,7 @@ const I = {
   olowek: <><path d="M4 20h4L19 9l-4-4L4 16z" /><path d="m13 7 4 4" /></>,
   plus: <><path d="M12 5v14" /><path d="M5 12h14" /></>,
   kosz: <><path d="M4 7h16" /><path d="M9 7V4h6v3" /><path d="M6 7l1 13h10l1-13" /></>,
+  oko: <><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></>,
   skan: <><path d="M4 8V6a2 2 0 0 1 2-2h2" /><path d="M16 4h2a2 2 0 0 1 2 2v2" /><path d="M20 16v2a2 2 0 0 1-2 2h-2" /><path d="M8 20H6a2 2 0 0 1-2-2v-2" /><path d="M7 12h10" /></>,
 };
 
@@ -324,11 +325,53 @@ function EdycjaLeasingu({ leasing, onZapisz, onAnuluj, onUsun, showToast }) {
   );
 }
 
+/**
+ * Podgląd dokumentu w aplikacji — plik ze znakiem wodnym (samo logo, bez daty) przygotowany przez serwer.
+ * `podglad`: { doc, stan: "laduje" | "gotowe" | "blad", url?, znak?, blad? }.
+ */
+function OknoPodgladu({ podglad, onClose, onPobierz }) {
+  const d = podglad.doc;
+  return (
+    <div className="fixed inset-0 z-40 flex items-stretch sm:items-center justify-center p-0 sm:p-4" style={{ background: "rgba(0,0,0,0.45)" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div role="dialog" aria-label={`Podgląd: ${d.label}`} className="w-full sm:max-w-5xl bg-white sm:rounded-2xl shadow-2xl flex flex-col" style={{ height: "min(100vh, 92vh)" }}>
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100">
+          <h3 className="flex-1 min-w-0 text-sm font-bold text-gray-900 truncate">{d.label}</h3>
+          {podglad.stan === "gotowe" && (
+            <a href={podglad.url} target="_blank" rel="noopener noreferrer" className="text-xs font-medium text-gray-700 px-2 py-1.5 rounded-lg hover:bg-gray-100 whitespace-nowrap">Otwórz w nowej karcie</a>
+          )}
+          {onPobierz && (
+            <button type="button" onClick={() => onPobierz(d)} className="inline-flex items-center gap-1 text-xs font-semibold text-white px-3 py-1.5 rounded-lg whitespace-nowrap" style={{ background: "#111827" }}>
+              <Ikona d={I.pobierz} /> Pobierz
+            </button>
+          )}
+          <button type="button" onClick={onClose} aria-label="Zamknij podgląd" className="w-8 h-8 rounded-lg bg-gray-100 text-gray-600 text-sm">✕</button>
+        </div>
+        <div className="flex-1 min-h-0 bg-gray-100">
+          {podglad.stan === "laduje" && <p className="p-6 text-sm text-gray-700" role="status">Przygotowuję podgląd…</p>}
+          {podglad.stan === "blad" && <p className="m-4 text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2">Nie udało się przygotować podglądu: {podglad.blad}</p>}
+          {podglad.stan === "gotowe" && (podglad.znak
+            // `#toolbar=0` chowa w przeglądarkowym czytniku PDF przyciski pobierania i druku — pobranie ma iść przez
+            // „Pobierz” (data + wpis w dzienniku). To wygoda, nie zabezpieczenie: podgląd i tak jest w dzienniku.
+            ? <iframe src={`${podglad.url}#toolbar=0&navpanes=0`} title={`Podgląd: ${d.label}`} className="w-full h-full border-0" />
+            : <p className="p-6 text-sm text-gray-700">Tego pliku nie da się pokazać w oknie (np. arkusz CSV). Użyj „Otwórz w nowej karcie”.</p>)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Pliki, na które da się nałożyć znak wodny, a go nie mają (nakładanie przy wgrywaniu się nie udało).
 const bezZnaku = (docs) => docs.filter(d => d.fileUrl && !d.znakWodny && /\.(pdf|jpe?g|png|webp)$/i.test(d.fileName || d.storagePath || ""));
 
-function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, onOdczytaj, onOryginal, onPobierz, safeHref }) {
+function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, onOdczytaj, onOryginal, onPobierz, onPodglad, safeHref }) {
   const [edytowany, setEdytowany] = useState(null);
+  const [podglad, setPodglad] = useState(null);
+  const pokazPodglad = async (d) => {
+    setPodglad({ doc: d, stan: "laduje" });
+    try { const w = await onPodglad(d); setPodglad(p => (p?.doc.id === d.id ? { doc: d, stan: "gotowe", url: safeHref ? safeHref(w.url) : w.url, znak: w.znak } : p)); }
+    catch (e) { console.error("podgląd dokumentu", e); setPodglad(p => (p?.doc.id === d.id ? { doc: d, stan: "blad", blad: e?.message || String(e) } : p)); }
+  };
   const [pobierany, setPobierany] = useState(null);
   const [wgrywam, setWgrywam] = useState(false);
   const doOznaczenia = bezZnaku(docs);
@@ -338,6 +381,7 @@ function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, onOdczytaj,
   const wGrupach = GRUPY.map(g => [g, wKolejnosci(docs.filter(d => (RODZAJ[d.kind]?.grupa || "Inne") === g))]).filter(([, l]) => l.length);
   return (
     <div>
+      {podglad && <OknoPodgladu podglad={podglad} onClose={() => setPodglad(null)} onPobierz={onPobierz} />}
       {docs.length === 0 && <p className="text-sm text-gray-500 mb-3">Brak dokumentów przy tym aucie.</p>}
       {wGrupach.map(([grupa, lista]) => (
         <div key={grupa} className="mb-3">
@@ -356,6 +400,11 @@ function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, onOdczytaj,
                     {[d.number && `nr ${d.number}`, d.issueDate && `z ${fmtData(d.issueDate)}`, d.expiryDate && `ważne do ${fmtData(d.expiryDate)}`, d.notes].filter(Boolean).join(" · ") || RODZAJ[d.kind]?.label}
                   </div>
                 </div>
+                {d.fileUrl && onPodglad && (
+                  <button type="button" onClick={() => pokazPodglad(d)} className="flex items-center gap-1 text-xs font-medium text-gray-800 px-2 py-1.5 rounded-lg hover:bg-gray-100" aria-label={`Podgląd: ${d.label}`}>
+                    <Ikona d={I.oko} /> Podgląd
+                  </button>
+                )}
                 {d.fileUrl && onPobierz
                   ? <button type="button" disabled={pobierany === d.id} onClick={async () => { setPobierany(d.id); try { await onPobierz(d); } finally { setPobierany(null); } }}
                       className="flex items-center gap-1 text-xs font-medium text-blue-700 px-2 py-1.5 rounded-lg hover:bg-blue-50 disabled:opacity-60" aria-label={`Pobierz: ${d.label}`}>
@@ -409,7 +458,7 @@ function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, onOdczytaj,
                 finally { setWgrywam(false); setWaznyDo(""); setOpis(""); }
               }} />
           </label>
-          <p className="w-full text-xs text-gray-500">„Pobierz” daje plik ze znakiem wodnym (logo VBS i data pobrania) i zapisuje w dzienniku, kto pobrał. Czysty oryginał zostaje w pamięci — do pobrania przez ołówek przy dokumencie.</p>
+          <p className="w-full text-xs text-gray-500">„Podgląd” pokazuje dokument z logo VBS (bez daty). „Pobierz” daje plik z logo i datą pobrania; jedno i drugie zapisuje się w dzienniku. Czysty oryginał zostaje w pamięci — do pobrania przez ołówek przy dokumencie.</p>
           {rodzaj === "dowod" && <p className="w-full text-xs text-gray-500">Po wgraniu dowodu aplikacja odczyta z niego dane auta (VIN, przegląd, rok…) i pokaże je do zatwierdzenia.</p>}
           {doOznaczenia.length > 0 && (
             <p className="w-full text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
@@ -530,7 +579,7 @@ function Harmonogram({ leasing, dzis }) {
   );
 }
 
-function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, uruchomienie, onBrudne, showToast, safeHref }) {
+function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, onPodgladDokumentu, uruchomienie, onBrudne, showToast, safeHref }) {
   const [oferta, setOferta] = useState(false);
   const [odczyt, setOdczyt] = useState(null);
   const mozeCzytacDowod = canEdit && onOdczytajDowod && onZapiszZDowodu && !v.archived;
@@ -642,7 +691,7 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
             const dowod = (wgrane || []).find(d => d.kind === "dowod" && d.fileUrl);
             if (dowod && mozeCzytacDowod) czytajDowod(dowod);
           } : null}
-          onOdczytaj={mozeCzytacDowod ? czytajDowod : null} onOryginal={canEdit ? onPobierzOryginal : null} onPobierz={onPobierzDokument}
+          onOdczytaj={mozeCzytacDowod ? czytajDowod : null} onOryginal={canEdit ? onPobierzOryginal : null} onPobierz={onPobierzDokument} onPodglad={onPodgladDokumentu}
           onUsun={onUsunDokument} onEdytuj={onEdytujDokument} />
       </Sekcja>
 
@@ -685,7 +734,7 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
   );
 }
 
-export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajPojazd, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, uruchomienie, showToast, safeHref }) {
+export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajPojazd, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, onPodgladDokumentu, uruchomienie, showToast, safeHref }) {
   const teraz = useMemo(() => dzis ?? new Date().setHours(0, 0, 0, 0), [dzis]);
   const [archiwum, setArchiwum] = useState(false);
   const [szukaj, setSzukaj] = useState("");
@@ -778,7 +827,7 @@ export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit 
 
         {aktywny
           ? <KartaPojazdu key={aktywny.id} v={aktywny} docs={docsWg[aktywny.id] || []} dzis={teraz} canEdit={canEdit}
-              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} onOdczytajDowod={onOdczytajDowod} onZapiszZDowodu={onZapiszZDowodu} onPobierzOryginal={onPobierzOryginal} onPobierzDokument={onPobierzDokument} uruchomienie={uruchomienie} onBrudne={onBrudne} showToast={showToast} safeHref={safeHref} />
+              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} onOdczytajDowod={onOdczytajDowod} onZapiszZDowodu={onZapiszZDowodu} onPobierzOryginal={onPobierzOryginal} onPobierzDokument={onPobierzDokument} onPodgladDokumentu={onPodgladDokumentu} uruchomienie={uruchomienie} onBrudne={onBrudne} showToast={showToast} safeHref={safeHref} />
           : <div className="bg-white rounded-2xl border border-gray-100 p-8 text-sm text-gray-500">Wybierz pojazd z listy.</div>}
       </div>
     </div>

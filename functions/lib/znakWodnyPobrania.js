@@ -39,7 +39,8 @@ async function znakNaDokumenciePdf(pdf, tekstDaty) {
     const px = (u.szer - font.widthOfTextAtSize(tekstDaty, u.data)) / 2, py = -u.data * 1.05;
     for (const [x, y] of u.punkty) {
       strona.drawImage(logo, { x, y, width: u.szer, height: u.wys, rotate: degrees(KAT), opacity: KRYCIE_LOGO });
-      strona.drawText(tekstDaty, { x: x + px * cos - py * sin, y: y + px * sin + py * cos, size: u.data, font, color: rgb(0.18, 0.19, 0.57), opacity: KRYCIE_DATY, rotate: degrees(KAT) });
+      // Podgląd w aplikacji ma samo logo (bez daty) — pusty `tekstDaty` pomija napis.
+      if (tekstDaty) strona.drawText(tekstDaty, { x: x + px * cos - py * sin, y: y + px * sin + py * cos, size: u.data, font, color: rgb(0.18, 0.19, 0.57), opacity: KRYCIE_DATY, rotate: degrees(KAT) });
     }
   }
 }
@@ -51,7 +52,7 @@ function rodzajPliku(nazwa) {
 }
 
 /**
- * Zwraca PDF (Buffer) ze znakiem wodnym z datą `tekstDaty`. PDF zostaje PDF-em (warstwa wektorowa na
+ * Zwraca PDF (Buffer) ze znakiem wodnym: logo + data `tekstDaty` (pobranie) albo samo logo, gdy `tekstDaty` jest puste (podgląd). PDF zostaje PDF-em (warstwa wektorowa na
  * wierzchu, treść nietknięta); zdjęcie JPG/PNG trafia na jedną stronę PDF — po stronie serwera nie mamy
  * biblioteki do rysowania po obrazach, a PDF ze zdjęciem i znakiem spełnia ten sam cel.
  */

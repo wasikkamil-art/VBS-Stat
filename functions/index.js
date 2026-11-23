@@ -4184,6 +4184,9 @@ exports.pobierzDokumentPojazdu = onCall(
     }
     const docId = String(request.data?.docId || "");
     if (!docId || docId.includes("/")) throw new HttpsError("invalid-argument", "Wymagany: docId");
+    // `podglad: true` = okno podglądu w aplikacji: samo logo BEZ daty (user, 23.11.2026), plik do wyświetlenia
+    // (inline) zamiast załącznika, w dzienniku osobny rodzaj wpisu (`preview`), żeby nie mylić z pobraniem.
+    const podglad = request.data?.podglad === true;
 
     const db = getFirestore();
     const snap = await db.collection("vehicleDocs").doc(docId).get();
@@ -4192,7 +4195,7 @@ exports.pobierzDokumentPojazdu = onCall(
     const bucket = getStorage().bucket();
     const kto = request.auth.token.email || "";
     const slad = (details) => db.collection("auditLog").add({
-      action: "download", module: "vehicleDocs",
+      action: podglad ? "preview" : "download", module: "vehicleDocs",
       details: { id: docId, vehicleId: d.vehicleId || "", label: d.label || "", kind: d.kind || "", ...details },
       uid: request.auth.uid, email: kto, displayName: request.auth.token.name || kto, ts: new Date().toISOString(),
     });
@@ -4201,7 +4204,7 @@ exports.pobierzDokumentPojazdu = onCall(
     // się nie udało) — plik główny. Plik główny JUŻ ze znakiem oddajemy bez zmian, żeby nie nakładać dwóch.
     const zrodlo = d.oryginalPath || (!d.znakWodny ? d.storagePath : "");
     const rodzaj = rodzajPliku(zrodlo);
-    const data = dataPobrania();
+    const data = podglad ? "" : dataPobrania();
     if (!zrodlo || !rodzaj) {
       if (!d.fileUrl) throw new HttpsError("failed-precondition", "Ten dokument nie ma pliku.");
       await slad({ znak: d.znakWodny || "bez znaku" });
@@ -4225,12 +4228,12 @@ exports.pobierzDokumentPojazdu = onCall(
     await bucket.file(sciezka).save(wynik, {
       contentType: "application/pdf",
       metadata: {
-        contentDisposition: `attachment; filename="${nazwaPliku(d.label)}.pdf"`,
+        contentDisposition: `${podglad ? "inline" : "attachment"}; filename="${nazwaPliku(d.label)}.pdf"`,
         cacheControl: "private, no-store",
         metadata: { firebaseStorageDownloadTokens: token },
       },
     });
-    await slad({ znak: `logo VBS · ${data}` });
+    await slad({ znak: podglad ? "logo VBS (podgląd, bez daty)" : `logo VBS · ${data}` });
 
     // Sprzątanie po poprzednich pobraniach — błąd tutaj nie może zepsuć bieżącego pobrania.
     try {

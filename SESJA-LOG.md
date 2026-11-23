@@ -8610,3 +8610,15 @@ Safari/iPhone (pamięć canvasa przy dużym skanie).
   wywołanie bez logowania (`UNAUTHENTICATED`). Lint 0 błędów, build zielony.
   ❌ Niesprawdzone: prawdziwe pobranie po zalogowaniu (czy przeglądarka zapisuje plik z ukrytej ramki, zwłaszcza Safari),
   wpis w dzienniku zdarzeń, czas przy zimnym starcie funkcji, sprzątanie plików tymczasowych.
+
+- **cd.5 — podgląd dokumentu.** User po teście cd.4: „działa — i teraz jeszcze musimy dodać pole gdzie będzie podgląd dokumentu
+  obok pobierz, ze znakiem wodnym ale bez daty”.
+  - `pobierzDokumentPojazdu` dostała tryb `podglad: true` (**wdrożona ponownie**): samo logo VBS bez daty, plik `inline`,
+    wpis w `auditLog` jako `preview` (moja decyzja — user prosił o logowanie pobrań; podgląd też zostawia ślad, osobnego rodzaju).
+  - Front: przycisk „Podgląd” (ikona oka) przed „Pobierz”, okno z dokumentem w ramce, w nagłówku „Otwórz w nowej karcie” i „Pobierz”
+    (to drugie = zwykłe pobranie z datą i wpisem). `#toolbar=0` chowa przyciski pobierania/druku czytnika PDF w Chrome —
+    wygoda, nie zabezpieczenie. CSV: komunikat + otwarcie w nowej karcie.
+  ✅ Pobranie z datą potwierdzone przez usera na produkcji (cd.4). Podgląd: lokalnie polisa z samym logo; atrapa — okno, stan
+  ładowania, PDF w ramce. Lint 0 błędów, build zielony.
+  ❌ Niesprawdzone po zalogowaniu: podgląd z prawdziwego linku Storage w ramce (Safari/iPhone zwykle nie pokazuje PDF w ramce —
+  zostaje „Otwórz w nowej karcie”), wpis `preview` w dzienniku.
