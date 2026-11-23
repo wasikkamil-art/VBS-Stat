@@ -42,6 +42,9 @@ const WYPOSAZENIE = {
   gps: "GPS / lokalizator", "chłodnia": "Agregat chłodniczy", plandeka: "Plandeka",
 };
 
+// Kolory z logo VBS — nagłówek karty auta (granat + żółty akcent). Granat na jasnym tle: kontrast 10:1.
+const KOLOR = { granat: "#2e3192", zolty: "#fdb913", tlo: "#eef0fb", ramka: "#d9dcf3" };
+
 const DZIEN = 86400000;
 const dniDo = (data, dzis) => {
   if (!data) return null;
@@ -119,6 +122,31 @@ function Sekcja({ tytul, licznik, domyslnieOtwarta = false, children, akcja }) {
       </div>
       {otwarta && <div className="px-5 pb-5">{children}</div>}
     </section>
+  );
+}
+
+/** „We flocie od" z ustawianiem daty wprost na karcie (ołówek → pole daty → Zapisz). */
+function DataWeFlocie({ v, onZapisz }) {
+  const [edycja, setEdycja] = useState(false);
+  const [data, setData] = useState(v.fleetJoinDate || "");
+  const [zapis, setZapis] = useState(false);
+  if (!edycja) {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        {v.fleetJoinDate ? fmtData(v.fleetJoinDate) : <span className="text-gray-500 font-normal">nie ustawiono</span>}
+        {onZapisz && (
+          <button type="button" onClick={() => { setData(v.fleetJoinDate || ""); setEdycja(true); }} aria-label="Ustaw datę wejścia do floty"
+            className="text-xs font-medium px-1.5 py-0.5 rounded-md" style={{ color: KOLOR.granat, background: KOLOR.tlo }}>{v.fleetJoinDate ? "zmień" : "ustaw datę"}</button>
+        )}
+      </span>
+    );
+  }
+  return (
+    <form className="flex flex-wrap items-center gap-1.5" onSubmit={async (e) => { e.preventDefault(); setZapis(true); const ok = await onZapisz({ fleetJoinDate: data }); setZapis(false); if (ok !== false) setEdycja(false); }}>
+      <input type="date" value={data} onChange={e => setData(e.target.value)} aria-label="We flocie od" className="px-2 py-1 rounded-lg text-sm bg-white border border-gray-300" />
+      <button type="submit" disabled={zapis} className="px-2 py-1 rounded-lg text-xs font-semibold text-white disabled:opacity-60" style={{ background: KOLOR.granat }}>{zapis ? "…" : "Zapisz"}</button>
+      <button type="button" onClick={() => setEdycja(false)} className="px-2 py-1 rounded-lg text-xs font-medium text-gray-700 bg-gray-100">Anuluj</button>
+    </form>
   );
 }
 
@@ -579,7 +607,7 @@ function Harmonogram({ leasing, dzis }) {
   );
 }
 
-function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, onPodgladDokumentu, uruchomienie, onBrudne, showToast, safeHref }) {
+function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, onPodgladDokumentu, onZapiszPole, uruchomienie, onBrudne, showToast, safeHref }) {
   const [oferta, setOferta] = useState(false);
   const [odczyt, setOdczyt] = useState(null);
   const mozeCzytacDowod = canEdit && onOdczytajDowod && onZapiszZDowodu && !v.archived;
@@ -602,24 +630,25 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
   }
   return (
     <article className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-      <header className="flex flex-wrap items-start gap-3 px-5 py-4">
+      <div aria-hidden="true" style={{ height: 4, background: `linear-gradient(90deg, ${KOLOR.granat} 0%, ${KOLOR.granat} 70%, ${KOLOR.zolty} 70%, ${KOLOR.zolty} 100%)` }} />
+      <header className="flex flex-wrap items-start gap-3 px-5 py-4" style={{ background: KOLOR.tlo, borderBottom: `1px solid ${KOLOR.ramka}` }}>
         <div className="flex-1 min-w-0">
-          <h2 className="text-lg font-bold text-gray-900">{v.plate}{v.plate2 && <span className="text-gray-500 font-medium"> + {v.plate2}</span>}</h2>
-          <p className="text-sm text-gray-600">{[v.brand, v.year, v.type].filter(Boolean).join(" · ")}{v.archived && " · w archiwum"}</p>
-          <p className="text-sm text-gray-600 mt-0.5">{kierowca ? <>Kierowca: <span className="text-gray-900 font-medium">{kierowca.name}</span>{kierowca.phone && ` · ${kierowca.phone}`}</> : "Bez przypisanego kierowcy"}</p>
+          <h2 className="text-xl font-bold" style={{ color: KOLOR.granat }}>{v.plate}{v.plate2 && <span className="text-gray-500 font-medium"> + {v.plate2}</span>}</h2>
+          <p className="text-sm text-gray-700">{[v.brand, v.year, v.type].filter(Boolean).join(" · ")}{v.archived && " · w archiwum"}</p>
+          <p className="text-sm text-gray-700 mt-0.5">{kierowca ? <>Kierowca: <span className="text-gray-900 font-medium">{kierowca.name}</span>{kierowca.phone && ` · ${kierowca.phone}`}</> : "Bez przypisanego kierowcy"}</p>
         </div>
         <div className="flex gap-2">
-          <button type="button" onClick={() => setOferta(true)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold text-white" style={{ background: "#111827" }}>
+          <button type="button" onClick={() => setOferta(true)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold text-white" style={{ background: KOLOR.granat }}>
             <Ikona d={I.kopiuj} /> Kopiuj ofertę
           </button>
           {canEdit && uruchomienie && (
-            <button type="button" onClick={() => setUruchom(true)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-900">
+            <button type="button" onClick={() => setUruchom(true)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-white text-gray-900" style={{ border: `1px solid ${KOLOR.ramka}` }}>
               Uruchomienie auta
             </button>
           )}
           {canEdit && renderEdycja && !v.archived && (
             <button type="button" onClick={() => setEdycja(e => !e)} aria-pressed={edycja} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium"
-              style={edycja ? { background: "#111827", color: "#fff" } : { background: "#f3f4f6", color: "#1f2937" }}>
+              style={edycja ? { background: KOLOR.granat, color: "#fff" } : { background: "#fff", color: "#1f2937", border: `1px solid ${KOLOR.ramka}` }}>
               <Ikona d={I.olowek} /> {edycja ? "Zamknij edycję" : "Edytuj"}
             </button>
           )}
@@ -629,14 +658,15 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
         </div>
       </header>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-5 gap-y-3 px-5 pb-5">
+      {/* Wartości netto tu nie ma (user, 23.11.2026: nieistotna dla dyspozytora) — zostaje w „Edytuj". */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-5 gap-y-3 px-5 py-5">
         <Fakt etykieta="Wymiary skrzyni (cm)">{v.dimensions}</Fakt>
-        <Fakt etykieta="Ładowność">{v.maxWeight ? `${v.maxWeight} kg` : ""}</Fakt>
+        <Fakt etykieta="Ładowność rzeczywista">{v.maxWeight ? `${v.maxWeight} kg` : ""}</Fakt>
+        <Fakt etykieta="Ładowność wg dowodu">{v.maxWeightDowod ? `${v.maxWeightDowod} kg` : ""}</Fakt>
         <Fakt etykieta="Załadunek">{v.loadingType}</Fakt>
-        <Fakt etykieta="Wartość netto">{v.wartoscNet ? fmtKwota(v.wartoscNet, v.wartoscWaluta) : ""}</Fakt>
         {v.plate2 && <Fakt etykieta={`Przyczepa ${v.plate2} (cm)`}>{v.dimensions2}</Fakt>}
         {v.plate2 && <Fakt etykieta="Ładowność przyczepy">{v.maxWeight2 ? `${v.maxWeight2} kg` : ""}</Fakt>}
-        <Fakt etykieta="We flocie od">{v.fleetJoinDate ? fmtData(v.fleetJoinDate) : ""}</Fakt>
+        <Fakt etykieta="We flocie od"><DataWeFlocie v={v} onZapisz={canEdit && onZapiszPole && !v.archived ? (patch) => onZapiszPole(v, patch) : null} /></Fakt>
         {v.archived && <Fakt etykieta="W archiwum od">{[v.archivedDate && fmtData(v.archivedDate), v.archivedReason].filter(Boolean).join(" · ")}</Fakt>}
         <div className="col-span-2 sm:col-span-4"><Fakt etykieta="VIN"><span style={{ fontFamily: "'DM Mono', monospace" }}>{v.vin}</span></Fakt></div>
         <div className="col-span-2 sm:col-span-4">
@@ -734,7 +764,7 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
   );
 }
 
-export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajPojazd, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, onPodgladDokumentu, uruchomienie, showToast, safeHref }) {
+export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajPojazd, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, onPodgladDokumentu, onZapiszPole, uruchomienie, showToast, safeHref }) {
   const teraz = useMemo(() => dzis ?? new Date().setHours(0, 0, 0, 0), [dzis]);
   const [archiwum, setArchiwum] = useState(false);
   const [szukaj, setSzukaj] = useState("");
@@ -810,7 +840,7 @@ export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit 
 
         {aktywny
           ? <KartaPojazdu key={aktywny.id} v={aktywny} docs={docsWg[aktywny.id] || []} dzis={teraz} canEdit={canEdit}
-              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} onOdczytajDowod={onOdczytajDowod} onZapiszZDowodu={onZapiszZDowodu} onPobierzOryginal={onPobierzOryginal} onPobierzDokument={onPobierzDokument} onPodgladDokumentu={onPodgladDokumentu} uruchomienie={uruchomienie} onBrudne={onBrudne} showToast={showToast} safeHref={safeHref} />
+              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} onOdczytajDowod={onOdczytajDowod} onZapiszZDowodu={onZapiszZDowodu} onPobierzOryginal={onPobierzOryginal} onPobierzDokument={onPobierzDokument} onPodgladDokumentu={onPodgladDokumentu} onZapiszPole={onZapiszPole} uruchomienie={uruchomienie} onBrudne={onBrudne} showToast={showToast} safeHref={safeHref} />
           : <div className="bg-white rounded-2xl border border-gray-100 p-8 text-sm text-gray-500">Wybierz pojazd z listy.</div>}
       </div>
 

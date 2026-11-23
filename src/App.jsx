@@ -4199,6 +4199,13 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
                   }
                 }}
                 onDodajDokumenty={addVehicleDocs} onUsunDokument={deleteVehicleDoc}
+                onZapiszPole={async (v, patch) => {
+                  try {
+                    await dbUpdateVehicleField(v.id, patch);
+                    logAction("update", "vehicles", { id: v.id, plate: v.plate, action: "pole-karty", pola: Object.keys(patch).join(", ") });
+                    return true;
+                  } catch (e) { console.error("zapis pola pojazdu", e); showToast("❌ Błąd zapisu: " + (e?.message || e)); return false; }
+                }}
                 onOdczytajDowod={odczytajDowod} onZapiszZDowodu={zapiszDaneZDowodu} onPobierzOryginal={pobierzOryginalDokumentu} onPobierzDokument={pobierzDokumentPojazdu} onPodgladDokumentu={podgladDokumentuPojazdu}
                 onEdytujDokument={updateVehicleDocMeta} onZapiszLeasing={saveVehicleLeasing}
                 uruchomienie={uruchomienieApi}
@@ -14758,6 +14765,7 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
     dimensions2:     vehicle.dimensions2     || "",
     loadingType:     vehicle.loadingType     || "",
     maxWeight:       vehicle.maxWeight       || "",
+    maxWeightDowod:  vehicle.maxWeightDowod  || "",
     maxWeight2:      vehicle.maxWeight2      || "",
     driverHistory: (vehicle.driverHistory || []).map((d) => ({ ...d })),
     // Insurance
@@ -14934,8 +14942,14 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
           <MF label="Wymiary — pojazd (cm)">
             <MInput value={v.dimensions} onChange={(val) => setF("dimensions", val)} placeholder="607x243x245" />
           </MF>
-          <MF label="Max waga — pojazd (kg)">
+          <MF label="Ładowność rzeczywista — pojazd (kg)">
             <MInput type="number" value={v.maxWeight} onChange={(val) => setF("maxWeight", val)} placeholder="3000" />
+          </MF>
+          <MF label="Ładowność wg dowodu — pojazd (kg)">
+            <MInput type="number" value={v.maxWeightDowod} onChange={(val) => setF("maxWeightDowod", val)} placeholder="3511" />
+          </MF>
+          <MF label="We flocie od">
+            <MInput type="date" value={v.fleetJoinDate} onChange={(val) => setF("fleetJoinDate", val)} />
           </MF>
           {v.plate2 && (
             <>

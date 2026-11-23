@@ -59,7 +59,8 @@ export function porownajZDowodem(v, dane) {
   if (rok && rok >= 1980 && rok <= 2100) dodaj("year", "Rok produkcji", v.year, rok, { rowne: (a, b) => Number(a) === b });
   dodaj("inspectionExpiry", "Przegląd — ważny do", v.inspectionExpiry, data(d.badanieDo), { pokaz: fmtData, rowne: (a, b) => a === b });
   const lad = liczba(d.ladownosc);
-  if (lad) dodaj("maxWeight", "Ładowność (kg)", v.maxWeight, String(lad), { rowne: (a, b) => Number(a) === Number(b) });
+  // Ładowność z dowodu ma WŁASNE pole — `maxWeight` to ładowność rzeczywista (ta z ofert i planera), wpisywana ręcznie.
+  if (lad) dodaj("maxWeightDowod", "Ładowność wg dowodu (kg)", v.maxWeightDowod, String(lad), { rowne: (a, b) => Number(a) === Number(b) });
 
   const rej = czysty(d.rejestracja);
   const dodatki = [

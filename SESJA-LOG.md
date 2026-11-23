@@ -8641,3 +8641,19 @@ Safari/iPhone (pamięć canvasa przy dużym skanie).
 - **cd.7:** po pushu `9d9e32b` user potwierdził układ na produkcji i poprosił o próbny mail tylko do siebie — wysłany skryptem
   (ta sama treść z `lib/terminyFloty.js`, temat z „[PRÓBA]”), **user potwierdził, że dotarł i wygląda dobrze**. Nadal
   niesprawdzone: automatyczna wysyłka z harmonogramu do 5 kont (pierwsza w czwartek 26.11.2026, 7:00).
+
+- **cd.8 — karta auta: wygląd i dane.** Słowa usera (zrzut nagłówka karty): „dodałbym jakiś kolor inny ale pasujący, wykasowałbym
+  wartość netto bo to nie jest istotne dla dyspozytora, dodałbym ładowność w dowodzie i ładowność prawdziwą, i we flocie
+  można dodać miejsce żeby ustawić datę”.
+  - Kolor: granat i żółty z logo VBS (`KOLOR` w `PojazdyPanel.jsx`) — pasek u góry karty, jasnogranatowe tło nagłówka,
+    rejestracja i przycisk „Kopiuj ofertę” w granacie. Dobór koloru to moja decyzja (user nie wskazał konkretnego).
+  - „Wartość netto” zdjęta z karty (pole i edycja w „Edytuj” bez zmian — dane nietknięte).
+  - Dwie ładowności: **„Ładowność rzeczywista” = dotychczasowe `maxWeight`** (to ono idzie do ofert i planera),
+    **„Ładowność wg dowodu” = nowe pole `maxWeightDowod`** (puste, dopóki ktoś nie wpisze albo nie zatwierdzi z odczytu dowodu —
+    odczyt AI proponuje teraz ładowność do tego pola, nie do `maxWeight`). Oba pola w „Edytuj → Dane techniczne”.
+    ⚠️ Założenie do potwierdzenia przez usera: że dzisiejsze wartości `maxWeight` to ładowność rzeczywista. Przy v7–v9
+    wpisano je z dokumentów (np. 3511 kg = wartość z dowodu) — tam user powinien poprawić rzeczywistą.
+  - „We flocie od”: ustawianie daty wprost na karcie („ustaw datę” / „zmień” → pole daty → Zapisz; zapis `dbUpdateVehicleField`
+    + auditLog) oraz pole w „Edytuj” (wcześniej formularz edycji nie miał tego pola w ogóle).
+  ✅ Atrapa: nagłówek, fakty, ustawienie daty. Lint 0 błędów, build zielony. ❌ Niesprawdzone po zalogowaniu (zapis daty,
+  nowe pole w „Edytuj”), telefon.
