@@ -8682,3 +8682,6 @@ Safari/iPhone (pamięć canvasa przy dużym skanie).
   - Poprawka: auto rozpoznawane po rejestracji; VIN decyduje tylko, gdy dokument rejestracji nie podaje. Różnica VIN przy zgodnej
     rejestracji to osobna, żółta uwaga z oboma numerami („sprawdź z dowodem, który jest poprawny”), nie czerwone „inne auto”.
   ✅ Test logiki (5 przypadków), lint 0 błędów, build zielony. ❌ Niesprawdzone po zalogowaniu.
+- **cd.11:** user potwierdził z dowodem, że poprawny VIN WGM 0475M to wersja z „1” → w karcie (v1) poprawione
+  `ZCFC672C5R5615130` → `ZCFC672C1R5615130` (transakcja z asercją długości tablicy, 9 → 9 pojazdów; wpis `korekta-vin` w auditLog).
+  Poprawka cd.10 (żółta uwaga o różnicy VIN) wypchnięta, bundle `index-hGYgcIy8.js` potwierdzony.
