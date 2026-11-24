@@ -802,7 +802,8 @@ export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit 
 
   const widoczne = vehicles.filter(v => !!v.archived === archiwum)
     .filter(v => !szukaj.trim() || `${v.plate} ${v.plate2 || ""} ${v.brand || ""} ${(v.driverHistory || []).find(d => !d.to)?.name || ""}`.toLowerCase().includes(szukaj.trim().toLowerCase()));
-  const aktywny = widoczne.find(v => v.id === wybrany) || widoczne[0] || null;
+  // Karta otwiera się dopiero po kliknięciu kafelka; `null` = widok kafelków.
+  const aktywny = vehicles.find(v => v.id === wybrany) || null;
 
   // Najbliższe terminy całej floty — to są „przypomnienia”.
   const flotaTerminy = useMemo(() => vehicles.filter(v => !v.archived)
@@ -822,49 +823,69 @@ export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit 
         )}
       </div>
 
-      <div ref={gora} className="grid lg:grid-cols-[280px_minmax(0,1fr)] gap-4 items-start">
-        <aside className="bg-white rounded-2xl border border-gray-100 p-3 lg:sticky lg:top-4">
-          <input type="search" value={szukaj} onChange={e => setSzukaj(e.target.value)} placeholder="Szukaj: rejestracja, kierowca" aria-label="Szukaj pojazdu"
-            className="w-full px-3 py-2 rounded-lg text-sm bg-gray-50 border border-gray-200 mb-2" />
-          <div className="flex gap-1 mb-2" role="tablist">
-            {[[false, `Aktywne (${vehicles.length - ileArch})`], [true, `Archiwum (${ileArch})`]].map(([a, opis]) => (
-              <button key={String(a)} type="button" role="tab" aria-selected={archiwum === a} onClick={() => { if (moznaZmienic()) { setArchiwum(a); setWybrany(null); } }}
-                className="flex-1 px-2 py-1.5 rounded-lg text-xs font-medium" style={archiwum === a ? { background: "#111827", color: "#fff" } : { background: "#f3f4f6", color: "#374151" }}>{opis}</button>
-            ))}
-          </div>
-          <ul className="space-y-1">
-            {widoczne.map(v => {
-              const najblizszy = terminyPojazdu(v, docsWg[v.id] || [], teraz).filter(t => !t.rata)[0];
-              const kier = (v.driverHistory || []).find(d => !d.to);
-              const wybr = aktywny?.id === v.id;
-              const kropka = !najblizszy ? "#d1d5db" : najblizszy.dni < 0 ? "#dc2626" : najblizszy.dni <= 30 ? "#d97706" : "#16a34a";
-              return (
-                <li key={v.id}>
-                  <button type="button" onClick={() => { if (moznaZmienic()) setWybrany(v.id); }} aria-current={wybr ? "true" : undefined}
-                    className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-left" style={wybr ? { background: "#eff6ff", boxShadow: "inset 0 0 0 1.5px #2563eb" } : undefined}>
-                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: kropka }} aria-hidden="true" />
-                    <span className="flex-1 min-w-0">
-                      <span className="block text-sm font-semibold text-gray-900">{v.plate}</span>
-                      <span className="block text-xs text-gray-600 truncate">{kier?.name || v.brand || "—"}</span>
-                    </span>
-                    <span className="text-xs text-gray-500">{(docsWg[v.id] || []).length || ""}</span>
-                  </button>
-                </li>
-              );
-            })}
-            {widoczne.length === 0 && <li className="text-sm text-gray-500 px-3 py-4">Brak pojazdów.</li>}
-          </ul>
-        </aside>
-
-        {aktywny
-          ? <KartaPojazdu key={aktywny.id} v={aktywny} docs={docsWg[aktywny.id] || []} dzis={teraz} canEdit={canEdit}
+      {/* Kafelki zamiast listy bocznej (user, 24.11.2026): najpierw wybór auta, dopiero klik wchodzi w kartę z dokumentami. */}
+      <div ref={gora}>
+        {aktywny ? (
+          <>
+            <button type="button" onClick={() => { if (moznaZmienic()) setWybrany(null); }}
+              className="inline-flex items-center gap-1.5 mb-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-800 bg-white border border-gray-200 hover:bg-gray-50">
+              <span aria-hidden="true">←</span> Wszystkie pojazdy
+            </button>
+            <KartaPojazdu key={aktywny.id} v={aktywny} docs={docsWg[aktywny.id] || []} dzis={teraz} canEdit={canEdit}
               renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} onOdczytajDowod={onOdczytajDowod} onZapiszZDowodu={onZapiszZDowodu} onPobierzOryginal={onPobierzOryginal} onPobierzDokument={onPobierzDokument} onPodgladDokumentu={onPodgladDokumentu} onZapiszPole={onZapiszPole} uruchomienie={uruchomienie} onBrudne={onBrudne} showToast={showToast} safeHref={safeHref} />
-          : <div className="bg-white rounded-2xl border border-gray-100 p-8 text-sm text-gray-500">Wybierz pojazd z listy.</div>}
+          </>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center gap-2 mb-4">
+              <input type="search" value={szukaj} onChange={e => setSzukaj(e.target.value)} placeholder="Szukaj: rejestracja, kierowca" aria-label="Szukaj pojazdu"
+                className="flex-1 px-3 py-2 rounded-lg text-sm bg-white border border-gray-200" style={{ minWidth: 200, maxWidth: 360 }} />
+              <div className="flex gap-1" role="tablist">
+                {[[false, `Aktywne (${vehicles.length - ileArch})`], [true, `Archiwum (${ileArch})`]].map(([a, opis]) => (
+                  <button key={String(a)} type="button" role="tab" aria-selected={archiwum === a} onClick={() => setArchiwum(a)}
+                    className="px-3 py-2 rounded-lg text-sm font-medium" style={archiwum === a ? { background: KOLOR.granat, color: "#fff" } : { background: "#fff", color: "#374151", border: "1px solid #e5e7eb" }}>{opis}</button>
+                ))}
+              </div>
+            </div>
+            <ul className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
+              {widoczne.map(v => {
+                const terminy = terminyPojazdu(v, docsWg[v.id] || [], teraz).filter(t => !t.rata);
+                const najblizszy = terminy[0];
+                const poTerminie = terminy.filter(t => t.dni < 0).length;
+                const kier = (v.driverHistory || []).find(d => !d.to);
+                const ileDok = (docsWg[v.id] || []).length;
+                return (
+                  <li key={v.id}>
+                    <button type="button" onClick={() => setWybrany(v.id)} aria-label={`Otwórz kartę ${v.plate}`}
+                      className="w-full h-full text-left bg-white rounded-2xl border border-gray-100 overflow-hidden hover:shadow-md focus-visible:shadow-md transition-shadow">
+                      <span aria-hidden="true" className="block" style={{ height: 4, background: `linear-gradient(90deg, ${KOLOR.granat} 0%, ${KOLOR.granat} 70%, ${KOLOR.zolty} 70%, ${KOLOR.zolty} 100%)` }} />
+                      <span className="block px-4 py-3" style={{ background: KOLOR.tlo, borderBottom: `1px solid ${KOLOR.ramka}` }}>
+                        <span className="block text-lg font-bold" style={{ color: KOLOR.granat }}>{v.plate}{v.plate2 && <span className="text-gray-600 font-medium text-sm"> + {v.plate2}</span>}</span>
+                        <span className="block text-sm text-gray-700 truncate">{[v.brand, v.year, v.type].filter(Boolean).join(" · ") || "—"}</span>
+                      </span>
+                      <span className="block px-4 py-3 space-y-2">
+                        <span className="block text-sm text-gray-700 truncate">{kier ? <>Kierowca: <span className="font-medium text-gray-900">{kier.name}</span></> : "Bez przypisanego kierowcy"}</span>
+                        <span className="flex items-center gap-2 text-sm">
+                          <span className="flex-1 min-w-0 truncate text-gray-700">{najblizszy ? najblizszy.nazwa : "Brak wpisanych terminów"}</span>
+                          {najblizszy && <Znaczek dni={najblizszy.dni} />}
+                        </span>
+                        <span className="flex items-center gap-2 text-xs text-gray-600">
+                          <span className="flex-1">Dokumenty: <span className="font-medium text-gray-900">{ileDok}</span>{poTerminie > 1 && <span className="text-red-700 font-medium"> · po terminie: {poTerminie}</span>}</span>
+                          <span className="font-medium" style={{ color: KOLOR.granat }}>Otwórz →</span>
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+            {widoczne.length === 0 && <p className="bg-white rounded-2xl border border-gray-100 p-8 text-sm text-gray-500">Brak pojazdów.</p>}
+          </>
+        )}
       </div>
 
       {/* Terminy całej floty — na dole strony (user, 23.11.2026: „nie chcę u góry tych przypomnień”);
           to samo zestawienie biuro dostaje mailem w poniedziałki i czwartki (CF `terminyFlotyMail`). */}
-      {flotaTerminy.length > 0 && (
+      {!aktywny && flotaTerminy.length > 0 && (
         <div className="bg-white rounded-2xl border border-gray-100 mt-4">
           <Sekcja tytul="Najbliższe terminy we flocie (60 dni)" licznik={flotaTerminy.length} domyslnieOtwarta={flotaTerminy.some(t => t.dni <= 30)}>
             <ul className="grid sm:grid-cols-2 xl:grid-cols-3 gap-2">

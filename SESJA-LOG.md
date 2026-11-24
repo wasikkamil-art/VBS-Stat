@@ -8732,3 +8732,15 @@ Safari/iPhone (pamięć canvasa przy dużym skanie).
   przy umowach WGM 0475M i WGM 0507M; wykup 71,41 EUR przenumerowany na nr 49, data wykupu bez zmian (umowa jej osobno nie podaje).
   REST PATCH tylko pola `raty` (+ `updatedBy`, `updatedAt`), z warunkiem na `updateTime`. Przed/po: 48 → 49 pozycji, zapłaconych 24 = 24,
   22 pola dokumentu bez zmian. ❌ Nie sprawdzone w interfejsie VBS Faktury (widok umowy, cotygodniowy raport leasingów).
+
+## 2026-11-24 — Pojazdy: kafelki zamiast listy bocznej
+
+Słowa usera (zrzut widoku z listą aut po lewej i kartą po prawej): „w tym widoku zrobiłbym kafelki zamiast tej listy wyboru
+i dopiero klikasz i wchodzi dopiero do zawartości dokumentów”.
+- `PojazdyPanel.jsx`: strona startowa = siatka kafelków aut (1/2/3 kolumny), nad nią wyszukiwarka i Aktywne/Archiwum.
+  Kafelek: rejestracja (+ przyczepa), marka · rok · typ, kierowca, najbliższy termin ze znaczkiem, liczba dokumentów,
+  „po terminie: N”, „Otwórz →”; kolory jak nagłówek karty. Klik → karta auta na całą szerokość z przyciskiem „← Wszystkie pojazdy”.
+  Lista boczna usunięta; nic nie otwiera się samo (wcześniej pierwsze auto było otwarte od razu).
+  Blok terminów floty widoczny tylko w widoku kafelków; kliknięcie terminu otwiera kartę auta.
+✅ Atrapa: 7 kafelków aktywnych, 2 w archiwum, wejście w kartę, powrót, konsola bez błędów. Lint 0 błędów, build zielony.
+❌ Niesprawdzone po zalogowaniu i na telefonie.
