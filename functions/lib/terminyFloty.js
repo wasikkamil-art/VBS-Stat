@@ -22,6 +22,7 @@ function terminyDoMaila(pojazdy, docs, dzis) {
     const dodaj = (nazwa, data) => { if (poprawnaData(data)) lista.push({ plate: v.plate || "", nazwa, data, dni: dniDo(data, dzis) }); };
     dodaj("Przegląd techniczny", v.inspectionExpiry);
     dodaj("OC", v.ocExpiry);
+    if (v.plate2) dodaj(`OC przyczepy ${v.plate2}`, v.ocExpiry2);
     dodaj("AC", v.acExpiry);
     dodaj("GAP", v.gapExpiry);
     dodaj("UDT windy", v.udtExpiry);

@@ -62,6 +62,7 @@ export function terminyPojazdu(v, docs, dzis) {
   const lista = [
     { nazwa: "Przegląd techniczny", data: v.inspectionExpiry },
     { nazwa: "OC", data: v.ocExpiry },
+    { nazwa: `OC przyczepy${v.plate2 ? ` ${v.plate2}` : ""}`, data: v.plate2 ? v.ocExpiry2 : "" },
     { nazwa: "AC", data: v.acExpiry },
     { nazwa: "GAP", data: v.gapExpiry },
     { nazwa: "UDT windy", data: v.udtExpiry },
@@ -806,6 +807,7 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
           <Fakt etykieta="Polisa OC">{v.ocNumber}</Fakt>
           <Fakt etykieta="Składka OC">{v.ocAmount ? fmtKwota(v.ocAmount) : ""}</Fakt>
           <Fakt etykieta="Polisa AC">{v.acNumber}</Fakt>
+          {v.plate2 && <Fakt etykieta={`Polisa OC — przyczepa ${v.plate2}`}>{[v.ocNumber2, v.ocExpiry2 && `do ${fmtData(v.ocExpiry2)}`].filter(Boolean).join(" · ")}</Fakt>}
           <Fakt etykieta="Całość polis">{v.caloscPolis ? fmtKwota(v.caloscPolis) : ""}</Fakt>
           <Fakt etykieta="Nr ewidencyjny UDT">{v.udtNumber}</Fakt>
           <div className="col-span-2 sm:col-span-3"><Fakt etykieta="Winda">{v.udtLiftName}</Fakt></div>

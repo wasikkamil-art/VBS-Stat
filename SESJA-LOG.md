@@ -8820,3 +8820,9 @@ i dopiero klikasz i wchodzi dopiero do zawartości dokumentów”.
   nie wchodzi do „Terminów” — ten termin nie jest dziś nigdzie pilnowany. Zakładka „Dokumenty firmowe” wypchnięta (`d033cc8`), bundle potwierdzony.
 - **24.11 cd.:** na polecenie usera numery polis w kartach zaktualizowane z dokumentów: WGM 5367K AC 920049595762 → 922001902227,
   TK 314CL OC 3315273 → 920062792248 (transakcja z kontrolą stanu, 9 → 9, auditLog).
+
+- **24.11 — OC przyczepy jako osobny termin.** Po przeniesieniu polis wyszło, że OC przyczepy TK760AP (do 11.05.2027) nie jest nigdzie pilnowane
+  (polisy-dokumenty nie wchodzą do „Terminów”). User: „Tak, dodaj”. Nowe pola pojazdu **`ocExpiry2`** i **`ocNumber2`**, widoczne tylko przy aucie
+  z przyczepą (`plate2`): w „Edytuj” (sekcja OC), w kafelku „Ubezpieczenie i UDT”, w „Terminach” karty i floty, w starych alertach pojazdu oraz
+  w mailu z terminami (`terminyFlotyMail` **wdrożona ponownie**). Dane: TK 314CL — OC przyczepy 920065762286, do 11.05.2027 (z polisy; transakcja, auditLog).
+  ✅ Test maila, lint 0 błędów, build zielony. ❌ Niesprawdzone po zalogowaniu.

@@ -14102,6 +14102,7 @@ function ServisTab({ vehicles, onUpdateVehicle }) {
     };
 
     push("OC",          daysUntilD(v.ocExpiry));
+    if (v.plate2) push("OC przyczepy", daysUntilD(v.ocExpiry2));
     push("AC",          daysUntilD(v.acExpiry));
     push("Przegląd",    daysUntilD(v.inspectionExpiry));
     push("UDT ważność", daysUntilD(v.udtExpiry));
@@ -14786,6 +14787,8 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
     driverHistory: (vehicle.driverHistory || []).map((d) => ({ ...d })),
     // Insurance
     ocNumber:        vehicle.ocNumber        || "",
+    ocNumber2:       vehicle.ocNumber2       || "",
+    ocExpiry2:       vehicle.ocExpiry2       || "",
     ocAmount:        vehicle.ocAmount        || "",
     ocExpiry:        vehicle.ocExpiry        || "",
     acNumber:        vehicle.acNumber        || "",
@@ -15129,6 +15132,17 @@ function VehicleEditPanel({ vehicle, onSave, onClose }) {
           <MF label="OC — ważna do">
             <MInput type="date" value={v.ocExpiry} onChange={val=>setF("ocExpiry",val)} />
           </MF>
+          {/* Przyczepa ma własną polisę OC z innym terminem — osobne pola, tylko przy aucie z przyczepą. */}
+          {v.plate2 && (
+            <>
+              <MF label={`Nr polisy OC — przyczepa ${v.plate2}`}>
+                <MInput value={v.ocNumber2} onChange={val=>setF("ocNumber2",val)} placeholder="920065762286" />
+              </MF>
+              <MF label="OC przyczepy — ważna do">
+                <MInput type="date" value={v.ocExpiry2} onChange={val=>setF("ocExpiry2",val)} />
+              </MF>
+            </>
+          )}
         </div>
         <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">🛡️ AC</div>
         <div className="grid grid-cols-3 gap-3 mb-4">
