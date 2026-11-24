@@ -8,7 +8,7 @@
 // wymagają migracji. Nowe są tylko: `leasing` (obiekt) i dokumenty pojazdu (`docs`).
 import { useCallback, useMemo, useRef, useState } from "react";
 import UruchomienieAuta from "./UruchomienieAuta";
-import { porownajZDowodem, porownajZDokumentem } from "../utils/dowodRejestracyjny";
+import { porownajZDowodem, porownajZDokumentem, opisZRozpoznania, czyjDokument, polaKartyZDokumentu, RODZAJE_Z_POLEM_KARTY } from "../utils/dowodRejestracyjny";
 import { pierwszaRataLeasingu } from "../utils/leasing";
 
 // Rodzaje dokumentów pojazdu. `oferta: true` = domyślnie proponowany do dołączenia do oferty.
@@ -18,6 +18,7 @@ export const RODZAJE_DOKUMENTOW = [
   { id: "oswiadczenie", label: "Oświadczenie do rejestracji",    grupa: "Rejestracja i homologacja" },
   { id: "cemt",         label: "Certyfikat CEMT / Euro",         grupa: "Rejestracja i homologacja", oferta: true },
   { id: "protokol",     label: "Protokół przekazania",           grupa: "Rejestracja i homologacja" },
+  { id: "badanie",      label: "Badanie techniczne — zaświadczenie", grupa: "Rejestracja i homologacja" },
   { id: "polisa",       label: "Polisa OC / AC",                 grupa: "Ubezpieczenia", oferta: true },
   { id: "gap",          label: "Polisa GAP",                     grupa: "Ubezpieczenia" },
   { id: "umowa",        label: "Umowa leasingu",                 grupa: "Leasing" },
@@ -28,6 +29,7 @@ export const RODZAJE_DOKUMENTOW = [
   { id: "winda",        label: "Dokumenty windy",                grupa: "Winda i UDT" },
   { id: "tachograf",    label: "Kalibracja tachografu",          grupa: "Tachograf" },
   { id: "gwarancja",    label: "Gwarancja / serwis",             grupa: "Serwis i gwarancje" },
+  { id: "gasnica",      label: "Przegląd gaśnicy",               grupa: "Serwis i gwarancje" },
   { id: "faktura",      label: "Faktura",                        grupa: "Faktury" },
   { id: "inne",         label: "Inne",                           grupa: "Inne" },
 ];
@@ -73,8 +75,8 @@ export function terminyPojazdu(v, docs, dzis) {
   if (nastepnaRata) lista.push({ nazwa: `Rata leasingu nr ${nastepnaRata.lp}`, data: nastepnaRata.data, kwota: nastepnaRata.rata, waluta: v.leasing?.waluta, rata: true });
   for (const d of docs) {
     if (!d.expiryDate) continue;
-    // Polisa i UDT mają już swój termin w polach karty — nie dublujemy.
-    if (["polisa", "gap", "udt", "dowod"].includes(d.kind)) continue;
+    // Polisa, UDT, badanie i gaśnica mają już swój termin w polach karty — nie dublujemy.
+    if (RODZAJE_Z_POLEM_KARTY.includes(d.kind)) continue;
     lista.push({ nazwa: RODZAJ[d.kind]?.label || d.label, data: d.expiryDate });
   }
   return lista
@@ -107,6 +109,7 @@ const I = {
   plus: <><path d="M12 5v14" /><path d="M5 12h14" /></>,
   kosz: <><path d="M4 7h16" /><path d="M9 7V4h6v3" /><path d="M6 7l1 13h10l1-13" /></>,
   oko: <><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></>,
+  wgraj: <><path d="M12 16V5" /><path d="m7 9 5-5 5 5" /><path d="M5 20h14" /></>,
   skan: <><path d="M4 8V6a2 2 0 0 1 2-2h2" /><path d="M16 4h2a2 2 0 0 1 2 2v2" /><path d="M20 16v2a2 2 0 0 1-2 2h-2" /><path d="M8 20H6a2 2 0 0 1-2-2v-2" /><path d="M7 12h10" /></>,
 };
 
@@ -438,7 +441,157 @@ function OknoPodgladu({ podglad, onClose, onPobierz }) {
 // Pliki, na które da się nałożyć znak wodny, a go nie mają (nakładanie przy wgrywaniu się nie udało).
 const bezZnaku = (docs) => docs.filter(d => d.fileUrl && !d.znakWodny && /\.(pdf|jpe?g|png|webp)$/i.test(d.fileName || d.storagePath || ""));
 
-function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, onOdczytaj, onOryginal, onPobierz, onPodglad, safeHref }) {
+/** Jeden przycisk do wgrywania: bez wyboru rodzaju — dokument rozpoznaje AI, a człowiek zatwierdza. */
+function PrzyciskWgraj({ onPliki, wgrywam, ciemny }) {
+  return (
+    <label className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium ${wgrywam ? "opacity-60 cursor-wait" : "cursor-pointer"}`}
+      style={ciemny ? { background: "#111827", color: "#fff" } : { background: KOLOR.zolty, color: "#1f2937" }}>
+      <Ikona d={I.wgraj} /> {wgrywam ? "Wgrywam…" : "Wgraj dokument"}
+      <input type="file" multiple className="sr-only" accept=".pdf,image/*,.heic,.heif,.csv,.xlsx" disabled={wgrywam}
+        onChange={(e) => { const pliki = [...e.target.files]; e.target.value = ""; if (pliki.length) onPliki(pliki); }} />
+    </label>
+  );
+}
+
+// Gdzie w karcie auta widać dokument danej grupy (poza kafelkiem „Dokumenty”, w którym jest każdy).
+const KAFELEK_GRUPY = { "Ubezpieczenia": "Ubezpieczenie i UDT", "Winda i UDT": "Ubezpieczenie i UDT", "Leasing": "Leasing", "Tachograf": "Serwis, gwarancja i tachograf", "Serwis i gwarancje": "Serwis, gwarancja i tachograf" };
+const CZYTELNY = /\.(pdf|jpe?g|png|webp)$/i;
+const BIALE = { background: "#fff" };
+
+/**
+ * Świeżo wgrany dokument: AI rozpoznało rodzaj i odczytało dane, człowiek sprawdza, poprawia i klika „Zapisz”.
+ * `pozycja`: { doc, stan: "czytam" | "gotowe" | "blad" | "reczne", dane?, daneDowodu?, blad? }.
+ * Formularz jest edytowalny w każdym stanie poza „czytam” — przy błędzie AI dane wpisuje się ręcznie.
+ */
+function OknoRozpoznania({ v, pozycja, zostalo, onZapisz, onPonow, onClose }) {
+  const { doc: d, stan, dane, daneDowodu } = pozycja;
+  const start = useMemo(() => (stan === "gotowe" ? opisZRozpoznania(d, dane, RODZAJE_DOKUMENTOW.map(r => r.id)) : { kind: "inne", label: d.label || "", number: "", issueDate: "", expiryDate: "", notes: "" }), [d, stan, dane]);
+  const [f, setF] = useState(null);
+  const opis = f ?? start;
+  const ustaw = (k) => (e) => setF({ ...opis, [k]: e.target.value });
+  const czyj = useMemo(() => (stan === "gotowe" ? czyjDokument(v, daneDowodu || dane) : null), [v, stan, dane, daneDowodu]);
+  const zDowodu = opis.kind === "dowod" && daneDowodu ? porownajZDowodem(v, daneDowodu) : null;
+  const pola = zDowodu ? zDowodu.pola : polaKartyZDokumentu(v, opis, dane);
+  const [wybrane, setWybrane] = useState({}); // klucz → true/false; brak wpisu = domyślne z propozycji
+  const zaznaczone = (p) => p.stan !== "zgodne" && (wybrane[p.klucz] ?? p.domyslnie);
+  const doKarty = pola.filter(zaznaczone);
+  const [zapis, setZapis] = useState(false);
+  const zapisz = async (e) => {
+    e.preventDefault();
+    if (!opis.label.trim()) return;
+    setZapis(true);
+    // Przy dowodzie numer i data wydania z odczytu uzupełniają opis tylko tam, gdzie user nic nie wpisał.
+    const zOdczytu = zDowodu ? Object.fromEntries(Object.entries(zDowodu.opisDokumentu).filter(([k]) => !String(opis[k] || "").trim())) : {};
+    const ok = await onZapisz({ ...opis, ...zOdczytu, label: opis.label.trim(), number: (zOdczytu.number || opis.number).trim(), notes: (zOdczytu.notes || opis.notes).trim() }, Object.fromEntries(doKarty.map(p => [p.klucz, p.wartosc])));
+    setZapis(false);
+    if (ok !== false) onClose();
+  };
+  const grupa = RODZAJ[opis.kind]?.grupa || "Inne";
+  const kafelki = ["Dokumenty", KAFELEK_GRUPY[grupa], opis.expiryDate && "Terminy i przypomnienia"].filter(Boolean);
+  const STAN = { nowe: ["#dcfce7", "#166534", "puste w karcie"], zgodne: ["#f3f4f6", "#374151", "zgodne"], rozni: ["#fef3c7", "#92400e", "inna wartość w karcie"] };
+  const tytul = `Nowy dokument — ${v.plate}`;
+  return (
+    <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center p-0 sm:p-4" style={{ background: "rgba(0,0,0,0.35)" }}>
+      <form onSubmit={zapisz} role="dialog" aria-label={tytul} className="w-full sm:max-w-2xl bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col" style={{ maxHeight: "92vh" }}>
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-gray-100">
+          <h3 className="flex-1 text-base font-bold text-gray-900 min-w-0 truncate">{tytul}</h3>
+          {zostalo > 0 && <span className="text-xs text-gray-600 whitespace-nowrap">w kolejce jeszcze {zostalo}</span>}
+          <button type="button" onClick={onClose} aria-label="Zamknij" className="w-8 h-8 rounded-lg bg-gray-100 text-gray-600 text-sm">✕</button>
+        </div>
+        <div className="p-5 overflow-y-auto">
+          <p className="text-xs text-gray-600 mb-3 truncate">Plik: <span className="text-gray-900">{d.fileName || d.label}</span></p>
+          {stan === "czytam" && <p className="text-sm text-gray-700" role="status">Rozpoznaję dokument… to trwa kilkanaście sekund.</p>}
+          {stan === "blad" && (
+            <div className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">
+              Nie udało się rozpoznać dokumentu: {pozycja.blad}. Plik jest wgrany — wybierz rodzaj i wpisz dane ręcznie albo spróbuj ponownie.
+            </div>
+          )}
+          {stan === "reczne" && <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">Tego typu pliku (arkusz, CSV) aplikacja nie czyta — wybierz rodzaj i uzupełnij opis ręcznie.</p>}
+          {stan === "gotowe" && (
+            <p className="text-sm rounded-lg px-3 py-2 mb-3" style={{ background: KOLOR.tlo, border: `1px solid ${KOLOR.ramka}`, color: KOLOR.granat }}>
+              {start.kind === "inne" ? <>Nie rozpoznałem rodzaju tego dokumentu — <b>wybierz go poniżej</b>.</> : <>Rozpoznano: <b>{RODZAJ[start.kind]?.label}</b>. Sprawdź dane i popraw, jeśli trzeba.</>}
+            </p>
+          )}
+          {czyj && czyj.zDokumentu && !czyj.zgodna && (
+            <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">
+              Uwaga: dokument jest wystawiony na <b>{czyj.zDokumentu}</b>, a to karta auta <b>{v.plate}</b>. Sprawdź, czy to dokument tego pojazdu, zanim cokolwiek zapiszesz.
+            </p>
+          )}
+          {czyj?.vinRozny && (
+            <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+              To dokument tego auta (rejestracja się zgadza), ale <b>VIN jest inny niż w karcie</b>: w dokumencie{" "}
+              <span style={{ fontFamily: "'DM Mono', monospace" }}>{czyj.vinRozny.zDokumentu}</span>, w karcie{" "}
+              <span style={{ fontFamily: "'DM Mono', monospace" }}>{czyj.vinRozny.wKarcie}</span>.
+            </p>
+          )}
+          {stan !== "czytam" && (
+            <>
+              <div className="grid sm:grid-cols-6 gap-2">
+                <label className="text-xs text-gray-600 sm:col-span-3">Rodzaj dokumentu
+                  <select value={opis.kind} onChange={ustaw("kind")} className={POLE} style={BIALE}>
+                    {GRUPY.map(g => <optgroup key={g} label={g}>{RODZAJE_DOKUMENTOW.filter(r => r.grupa === g).map(r => <option key={r.id} value={r.id}>{r.label}</option>)}</optgroup>)}
+                  </select>
+                </label>
+                <label className="text-xs text-gray-600 sm:col-span-3">Opis
+                  <input type="text" required value={opis.label} onChange={ustaw("label")} className={POLE} style={BIALE} />
+                </label>
+                <label className="text-xs text-gray-600 sm:col-span-2">Numer
+                  <input type="text" value={opis.number} onChange={ustaw("number")} className={POLE} style={BIALE} />
+                </label>
+                <label className="text-xs text-gray-600 sm:col-span-2">Data dokumentu
+                  <input type="date" value={opis.issueDate} onChange={ustaw("issueDate")} className={POLE} style={BIALE} />
+                </label>
+                <label className="text-xs text-gray-600 sm:col-span-2">Ważny do
+                  <input type="date" value={opis.expiryDate} onChange={ustaw("expiryDate")} className={POLE} style={BIALE} />
+                </label>
+                <label className="text-xs text-gray-600 sm:col-span-6">Uwagi
+                  <input type="text" value={opis.notes} onChange={ustaw("notes")} className={POLE} style={BIALE} />
+                </label>
+              </div>
+              <p className="text-xs text-gray-600 mt-3">Po zapisaniu dokument będzie w kafelkach: <b className="text-gray-900">{kafelki.join(" · ")}</b>.</p>
+              {opis.kind === "dowod" && !daneDowodu && <p className="text-xs text-amber-900 mt-2">Dane auta z dowodu (VIN, przegląd, rok) odczytasz po zapisaniu — przycisk „Odczytaj dane” przy dokumencie.</p>}
+              {pola.length > 0 && (
+                <>
+                  <p className="text-xs font-semibold text-gray-700 mt-4 mb-1">Do karty auta — zaznacz, co zapisać</p>
+                  <ul className="divide-y divide-gray-100 rounded-xl border border-gray-100">
+                    {pola.map(p => {
+                      const [tlo, kolor, tekst] = STAN[p.stan];
+                      return (
+                        <li key={p.klucz}>
+                          <label className={`flex items-start gap-3 px-3 py-2.5 ${p.stan === "zgodne" ? "" : "cursor-pointer"}`}>
+                            <input type="checkbox" className="mt-1" disabled={p.stan === "zgodne"} checked={zaznaczone(p)} onChange={() => setWybrane(w => ({ ...w, [p.klucz]: !zaznaczone(p) }))} aria-label={`Zapisz w karcie: ${p.etykieta}`} />
+                            <span className="flex-1 min-w-0">
+                              <span className="block text-xs text-gray-500">{p.etykieta}</span>
+                              <span className="block text-sm font-medium text-gray-900 break-words">{p.zDowodu}</span>
+                              {p.stan === "rozni" && <span className="block text-xs text-gray-600">w karcie teraz: {p.teraz}</span>}
+                              {p.uwaga && <span className="block text-xs font-medium text-red-800 mt-0.5">{p.uwaga}</span>}
+                            </span>
+                            <span className="text-xs font-medium px-2 py-0.5 rounded-md whitespace-nowrap" style={{ background: tlo, color: kolor }}>{tekst}</span>
+                          </label>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </>
+              )}
+            </>
+          )}
+        </div>
+        <div className="flex flex-wrap justify-end gap-2 px-5 py-4 border-t border-gray-100">
+          {stan === "blad" && <button type="button" onClick={onPonow} className="px-4 py-2 rounded-lg text-sm font-medium text-gray-800 bg-gray-100 mr-auto">Spróbuj ponownie</button>}
+          <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium text-gray-700 bg-gray-100">{stan === "czytam" ? "Zamknij" : "Zostaw w „Inne”"}</button>
+          {stan !== "czytam" && (
+            <button type="submit" disabled={zapis} className="px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-60" style={{ background: KOLOR.granat }}>
+              {zapis ? "Zapisuję…" : doKarty.length ? `Zapisz (+ ${doKarty.length} w karcie)` : "Zapisz"}
+            </button>
+          )}
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function ListaDokumentow({ docs, canEdit, onDodaj, wgrywam, onUsun, onEdytuj, onOdczytaj, onOryginal, onPobierz, onPodglad, safeHref, pusto = "Brak dokumentów przy tym aucie." }) {
   const [edytowany, setEdytowany] = useState(null);
   const [podglad, setPodglad] = useState(null);
   const pokazPodglad = async (d) => {
@@ -447,16 +600,12 @@ function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, onOdczytaj,
     catch (e) { console.error("podgląd dokumentu", e); setPodglad(p => (p?.doc.id === d.id ? { doc: d, stan: "blad", blad: e?.message || String(e) } : p)); }
   };
   const [pobierany, setPobierany] = useState(null);
-  const [wgrywam, setWgrywam] = useState(false);
   const doOznaczenia = bezZnaku(docs);
-  const [rodzaj, setRodzaj] = useState("dowod");
-  const [waznyDo, setWaznyDo] = useState("");
-  const [opis, setOpis] = useState("");
   const wGrupach = GRUPY.map(g => [g, wKolejnosci(docs.filter(d => (RODZAJ[d.kind]?.grupa || "Inne") === g))]).filter(([, l]) => l.length);
   return (
     <div>
       {podglad && <OknoPodgladu podglad={podglad} onClose={() => setPodglad(null)} onPobierz={onPobierz} />}
-      {docs.length === 0 && <p className="text-sm text-gray-500 mb-3">Brak dokumentów przy tym aucie.</p>}
+      {docs.length === 0 && pusto && <p className="text-sm text-gray-500 mb-3">{pusto}</p>}
       {wGrupach.map(([grupa, lista]) => (
         <div key={grupa} className="mb-3">
           <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">{grupa}</div>
@@ -510,32 +659,9 @@ function ListaDokumentow({ docs, canEdit, onDodaj, onUsun, onEdytuj, onOdczytaj,
       ))}
       {canEdit && onDodaj && (
         <div className="flex flex-wrap items-end gap-2 pt-1">
-          <label className="text-xs text-gray-600">Rodzaj
-            <select value={rodzaj} onChange={e => setRodzaj(e.target.value)} className="block mt-1 px-3 py-2 rounded-lg text-sm bg-gray-50 border border-gray-200">
-              {GRUPY.map(g => <optgroup key={g} label={g}>{RODZAJE_DOKUMENTOW.filter(r => r.grupa === g).map(r => <option key={r.id} value={r.id}>{r.label}</option>)}</optgroup>)}
-            </select>
-          </label>
-          <label className="text-xs text-gray-600">Ważny do (opcjonalnie)
-            <input type="date" value={waznyDo} onChange={e => setWaznyDo(e.target.value)} className="block mt-1 px-3 py-2 rounded-lg text-sm bg-gray-50 border border-gray-200" />
-          </label>
-          <label className="text-xs text-gray-600 flex-1" style={{ minWidth: 160 }}>Opis (opcjonalnie)
-            <input type="text" value={opis} onChange={e => setOpis(e.target.value)} placeholder="domyślnie nazwa pliku" className="block w-full mt-1 px-3 py-2 rounded-lg text-sm bg-gray-50 border border-gray-200" />
-          </label>
-          <label className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-white ${wgrywam ? "opacity-60 cursor-wait" : "cursor-pointer"}`} style={{ background: "#111827" }}>
-            <Ikona d={I.plus} /> {wgrywam ? "Wgrywam…" : "Dodaj pliki"}
-            <input type="file" multiple className="sr-only" accept=".pdf,image/*,.heic,.heif,.csv,.xlsx" disabled={wgrywam}
-              onChange={async (e) => {
-                const pliki = [...e.target.files]; e.target.value = "";
-                if (!pliki.length) return;
-                setWgrywam(true);
-                try { await onDodaj(pliki, { kind: rodzaj, expiryDate: waznyDo, label: opis.trim() }); }
-                finally { setWgrywam(false); setWaznyDo(""); setOpis(""); }
-              }} />
-          </label>
+          <PrzyciskWgraj onPliki={onDodaj} wgrywam={wgrywam} ciemny />
+          <p className="w-full text-xs text-gray-500">Rodzaju nie wybierasz — aplikacja sama rozpozna dokument, odczyta numer, datę i termin ważności i pokaże wszystko do sprawdzenia. Zapisuje się dopiero po Twoim „Zapisz”.</p>
           <p className="w-full text-xs text-gray-500">„Podgląd” pokazuje dokument z logo VBS (bez daty). „Pobierz” daje plik z logo i datą pobrania; jedno i drugie zapisuje się w dzienniku. Czysty oryginał zostaje w pamięci — do pobrania przez ołówek przy dokumencie.</p>
-          <p className="w-full text-xs text-gray-500">{rodzaj === "dowod"
-            ? "Po wgraniu dowodu aplikacja odczyta z niego dane auta (VIN, przegląd, rok…) i pokaże je do zatwierdzenia."
-            : "Po wgraniu jednego pliku aplikacja odczyta numer, datę i termin ważności dokumentu i pokaże je do zatwierdzenia."}</p>
           {doOznaczenia.length > 0 && (
             <p className="w-full text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
               Bez znaku wodnego: {doOznaczenia.map(d => d.label).join(", ")}. Usuń taki dokument i wgraj go ponownie — znak nakłada się przy wgrywaniu.
@@ -668,7 +794,7 @@ function Harmonogram({ leasing, dzis }) {
   );
 }
 
-function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, onPodgladDokumentu, onZapiszPole, isAdmin, uruchomienie, onBrudne, showToast, safeHref }) {
+function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, onPodgladDokumentu, onZapiszPole, onRozpoznajDokument, onZapiszRozpoznany, isAdmin, uruchomienie, onBrudne, showToast, safeHref }) {
   const [oferta, setOferta] = useState(false);
   const mozePole = canEdit && onZapiszPole && !v.archived;
   const [sekcja, setSekcja] = useState(null); // która sekcja karty jest otwarta; null = kafelki
@@ -680,6 +806,25 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
     try { const dane = await onOdczytajDowod({ ...d, rodzajOpis: RODZAJ[d.kind]?.label || "" }); setOdczyt(o => (o?.doc.id === d.id ? { doc: d, stan: "gotowe", dane } : o)); }
     catch (e) { console.error("odczyt dowodu", e); setOdczyt(o => (o?.doc.id === d.id ? { doc: d, stan: "blad", blad: e?.message || String(e) } : o)); }
   };
+  // Wgrywanie bez wyboru rodzaju: pliki idą do kolejki, AI czyta każdy, a okno pokazuje je po kolei do zatwierdzenia.
+  const mozeWgrywac = canEdit && onDodajDokumenty && onZapiszRozpoznany && !v.archived;
+  const [kolejka, setKolejka] = useState([]);
+  const [wgrywam, setWgrywam] = useState(false);
+  const wKolejce = (id, zmiana) => setKolejka(k => k.map(p => (p.doc.id === id ? { ...p, ...zmiana } : p)));
+  const rozpoznaj = async (d) => {
+    if (!onRozpoznajDokument || !d.fileUrl || !CZYTELNY.test(d.fileName || "")) { wKolejce(d.id, { stan: "reczne" }); return; }
+    wKolejce(d.id, { stan: "czytam", blad: "" });
+    try { const w = await onRozpoznajDokument(d, RODZAJE_DOKUMENTOW.map(r => ({ id: r.id, label: r.label }))); wKolejce(d.id, { stan: "gotowe", dane: w.dane, daneDowodu: w.daneDowodu || null }); }
+    catch (e) { console.error("rozpoznanie dokumentu", e); wKolejce(d.id, { stan: "blad", blad: e?.message || String(e) }); }
+  };
+  const wgrajPliki = async (pliki) => {
+    setWgrywam(true);
+    try {
+      const wgrane = (await onDodajDokumenty(v, pliki, { kind: "inne" })) || [];
+      setKolejka(k => [...k, ...wgrane.map(d => ({ doc: d, stan: "czytam" }))]);
+      wgrane.forEach(rozpoznaj);
+    } finally { setWgrywam(false); }
+  };
   const [uruchom, setUruchom] = useState(false);
   const [edycjaLeasingu, setEdycjaLeasingu] = useState(false);
   const mozeLeasing = canEdit && onZapiszLeasing && !v.archived;
@@ -688,6 +833,18 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
   const terminy = terminyPojazdu(v, docs, dzis);
   const wyp = [...(v.equipment || []).map(id => WYPOSAZENIE[id] || id), ...(v.customEquipment || [])];
   const L = v.leasing;
+  // Dokumenty danej grupy pokazujemy też w „ich” kafelku (polisy przy ubezpieczeniu, umowa przy leasingu…).
+  const dokumentyW = (...grupy) => {
+    const lista = docs.filter(d => grupy.includes(RODZAJ[d.kind]?.grupa));
+    if (!lista.length) return null;
+    return (
+      <div className="mt-5">
+        <ListaDokumentow docs={lista} canEdit={canEdit} safeHref={safeHref} pusto=""
+          onOdczytaj={mozeCzytacDowod ? czytajDowod : null} onOryginal={canEdit ? onPobierzOryginal : null} onPobierz={onPobierzDokument} onPodglad={onPodgladDokumentu}
+          onUsun={onUsunDokument} onEdytuj={onEdytujDokument} />
+      </div>
+    );
+  };
   // „Uruchomienie auta" to pełna strona ZAMIAST karty (nie okno) — lista aut po lewej zostaje.
   if (uruchom && uruchomienie) {
     return <UruchomienieAuta v={v} api={uruchomienie} kierowca={kierowca} onClose={() => setUruchom(false)} onBrudne={onBrudne} showToast={showToast} safeHref={safeHref} />;
@@ -701,7 +858,7 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
           <p className="text-sm text-gray-700">{[v.brand, v.year, v.type].filter(Boolean).join(" · ")}{v.archived && " · w archiwum"}</p>
           <p className="text-sm text-gray-700 mt-0.5">{kierowca ? <>Kierowca: <span className="text-gray-900 font-medium">{kierowca.name}</span>{kierowca.phone && ` · ${kierowca.phone}`}</> : "Bez przypisanego kierowcy"}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => setOferta(true)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold text-white" style={{ background: KOLOR.granat }}>
             <Ikona d={I.kopiuj} /> Kopiuj ofertę
           </button>
@@ -710,6 +867,7 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
               Uruchomienie auta
             </button>
           )}
+          {mozeWgrywac && <PrzyciskWgraj onPliki={wgrajPliki} wgrywam={wgrywam} />}
           {canEdit && renderEdycja && !v.archived && (
             <button type="button" onClick={() => setEdycja(e => !e)} aria-pressed={edycja} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium"
               style={edycja ? { background: KOLOR.granat, color: "#fff" } : { background: "#fff", color: "#1f2937", border: `1px solid ${KOLOR.ramka}` }}>
@@ -786,18 +944,12 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
             <Harmonogram leasing={L} dzis={dzis} />
           </>
         )}
+        {!edycjaLeasingu && dokumentyW("Leasing")}
       </SekcjaKarty>
 
       <SekcjaKarty id="dokumenty" {...sk} tytul="Dokumenty" licznik={docs.length} opis={docs.length ? "Podgląd, pobieranie, wgrywanie" : "Brak dokumentów — wgraj pierwszy"}>
         <ListaDokumentow docs={docs} canEdit={canEdit} safeHref={safeHref}
-          onDodaj={onDodajDokumenty ? async (pliki, meta) => {
-            const wgrane = await onDodajDokumenty(v, pliki, meta);
-            // Po wgraniu od razu czytamy dane: dowód zawsze, inny dokument — gdy wgrano jeden plik
-            // (przy kilku naraz okna wyskakiwałyby jedno po drugim; zostaje przycisk „Odczytaj dane”).
-            const czytelne = (wgrane || []).filter(d => d.fileUrl && /\.(pdf|jpe?g|png|webp)$/i.test(d.fileName || ""));
-            const doOdczytu = czytelne.find(d => d.kind === "dowod") || (czytelne.length === 1 ? czytelne[0] : null);
-            if (doOdczytu && mozeCzytacDowod) czytajDowod(doOdczytu);
-          } : null}
+          onDodaj={mozeWgrywac ? wgrajPliki : null} wgrywam={wgrywam}
           onOdczytaj={mozeCzytacDowod ? czytajDowod : null} onOryginal={canEdit ? onPobierzOryginal : null} onPobierz={onPobierzDokument} onPodglad={onPodgladDokumentu}
           onUsun={onUsunDokument} onEdytuj={onEdytujDokument} />
       </SekcjaKarty>
@@ -812,9 +964,10 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
           <Fakt etykieta="Nr ewidencyjny UDT">{v.udtNumber}</Fakt>
           <div className="col-span-2 sm:col-span-3"><Fakt etykieta="Winda">{v.udtLiftName}</Fakt></div>
         </div>
+        {dokumentyW("Ubezpieczenia", "Winda i UDT")}
       </SekcjaKarty>
 
-      {renderSerwis && <SekcjaKarty id="serwis" {...sk} tytul="Serwis, gwarancja i tachograf" opis="Przeglądy olejowe, gwarancja, tachograf">{renderSerwis(v)}</SekcjaKarty>}
+      {renderSerwis && <SekcjaKarty id="serwis" {...sk} tytul="Serwis, gwarancja i tachograf" opis="Przeglądy olejowe, gwarancja, tachograf">{renderSerwis(v)}{dokumentyW("Tachograf", "Serwis i gwarancje")}</SekcjaKarty>}
 
       <SekcjaKarty id="kierowcy" {...sk} tytul="Historia kierowców" licznik={(v.driverHistory || []).length} opis={kierowca ? `Obecnie: ${kierowca.name}` : "Bez przypisanego kierowcy"}>
         {(v.driverHistory || []).length === 0 ? <p className="text-sm text-gray-500">Brak wpisów.</p> : (
@@ -838,12 +991,15 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
 
       {odczyt && <OknoDanychZDowodu key={`${odczyt.doc.id}-${odczyt.stan}`} v={v} odczyt={odczyt} onClose={() => setOdczyt(null)}
         onPonow={() => czytajDowod(odczyt.doc)} onZapisz={(patch, opis) => onZapiszZDowodu(v, patch, odczyt.doc, opis)} />}
+      {kolejka[0] && <OknoRozpoznania key={`${kolejka[0].doc.id}-${kolejka[0].stan}`} v={v} pozycja={kolejka[0]} zostalo={kolejka.length - 1}
+        onClose={() => setKolejka(k => k.slice(1))} onPonow={() => rozpoznaj(kolejka[0].doc)}
+        onZapisz={(opis, patch) => onZapiszRozpoznany(v, kolejka[0].doc, opis, patch)} />}
       {oferta && <OknoOferty v={v} kierowca={kierowca} docs={docs} onClose={() => setOferta(false)} showToast={showToast} />}
     </article>
   );
 }
 
-export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajPojazd, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, onPodgladDokumentu, onZapiszPole, isAdmin = false, uruchomienie, showToast, safeHref }) {
+export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajPojazd, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, onPodgladDokumentu, onZapiszPole, onRozpoznajDokument, onZapiszRozpoznany, isAdmin = false, uruchomienie, showToast, safeHref }) {
   const teraz = useMemo(() => dzis ?? new Date().setHours(0, 0, 0, 0), [dzis]);
   const [archiwum, setArchiwum] = useState(false);
   const [szukaj, setSzukaj] = useState("");
@@ -919,7 +1075,7 @@ export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit 
 
         {aktywny
           ? <KartaPojazdu key={aktywny.id} v={aktywny} docs={docsWg[aktywny.id] || []} dzis={teraz} canEdit={canEdit}
-              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} onOdczytajDowod={onOdczytajDowod} onZapiszZDowodu={onZapiszZDowodu} onPobierzOryginal={onPobierzOryginal} onPobierzDokument={onPobierzDokument} onPodgladDokumentu={onPodgladDokumentu} onZapiszPole={onZapiszPole} isAdmin={isAdmin} uruchomienie={uruchomienie} onBrudne={onBrudne} showToast={showToast} safeHref={safeHref} />
+              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} onOdczytajDowod={onOdczytajDowod} onZapiszZDowodu={onZapiszZDowodu} onPobierzOryginal={onPobierzOryginal} onPobierzDokument={onPobierzDokument} onPodgladDokumentu={onPodgladDokumentu} onZapiszPole={onZapiszPole} onRozpoznajDokument={onRozpoznajDokument} onZapiszRozpoznany={onZapiszRozpoznany} isAdmin={isAdmin} uruchomienie={uruchomienie} onBrudne={onBrudne} showToast={showToast} safeHref={safeHref} />
           : <div className="bg-white rounded-2xl border border-gray-100 p-8 text-sm text-gray-500">Wybierz pojazd z listy.</div>}
       </div>
 

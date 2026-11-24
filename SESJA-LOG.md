@@ -8826,3 +8826,21 @@ i dopiero klikasz i wchodzi dopiero do zawartości dokumentów”.
   z przyczepą (`plate2`): w „Edytuj” (sekcja OC), w kafelku „Ubezpieczenie i UDT”, w „Terminach” karty i floty, w starych alertach pojazdu oraz
   w mailu z terminami (`terminyFlotyMail` **wdrożona ponownie**). Dane: TK 314CL — OC przyczepy 920065762286, do 11.05.2027 (z polisy; transakcja, auditLog).
   ✅ Test maila, lint 0 błędów, build zielony. ❌ Niesprawdzone po zalogowaniu.
+
+## 2026-11-24 cd. — Pojazdy: „Wgraj dokument” bez wyboru rodzaju (AI rozpoznaje, człowiek zatwierdza)
+
+**Zgłoszenie usera**: przycisk do wgrywania obok „Edytuj”; bez listy wyboru rodzaju — AI ma rozpoznać dokument i przypisać go do kafelka, a człowiek potwierdza („klika zapisz, sprawdza i może coś poprawić”).
+
+**Co zrobione**
+- Przycisk **„Wgraj dokument”** w nagłówku karty auta (obok „Edytuj”) i ten sam w kafelku „Dokumenty” — stary formularz z listą „Rodzaj / Ważny do / Opis” usunięty.
+- Plik wgrywa się jak dotąd (zmniejszanie, znak wodny, oryginał obok) jako „Inne”, potem AI (`promptRozpoznania`) wskazuje rodzaj z naszej listy i czyta tytuł, numer, datę, ważność, rejestrację, VIN, zakres polisy. Dla dowodu drugi odczyt (`PROMPT_DOWOD`) bierze dane auta.
+- Okno **`OknoRozpoznania`**: edytowalny formularz (rodzaj, opis, numer, daty, uwagi) + lista pól do karty auta z ptaszkami. Zapis dopiero po „Zapisz”. Kilka plików naraz = kolejka okien. Błąd AI albo CSV/arkusz → formularz do ręcznego wypełnienia.
+- Pola karty z dokumentu (`polaKartyZDokumentu`): polisa → OC/AC numer i ważność (polisa na rejestrację przyczepy → `ocNumber2`/`ocExpiry2`), GAP, UDT, badanie techniczne → przegląd, gaśnica. Odnowienie (data późniejsza) zaznaczone domyślnie, data wcześniejsza — odznaczona z ostrzeżeniem.
+- Nowe rodzaje: „Badanie techniczne — zaświadczenie” i „Przegląd gaśnicy” (termin idzie do pola karty; pominięte w liście dokumentów-terminów w panelu i w mailu `terminyFloty`).
+- Dokumenty widać też w „swoich” kafelkach: polisy i UDT w „Ubezpieczenie i UDT”, leasingowe w „Leasing”, tachograf/gwarancje w „Serwis…”.
+
+**Sprawdzone**
+- Prompt na 16 prawdziwych dokumentach z bazy (tylko odczyt): rodzaj zgodny 15/16 (jedyna różnica: karta emisji CO2 „inne” → „coc”), numery i daty zgodne z wpisanymi ręcznie, polisa przyczepy trafiła w pola przyczepy.
+- Atrapa `podglad/pojazdy`: przycisk, okno, poprawka daty przenosi się na pola karty, zapis, kolejka 2 plików, CSV, błąd AI, dokument w kafelku „Ubezpieczenie i UDT”. Lint 0 błędów, build OK.
+
+**NIE sprawdzone**: po zalogowaniu na produkcji (prawdziwe wgranie + zapis do bazy), telefon. Danych z umowy leasingu AI nie wpisuje do kafelka „Leasing” (tylko odkłada plik) — do decyzji usera.

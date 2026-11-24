@@ -30,7 +30,7 @@ function terminyDoMaila(pojazdy, docs, dzis) {
     dodaj("Koniec leasingu", v.leasing?.koniec);
     for (const d of docs || []) {
       if (d.vehicleId !== v.id || !d.expiryDate) continue;
-      if (["polisa", "gap", "udt", "dowod"].includes(d.kind)) continue; // mają swój termin w polach karty
+      if (["polisa", "gap", "udt", "dowod", "badanie", "gasnica"].includes(d.kind)) continue; // mają swój termin w polach karty
       dodaj(RODZAJE[d.kind] || d.label || "Dokument", d.expiryDate);
     }
   }

@@ -141,3 +141,104 @@ export function porownajZDokumentem(v, d, dane) {
     pola, opisDokumentu: {},
   };
 }
+
+// ── Wgrywanie bez wybierania rodzaju (user, 24.11.2026) ──
+// „Nie chcę mieć listy wyboru, jaki dokument wgrywam — AI musi to rozczytać i przypisać do kafelka,
+// a człowiek potwierdza: klika Zapisz, sprawdza i może coś poprawić.” AI wskazuje rodzaj z NASZEJ listy
+// i czyta dane wspólne dla każdego dokumentu; `rozpoznanyDokument` robi z tego propozycję do okna.
+
+export const promptRozpoznania = (rodzaje) => `To skan lub zdjęcie dokumentu dotyczącego pojazdu ciężarowego firmy transportowej.
+Rozpoznaj, co to za dokument, i odczytaj z niego dane. Odpowiedz TYLKO w formacie JSON (bez markdown):
+{
+  "rodzaj": "DOKŁADNIE jeden identyfikator z listy poniżej",
+  "tytul": "krótka nazwa dokumentu po polsku, do 60 znaków, np. „Polisa OC/AC PZU 2026/2027” albo „Kalibracja tachografu 10.2026”",
+  "numer": "numer dokumentu (polisy, zaświadczenia, decyzji, umowy, faktury) albo null",
+  "dataDokumentu": "data wystawienia / zawarcia / wykonania YYYY-MM-DD albo null",
+  "waznyDo": "termin ważności albo data następnej czynności YYYY-MM-DD albo null",
+  "rejestracja": "numer rejestracyjny pojazdu, którego dokument dotyczy, albo null",
+  "vin": "numer VIN z dokumentu albo null",
+  "polisa": { "oc": true/false, "ac": true/false, "gap": true/false } — tylko dla polis: które ubezpieczenia obejmuje; inaczej null,
+  "nrEwidencyjnyUdt": "numer ewidencyjny urządzenia z decyzji / protokołu UDT albo null"
+}
+Lista rodzajów (identyfikator — znaczenie):
+${rodzaje.map(r => `- ${r.id} — ${r.label}`).join("\n")}
+Wskazówki:
+- dowód rejestracyjny albo pozwolenie czasowe → dowod; zaświadczenie o przeprowadzonym badaniu technicznym → badanie,
+- polisa lub certyfikat ubezpieczenia OC / AC / NNW pojazdu → polisa; ubezpieczenie GAP → gap,
+- legalizacja / przegląd gaśnicy → gasnica; kalibracja lub sprawdzenie tachografu → tachograf,
+- gdy nic nie pasuje albo nie masz pewności → inne (nie zgaduj).
+Wskazówki do pola waznyDo: polisa — koniec okresu ubezpieczenia; kalibracja tachografu — „Data nast. kalibracji”;
+UDT — termin następnego badania; badanie techniczne — termin następnego badania; gaśnica — data następnego przeglądu;
+certyfikat, zezwolenie, upoważnienie — data, do której jest ważne. Umowa leasingu, faktura, protokół: null.
+Przepisuj DOKŁADNIE z dokumentu. Czego nie widać, nie zgaduj — zwróć null. Terminu ważności NIE wyliczaj samodzielnie.`;
+
+/** Rodzaje, których termin i numer mają własne pola w karcie auta. */
+export const RODZAJE_Z_POLEM_KARTY = ["polisa", "gap", "udt", "dowod", "badanie", "gasnica"];
+
+/**
+ * Propozycja opisu dokumentu z odczytu AI: { kind, label, number, issueDate, expiryDate, notes }.
+ * `znane` = lista identyfikatorów rodzajów; nieznany rodzaj ląduje w „inne”.
+ */
+export function opisZRozpoznania(d, dane, znane) {
+  const x = dane || {};
+  return {
+    kind: znane.includes(x.rodzaj) ? x.rodzaj : "inne",
+    label: czysty(x.tytul).slice(0, 80) || czysty(d?.label),
+    number: czysty(x.numer), issueDate: data(x.dataDokumentu), expiryDate: data(x.waznyDo), notes: "",
+  };
+}
+
+/** Czy dokument dotyczy tego auta: { zDokumentu, zgodna, przyczepa } + osobna uwaga o VIN-ie. */
+export function czyjDokument(v, dane) {
+  const x = dane || {};
+  const rej = czysty(x.rejestracja), vin = bezOdstepow(x.vin);
+  const pasuje = (p) => !!p && !!rej && bezOdstepow(p) === bezOdstepow(rej);
+  const rejOk = pasuje(v.plate) || pasuje(v.plate2);
+  const vinOk = !poprawnyVin(vin) || !v.vin || bezOdstepow(v.vin) === vin;
+  return {
+    zDokumentu: rej || (poprawnyVin(vin) ? `VIN ${vin}` : ""),
+    zgodna: rej ? rejOk : vinOk,
+    przyczepa: pasuje(v.plate2) && !pasuje(v.plate),
+    vinRozny: rej && rejOk && !vinOk ? { zDokumentu: vin, wKarcie: bezOdstepow(v.vin) } : null,
+  };
+}
+
+/**
+ * Pola KARTY AUTA wynikające z dokumentu — liczone z tego, co user ma aktualnie w oknie (`opis`),
+ * więc poprawka numeru albo daty w formularzu od razu zmienia propozycję do karty.
+ * Ten sam kształt pola co w `porownajZDowodem`. Odnowienie (data późniejsza niż w karcie) jest domyślnie
+ * zaznaczone razem z numerem; data wcześniejsza — odznaczona.
+ */
+export function polaKartyZDokumentu(v, opis, dane) {
+  const x = dane || {};
+  const pola = [];
+  const termin = data(opis.expiryDate), numer = czysty(opis.number);
+  const para = (kluczNr, kluczData, nazwa, nr = numer) => {
+    const stara = data(v[kluczData]);
+    const odnowienie = !!termin && (!stara || termin > stara);
+    if (termin) {
+      const stan = !stara ? "nowe" : stara === termin ? "zgodne" : "rozni";
+      const p = { klucz: kluczData, etykieta: `${nazwa} — ważne do`, teraz: fmtData(stara), zDowodu: fmtData(termin), wartosc: termin, stan, domyslnie: odnowienie };
+      if (stan === "rozni" && !odnowienie) p.uwaga = "Data z dokumentu jest WCZEŚNIEJSZA niż w karcie — to raczej starszy dokument. Zostaw odznaczone.";
+      pola.push(p);
+    }
+    if (kluczNr && nr) {
+      const jest = czysty(v[kluczNr]);
+      const stan = !jest ? "nowe" : bezOdstepow(jest) === bezOdstepow(nr) ? "zgodne" : "rozni";
+      pola.push({ klucz: kluczNr, etykieta: `${nazwa} — numer`, teraz: jest, zDowodu: nr, wartosc: nr, stan, domyslnie: !jest || odnowienie });
+    }
+  };
+  if (opis.kind === "polisa") {
+    const z = x.polisa || {};
+    if (czyjDokument(v, x).przyczepa) para("ocNumber2", "ocExpiry2", `OC przyczepy ${v.plate2}`);
+    else {
+      if (z.oc || (!z.ac && !z.gap)) para("ocNumber", "ocExpiry", "OC");
+      if (z.ac) para("acNumber", "acExpiry", "AC");
+      if (z.gap) para(null, "gapExpiry", "GAP");
+    }
+  } else if (opis.kind === "gap") para(null, "gapExpiry", "GAP");
+  else if (opis.kind === "udt") para("udtNumber", "udtExpiry", "UDT windy", czysty(x.nrEwidencyjnyUdt));
+  else if (opis.kind === "badanie") para(null, "inspectionExpiry", "Przegląd techniczny");
+  else if (opis.kind === "gasnica") para(null, "gasnicaExpiry", "Gaśnica");
+  return pola;
+}

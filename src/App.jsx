@@ -16,7 +16,7 @@ import { safeHref } from "./utils/safeHref";
 import { licznikiZadan, noweZadanie, przygotujEdycje, wpisHistorii, czyPowiadamiac } from "./utils/zadaniaAuta";
 import { naJpgJesliHeic } from "./utils/heicNaJpg";
 import { zmniejszPdf, czyPdf, fmtMB, LIMIT_PLIKU } from "./utils/zmniejszPdf";
-import { PROMPT_DOWOD, promptDokumentu } from "./utils/dowodRejestracyjny";
+import { PROMPT_DOWOD, promptDokumentu, promptRozpoznania } from "./utils/dowodRejestracyjny";
 import { pierwszaRataLeasingu } from "./utils/leasing";
 import { nalozZnakWodny, tekstZnaku, czyDaSieOznaczyc } from "./utils/znakWodny";
 import { tekstowy, zmieszaj, alfaZSufiksu } from "./utils/kolorTekstu";
@@ -1910,20 +1910,49 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   };
   // AI czyta dowód rejestracyjny. Plik idzie URL-em ze Storage (limit body funkcji Vercela).
   // Niczego nie zapisuje — wynik trafia do okna, w którym user zatwierdza pole po polu.
-  const odczytajDowod = async (d) => {
+  const zapytajODokument = async (d, prompt) => {
     const czyDokument = /pdf/i.test(d.fileType || "") || /\.pdf$/i.test(d.fileName || d.storagePath || "");
     const resp = await callClaude({
       model: "claude-sonnet-4-6", max_tokens: 900,
       messages: [{ role: "user", content: [
         { type: czyDokument ? "document" : "image", source: { type: "url", url: d.fileUrl } },
-        // Dowód ma własny, szczegółowy odczyt (dane auta); każdy inny dokument — numer, datę i ważność.
-        { type: "text", text: d.kind === "dowod" ? PROMPT_DOWOD : promptDokumentu(d.rodzajOpis || d.kind) },
+        { type: "text", text: prompt },
       ] }],
     });
     if (!resp.ok) throw new Error(`skaner AI odpowiedział błędem ${resp.status}`);
     const data = await resp.json();
     const text = data.content?.find(b => b.type === "text")?.text || "";
     return JSON.parse(text.replace(/```json|```/g, "").trim());
+  };
+  // Dowód ma własny, szczegółowy odczyt (dane auta); każdy inny dokument — numer, datę i ważność.
+  const odczytajDowod = (d) => zapytajODokument(d, d.kind === "dowod" ? PROMPT_DOWOD : promptDokumentu(d.rodzajOpis || d.kind));
+  // Wgrywanie bez wyboru rodzaju (user, 24.11.2026): AI wskazuje rodzaj z naszej listy i czyta dane.
+  // Gdy to dowód rejestracyjny, drugi odczyt bierze z niego dane auta (VIN, przegląd, rok…).
+  // Lista rodzajów przychodzi z panelu (jest w leniwie ładowanym pliku — nie wciągamy jej do głównej paczki).
+  const rozpoznajDokument = async (d, rodzaje) => {
+    const dane = await zapytajODokument(d, promptRozpoznania(rodzaje));
+    let daneDowodu = null;
+    if (dane?.rodzaj === "dowod") { try { daneDowodu = await zapytajODokument(d, PROMPT_DOWOD); } catch (e) { console.error("rozpoznajDokument: dane z dowodu", e); } }
+    return { dane, daneDowodu };
+  };
+  // Zapis po zatwierdzeniu w oknie: opis dokumentu (z rodzajem) + zaznaczone pola karty auta.
+  const zapiszRozpoznany = async (v, d, opis, patch) => {
+    try {
+      await updateDoc(doc(db, "vehicleDocs", d.id), {
+        label: opis.label, kind: opis.kind, number: opis.number || "", issueDate: opis.issueDate || "",
+        expiryDate: opis.expiryDate || "", notes: opis.notes || "",
+        updatedAt: new Date().toISOString(), updatedBy: user?.email || "",
+      });
+      const pola = Object.keys(patch || {});
+      if (pola.length) await dbUpdateVehicleField(v.id, patch);
+      logAction("update", "vehicleDocs", { id: d.id, vehicleId: v.id, plate: v.plate, action: "rozpoznany-dokument", kind: opis.kind, label: opis.label, polaKarty: pola.join(", ") });
+      showToast(pola.length ? `✅ Dokument zapisany, w karcie ${v.plate} zmieniono pól: ${pola.length}` : "✅ Dokument zapisany");
+      return true;
+    } catch (e) {
+      console.error("zapiszRozpoznany", e);
+      showToast(`⚠️ Nie zapisano: ${e?.message || e}`);
+      return false;
+    }
   };
   // Zapis pól ZATWIERDZONYCH w oknie: `patch` to tylko zaznaczone pola karty auta,
   // `opisDokumentu` uzupełnia numer i datę wydania przy samym dowodzie.
@@ -4219,7 +4248,7 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
                     return true;
                   } catch (e) { console.error("zapis pola pojazdu", e); showToast("❌ Błąd zapisu: " + (e?.message || e)); return false; }
                 }}
-                onOdczytajDowod={odczytajDowod} onZapiszZDowodu={zapiszDaneZDowodu} onPobierzOryginal={pobierzOryginalDokumentu} onPobierzDokument={pobierzDokumentPojazdu} onPodgladDokumentu={podgladDokumentuPojazdu}
+                onOdczytajDowod={odczytajDowod} onZapiszZDowodu={zapiszDaneZDowodu} onRozpoznajDokument={rozpoznajDokument} onZapiszRozpoznany={zapiszRozpoznany} onPobierzOryginal={pobierzOryginalDokumentu} onPobierzDokument={pobierzDokumentPojazdu} onPodgladDokumentu={podgladDokumentuPojazdu}
                 onEdytujDokument={updateVehicleDocMeta} onZapiszLeasing={saveVehicleLeasing}
                 uruchomienie={uruchomienieApi}
               />
