@@ -2941,7 +2941,9 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
   };
   const updateVehicle= async (updated) => {
     const veh = syncAssignedDriver(updated);
-    const { id: _id, ...patch } = veh;
+    // `wagaAktualna` zmienia tylko admin i tylko z karty auta — formularz „Edytuj” (dostępny też dyspozytorowi)
+    // niesie kopię całego pojazdu z chwili otwarcia, więc to pole wycinamy, żeby zapis formularza go nie ruszał.
+    const { id: _id, wagaAktualna: _waga, ...patch } = veh;
     try {
       await dbUpdateVehicleField(veh.id, patch);
       // Kierowca dopisany ręcznie w panelu pojazdu przechodził inną drogą niż "Przypisz do
@@ -4200,10 +4202,13 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
                   }
                 }}
                 onDodajDokumenty={addVehicleDocs} onUsunDokument={deleteVehicleDoc}
+                isAdmin={isAdmin}
                 onZapiszPole={async (v, patch) => {
+                  // „Aktualna waga auta” (po naszych modyfikacjach) zmienia TYLKO admin — decyzja usera 24.11.2026.
+                  if ("wagaAktualna" in patch && !isAdmin) { showToast("⚠️ Aktualną wagę auta może zmienić tylko administrator"); return false; }
                   try {
                     await dbUpdateVehicleField(v.id, patch);
-                    logAction("update", "vehicles", { id: v.id, plate: v.plate, action: "pole-karty", pola: Object.keys(patch).join(", ") });
+                    logAction("update", "vehicles", { id: v.id, plate: v.plate, action: "pole-karty", pola: Object.keys(patch).join(", "), wartosci: patch });
                     return true;
                   } catch (e) { console.error("zapis pola pojazdu", e); showToast("❌ Błąd zapisu: " + (e?.message || e)); return false; }
                 }}

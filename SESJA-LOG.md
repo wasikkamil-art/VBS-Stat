@@ -8775,3 +8775,15 @@ i dopiero klikasz i wchodzi dopiero do zawartości dokumentów”.
   ten sam co dla „We flocie od”; zapis `dbUpdateVehicleField` + auditLog). Dostęp jak reszta edycji auta: admin i dyspozytor.
   ✅ Atrapa: 3511 → 3100 kg, konsola bez błędów. Lint 0 błędów, build zielony. ❌ Niesprawdzone po zalogowaniu;
   jeśli problem był w formularzu „Edytuj”, potrzebny opis, co się działo (pole nie przyjmuje cyfr? zapis nie przechodzi?).
+
+- **24.11 — „Aktualna waga auta” (tylko admin).** User: „dodamy aktualna waga auta już po naszych modyfikacjach, czyli jak będzie
+  zatankowany, będą dodane belki, paleciak na pace itd., ale zmiany może dokonać tylko admin”. Nowe pole pojazdu **`wagaAktualna`** (kg),
+  na karcie obok ładowności; „wpisz” / „zmień” widzi tylko admin, dyspozytor widzi samą wartość.
+  - `PojazdyPanel` dostał prop `isAdmin`; `onZapiszPole` w App odrzuca `wagaAktualna` od nie-admina; formularz „Edytuj” wycina to pole
+    z zapisu (niesie kopię całego pojazdu, więc bez tego mógłby je nadpisać starą wartością). auditLog zapisuje teraz także wartości
+    pól zmienianych z karty (kto, na ile).
+  - ⚠️ Blokada jest w aplikacji, nie w regułach Firestore: `fleet/data` jest jednym dokumentem z całą flotą i reguły wpuszczają tam
+    zapis dyspozytora w całości. Kto ominie interfejs, technicznie zapisze. Zaostrzenie reguł to osobna praca.
+  - Nic z tej wagi jeszcze nie jest liczone (np. ładowność = DMC − waga) — DMC nie ma własnego pola w karcie.
+  ✅ Atrapa: admin wpisuje 3950 kg; nie-admin widzi wartość bez przycisku, a przy ładowności rzeczywistej przycisk ma. Lint 0 błędów, build zielony.
+  ❌ Niesprawdzone po zalogowaniu (zwłaszcza na koncie dyspozytora).

@@ -666,7 +666,7 @@ function Harmonogram({ leasing, dzis }) {
   );
 }
 
-function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, onPodgladDokumentu, onZapiszPole, uruchomienie, onBrudne, showToast, safeHref }) {
+function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, onPodgladDokumentu, onZapiszPole, isAdmin, uruchomienie, onBrudne, showToast, safeHref }) {
   const [oferta, setOferta] = useState(false);
   const mozePole = canEdit && onZapiszPole && !v.archived;
   const [sekcja, setSekcja] = useState(null); // która sekcja karty jest otwarta; null = kafelki
@@ -725,6 +725,8 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
         <Fakt etykieta="Wymiary skrzyni (cm)">{v.dimensions}</Fakt>
         <Fakt etykieta="Ładowność rzeczywista"><PoleNaKarcie wartosc={v.maxWeight} pokaz={(x) => `${x} kg`} typ="number" nazwa="Ładowność rzeczywista (kg)" pusto="nie wpisano" ustaw="wpisz" onZapisz={mozePole ? (x) => onZapiszPole(v, { maxWeight: x }) : null} /></Fakt>
         <Fakt etykieta="Ładowność wg dowodu">{v.maxWeightDowod ? `${v.maxWeightDowod} kg` : ""}</Fakt>
+        {/* Waga auta gotowego do jazdy po naszych modyfikacjach (paliwo, belki, paleciak…). Zmienia tylko admin. */}
+        <Fakt etykieta="Aktualna waga auta"><PoleNaKarcie wartosc={v.wagaAktualna} pokaz={(x) => `${x} kg`} typ="number" nazwa="Aktualna waga auta (kg)" pusto="nie wpisano" ustaw="wpisz" onZapisz={mozePole && isAdmin ? (x) => onZapiszPole(v, { wagaAktualna: x }) : null} /></Fakt>
         <Fakt etykieta="Załadunek">{v.loadingType}</Fakt>
         {v.plate2 && <Fakt etykieta={`Przyczepa ${v.plate2} (cm)`}>{v.dimensions2}</Fakt>}
         {v.plate2 && <Fakt etykieta="Ładowność przyczepy">{v.maxWeight2 ? `${v.maxWeight2} kg` : ""}</Fakt>}
@@ -833,7 +835,7 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
   );
 }
 
-export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajPojazd, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, onPodgladDokumentu, onZapiszPole, uruchomienie, showToast, safeHref }) {
+export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajPojazd, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, onPodgladDokumentu, onZapiszPole, isAdmin = false, uruchomienie, showToast, safeHref }) {
   const teraz = useMemo(() => dzis ?? new Date().setHours(0, 0, 0, 0), [dzis]);
   const [archiwum, setArchiwum] = useState(false);
   const [szukaj, setSzukaj] = useState("");
@@ -909,7 +911,7 @@ export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit 
 
         {aktywny
           ? <KartaPojazdu key={aktywny.id} v={aktywny} docs={docsWg[aktywny.id] || []} dzis={teraz} canEdit={canEdit}
-              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} onOdczytajDowod={onOdczytajDowod} onZapiszZDowodu={onZapiszZDowodu} onPobierzOryginal={onPobierzOryginal} onPobierzDokument={onPobierzDokument} onPodgladDokumentu={onPodgladDokumentu} onZapiszPole={onZapiszPole} uruchomienie={uruchomienie} onBrudne={onBrudne} showToast={showToast} safeHref={safeHref} />
+              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} onOdczytajDowod={onOdczytajDowod} onZapiszZDowodu={onZapiszZDowodu} onPobierzOryginal={onPobierzOryginal} onPobierzDokument={onPobierzDokument} onPodgladDokumentu={onPodgladDokumentu} onZapiszPole={onZapiszPole} isAdmin={isAdmin} uruchomienie={uruchomienie} onBrudne={onBrudne} showToast={showToast} safeHref={safeHref} />
           : <div className="bg-white rounded-2xl border border-gray-100 p-8 text-sm text-gray-500">Wybierz pojazd z listy.</div>}
       </div>
 
