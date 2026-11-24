@@ -9,6 +9,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import UruchomienieAuta from "./UruchomienieAuta";
 import { porownajZDowodem, porownajZDokumentem } from "../utils/dowodRejestracyjny";
+import { pierwszaRataLeasingu } from "../utils/leasing";
 
 // Rodzaje dokumentów pojazdu. `oferta: true` = domyślnie proponowany do dołączenia do oferty.
 export const RODZAJE_DOKUMENTOW = [
@@ -730,7 +731,12 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
         <Fakt etykieta="Załadunek">{v.loadingType}</Fakt>
         {v.plate2 && <Fakt etykieta={`Przyczepa ${v.plate2} (cm)`}>{v.dimensions2}</Fakt>}
         {v.plate2 && <Fakt etykieta="Ładowność przyczepy">{v.maxWeight2 ? `${v.maxWeight2} kg` : ""}</Fakt>}
-        <Fakt etykieta="We flocie od"><PoleNaKarcie wartosc={v.fleetJoinDate} pokaz={fmtData} typ="date" nazwa="We flocie od" ustaw="ustaw datę" onZapisz={mozePole ? (x) => onZapiszPole(v, { fleetJoinDate: x }) : null} /></Fakt>
+        <Fakt etykieta="We flocie od">
+          {/* Auto z leasingiem: data bierze się sama z pierwszej raty i nie jest edytowana ręcznie. */}
+          {pierwszaRataLeasingu(L)
+            ? <span>{fmtData(v.fleetJoinDate || pierwszaRataLeasingu(L))} <span className="text-xs font-normal text-gray-500">· 1. rata leasingu</span></span>
+            : <PoleNaKarcie wartosc={v.fleetJoinDate} pokaz={fmtData} typ="date" nazwa="We flocie od" ustaw="ustaw datę" onZapisz={mozePole ? (x) => onZapiszPole(v, { fleetJoinDate: x }) : null} />}
+        </Fakt>
         {v.archived && <Fakt etykieta="W archiwum od">{[v.archivedDate && fmtData(v.archivedDate), v.archivedReason].filter(Boolean).join(" · ")}</Fakt>}
         <div className="col-span-2 sm:col-span-4"><Fakt etykieta="VIN"><span style={{ fontFamily: "'DM Mono', monospace" }}>{v.vin}</span></Fakt></div>
         <div className="col-span-2 sm:col-span-4">

@@ -8787,3 +8787,14 @@ i dopiero klikasz i wchodzi dopiero do zawartości dokumentów”.
   - Nic z tej wagi jeszcze nie jest liczone (np. ładowność = DMC − waga) — DMC nie ma własnego pola w karcie.
   ✅ Atrapa: admin wpisuje 3950 kg; nie-admin widzi wartość bez przycisku, a przy ładowności rzeczywistej przycisk ma. Lint 0 błędów, build zielony.
   ❌ Niesprawdzone po zalogowaniu (zwłaszcza na koncie dyspozytora).
+
+- **24.11 — „We flocie od” = termin pierwszej raty leasingu.** User: „we flocie zawsze ustawiaj datę od daty pierwszego leasingu,
+  bo to wtedy wychodzi data dołączenia auta do floty”. Dopytane (2 pytania): chodzi o **termin pierwszej raty** (nie datę zawarcia umowy),
+  a ręcznie wpisane 02.11.2026 przy nowych Iveco ma zostać **zastąpione**.
+  - Dane (transakcja, 9 → 9, auditLog): WGM 0475M i 0507M → 13.01.2025, WGM 5367K → 13.03.2024, WGM 7652V/7651V/7653V 02.11.2026 → 01.10.2026.
+    TK 314CL i auta w archiwum bez leasingu — bez zmian (data ręczna).
+  - Kod: `src/utils/leasing.js` (`pierwszaRataLeasingu`); zapis leasingu ustawia `fleetJoinDate` razem z harmonogramem; zapis formularza
+    „Edytuj” wymusza tę datę przy aucie z harmonogramem; na karcie przy takim aucie data ma dopisek „1. rata leasingu” i nie ma przycisku
+    zmiany (auta bez leasingu — ręcznie jak dotąd).
+  ✅ Atrapa: auto z leasingiem — data bez przycisku, auto bez leasingu — „ustaw datę”. Lint 0 błędów, build zielony.
+  ❌ Niesprawdzone po zalogowaniu (zapis leasingu → zmiana daty).

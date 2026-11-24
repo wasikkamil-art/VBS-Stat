@@ -17,6 +17,7 @@ import { licznikiZadan, noweZadanie, przygotujEdycje, wpisHistorii, czyPowiadami
 import { naJpgJesliHeic } from "./utils/heicNaJpg";
 import { zmniejszPdf, czyPdf, fmtMB, LIMIT_PLIKU } from "./utils/zmniejszPdf";
 import { PROMPT_DOWOD, promptDokumentu } from "./utils/dowodRejestracyjny";
+import { pierwszaRataLeasingu } from "./utils/leasing";
 import { nalozZnakWodny, tekstZnaku, czyDaSieOznaczyc } from "./utils/znakWodny";
 import { tekstowy, zmieszaj, alfaZSufiksu } from "./utils/kolorTekstu";
 // ZlecenieUploadBtn — przycisk uploadu PDF zlecenia (wydzielone 2026-04-29 #5c krok 6)
@@ -2096,8 +2097,10 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
   const saveVehicleLeasing = async (v, leasing) => {
     if (leasing === null && !window.confirm(`Usunąć dane leasingu przy ${v.plate}? Dokumenty zostaną.`)) return false;
     try {
-      await dbUpdateVehicleField(v.id, { leasing });
-      logAction("update", "vehicles", { id: v.id, plate: v.plate, action: leasing ? "leasing" : "leasing-usuniety", umowa: leasing?.umowa || "" });
+      // „We flocie od” = termin pierwszej raty leasingu (user, 24.11.2026) — ustawiamy razem z leasingiem.
+      const pierwszaRata = pierwszaRataLeasingu(leasing);
+      await dbUpdateVehicleField(v.id, pierwszaRata ? { leasing, fleetJoinDate: pierwszaRata } : { leasing });
+      logAction("update", "vehicles", { id: v.id, plate: v.plate, action: leasing ? "leasing" : "leasing-usuniety", umowa: leasing?.umowa || "", weFlocieOd: pierwszaRata });
       showToast(leasing ? "✅ Leasing zapisany" : "Dane leasingu usunięte");
       return true;
     } catch (e) {
@@ -2944,6 +2947,9 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
     // `wagaAktualna` zmienia tylko admin i tylko z karty auta — formularz „Edytuj” (dostępny też dyspozytorowi)
     // niesie kopię całego pojazdu z chwili otwarcia, więc to pole wycinamy, żeby zapis formularza go nie ruszał.
     const { id: _id, wagaAktualna: _waga, ...patch } = veh;
+    // Auto z leasingiem: „We flocie od” to zawsze termin pierwszej raty, niezależnie od tego, co stoi w formularzu.
+    const pierwszaRata = pierwszaRataLeasingu(veh.leasing);
+    if (pierwszaRata) patch.fleetJoinDate = pierwszaRata;
     try {
       await dbUpdateVehicleField(veh.id, patch);
       // Kierowca dopisany ręcznie w panelu pojazdu przechodził inną drogą niż "Przypisz do
