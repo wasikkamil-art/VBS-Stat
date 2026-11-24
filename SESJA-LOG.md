@@ -8754,3 +8754,13 @@ i dopiero klikasz i wchodzi dopiero do zawartości dokumentów”.
   został tylko dla bloku terminów floty).
   ✅ Atrapa: 6 kafelków, wejście i powrót w każdej sekcji, przycisk „Edytuj leasing” w nagłówku sekcji. Lint 0 błędów, build zielony.
   ❌ Niesprawdzone po zalogowaniu i na telefonie.
+
+- **24.11 — odczyt dowodu WGM 0475M: błędny termin badania.** User wgrał dowód i poprosił o sprawdzenie odczytu. Opis dokumentu
+  poprawny (DR/BAU 5848949, wydany 16.12.2024, 1. rej. 11.12.2024, DMC 7200, masa własna 3613). **Błąd:** AI wskazało jako termin badania
+  11.12.2025 (pierwszy, wydrukowany wpis) zamiast 03.11.2026 (drugi, odręczny, przy pieczątce stacji), a user zatwierdził to pole w oknie —
+  w karcie `inspectionExpiry` zmieniło się z 2026-11-03 na **2025-12-11** (auditLog 23.11 14:22). Próbę przywrócenia daty skryptem
+  zablokowało narzędzie (zmiana danych bez polecenia usera) → **karta nadal ma 2025-12-11, do poprawy przez usera** („Edytuj” → Przegląd).
+  - Poprawka odczytu: prompt każe wypisać WSZYSTKIE rubryki „Termin badania technicznego” (`badaniaWpisy`), kod bierze najpóźniejszą;
+    data z dowodu wcześniejsza niż w karcie dostaje czerwoną uwagę przy polu („najpewniej odczytano starszy wpis”). `max_tokens` 700 → 900.
+  ✅ Test na skanie usera, 2 próby: wpisy [2025-12-11, 2026-11-03], termin 2026-11-03; logika uwagi na 3 przypadkach. Lint 0 błędów, build zielony.
+  ❌ Niesprawdzone po zalogowaniu (tam AI czyta kopię ze znakiem wodnym).

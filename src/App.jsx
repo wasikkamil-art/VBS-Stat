@@ -1911,7 +1911,7 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   const odczytajDowod = async (d) => {
     const czyDokument = /pdf/i.test(d.fileType || "") || /\.pdf$/i.test(d.fileName || d.storagePath || "");
     const resp = await callClaude({
-      model: "claude-sonnet-4-6", max_tokens: 700,
+      model: "claude-sonnet-4-6", max_tokens: 900,
       messages: [{ role: "user", content: [
         { type: czyDokument ? "document" : "image", source: { type: "url", url: d.fileUrl } },
         // Dowód ma własny, szczegółowy odczyt (dane auta); każdy inny dokument — numer, datę i ważność.

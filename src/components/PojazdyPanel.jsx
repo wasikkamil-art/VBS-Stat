@@ -609,6 +609,7 @@ function OknoDanychZDowodu({ v, odczyt, onZapisz, onPonow, onClose }) {
                           <span className="block text-xs text-gray-500">{p.etykieta}</span>
                           <span className="block text-sm font-medium text-gray-900 break-words">{p.zDowodu}</span>
                           {p.stan === "rozni" && <span className="block text-xs text-gray-600">{gdzie} teraz: {p.teraz}</span>}
+                          {p.uwaga && <span className="block text-xs font-medium text-red-800 mt-0.5">{p.uwaga}</span>}
                         </span>
                         <span className="text-xs font-medium px-2 py-0.5 rounded-md whitespace-nowrap" style={{ background: tlo, color: kolor }}>{tekst}</span>
                       </label>

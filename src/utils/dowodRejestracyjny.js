@@ -18,12 +18,15 @@ Odpowiedz TYLKO w formacie JSON (bez markdown):
   "pierwszaRejestracja": "pole B — data pierwszej rejestracji YYYY-MM-DD",
   "dataWydania": "pole I — data wydania dowodu YYYY-MM-DD",
   "seriaNumer": "seria i numer dowodu, np. DR/BAA 1234567",
-  "badanieDo": "termin następnego badania technicznego YYYY-MM-DD — NAJPÓŹNIEJSZY wpis; null, gdy nieczytelny lub brak",
+  "badaniaWpisy": ["WSZYSTKIE daty z rubryk „TERMIN BADANIA TECHNICZNEGO” w kolejności rubryk, YYYY-MM-DD — także wpisane ODRĘCZNIE i częściowo zasłonięte pieczątką stacji kontroli"],
+  "badanieDo": "NAJPÓŹNIEJSZA z dat w badaniaWpisy (to ona jest aktualnym terminem badania) YYYY-MM-DD; null, gdy żadnej nie da się pewnie odczytać",
   "ladownosc": "dopuszczalna ładowność w kg, sama liczba",
   "dmc": "pole F.2 — dopuszczalna masa całkowita w kg, sama liczba",
   "masaWlasna": "pole G — masa własna w kg, sama liczba"
 }
 Przepisuj DOKŁADNIE z dokumentu. Pola, którego nie widać albo nie da się pewnie odczytać, nie zgaduj — zwróć null.
+Rubryk „TERMIN BADANIA TECHNICZNEGO” jest sześć; pierwsza bywa wydrukowana przy rejestracji, kolejne wypełnia odręcznie diagnosta
+(obok jest pieczątka stacji z DATĄ BADANIA — to nie jest termin; terminem jest data wpisana w górnej linii rubryki). Obejrzyj wszystkie sześć.
 W numerze VIN nie występują litery I, O ani Q.`;
 
 const czysty = (x) => (x == null ? "" : String(x).trim());
@@ -57,7 +60,16 @@ export function porownajZDowodem(v, dane) {
   dodaj("brand", "Marka i model", v.brand, marka, { rowne: (a, b) => { const x = czysty(a).toLowerCase(), y = b.toLowerCase(); return x.includes(y) || y.includes(x) || (czysty(d.marka) && x.includes(czysty(d.marka).toLowerCase())); } });
   const rok = liczba(d.rokProdukcji);
   if (rok && rok >= 1980 && rok <= 2100) dodaj("year", "Rok produkcji", v.year, rok, { rowne: (a, b) => Number(a) === b });
-  dodaj("inspectionExpiry", "Przegląd — ważny do", v.inspectionExpiry, data(d.badanieDo), { pokaz: fmtData, rowne: (a, b) => a === b });
+  // Termin badania: najpóźniejsza z odczytanych dat (AI potrafi wskazać starszy, wydrukowany wpis zamiast odręcznego —
+  // zgłoszenie usera 24.11.2026, WGM 0475M: odczyt 11.12.2025 nadpisał w karcie poprawne 03.11.2026).
+  const badania = [data(d.badanieDo), ...(Array.isArray(d.badaniaWpisy) ? d.badaniaWpisy.map(data) : [])].filter(Boolean).sort();
+  const badanie = badania[badania.length - 1] || "";
+  dodaj("inspectionExpiry", "Przegląd — ważny do", v.inspectionExpiry, badanie, { pokaz: fmtData, rowne: (a, b) => a === b });
+  // Data z dowodu WCZEŚNIEJSZA niż w karcie = prawie na pewno odczytany stary wpis. Ostrzegamy przy polu.
+  const pb = pola.find(p => p.klucz === "inspectionExpiry");
+  if (pb && pb.stan === "rozni" && data(v.inspectionExpiry) && badanie < data(v.inspectionExpiry)) {
+    pb.uwaga = "Data z dowodu jest WCZEŚNIEJSZA niż w karcie — najpewniej odczytano starszy wpis. Zostaw odznaczone, chyba że karta ma błąd.";
+  }
   const lad = liczba(d.ladownosc);
   // Ładowność z dowodu ma WŁASNE pole — `maxWeight` to ładowność rzeczywista (ta z ofert i planera), wpisywana ręcznie.
   if (lad) dodaj("maxWeightDowod", "Ładowność wg dowodu (kg)", v.maxWeightDowod, String(lad), { rowne: (a, b) => Number(a) === Number(b) });
