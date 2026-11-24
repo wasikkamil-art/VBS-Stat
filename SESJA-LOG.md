@@ -8744,3 +8744,13 @@ i dopiero klikasz i wchodzi dopiero do zawartości dokumentów”.
   Blok terminów floty widoczny tylko w widoku kafelków; kliknięcie terminu otwiera kartę auta.
 ✅ Atrapa: 7 kafelków aktywnych, 2 w archiwum, wejście w kartę, powrót, konsola bez błędów. Lint 0 błędów, build zielony.
 ❌ Niesprawdzone po zalogowaniu i na telefonie.
+
+- **Sprostowanie (24.11):** źle zrozumiałem zgłoszenie — user: „nie chodzi mi o auta, miejsce aut jest ok, chodzi mi o kafelki:
+  terminy, leasing, dokumenty, ubezpieczenia, serwis, historia”. Kafelki aut z commita `6f48aac` (niewypchniętego) cofnięte:
+  lista aut po lewej zostaje jak była. Zamiast tego **sekcje karty auta są kafelkami**: Terminy i przypomnienia, Leasing, Dokumenty,
+  Ubezpieczenie i UDT, Serwis/gwarancja/tachograf, Historia kierowców. Kafelek pokazuje tytuł, licznik i jednozdaniowy skrót
+  (najbliższy termin ze znaczkiem, nr umowy i rata, OC/UDT do…, obecny kierowca). Klik → sama zawartość sekcji z przyciskiem
+  „← Wróć”; pozostałe sekcje wtedy się nie renderują. Komponent `SekcjaKarty` w `PojazdyPanel.jsx` (stary `Sekcja`-harmonijka
+  został tylko dla bloku terminów floty).
+  ✅ Atrapa: 6 kafelków, wejście i powrót w każdej sekcji, przycisk „Edytuj leasing” w nagłówku sekcji. Lint 0 błędów, build zielony.
+  ❌ Niesprawdzone po zalogowaniu i na telefonie.
