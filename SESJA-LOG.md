@@ -8818,3 +8818,5 @@ i dopiero klikasz i wchodzi dopiero do zawartości dokumentów”.
   Numerów polis w kartach NIE ruszałem — dwa różnią się od polis: WGM 5367K AC (karta 920049595762, polisa 922001902227),
   TK 314CL OC (karta 3315273, polisa 920062792248). OC przyczepy TK760AP (do 11.05.2027) nie ma własnego pola w karcie i jako „polisa”
   nie wchodzi do „Terminów” — ten termin nie jest dziś nigdzie pilnowany. Zakładka „Dokumenty firmowe” wypchnięta (`d033cc8`), bundle potwierdzony.
+- **24.11 cd.:** na polecenie usera numery polis w kartach zaktualizowane z dokumentów: WGM 5367K AC 920049595762 → 922001902227,
+  TK 314CL OC 3315273 → 920062792248 (transakcja z kontrolą stanu, 9 → 9, auditLog).
