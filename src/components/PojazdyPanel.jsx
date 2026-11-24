@@ -126,25 +126,29 @@ function Sekcja({ tytul, licznik, domyslnieOtwarta = false, children, akcja }) {
   );
 }
 
-/** „We flocie od" z ustawianiem daty wprost na karcie (ołówek → pole daty → Zapisz). */
-function DataWeFlocie({ v, onZapisz }) {
+/**
+ * Pole karty auta zmieniane wprost na karcie: wartość + „ustaw / zmień" → pole → Zapisz.
+ * Używane dla „We flocie od" (data) i „Ładowność rzeczywista" (liczba kg, wpisywana ręcznie przez biuro).
+ */
+function PoleNaKarcie({ wartosc, pokaz, typ = "text", nazwa, pusto = "nie ustawiono", ustaw = "ustaw", onZapisz }) {
   const [edycja, setEdycja] = useState(false);
-  const [data, setData] = useState(v.fleetJoinDate || "");
+  const [nowa, setNowa] = useState(wartosc || "");
   const [zapis, setZapis] = useState(false);
   if (!edycja) {
     return (
       <span className="inline-flex items-center gap-1.5">
-        {v.fleetJoinDate ? fmtData(v.fleetJoinDate) : <span className="text-gray-500 font-normal">nie ustawiono</span>}
+        {wartosc ? pokaz(wartosc) : <span className="text-gray-500 font-normal">{pusto}</span>}
         {onZapisz && (
-          <button type="button" onClick={() => { setData(v.fleetJoinDate || ""); setEdycja(true); }} aria-label="Ustaw datę wejścia do floty"
-            className="text-xs font-medium px-1.5 py-0.5 rounded-md" style={{ color: KOLOR.granat, background: KOLOR.tlo }}>{v.fleetJoinDate ? "zmień" : "ustaw datę"}</button>
+          <button type="button" onClick={() => { setNowa(wartosc || ""); setEdycja(true); }} aria-label={`${wartosc ? "Zmień" : "Ustaw"}: ${nazwa}`}
+            className="text-xs font-medium px-1.5 py-0.5 rounded-md" style={{ color: KOLOR.granat, background: KOLOR.tlo }}>{wartosc ? "zmień" : ustaw}</button>
         )}
       </span>
     );
   }
   return (
-    <form className="flex flex-wrap items-center gap-1.5" onSubmit={async (e) => { e.preventDefault(); setZapis(true); const ok = await onZapisz({ fleetJoinDate: data }); setZapis(false); if (ok !== false) setEdycja(false); }}>
-      <input type="date" value={data} onChange={e => setData(e.target.value)} aria-label="We flocie od" className="px-2 py-1 rounded-lg text-sm bg-white border border-gray-300" />
+    <form className="flex flex-wrap items-center gap-1.5" onSubmit={async (e) => { e.preventDefault(); setZapis(true); const ok = await onZapisz(String(nowa).trim()); setZapis(false); if (ok !== false) setEdycja(false); }}>
+      <input type={typ} value={nowa} onChange={e => setNowa(e.target.value)} aria-label={nazwa} autoFocus min={typ === "number" ? 0 : undefined} step={typ === "number" ? 1 : undefined}
+        className="px-2 py-1 rounded-lg bg-white border border-gray-300" style={{ fontSize: 16, width: typ === "number" ? 110 : undefined }} />
       <button type="submit" disabled={zapis} className="px-2 py-1 rounded-lg text-xs font-semibold text-white disabled:opacity-60" style={{ background: KOLOR.granat }}>{zapis ? "…" : "Zapisz"}</button>
       <button type="button" onClick={() => setEdycja(false)} className="px-2 py-1 rounded-lg text-xs font-medium text-gray-700 bg-gray-100">Anuluj</button>
     </form>
@@ -664,6 +668,7 @@ function Harmonogram({ leasing, dzis }) {
 
 function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, onPodgladDokumentu, onZapiszPole, uruchomienie, onBrudne, showToast, safeHref }) {
   const [oferta, setOferta] = useState(false);
+  const mozePole = canEdit && onZapiszPole && !v.archived;
   const [sekcja, setSekcja] = useState(null); // która sekcja karty jest otwarta; null = kafelki
   const sk = { wybrana: sekcja, onWybierz: setSekcja };
   const [odczyt, setOdczyt] = useState(null);
@@ -718,12 +723,12 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
       {/* Wartości netto tu nie ma (user, 23.11.2026: nieistotna dla dyspozytora) — zostaje w „Edytuj". */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-5 gap-y-3 px-5 py-5">
         <Fakt etykieta="Wymiary skrzyni (cm)">{v.dimensions}</Fakt>
-        <Fakt etykieta="Ładowność rzeczywista">{v.maxWeight ? `${v.maxWeight} kg` : ""}</Fakt>
+        <Fakt etykieta="Ładowność rzeczywista"><PoleNaKarcie wartosc={v.maxWeight} pokaz={(x) => `${x} kg`} typ="number" nazwa="Ładowność rzeczywista (kg)" pusto="nie wpisano" ustaw="wpisz" onZapisz={mozePole ? (x) => onZapiszPole(v, { maxWeight: x }) : null} /></Fakt>
         <Fakt etykieta="Ładowność wg dowodu">{v.maxWeightDowod ? `${v.maxWeightDowod} kg` : ""}</Fakt>
         <Fakt etykieta="Załadunek">{v.loadingType}</Fakt>
         {v.plate2 && <Fakt etykieta={`Przyczepa ${v.plate2} (cm)`}>{v.dimensions2}</Fakt>}
         {v.plate2 && <Fakt etykieta="Ładowność przyczepy">{v.maxWeight2 ? `${v.maxWeight2} kg` : ""}</Fakt>}
-        <Fakt etykieta="We flocie od"><DataWeFlocie v={v} onZapisz={canEdit && onZapiszPole && !v.archived ? (patch) => onZapiszPole(v, patch) : null} /></Fakt>
+        <Fakt etykieta="We flocie od"><PoleNaKarcie wartosc={v.fleetJoinDate} pokaz={fmtData} typ="date" nazwa="We flocie od" ustaw="ustaw datę" onZapisz={mozePole ? (x) => onZapiszPole(v, { fleetJoinDate: x }) : null} /></Fakt>
         {v.archived && <Fakt etykieta="W archiwum od">{[v.archivedDate && fmtData(v.archivedDate), v.archivedReason].filter(Boolean).join(" · ")}</Fakt>}
         <div className="col-span-2 sm:col-span-4"><Fakt etykieta="VIN"><span style={{ fontFamily: "'DM Mono', monospace" }}>{v.vin}</span></Fakt></div>
         <div className="col-span-2 sm:col-span-4">

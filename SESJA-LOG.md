@@ -8767,3 +8767,11 @@ i dopiero klikasz i wchodzi dopiero do zawartości dokumentów”.
 - **24.11 cd.:** na polecenie usera przywrócona w karcie WGM 0475M data przeglądu **2025-12-11 → 2026-11-03** (transakcja z kontrolą stanu,
   9 → 9 pojazdów, wpis `korekta-przegladu` w auditLog). Poprawka odczytu (`7ce7b99`) wypchnięta, bundle `index-C4D1DriJ.js` potwierdzony.
   Przegląd tego auta jest po terminie od 03.11.2026 — user ma w Checkliście zadanie „Przegląd w dowodzie był 3.11.2026 !!!” (termin 27.11).
+
+- **24.11 — ładowność rzeczywista zmieniana wprost na karcie.** User: „nie mogę z palca zmienić ładowność rzeczywista w autach”.
+  Nie wiem, czego dokładnie próbował: pole w „Edytuj → Dane techniczne” w kodzie wygląda poprawnie, a w auditLog nie ma dziś żadnej
+  jego próby zapisu pojazdu. Założyłem (moja interpretacja), że szukał zmiany na karcie — tam ładowność była samym tekstem.
+  Dodane: przy „Ładowność rzeczywista” przycisk „wpisz” / „zmień” → pole liczbowe → Zapisz (wspólny komponent `PoleNaKarcie`,
+  ten sam co dla „We flocie od”; zapis `dbUpdateVehicleField` + auditLog). Dostęp jak reszta edycji auta: admin i dyspozytor.
+  ✅ Atrapa: 3511 → 3100 kg, konsola bez błędów. Lint 0 błędów, build zielony. ❌ Niesprawdzone po zalogowaniu;
+  jeśli problem był w formularzu „Edytuj”, potrzebny opis, co się działo (pole nie przyjmuje cyfr? zapis nie przechodzi?).
