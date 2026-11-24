@@ -8813,3 +8813,8 @@ i dopiero klikasz i wchodzi dopiero do zawartości dokumentów”.
   ✅ Lint 0 błędów, build zielony; dane sprawdzone odczytem z bazy. ❌ **Zakładki nie oglądałem w ogóle** — siedzi w `App.jsx` i nie ma atrapy;
   niesprawdzone po zalogowaniu: wygląd, „Wgraj z AI” po zmianie domyślnego auta, rozpoznanie „OC przewoźnika”.
   Otwarte: istniejący wpis „OC Przewoźnika PZU” ma nadal rodzaj „OC” (nie zmieniałem); daty OC/AC w kartach v3/v4 są starsze niż w polisach.
+- **24.11 cd.:** na polecenie usera daty OC/AC w kartach wpisane z przeniesionych polis (transakcja, 9 → 9, auditLog):
+  WGM 5367K OC i AC 13.02.2026 → **13.02.2027**; TK 314CL OC 13.05.2026 → **13.02.2027**, AC 16.05.2026 → **13.02.2027**.
+  Numerów polis w kartach NIE ruszałem — dwa różnią się od polis: WGM 5367K AC (karta 920049595762, polisa 922001902227),
+  TK 314CL OC (karta 3315273, polisa 920062792248). OC przyczepy TK760AP (do 11.05.2027) nie ma własnego pola w karcie i jako „polisa”
+  nie wchodzi do „Terminów” — ten termin nie jest dziś nigdzie pilnowany. Zakładka „Dokumenty firmowe” wypchnięta (`d033cc8`), bundle potwierdzony.
