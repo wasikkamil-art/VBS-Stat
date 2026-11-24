@@ -8764,3 +8764,6 @@ i dopiero klikasz i wchodzi dopiero do zawartości dokumentów”.
     data z dowodu wcześniejsza niż w karcie dostaje czerwoną uwagę przy polu („najpewniej odczytano starszy wpis”). `max_tokens` 700 → 900.
   ✅ Test na skanie usera, 2 próby: wpisy [2025-12-11, 2026-11-03], termin 2026-11-03; logika uwagi na 3 przypadkach. Lint 0 błędów, build zielony.
   ❌ Niesprawdzone po zalogowaniu (tam AI czyta kopię ze znakiem wodnym).
+- **24.11 cd.:** na polecenie usera przywrócona w karcie WGM 0475M data przeglądu **2025-12-11 → 2026-11-03** (transakcja z kontrolą stanu,
+  9 → 9 pojazdów, wpis `korekta-przegladu` w auditLog). Poprawka odczytu (`7ce7b99`) wypchnięta, bundle `index-C4D1DriJ.js` potwierdzony.
+  Przegląd tego auta jest po terminie od 03.11.2026 — user ma w Checkliście zadanie „Przegląd w dowodzie był 3.11.2026 !!!” (termin 27.11).
