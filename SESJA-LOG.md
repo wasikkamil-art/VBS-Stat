@@ -8798,3 +8798,18 @@ i dopiero klikasz i wchodzi dopiero do zawartości dokumentów”.
     zmiany (auta bez leasingu — ręcznie jak dotąd).
   ✅ Atrapa: auto z leasingiem — data bez przycisku, auto bez leasingu — „ustaw datę”. Lint 0 błędów, build zielony.
   ❌ Niesprawdzone po zalogowaniu (zapis leasingu → zmiana daty).
+
+- **24.11 — stara zakładka „Dokumenty” → „Dokumenty firmowe”; polisy aut przeniesione do kart.** User: „tam są jakieś dane, ale nie chcemy
+  ich, bo będziemy je mieć w pojazdach, można je usunąć”. Przed kasowaniem sprawdziłem zawartość: 7 wpisów z plikami, wszystkie aktualne
+  (ważne do 2027–2029) — 5 polis OC/AC dla TK 314CL i WGM 5367K (auta bez żadnych dokumentów w nowym panelu) oraz 2 firmowe (OC Przewoźnika PZU,
+  umowa GPS widziszwszystko). Decyzje usera (pytania): polisy **przenieść do kart aut**; firmowe — „zostawimy tam te dokumenty, ale nazwiemy
+  dok. firmowe i tam będzie można dodawać przez AI umowy z widziszwszystko, OC przewoźnika i inne, AI sam będzie kategoryzował”.
+  - Dane: 5 polis przeniesionych do `vehicleDocs` (v4: 3, v3: 2) — kopia ze znakiem wodnym (logo + 24.11.2026) i czysty oryginał, numer polisy,
+    ważność, ubezpieczyciel w uwagach, pole `przeniesioneZ`. Stara tablica `fleetv2_docs` 7 → 2 (transakcja, auditLog). Stare pliki w Storage
+    `docs/` zostały (nic nie skasowane). Po zapisie: 5/5 linków działa, 5/5 oryginałów na miejscu.
+  - Kod (`App.jsx`): menu i lista uprawnień „Dok. firmowe”, nagłówek „Dokumenty firmowe” z opisem; sekcja „Firma” na górze listy; domyślnie
+    dokument firmy — wcześniej nierozpoznany plik z „Wgraj z AI” i nowy ręczny wpis lądowały przy PIERWSZYM aucie z listy; nowy rodzaj
+    „OC przewoźnika” (`ocp`) dodany do listy i do promptu AI. Samo wgrywanie z AI z automatyczną kategorią istniało już wcześniej (`BulkUploadModal`).
+  ✅ Lint 0 błędów, build zielony; dane sprawdzone odczytem z bazy. ❌ **Zakładki nie oglądałem w ogóle** — siedzi w `App.jsx` i nie ma atrapy;
+  niesprawdzone po zalogowaniu: wygląd, „Wgraj z AI” po zmianie domyślnego auta, rozpoznanie „OC przewoźnika”.
+  Otwarte: istniejący wpis „OC Przewoźnika PZU” ma nadal rodzaj „OC” (nie zmieniałem); daty OC/AC w kartach v3/v4 są starsze niż w polisach.

@@ -652,6 +652,7 @@ const VEHICLE_TYPES = [
 
 const DOC_TYPES = [
   { id: "oc",        label: "OC",               icon: "🛡️",  color: "#3b82f6", group: "Ubezpieczenia" },
+  { id: "ocp",       label: "OC przewoźnika",   icon: "🚚",  color: "#1d4ed8", group: "Ubezpieczenia" },
   { id: "ac",        label: "AC",               icon: "🚗",  color: "#6366f1", group: "Ubezpieczenia" },
   { id: "gap",       label: "GAP",              icon: "📊",  color: "#6d28d9", group: "Ubezpieczenia" },
   { id: "nnw",       label: "NNW",              icon: "🏥",  color: "#ec4899", group: "Ubezpieczenia" },
@@ -684,7 +685,7 @@ const COVERAGE_OPTIONS = [
   { id: "stluczka_parkingowa", label: "Stłuczka parkingowa", icon: "🅿️" },
 ];
 
-const INSURANCE_TYPES = ["oc","ac","gap","nnw","assistance","cargo"];
+const INSURANCE_TYPES = ["oc","ocp","ac","gap","nnw","assistance","cargo"];
 const CONTRACT_TYPES  = ["umowa_leasing","umowa_gps","umowa_serwis","umowa_inna"];
 
 // TRIP SUMMARY — wydzielone do src/utils/tripStats.js + src/components/TripSummaryPanel.jsx
@@ -3237,7 +3238,7 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
                     <NavBtn ctx={navCtx} indent id="kierowcy" label="Panel kierowców" icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>} />
                     <NavBtn ctx={navCtx} indent id="imi" label="IMI / SIPSI" icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>} />
                     <NavBtn ctx={navCtx} indent id="serwis" label="Serwis" icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>} />
-                    <NavBtn ctx={navCtx} indent id="docs" label="Dokumenty" icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>} />
+                    <NavBtn ctx={navCtx} indent id="docs" label="Dok. firmowe" icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>} />
                     <NavBtn ctx={navCtx} indent id="gps" label="GPS / Monitoring" icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3"/><path d="M12 19v3"/><path d="M2 12h3"/><path d="M19 12h3"/></svg>} />
                   </div>
                 )}
@@ -9717,7 +9718,7 @@ const ASSIGNABLE_TABS = [
   { id: "serwis",    label: "Serwis",        icon: "🔧" },
   { id: "rent",      label: "Rentowność",    icon: "📈" },
   { id: "analizy",   label: "Analizy",           icon: "📊" },
-  { id: "docs",      label: "Dokumenty",     icon: "📄" },
+  { id: "docs",      label: "Dok. firmowe",  icon: "📄" },
   { id: "imi",       label: "IMI / SIPSI",   icon: "🌍" },
   { id: "logi",      label: "Logi aktywności", icon: "📝" },
   { id: "sprawy",    label: "Sprawy",        icon: "📋" },
@@ -11444,8 +11445,9 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
       {/* HEADER */}
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">Dokumenty & Ubezpieczenia</h2>
+          <h2 className="text-xl font-bold text-gray-900">Dokumenty firmowe</h2>
           <p className="text-sm text-gray-500 mt-0.5">{docs.length} dokumentów · {docs.filter(d=>d.fileUrl||d.fileData).length} z plikiem</p>
+          <p className="text-xs text-gray-500 mt-1" style={{ maxWidth: 560 }}>Umowy, OC przewoźnika, licencje i inne dokumenty firmy. „Wgraj z AI” samo rozpozna rodzaj i daty. Dokumenty konkretnego auta (dowód, polisy, UDT) wgrywaj w Pojazdach, w karcie auta.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
           <button onClick={() => setShowBulkUpload(true)}
@@ -11493,7 +11495,19 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
         </select>
       </div>
 
-      {/* DOC LIST grouped by vehicle */}
+      {/* dokumenty firmy (bez pojazdu) — na górze, to jest główna zawartość tej zakładki */}
+      {(() => {
+        const orphans = filtered.filter(d => !vehicles.find(v => v.id === d.vehicleId));
+        if (!orphans.length) return null;
+        return (
+          <div className="mb-6">
+            <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2.5">Firma</div>
+            <div className="space-y-2">{orphans.map(doc => <DocRow key={doc.id} doc={doc} />)}</div>
+          </div>
+        );
+      })()}
+
+      {/* wpisy przypięte do auta — pozostałość sprzed panelu Pojazdy; nowe dokumenty aut idą do karty auta */}
       {vehicles.map(v => {
         const vDocs = filtered.filter(d => d.vehicleId === v.id);
         if (!vDocs.length) return null;
@@ -11512,18 +11526,6 @@ function DocsTab({ docs, vehicles, onAdd, onDelete, onEdit }) {
           </div>
         );
       })}
-
-      {/* docs without vehicle */}
-      {(() => {
-        const orphans = filtered.filter(d => !vehicles.find(v => v.id === d.vehicleId));
-        if (!orphans.length) return null;
-        return (
-          <div className="mb-6">
-            <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2.5">Inne / bez pojazdu</div>
-            <div className="space-y-2">{orphans.map(doc => <DocRow key={doc.id} doc={doc} />)}</div>
-          </div>
-        );
-      })()}
 
       {docs.length === 0 && (
         <div className="text-center py-20 text-gray-500">
@@ -11634,9 +11636,9 @@ function BulkUploadModal({ vehicles, onSave, onClose }) {
       const systemPrompt = `Jestes asystentem do rozpoznawania dokumentow transportowych, ubezpieczeniowych i umow.
 Analizujesz obrazy/PDF i zwracasz JSON z polami dokumentu.
 Zawsze odpowiadaj TYLKO czystym JSON bez zadnego tekstu przed ani po.
-Typy dokumentow (pole "type"): oc, ac, gap, nnw, assistance, cargo, licencja, zezwolenie, przeglad, tachlegalizacja, prawo_jazdy, karta_kierowcy, umowa_leasing, umowa_gps, umowa_serwis, umowa_inna, inne
+Typy dokumentow (pole "type"): oc, ocp (OC przewoznika drogowego / OCP — polisa firmy, NIE OC konkretnego pojazdu), ac, gap, nnw, assistance, cargo, licencja, zezwolenie, przeglad, tachlegalizacja, prawo_jazdy, karta_kierowcy, umowa_leasing, umowa_gps, umowa_serwis, umowa_inna, inne
 Format daty: YYYY-MM-DD
-Dla ubezpieczen (oc,ac,gap,nnw,assistance,cargo) - wyodrebnij OKRES OCHRONY: coverageStart (wazna OD / poczatek ochrony) oraz expiryDate (wazna DO / koniec ochrony). To NIE jest data wystawienia (issueDate). Wyodrebnij tez zakres pokrycia (coverage).
+Dla ubezpieczen (oc,ocp,ac,gap,nnw,assistance,cargo) - wyodrebnij OKRES OCHRONY: coverageStart (wazna OD / poczatek ochrony) oraz expiryDate (wazna DO / koniec ochrony). To NIE jest data wystawienia (issueDate). Wyodrebnij tez zakres pokrycia (coverage).
 Dla umow (umowa_*) - wyodrebnij dane kontrahenta, nr umowy, kwoty, okresy.
 Szukaj numerow rejestracyjnych pojazdow w dokumencie.`;
 
@@ -11684,7 +11686,8 @@ Szukaj numerow rejestracyjnych pojazdow w dokumencie.`;
       try { parsed = JSON.parse(clean); } catch(e) { throw new Error("JSON parse error: " + clean.slice(0,100)); }
 
       // Auto-match vehicle by plate number
-      let matchedVehicleId = vehicles[0]?.id || "";
+      // Domyślnie dokument FIRMY (bez pojazdu) — wcześniej nierozpoznany plik lądował przy pierwszym aucie z listy.
+      let matchedVehicleId = "";
       if (parsed.vehiclePlate) {
         const plate = parsed.vehiclePlate.replace(/[\s-]/g, "").toUpperCase();
         const found = vehicles.find(v => {
@@ -11818,7 +11821,7 @@ Szukaj numerow rejestracyjnych pojazdow w dokumencie.`;
                     <div className="col-span-2">
                       <MF label="Pojazd">
                         <MSelect value={item.edited.vehicleId} onChange={v => updateEdited(item.id,"vehicleId",v)}>
-                          <option value="">— bez pojazdu —</option>
+                          <option value="">Firma (bez pojazdu)</option>
                           {vehicles.map(v => <option key={v.id} value={v.id}>{v.plate}{v.plate2?` / ${v.plate2}`:""} · {v.brand}</option>)}
                         </MSelect>
                       </MF>
@@ -11929,7 +11932,7 @@ Szukaj numerow rejestracyjnych pojazdow w dokumencie.`;
 function AddDocModal({ vehicles, doc, onSave, onClose }) {
   const today = new Date().toISOString().split("T")[0];
   const [form, setForm] = useState({
-    vehicleId:    doc?.vehicleId    || vehicles[0]?.id || "",
+    vehicleId:    doc?.vehicleId    || "",
     type:         doc?.type         || "oc",
     label:        doc?.label        || "",
     issueDate:    doc?.issueDate    || today,
@@ -12018,7 +12021,7 @@ function AddDocModal({ vehicles, doc, onSave, onClose }) {
           {/* Pojazd */}
           <MF label="Pojazd">
             <MSelect value={form.vehicleId} onChange={v => set("vehicleId", v)}>
-              <option value="">— bez pojazdu —</option>
+              <option value="">Firma (bez pojazdu)</option>
               {vehicles.map(v => <option key={v.id} value={v.id}>{v.plate}{v.plate2?` / ${v.plate2}`:""} · {v.brand}</option>)}
             </MSelect>
           </MF>
