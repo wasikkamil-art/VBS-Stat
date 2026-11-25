@@ -8862,3 +8862,27 @@ tak, jak kierowca faktycznie jeździł w miesiącu. **Etap 1 = stan faktyczny od
   czekają na odpowiedzi usera (wymiar, co liczymy jako pracę, okres rozliczeniowy, forma raportu).
 - Przy okazji (nie ruszane): VU po terminie 90 dni na 4 starszych autach; wpis Tepera na WGM 7651V
   bez numeru karty; v7/v8 bez `tachoCardStart`.
+
+## 2026-11-25 cd. — Raport czasu pracy: podzakładka w GPS/Monitoring (tylko odczyt)
+
+Decyzje usera: liczymy **jazda + inna praca + dyspozycyjność**, **każdy miesiąc osobno**, wchodzą
+**wszyscy kierowcy** (także Ivanskyy i Omelianiuk mimo luk), **bez Excela** — widok w aplikacji.
+
+- Nowe: `src/utils/raportCzasuPracy.js` (czysta logika) + `src/components/RaportCzasuPracy.jsx`
+  (lazy), podzakładka „🧾 Raport czasu pracy” w GPS/Monitoring — widoczność dziedziczy po zakładce
+  (nikomu nic nie nadawałem). Tabela kierowców za miesiąc, klik → miesiąc dzień po dniu
+  (początek, koniec, jazda, praca, dyspozycyjność, źródło dnia). **Nic nie zapisuje.**
+- Dane dociągane na żądanie (`driverActivities` po `driverEmail` + `startTs`, istniejący indeks),
+  bo admin trzyma w pamięci tylko 45 dni. Ok. 3–4 tys. odczytów na otwarty miesiąc, pamiętane w stanie.
+- 🔑 **Szum GPS w szczelinach karty.** Zapis karty ma w ciągu dnia przerwy po kilka–kilkanaście
+  minut; `preferDddSegments` wycina inne źródła tylko tam, gdzie LEŻY segment karty, więc w szczeliny
+  wpadała „jazda” z raportu ww. Teper X.2026: 183,6 h zamiast 176,5 h z karty. W raporcie szczelina
+  do 120 min (`CISZA_KARTY_MIN`) nie jest wypełniana innym źródłem. ⚠️ `preferDddSegments` i panel
+  compliance **nie ruszone** — tam ten sam efekt istnieje (zawyża pracę, czyli w stronę ostrożną).
+- ✅ Sumy raportu = sumy wprost z plików kart (Teper X 176,5; Lukashchuk IX 153,5 / X 161,3;
+  Kolabau IX 111,0 + 0,8 dysp.). Suma dni = suma miesiąca, żaden dzień > 24 h. Lint 0 błędów, build zielony.
+- ✅ Układ obejrzany w atrapie `podglad/czaspracy` (dane ze zrzutu do pliku); serwer zatrzymany.
+- ❌ Nie klikane na produkcji (panel za loginem) i nie sprawdzone na telefonie.
+- 🚩 Otwarte przed etapem 2: user chce ręcznie modyfikować godziny „żeby było dobrze dla księgowej”.
+  Zgłoszone ryzyko: ewidencja rozjechana z kartą przy kontroli PIP/ITD — do ustalenia z księgową,
+  co wolno korygować; edycji NIE budowałem.

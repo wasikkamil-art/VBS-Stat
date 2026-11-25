@@ -40,6 +40,14 @@ import {
 const DriverPanel = lazy(() => import("./components/DriverPanel"));
 const TrackerPublicView = lazy(() => import("./components/TrackerPublicView"));
 const TachografComplianceSection = lazy(() => import("./components/TachografComplianceSection"));
+const RaportCzasuPracy = lazy(() => import("./components/RaportCzasuPracy"));
+// Segmenty jednego kierowcy z zadanego okna — dla raportu czasu pracy. Poza komponentem,
+// żeby referencja była stała (raport pamięta pobrane miesiące i nie czyta bazy drugi raz).
+const pobierzSegmentyKierowcy = async (email, odIso, doIso) => {
+  const snap = await getDocs(query(collection(db, "driverActivities"),
+    where("driverEmail", "==", email), where("startTs", ">=", odIso), where("startTs", "<", doIso)));
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+};
 // FrachtyModal — admin modal zlecenia (~480 linii) + SendTrackerLinkModal (~220 linii).
 // Lazy — admin pobiera dopiero gdy „+ Dodaj fracht" lub edytuje.
 const FrachtyModal = lazy(() => import("./components/FrachtyModal"));
@@ -7182,6 +7190,7 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
     { id: "ddd", label: "Tachograf", icon: "💾" },
     { id: "terminy", label: "Terminy pobrań", icon: "📅" },
     { id: "tachograf", label: "Czas pracy kierowcy", icon: "⏱️" },
+    { id: "raport", label: "Raport czasu pracy", icon: "🧾" },
   ];
 
   if (loading) {
@@ -7353,6 +7362,11 @@ function GpsTab({ vehicles, frachtyList = [], driverEvents = [], driverActivitie
             })()}
             {subTab === "ddd" && <GpsDddSection device={selectedDev} showToast={showToast} />}
             {subTab === "terminy" && <TerminyPobranTab vehicles={vehicles} />}
+            {subTab === "raport" && (
+              <Suspense fallback={<div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-sm text-gray-500">Ładowanie raportu czasu pracy…</div>}>
+                <RaportCzasuPracy vehicles={vehicles} pobierz={pobierzSegmentyKierowcy} />
+              </Suspense>
+            )}
             {/* 2026-05-07: subTab === "czas-pracy" / "aktywnosc" — usunięte (scalone w "Czas pracy kierowcy"). */}
             {subTab === "tachograf" && (
               <Suspense fallback={<div className="bg-white rounded-2xl border border-gray-100 p-8 text-center text-sm text-gray-500">📋 Ładowanie compliance tachografu…</div>}>
