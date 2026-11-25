@@ -7,7 +7,7 @@
 
 import { czyPdf } from "./zmniejszPdf.js";
 import { zaladujPdfLib } from "./znakWodny.js";
-import { promptPodzialu, planPodzialu } from "./dowodRejestracyjny.js";
+import { promptPodzialu, promptRozpoznania, planPodzialu } from "./dowodRejestracyjny.js";
 
 /** Tnie PDF wg planu. `lib` = pdf-lib (przeglądarka albo Node). Zwraca tablicę Uint8Array w kolejności planu. */
 export async function tnijPdf(lib, bajty, plan) {
@@ -22,20 +22,25 @@ export async function tnijPdf(lib, bajty, plan) {
 }
 
 /**
- * Rozkłada plik na dokumenty. Zwraca:
- *  - null — to nie jest wielostronicowy PDF albo nie udało się go bezpiecznie podzielić (wgrywaj w całości),
- *  - [{ plik, dane }] — jeden wpis, gdy AI uznało plik za jeden dokument (`plik` = ten sam plik),
- *    albo kilka wpisów z osobnymi plikami. `dane` = gotowy odczyt AI (drugi raz czytać nie trzeba).
- * `zapytaj(plik, prompt)` wysyła plik do AI i zwraca sparsowany JSON — dostarcza go wołający.
+ * Rozpoznaje plik i — gdy to skan zbiorczy — rozkłada go na dokumenty. Zwraca [{ plik, dane }]:
+ *  - zdjęcie albo jednostronicowy PDF → jeden wpis (`promptRozpoznania`),
+ *  - wielostronicowy PDF → tyle wpisów, ile dokumentów wskazało AI; każdy z osobnym plikiem.
+ *    Gdy AI uzna plik za jeden dokument albo podziału nie da się bezpiecznie użyć — jeden wpis z całym plikiem.
+ * `dane` = gotowy odczyt AI (null tylko wtedy, gdy podział zwrócił coś nieużywalnego).
+ * `zapytaj(plik, prompt, wiele)` wysyła plik do AI i zwraca sparsowany JSON — dostarcza go wołający.
  */
-export async function rozlozSkan({ plik, rodzaje, zapytaj }) {
-  if (!czyPdf(plik)) return null;
-  const lib = await zaladujPdfLib();
-  const bajty = await plik.arrayBuffer();
-  const stron = (await lib.PDFDocument.load(bajty)).getPageCount();
-  if (stron < 2) return null;
-  const plan = planPodzialu(await zapytaj(plik, promptPodzialu(rodzaje)), stron);
-  if (!plan) return null;
+export async function rozpoznajPlik({ plik, rodzaje, ext, zapytaj }) {
+  let lib = null, bajty = null, stron = 1;
+  if (czyPdf(plik)) {
+    try {
+      lib = await zaladujPdfLib();
+      bajty = await plik.arrayBuffer();
+      stron = (await lib.PDFDocument.load(bajty)).getPageCount();
+    } catch (e) { console.warn("podzielSkan: pdf-lib nie otworzył pliku — traktuję jak jeden dokument", e); stron = 1; }
+  }
+  if (stron < 2) return [{ plik, dane: await zapytaj(plik, promptRozpoznania(rodzaje, ext), false) }];
+  const plan = planPodzialu(await zapytaj(plik, promptPodzialu(rodzaje, ext), true), stron);
+  if (!plan) return [{ plik, dane: null }];
   if (plan.length === 1) return [{ plik, dane: plan[0].dane }];
   const czesci = await tnijPdf(lib, bajty, plan);
   const baza = plik.name.replace(/\.pdf$/i, "");

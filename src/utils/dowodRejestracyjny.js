@@ -147,7 +147,27 @@ export function porownajZDokumentem(v, d, dane) {
 // a człowiek potwierdza: klika Zapisz, sprawdza i może coś poprawić.” AI wskazuje rodzaj z NASZEJ listy
 // i czyta dane wspólne dla każdego dokumentu; `rozpoznanyDokument` robi z tego propozycję do okna.
 
-export const promptRozpoznania = (rodzaje) => `To skan lub zdjęcie dokumentu dotyczącego pojazdu ciężarowego firmy transportowej.
+// Faktury i dokumenty firmowe (user, 25.11.2026): faktura ma dać KOSZT w panelu Koszty (plik faktury się nie
+// zapisuje — w razie potrzeby wyciąga się ją od księgowej po numerze), a umowy i dokumenty firmy idą do
+// „Dok. firmowych”. Jedno i drugie zatwierdza admin. `ext` = { kategorie: [{id,label}], firmowe: [{id,label}] }.
+const polaDodatkowe = (ext) => (!ext ? "" : `
+W obiekcie dokumentu podaj DODATKOWO:
+  "zakres": "pojazd" — dokument dotyczy konkretnego pojazdu; "firma" — dotyczy firmy ogólnie (umowa z dostawcą, licencja, zezwolenie, OC przewoźnika, dokument kierowcy),
+  "rodzajFirmowy": gdy zakres = "firma" — jeden identyfikator z listy dokumentów firmowych poniżej; inaczej null,
+  "kontrahent": druga strona umowy albo wystawca dokumentu, albo null,
+  "faktura": TYLKO gdy rodzaj = "faktura" (także rachunek lub paragon), inaczej null:
+     { "sprzedawca": "nazwa firmy, która wystawiła fakturę",
+       "netto": kwota netto razem (liczba), "brutto": kwota brutto razem (liczba), "waluta": "PLN" / "EUR" / inny kod,
+       "kategoria": jeden identyfikator z listy kategorii kosztów poniżej — do czego ten koszt najpewniej należy,
+       "zaCo": "za co jest faktura, krótko, do 60 znaków",
+       "rejestracje": [numery rejestracyjne WSZYSTKICH pojazdów wymienionych na fakturze; pusta lista, gdy żadnego nie ma] }
+Lista dokumentów firmowych (identyfikator — znaczenie):
+${ext.firmowe.map(r => `- ${r.id} — ${r.label}`).join("\n")}
+Lista kategorii kosztów (identyfikator — znaczenie):
+${ext.kategorie.map(r => `- ${r.id} — ${r.label}`).join("\n")}
+Kwot z faktury NIE przeliczaj i nie zaokrąglaj — przepisz netto i brutto tak, jak stoją w podsumowaniu.`);
+
+export const promptRozpoznania = (rodzaje, ext) => `To skan lub zdjęcie dokumentu dotyczącego pojazdu ciężarowego firmy transportowej.
 Rozpoznaj, co to za dokument, i odczytaj z niego dane. Odpowiedz TYLKO w formacie JSON (bez markdown):
 {
   "rodzaj": "DOKŁADNIE jeden identyfikator z listy poniżej",
@@ -170,7 +190,7 @@ Wskazówki:
 Wskazówki do pola waznyDo: polisa — koniec okresu ubezpieczenia; kalibracja tachografu — „Data nast. kalibracji”;
 UDT — termin następnego badania; badanie techniczne — termin następnego badania; gaśnica — data następnego przeglądu;
 certyfikat, zezwolenie, upoważnienie — data, do której jest ważne. Umowa leasingu, faktura, protokół: null.
-Przepisuj DOKŁADNIE z dokumentu. Czego nie widać, nie zgaduj — zwróć null. Terminu ważności NIE wyliczaj samodzielnie.`;
+Przepisuj DOKŁADNIE z dokumentu. Czego nie widać, nie zgaduj — zwróć null. Terminu ważności NIE wyliczaj samodzielnie.${polaDodatkowe(ext)}`;
 
 /** Rodzaje, których termin i numer mają własne pola w karcie auta. */
 export const RODZAJE_Z_POLEM_KARTY = ["polisa", "gap", "udt", "dowod", "badanie", "gasnica"];
@@ -247,7 +267,7 @@ export function polaKartyZDokumentu(v, opis, dane) {
 // „To jest kilka dokumentów, a tak będziemy działać.” AI dzieli plik na dokumenty wg stron i dla każdego
 // zwraca te same pola co `promptRozpoznania`; `planPodzialu` sprawdza odpowiedź, zanim cokolwiek potniemy.
 
-export const promptPodzialu = (rodzaje) => `Ten plik PDF to skan, w którym może być KILKA osobnych dokumentów jeden po drugim (także dokumenty RÓŻNYCH pojazdów).
+export const promptPodzialu = (rodzaje, ext) => `Ten plik PDF to skan, w którym może być KILKA osobnych dokumentów jeden po drugim (także dokumenty RÓŻNYCH pojazdów).
 Podziel go na dokumenty: każda strona należy do dokładnie jednego dokumentu, strony jednego dokumentu idą po kolei
 (np. dwie strony dowodu rejestracyjnego albo protokołu to JEDEN dokument). Odpowiedz TYLKO w formacie JSON (bez markdown):
 {
@@ -271,7 +291,7 @@ Wskazówki: dowód rejestracyjny → dowod; zaświadczenie o badaniu technicznym
 przegląd gaśnicy → gasnica; kalibracja tachografu → tachograf; faktura (także za badanie techniczne) → faktura; brak pewności → inne.
 waznyDo: polisa — koniec okresu ubezpieczenia; badanie techniczne i UDT — termin następnego badania; kalibracja tachografu —
 data następnej kalibracji. Dowód rejestracyjny, faktura, umowa, protokół przekazania: null.
-Przepisuj DOKŁADNIE z dokumentu. Czego nie widać, nie zgaduj — zwróć null. Terminu ważności NIE wyliczaj samodzielnie.`;
+Przepisuj DOKŁADNIE z dokumentu. Czego nie widać, nie zgaduj — zwróć null. Terminu ważności NIE wyliczaj samodzielnie.${polaDodatkowe(ext)}`;
 
 /**
  * Sprawdza odpowiedź AI i zwraca plan cięcia: [{ strony: [1-based], dane }] albo null, gdy odpowiedzi nie da się
@@ -302,4 +322,48 @@ export function pojazdZDokumentu(pojazdy, dane) {
   const rej = bezOdstepow(dane?.rejestracja);
   if (!rej) return null;
   return (pojazdy || []).find(v => v && !v.archived && [v.plate, v.plate2].some(p => p && bezOdstepow(p) === rej)) || null;
+}
+
+/** Dokąd idzie rozpoznany dokument: "koszt" (faktura), "firma" (dokument firmowy) albo "pojazd" (karta auta). */
+export function typPozycji(dane) {
+  if (dane?.rodzaj === "faktura" && dane?.faktura) return "koszt";
+  if (dane?.zakres === "firma") return "firma";
+  return "pojazd";
+}
+
+/**
+ * Propozycja kosztu z faktury — do okna, w którym admin wszystko sprawdza i poprawia.
+ * Auta: wszystkie z rejestracji na fakturze, które mamy we flocie (poza archiwum). Brak = admin wybiera sam.
+ */
+export function kosztZFaktury(dane, pojazdy, kategorie) {
+  const f = dane?.faktura || {};
+  const rejestracje = [...(Array.isArray(f.rejestracje) ? f.rejestracje : []), dane?.rejestracja].filter(Boolean);
+  const auta = [...new Set(rejestracje.map(r => pojazdZDokumentu(pojazdy, { rejestracja: r })?.id).filter(Boolean))];
+  const waluta = czysty(f.waluta).toUpperCase();
+  return {
+    sprzedawca: czysty(f.sprzedawca), numer: czysty(dane?.numer), data: data(dane?.dataDokumentu),
+    netto: liczba(f.netto) ? String(liczba(f.netto)) : "", brutto: liczba(f.brutto) || null,
+    waluta: /^[A-Z]{3}$/.test(waluta) ? waluta : "PLN",
+    kategoria: (kategorie || []).some(k => k.id === f.kategoria) ? f.kategoria : "inne",
+    opis: czysty(f.zaCo), auta,
+  };
+}
+
+/** Dzieli kwotę po równo na `n` części co do grosza — ostatnia część bierze resztę z zaokrągleń, suma się zgadza. */
+export function podzielKwote(kwota, n) {
+  if (!(n >= 1) || !isFinite(kwota)) return [];
+  const grosze = Math.round(kwota * 100);
+  const czesc = Math.floor(grosze / n);
+  return Array.from({ length: n }, (_, i) => (i === n - 1 ? grosze - czesc * (n - 1) : czesc) / 100);
+}
+
+/** Propozycja wpisu w „Dok. firmowych” z odczytu AI. */
+export function dokumentFirmowyZOdczytu(dane, firmowe, nazwaPliku) {
+  const x = dane || {};
+  return {
+    type: (firmowe || []).some(r => r.id === x.rodzajFirmowy) ? x.rodzajFirmowy : "inne",
+    label: czysty(x.tytul).slice(0, 80) || czysty(nazwaPliku).replace(/\.[^.]+$/, ""),
+    kontrahent: czysty(x.kontrahent), number: czysty(x.numer),
+    issueDate: data(x.dataDokumentu), expiryDate: data(x.waznyDo), notes: "",
+  };
 }

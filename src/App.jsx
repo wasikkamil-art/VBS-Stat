@@ -17,7 +17,9 @@ import { licznikiZadan, noweZadanie, przygotujEdycje, wpisHistorii, czyPowiadami
 import { naJpgJesliHeic } from "./utils/heicNaJpg";
 import { zmniejszPdf, czyPdf, fmtMB, LIMIT_PLIKU } from "./utils/zmniejszPdf";
 import { PROMPT_DOWOD, promptDokumentu, promptRozpoznania, pojazdZDokumentu } from "./utils/dowodRejestracyjny";
-import { rozlozSkan } from "./utils/podzielSkan";
+import { rozpoznajPlik } from "./utils/podzielSkan";
+import { typPozycji, podzielKwote } from "./utils/dowodRejestracyjny";
+import { nbpRateInfo } from "./utils/nbp";
 import { pierwszaRataLeasingu } from "./utils/leasing";
 import { nalozZnakWodny, tekstZnaku, czyDaSieOznaczyc } from "./utils/znakWodny";
 import { tekstowy, zmieszaj, alfaZSufiksu } from "./utils/kolorTekstu";
@@ -1949,29 +1951,116 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   // „to jest kilka dokumentów, a tak będziemy działać”): AI dzieli go na dokumenty, tniemy plik na części
   // i każdą wgrywamy na kartę auta z JEJ rejestracją (skan bywa z dwóch aut). Gdy podział się nie uda,
   // plik wchodzi w całości — jak dotąd. AI czyta plik po adresie, więc skan idzie na chwilę do Storage.
+  // Od 25.11 dochodzą dwa rozgałęzienia TYLKO DLA ADMINA: faktura → propozycja kosztu (plik faktury się
+  // nie zapisuje), dokument firmowy → propozycja wpisu w „Dok. firmowych”. U dyspozytora obie rzeczy
+  // idą po staremu do dokumentów auta.
+  const rodzajeFirmowe = DOC_TYPES.map(t => ({ id: t.id, label: t.label, group: t.group }));
+  const kategorieKosztow = (categories.length ? categories : SEED_CATEGORIES).map(c => ({ id: c.id, label: c.label }));
   const wgrajZRozpoznaniem = async (v, pliki, rodzaje) => {
     const wynik = [];
+    const ext = isAdmin ? { kategorie: kategorieKosztow, firmowe: rodzajeFirmowe } : undefined;
     for (const oryginal of pliki) {
       let czesci = null;
       try {
         const plik = await przygotujPlikPojazdu(oryginal);
-        czesci = await rozlozSkan({ plik, rodzaje, zapytaj: async (p, prompt) => {
-          showToast(`⏳ „${oryginal.name}”: sprawdzam, ile dokumentów jest w skanie…`);
-          const r = storageRef(storage, `vehicleDocs/${v.id}/tmp_${uid()}.pdf`);
-          await uploadBytes(r, p, { contentType: "application/pdf" });
-          try { return await zapytajODokument({ fileUrl: await getDownloadURL(r), fileType: "application/pdf" }, prompt, 4000); }
-          finally { deleteObject(r).catch(e => console.warn("skan zbiorczy: plik tymczasowy został w Storage", e)); }
-        } });
-      } catch (e) { console.error("wgrajZRozpoznaniem: podział skanu", e); }
+        if (/\.(pdf|jpe?g|png|webp)$/i.test(plik.name)) {
+          const pdf = czyPdf(plik);
+          czesci = await rozpoznajPlik({ plik, rodzaje, ext, zapytaj: async (p, prompt, wiele) => {
+            showToast(`⏳ „${oryginal.name}”: rozpoznaję dokument…`);
+            const r = storageRef(storage, `vehicleDocs/${v.id}/tmp_${uid()}.${pdf ? "pdf" : (p.name.split(".").pop() || "jpg").toLowerCase()}`);
+            await uploadBytes(r, p, { contentType: p.type || undefined });
+            try { return await zapytajODokument({ fileUrl: await getDownloadURL(r), fileType: p.type, fileName: p.name }, prompt, wiele ? 6000 : 1400); }
+            finally { deleteObject(r).catch(e => console.warn("rozpoznanie: plik tymczasowy został w Storage", e)); }
+          } });
+        }
+      } catch (e) { console.error("wgrajZRozpoznaniem: rozpoznanie", e); }
+      // Nie udało się rozpoznać (albo CSV/arkusz) → plik wchodzi na kartę auta, panel spróbuje odczytu sam.
       if (!czesci) { wynik.push(...await addVehicleDocs(v, [oryginal], { kind: "inne" })); continue; }
-      if (czesci.length > 1) showToast(`📑 „${oryginal.name}”: ${czesci.length} dokumentów w skanie — wgrywam osobno…`);
+      if (czesci.length > 1) showToast(`📑 „${oryginal.name}”: ${czesci.length} dokumentów w skanie`);
       for (const c of czesci) {
-        const auto = pojazdZDokumentu(vehicles, c.dane) || v;
+        const typ = isAdmin && c.dane ? typPozycji(c.dane) : "pojazd";
+        if (typ !== "pojazd") {
+          // Faktura i dokument firmowy czekają w pamięci przeglądarki na decyzję admina — do bazy nic jeszcze nie idzie.
+          wynik.push({ id: `w${uid()}`, typ, plik: c.plik, fileName: c.plik.name, podgladUrl: URL.createObjectURL(c.plik), vehicleId: (pojazdZDokumentu(vehicles, c.dane) || v).id, rozpoznanie: c.dane });
+          continue;
+        }
+        const auto = (c.dane && pojazdZDokumentu(vehicles, c.dane)) || v;
         const [d] = await addVehicleDocs(auto, [c.plik], { kind: "inne" });
-        if (d) wynik.push({ ...d, rozpoznanie: c.dane });
+        if (d) wynik.push(c.dane ? { ...d, rozpoznanie: c.dane } : d);
       }
     }
     return wynik;
+  };
+  // Kurs do okna kosztu: średni NBP z dnia faktury (dzień wolny → do 5 dni wstecz). PLN→EUR = kwota / kurs EUR.
+  const kursKosztu = async (waluta, dzien) => {
+    if (waluta === "EUR") return { naEur: 1, opis: "" };
+    const eur = await nbpRateInfo("EUR", dzien);
+    const wal = waluta === "PLN" ? { mid: 1, date: eur?.date } : await nbpRateInfo(waluta, dzien);
+    if (!eur || !wal) return null;
+    return { naEur: wal.mid / eur.mid, kursEur: eur.mid, kursData: eur.date };
+  };
+  const kosztyZFaktury = (numer) => (numer ? costs.filter(c => c.nrFaktury && c.nrFaktury === numer) : []);
+  // Koszt z faktury zatwierdzony przez admina: jeden wpis na każde wybrane auto (kwota po równo), netto w EUR
+  // kursem NBP z dnia faktury. Pliku faktury nie zapisujemy — zostaje numer, sprzedawca i data.
+  // `arkusz: false` = koszt nie jest jeszcze wpisany do arkusza Total_26 (user: „również trzeba go wpisać z notatką”).
+  const zapiszKosztZFaktury = async (k) => {
+    if (!isAdmin) { showToast("⚠️ Koszt z faktury zatwierdza tylko admin"); return false; }
+    try {
+      const netto = Number(k.netto);
+      const auta = k.auta.map(id => vehicles.find(x => x.id === id)).filter(Boolean);
+      if (!(netto > 0) || !auta.length || !k.data) throw new Error("brak kwoty, daty albo auta");
+      const kurs = await kursKosztu(k.waluta, k.data);
+      if (!kurs) throw new Error(`nie udało się pobrać kursu NBP z ${k.data} — spróbuj za chwilę`);
+      const czesci = podzielKwote(netto, auta.length);
+      const nowe = auta.map((auto, i) => {
+        const rekord = {
+          id: uid(), vehicleId: auto.id, category: k.kategoria, currency: k.waluta === "EUR" ? "EUR" : "PLN",
+          amountEUR: Math.round(czesci[i] * kurs.naEur * 100) / 100,
+          amountPLN: k.waluta === "PLN" ? czesci[i] : null,
+          date: k.data,
+          note: [`FV ${k.numer}`, k.sprzedawca, k.opis, auta.length > 1 && `1/${auta.length} faktury (${netto} ${k.waluta} netto)`].filter(Boolean).join(" · "),
+          nrFaktury: k.numer, sprzedawca: k.sprzedawca, zrodlo: "skan", arkusz: false,
+          dodal: user?.email || "", dodano: new Date().toISOString(),
+        };
+        if (kurs.kursEur) { rekord.kursNbp = kurs.kursEur; rekord.kursData = kurs.kursData; }
+        if (!["PLN", "EUR"].includes(k.waluta)) { rekord.walutaFaktury = k.waluta; rekord.kwotaFaktury = czesci[i]; }
+        return rekord;
+      });
+      for (const r of nowe) await dbAddKoszt(r);
+      setCosts(p => [...p, ...nowe.filter(r => !p.some(x => x.id === r.id))]);
+      logAction("add", "costs", { action: "koszt-z-faktury", nrFaktury: k.numer, sprzedawca: k.sprzedawca, netto, waluta: k.waluta, auta: auta.map(a => a.plate).join(", "), category: k.kategoria });
+      showToast(`✅ Koszt z FV ${k.numer} dodany: ${auta.map(a => a.plate).join(", ")}`);
+      return true;
+    } catch (e) {
+      console.error("zapiszKosztZFaktury", e);
+      showToast(`⚠️ Nie zapisano kosztu: ${e?.message || e}`);
+      return false;
+    }
+  };
+  // Dokument firmowy zatwierdzony przez admina: dopiero teraz plik idzie do Storage, a wpis do „Dok. firmowych”.
+  const zapiszDokumentFirmowy = async (pozycja, opis) => {
+    if (!isAdmin) { showToast("⚠️ Dokument firmowy zatwierdza tylko admin"); return false; }
+    try {
+      const id = uid();
+      const ext = (pozycja.plik.name.split(".").pop() || "pdf").toLowerCase().replace(/[^a-z0-9]/g, "");
+      const storagePath = `docs/${auth.currentUser?.uid || "anon"}/${id}.${ext}`;
+      const r = storageRef(storage, storagePath);
+      await uploadBytes(r, pozycja.plik, { contentType: pozycja.plik.type || undefined });
+      await dbAddToArrayFieldVerified(SK.docs, {
+        id, vehicleId: "", type: opis.type, label: opis.label, issueDate: opis.issueDate || "", coverageStart: "",
+        expiryDate: opis.expiryDate || "", insurer: "", policyNumber: opis.number || "", cost: "", notes: opis.notes || "",
+        kontrahent: opis.kontrahent || "", nrUmowy: opis.number || "", reminders: [], coverage: [], customCoverage: [],
+        fileUrl: await getDownloadURL(r), fileData: null, fileName: pozycja.plik.name, fileType: pozycja.plik.type || "", storagePath,
+        zrodlo: "skan", addedAt: new Date().toISOString(), addedBy: user?.email || "",
+      });
+      logAction("add", "docs", { id, action: "dokument-firmowy-ze-skanu", type: opis.type, label: opis.label });
+      showToast("✅ Dokument zapisany w „Dok. firmowych”");
+      return true;
+    } catch (e) {
+      console.error("zapiszDokumentFirmowy", e);
+      showToast(`⚠️ Nie zapisano dokumentu: ${e?.message || e}`);
+      return false;
+    }
   };
   // Zapis po zatwierdzeniu w oknie: opis dokumentu (z rodzajem) + zaznaczone pola karty auta.
   // `v` = auto wybrane w oknie; gdy inne niż to, przy którym plik wgrano, dokument przechodzi na jego kartę.
@@ -4288,7 +4377,7 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
                     return true;
                   } catch (e) { console.error("zapis pola pojazdu", e); showToast("❌ Błąd zapisu: " + (e?.message || e)); return false; }
                 }}
-                onOdczytajDowod={odczytajDowod} onZapiszZDowodu={zapiszDaneZDowodu} onRozpoznajDokument={rozpoznajDokument} onZapiszRozpoznany={zapiszRozpoznany} onWgrajDokumenty={wgrajZRozpoznaniem} onPobierzOryginal={pobierzOryginalDokumentu} onPobierzDokument={pobierzDokumentPojazdu} onPodgladDokumentu={podgladDokumentuPojazdu}
+                onOdczytajDowod={odczytajDowod} onZapiszZDowodu={zapiszDaneZDowodu} onRozpoznajDokument={rozpoznajDokument} onZapiszRozpoznany={zapiszRozpoznany} onWgrajDokumenty={wgrajZRozpoznaniem} kategorieKosztow={kategorieKosztow} rodzajeFirmowe={rodzajeFirmowe} onKursKosztu={kursKosztu} onKosztyFaktury={kosztyZFaktury} onZapiszKoszt={zapiszKosztZFaktury} onZapiszFirmowy={zapiszDokumentFirmowy} onPobierzOryginal={pobierzOryginalDokumentu} onPobierzDokument={pobierzDokumentPojazdu} onPodgladDokumentu={podgladDokumentuPojazdu}
                 onEdytujDokument={updateVehicleDocMeta} onZapiszLeasing={saveVehicleLeasing}
                 uruchomienie={uruchomienieApi}
               />

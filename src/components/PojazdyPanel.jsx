@@ -6,9 +6,9 @@
 //
 // Dane pojazdu to te same pola co dotąd (`fleet/data.fleetv2_vehicles`) — stare auta nie
 // wymagają migracji. Nowe są tylko: `leasing` (obiekt) i dokumenty pojazdu (`docs`).
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import UruchomienieAuta from "./UruchomienieAuta";
-import { porownajZDowodem, porownajZDokumentem, opisZRozpoznania, czyjDokument, polaKartyZDokumentu, pojazdZDokumentu, RODZAJE_Z_POLEM_KARTY } from "../utils/dowodRejestracyjny";
+import { porownajZDowodem, porownajZDokumentem, opisZRozpoznania, czyjDokument, polaKartyZDokumentu, pojazdZDokumentu, kosztZFaktury, podzielKwote, dokumentFirmowyZOdczytu, RODZAJE_Z_POLEM_KARTY } from "../utils/dowodRejestracyjny";
 import { pierwszaRataLeasingu } from "../utils/leasing";
 
 // Rodzaje dokumentów pojazdu. `oferta: true` = domyślnie proponowany do dołączenia do oferty.
@@ -607,6 +607,198 @@ function OknoRozpoznania({ karta, pojazdy, pozycja, zostalo, onZapisz, onPonow, 
   );
 }
 
+/** Wspólna rama okien potwierdzenia ze skanu (koszt z faktury, dokument firmowy). */
+function RamaOkna({ tytul, zostalo, onClose, onSubmit, stopka, children }) {
+  return (
+    <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center p-0 sm:p-4" style={{ background: "rgba(0,0,0,0.35)" }}>
+      <form onSubmit={onSubmit} role="dialog" aria-label={tytul} className="w-full sm:max-w-2xl bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col" style={{ maxHeight: "92vh" }}>
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-gray-100">
+          <h3 className="flex-1 text-base font-bold text-gray-900 min-w-0 truncate">{tytul}</h3>
+          {zostalo > 0 && <span className="text-xs text-gray-600 whitespace-nowrap">w kolejce jeszcze {zostalo}</span>}
+          <button type="button" onClick={onClose} aria-label="Zamknij" className="w-8 h-8 rounded-lg bg-gray-100 text-gray-600 text-sm">✕</button>
+        </div>
+        <div className="p-5 overflow-y-auto">{children}</div>
+        <div className="flex flex-wrap justify-end gap-2 px-5 py-4 border-t border-gray-100">{stopka}</div>
+      </form>
+    </div>
+  );
+}
+
+function PlikZeSkanu({ pozycja, safeHref }) {
+  const url = safeHref ? safeHref(pozycja.doc.podgladUrl) : pozycja.doc.podgladUrl;
+  return (
+    <p className="text-xs text-gray-600 mb-3">Plik: <span className="text-gray-900">{pozycja.doc.fileName}</span>
+      {url && <> · <a href={url} target="_blank" rel="noopener noreferrer" className="font-medium underline" style={{ color: KOLOR.granat }}>otwórz, żeby sprawdzić</a></>}
+    </p>
+  );
+}
+
+const fmtLiczba = (n) => Number(n).toLocaleString("pl-PL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/**
+ * Faktura ze skanu → koszt w panelu „Koszty” (user, 25.11.2026). Pliku faktury NIE zapisujemy — zostaje numer,
+ * sprzedawca i data. Admin sprawdza kwotę, kategorię (AI tylko podpowiada) i auta: jedno, kilka albo wszystkie,
+ * kwota dzieli się po równo („auta były dwa na warsztacie, ale nie wiadomo, ile części na które”).
+ */
+function OknoKosztu({ pojazdy, kategorie, pozycja, zostalo, onKurs, onKoszty, onZapisz, onClose, safeHref }) {
+  const aktywne = useMemo(() => pojazdy.filter(x => !x.archived), [pojazdy]);
+  const start = useMemo(() => kosztZFaktury(pozycja.dane, aktywne, kategorie), [pozycja, aktywne, kategorie]);
+  const [f, setF] = useState(start);
+  const ustaw = (k) => (e) => setF(p => ({ ...p, [k]: e.target.value }));
+  const przelacz = (id) => setF(p => ({ ...p, auta: p.auta.includes(id) ? p.auta.filter(x => x !== id) : [...p.auta, id] }));
+  const netto = Number(String(f.netto).replace(",", "."));
+  const czesci = netto > 0 && f.auta.length ? podzielKwote(netto, f.auta.length) : [];
+  // Kurs NBP z dnia faktury — pokazujemy go, zanim admin zapisze (ten sam kurs policzy zapis).
+  const [kurs, setKurs] = useState({ klucz: "", wynik: null });
+  const kluczKursu = `${f.waluta}|${f.data}`;
+  useEffect(() => {
+    if (!onKurs || !f.data || !/^[A-Z]{3}$/.test(f.waluta)) return undefined;
+    let zywy = true;
+    onKurs(f.waluta, f.data).then(w => { if (zywy) setKurs({ klucz: kluczKursu, wynik: w || "brak" }); }).catch(() => { if (zywy) setKurs({ klucz: kluczKursu, wynik: "brak" }); });
+    return () => { zywy = false; };
+  }, [onKurs, f.waluta, f.data, kluczKursu]);
+  const k = kurs.klucz === kluczKursu ? kurs.wynik : null;
+  const naEur = k && k !== "brak" ? k.naEur : null;
+  const juzSa = onKoszty ? onKoszty(f.numer.trim()) : [];
+  const [zapis, setZapis] = useState(false);
+  const mozna = netto > 0 && f.auta.length > 0 && f.data && f.numer.trim() && naEur;
+  const zapisz = async (e) => {
+    e.preventDefault();
+    if (!mozna) return;
+    setZapis(true);
+    const ok = await onZapisz({ ...f, netto, numer: f.numer.trim(), sprzedawca: f.sprzedawca.trim(), opis: f.opis.trim() });
+    setZapis(false);
+    if (ok !== false) onClose();
+  };
+  return (
+    <RamaOkna tytul="Faktura ze skanu — koszt do zatwierdzenia" zostalo={zostalo} onClose={onClose} onSubmit={zapisz}
+      stopka={<>
+        <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium text-gray-700 bg-gray-100">Pomiń — nie dodawaj kosztu</button>
+        <button type="submit" disabled={zapis || !mozna} className="px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: KOLOR.granat }}>
+          {zapis ? "Zapisuję…" : f.auta.length > 1 ? `Dodaj koszt do ${f.auta.length} aut` : "Dodaj koszt"}
+        </button>
+      </>}>
+      <PlikZeSkanu pozycja={pozycja} safeHref={safeHref} />
+      <p className="text-sm rounded-lg px-3 py-2 mb-3" style={{ background: KOLOR.tlo, border: `1px solid ${KOLOR.ramka}`, color: KOLOR.granat }}>
+        To faktura — po zatwierdzeniu trafi do <b>Kosztów</b> w miesiącu z daty faktury. <b>Plik faktury nie zostanie zapisany</b> (zostaje numer, sprzedawca i data).
+      </p>
+      {juzSa.length > 0 && (
+        <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">
+          Faktura <b>{f.numer}</b> ma już koszt w aplikacji ({juzSa.length} {juzSa.length === 1 ? "wpis" : "wpisy"}). Zapis doda go drugi raz — pomiń, jeśli to ta sama faktura.
+        </p>
+      )}
+      <div className="grid sm:grid-cols-6 gap-2">
+        <label className="text-xs text-gray-600 sm:col-span-3">Sprzedawca
+          <input type="text" value={f.sprzedawca} onChange={ustaw("sprzedawca")} className={POLE} style={BIALE} />
+        </label>
+        <label className="text-xs text-gray-600 sm:col-span-3">Numer faktury
+          <input type="text" required value={f.numer} onChange={ustaw("numer")} className={POLE} style={BIALE} />
+        </label>
+        <label className="text-xs text-gray-600 sm:col-span-2">Data faktury
+          <input type="date" required value={f.data} onChange={ustaw("data")} className={POLE} style={BIALE} />
+        </label>
+        <label className="text-xs text-gray-600 sm:col-span-2">Kwota netto
+          <input type="text" inputMode="decimal" required value={f.netto} onChange={ustaw("netto")} className={POLE} style={BIALE} />
+        </label>
+        <label className="text-xs text-gray-600 sm:col-span-2">Waluta
+          <select value={f.waluta} onChange={ustaw("waluta")} className={POLE} style={BIALE}>
+            {[...new Set(["PLN", "EUR", f.waluta])].map(w => <option key={w} value={w}>{w}</option>)}
+          </select>
+        </label>
+        <label className="text-xs text-gray-600 sm:col-span-3">Kategoria kosztu <span className="text-gray-500">(podpowiedź — zmień, jeśli trzeba)</span>
+          <select value={f.kategoria} onChange={ustaw("kategoria")} className={POLE} style={BIALE}>
+            {kategorie.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+          </select>
+        </label>
+        <label className="text-xs text-gray-600 sm:col-span-3">Za co
+          <input type="text" value={f.opis} onChange={ustaw("opis")} className={POLE} style={BIALE} />
+        </label>
+      </div>
+      <p className="text-xs text-gray-600 mt-2">
+        {start.brutto ? `Brutto na fakturze: ${fmtLiczba(start.brutto)} ${start.waluta}. ` : ""}
+        {f.waluta === "EUR" ? "Faktura w euro — bez przeliczania."
+          : k === "brak" ? <span className="text-red-800 font-medium">Nie udało się pobrać kursu NBP z {fmtData(f.data)} — bez kursu nie zapiszę.</span>
+          : naEur && netto > 0 ? <>Kurs NBP EUR z {fmtData(k.kursData)}: {String(k.kursEur).replace(".", ",")} → <b className="text-gray-900">{fmtLiczba(netto * naEur)} € netto</b>.</>
+          : "Pobieram kurs NBP z dnia faktury…"}
+      </p>
+      <div className="flex items-baseline gap-3 mt-4 mb-1">
+        <p className="flex-1 text-xs font-semibold text-gray-700">Auta, na które idzie koszt{f.auta.length > 1 && " — kwota dzieli się po równo"}</p>
+        <button type="button" onClick={() => setF(p => ({ ...p, auta: aktywne.map(x => x.id) }))} className="text-xs font-medium underline" style={{ color: KOLOR.granat }}>wszystkie</button>
+        <button type="button" onClick={() => setF(p => ({ ...p, auta: [] }))} className="text-xs font-medium underline text-gray-700">żadne</button>
+      </div>
+      {f.auta.length === 0 && <p className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2">Na fakturze nie ma rejestracji auta z floty — zaznacz, na które auta przypisać koszt.</p>}
+      <ul className="grid sm:grid-cols-2 gap-x-3 rounded-xl border border-gray-100 px-3 py-1">
+        {aktywne.map(x => {
+          const i = f.auta.indexOf(x.id);
+          return (
+            <li key={x.id}>
+              <label className="flex items-center gap-2 py-1.5 cursor-pointer text-sm">
+                <input type="checkbox" checked={i >= 0} onChange={() => przelacz(x.id)} aria-label={`Koszt na auto ${x.plate}`} />
+                <span className="flex-1 text-gray-900">{x.plate}</span>
+                {i >= 0 && czesci[i] != null && <span className="text-xs text-gray-600 whitespace-nowrap">{fmtLiczba(czesci[i])} {f.waluta}{naEur && f.waluta !== "EUR" ? ` · ${fmtLiczba(czesci[i] * naEur)} €` : ""}</span>}
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+    </RamaOkna>
+  );
+}
+
+/** Dokument firmy ze skanu (umowa, licencja, OC przewoźnika…) → „Dok. firmowe”. Zatwierdza admin. */
+function OknoFirmowe({ rodzaje, pozycja, zostalo, onZapisz, onClose, safeHref }) {
+  const start = useMemo(() => dokumentFirmowyZOdczytu(pozycja.dane, rodzaje, pozycja.doc.fileName), [pozycja, rodzaje]);
+  const [f, setF] = useState(start);
+  const ustaw = (k) => (e) => setF(p => ({ ...p, [k]: e.target.value }));
+  const [zapis, setZapis] = useState(false);
+  const grupy = [...new Set(rodzaje.map(r => r.group || "Inne"))];
+  const zapisz = async (e) => {
+    e.preventDefault();
+    if (!f.label.trim()) return;
+    setZapis(true);
+    const ok = await onZapisz(pozycja.doc, { ...f, label: f.label.trim(), number: f.number.trim(), kontrahent: f.kontrahent.trim(), notes: f.notes.trim() });
+    setZapis(false);
+    if (ok !== false) onClose();
+  };
+  return (
+    <RamaOkna tytul="Dokument firmowy ze skanu" zostalo={zostalo} onClose={onClose} onSubmit={zapisz}
+      stopka={<>
+        <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium text-gray-700 bg-gray-100">Pomiń — nie zapisuj</button>
+        <button type="submit" disabled={zapis} className="px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-60" style={{ background: KOLOR.granat }}>{zapis ? "Zapisuję…" : "Zapisz w „Dok. firmowych”"}</button>
+      </>}>
+      <PlikZeSkanu pozycja={pozycja} safeHref={safeHref} />
+      <p className="text-sm rounded-lg px-3 py-2 mb-3" style={{ background: KOLOR.tlo, border: `1px solid ${KOLOR.ramka}`, color: KOLOR.granat }}>
+        To dokument <b>firmy</b>, nie konkretnego auta — po zatwierdzeniu trafi do zakładki <b>Dok. firmowe</b>{start.type !== "inne" && <> jako <b>{rodzaje.find(r => r.id === start.type)?.label}</b></>}.
+      </p>
+      <div className="grid sm:grid-cols-6 gap-2">
+        <label className="text-xs text-gray-600 sm:col-span-3">Rodzaj
+          <select value={f.type} onChange={ustaw("type")} className={POLE} style={BIALE}>
+            {grupy.map(g => <optgroup key={g} label={g}>{rodzaje.filter(r => (r.group || "Inne") === g).map(r => <option key={r.id} value={r.id}>{r.label}</option>)}</optgroup>)}
+          </select>
+        </label>
+        <label className="text-xs text-gray-600 sm:col-span-3">Nazwa
+          <input type="text" required value={f.label} onChange={ustaw("label")} className={POLE} style={BIALE} />
+        </label>
+        <label className="text-xs text-gray-600 sm:col-span-3">Kontrahent / wystawca
+          <input type="text" value={f.kontrahent} onChange={ustaw("kontrahent")} className={POLE} style={BIALE} />
+        </label>
+        <label className="text-xs text-gray-600 sm:col-span-3">Numer
+          <input type="text" value={f.number} onChange={ustaw("number")} className={POLE} style={BIALE} />
+        </label>
+        <label className="text-xs text-gray-600 sm:col-span-3">Data dokumentu
+          <input type="date" value={f.issueDate} onChange={ustaw("issueDate")} className={POLE} style={BIALE} />
+        </label>
+        <label className="text-xs text-gray-600 sm:col-span-3">Ważny do
+          <input type="date" value={f.expiryDate} onChange={ustaw("expiryDate")} className={POLE} style={BIALE} />
+        </label>
+        <label className="text-xs text-gray-600 sm:col-span-6">Uwagi
+          <input type="text" value={f.notes} onChange={ustaw("notes")} className={POLE} style={BIALE} />
+        </label>
+      </div>
+    </RamaOkna>
+  );
+}
+
 function ListaDokumentow({ docs, canEdit, onDodaj, wgrywam, onUsun, onEdytuj, onOdczytaj, onOryginal, onPobierz, onPodglad, safeHref, pusto = "Brak dokumentów przy tym aucie." }) {
   const [edytowany, setEdytowany] = useState(null);
   const [podglad, setPodglad] = useState(null);
@@ -810,7 +1002,7 @@ function Harmonogram({ leasing, dzis }) {
   );
 }
 
-function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, onPodgladDokumentu, onZapiszPole, onRozpoznajDokument, onZapiszRozpoznany, onWgrajDokumenty, pojazdy, isAdmin, uruchomienie, onBrudne, showToast, safeHref }) {
+function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, onPodgladDokumentu, onZapiszPole, onRozpoznajDokument, onZapiszRozpoznany, onWgrajDokumenty, pojazdy, kategorieKosztow, rodzajeFirmowe, onKursKosztu, onKosztyFaktury, onZapiszKoszt, onZapiszFirmowy, isAdmin, uruchomienie, onBrudne, showToast, safeHref }) {
   const [oferta, setOferta] = useState(false);
   const mozePole = canEdit && onZapiszPole && !v.archived;
   const [sekcja, setSekcja] = useState(null); // która sekcja karty jest otwarta; null = kafelki
@@ -838,8 +1030,9 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
     try {
       const rodzaje = RODZAJE_DOKUMENTOW.map(r => ({ id: r.id, label: r.label }));
       const wgrane = (await (onWgrajDokumenty ? onWgrajDokumenty(v, pliki, rodzaje) : onDodajDokumenty(v, pliki, { kind: "inne" }))) || [];
-      setKolejka(k => [...k, ...wgrane.map(d => ({ doc: d, stan: "czytam" }))]);
-      wgrane.forEach(rozpoznaj);
+      // Faktura i dokument firmowy przychodzą już rozpoznane i bez zapisu (`typ`) — czekają tylko na decyzję admina.
+      setKolejka(k => [...k, ...wgrane.map(d => (d.typ ? { doc: d, stan: "gotowe", dane: d.rozpoznanie } : { doc: d, stan: "czytam" }))]);
+      wgrane.filter(d => !d.typ).forEach(rozpoznaj);
     } finally { setWgrywam(false); }
   };
   const [uruchom, setUruchom] = useState(false);
@@ -1008,15 +1201,19 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
 
       {odczyt && <OknoDanychZDowodu key={`${odczyt.doc.id}-${odczyt.stan}`} v={v} odczyt={odczyt} onClose={() => setOdczyt(null)}
         onPonow={() => czytajDowod(odczyt.doc)} onZapisz={(patch, opis) => onZapiszZDowodu(v, patch, odczyt.doc, opis)} />}
-      {kolejka[0] && <OknoRozpoznania key={`${kolejka[0].doc.id}-${kolejka[0].stan}`} karta={v} pojazdy={pojazdy || [v]} pozycja={kolejka[0]} zostalo={kolejka.length - 1}
-        onClose={() => setKolejka(k => k.slice(1))} onPonow={() => rozpoznaj(kolejka[0].doc)}
-        onZapisz={(auto, opis, patch) => onZapiszRozpoznany(auto, kolejka[0].doc, opis, patch)} />}
+      {kolejka[0] && (() => {
+        const p = kolejka[0], dalej = () => setKolejka(k => k.slice(1)), zostalo = kolejka.length - 1;
+        if (p.doc.typ === "koszt") return <OknoKosztu key={p.doc.id} pojazdy={pojazdy || [v]} kategorie={kategorieKosztow || []} pozycja={p} zostalo={zostalo} onKurs={onKursKosztu} onKoszty={onKosztyFaktury} onZapisz={onZapiszKoszt} onClose={dalej} safeHref={safeHref} />;
+        if (p.doc.typ === "firma") return <OknoFirmowe key={p.doc.id} rodzaje={rodzajeFirmowe || []} pozycja={p} zostalo={zostalo} onZapisz={onZapiszFirmowy} onClose={dalej} safeHref={safeHref} />;
+        return <OknoRozpoznania key={`${p.doc.id}-${p.stan}`} karta={v} pojazdy={pojazdy || [v]} pozycja={p} zostalo={zostalo}
+          onClose={dalej} onPonow={() => rozpoznaj(p.doc)} onZapisz={(auto, opis, patch) => onZapiszRozpoznany(auto, p.doc, opis, patch)} />;
+      })()}
       {oferta && <OknoOferty v={v} kierowca={kierowca} docs={docs} onClose={() => setOferta(false)} showToast={showToast} />}
     </article>
   );
 }
 
-export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajPojazd, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, onPodgladDokumentu, onZapiszPole, onRozpoznajDokument, onZapiszRozpoznany, onWgrajDokumenty, isAdmin = false, uruchomienie, showToast, safeHref }) {
+export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajPojazd, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, onPodgladDokumentu, onZapiszPole, onRozpoznajDokument, onZapiszRozpoznany, onWgrajDokumenty, kategorieKosztow, rodzajeFirmowe, onKursKosztu, onKosztyFaktury, onZapiszKoszt, onZapiszFirmowy, isAdmin = false, uruchomienie, showToast, safeHref }) {
   const teraz = useMemo(() => dzis ?? new Date().setHours(0, 0, 0, 0), [dzis]);
   const [archiwum, setArchiwum] = useState(false);
   const [szukaj, setSzukaj] = useState("");
@@ -1092,7 +1289,7 @@ export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit 
 
         {aktywny
           ? <KartaPojazdu key={aktywny.id} v={aktywny} docs={docsWg[aktywny.id] || []} dzis={teraz} canEdit={canEdit}
-              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} onOdczytajDowod={onOdczytajDowod} onZapiszZDowodu={onZapiszZDowodu} onPobierzOryginal={onPobierzOryginal} onPobierzDokument={onPobierzDokument} onPodgladDokumentu={onPodgladDokumentu} onZapiszPole={onZapiszPole} onRozpoznajDokument={onRozpoznajDokument} onZapiszRozpoznany={onZapiszRozpoznany} onWgrajDokumenty={onWgrajDokumenty} pojazdy={vehicles} isAdmin={isAdmin} uruchomienie={uruchomienie} onBrudne={onBrudne} showToast={showToast} safeHref={safeHref} />
+              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} onOdczytajDowod={onOdczytajDowod} onZapiszZDowodu={onZapiszZDowodu} onPobierzOryginal={onPobierzOryginal} onPobierzDokument={onPobierzDokument} onPodgladDokumentu={onPodgladDokumentu} onZapiszPole={onZapiszPole} onRozpoznajDokument={onRozpoznajDokument} onZapiszRozpoznany={onZapiszRozpoznany} onWgrajDokumenty={onWgrajDokumenty} pojazdy={vehicles} kategorieKosztow={kategorieKosztow} rodzajeFirmowe={rodzajeFirmowe} onKursKosztu={onKursKosztu} onKosztyFaktury={onKosztyFaktury} onZapiszKoszt={onZapiszKoszt} onZapiszFirmowy={onZapiszFirmowy} isAdmin={isAdmin} uruchomienie={uruchomienie} onBrudne={onBrudne} showToast={showToast} safeHref={safeHref} />
           : <div className="bg-white rounded-2xl border border-gray-100 p-8 text-sm text-gray-500">Wybierz pojazd z listy.</div>}
       </div>
 

@@ -8913,3 +8913,21 @@ nadrzędną, ale tam, gdzie karty nie było, dopisywał do sum pracę z GPS / ra
 **Sprawdzone**: prawdziwy skan usera w Node (sam odczyt + cięcie do folderu roboczego): 6 części, 8 z 8 stron, rodzaje/numery/daty poprawne, oba auta rozpoznane. Atrapa: prawdziwe cięcie 8-stronicowego PDF w przeglądarce, kolejka 6 okien, dokumenty 0507M przypisane do 0507M, zapis pól karty do właściwego auta. Lint 0 błędów, build OK.
 
 **NIE sprawdzone**: cała ścieżka na produkcji (plik tymczasowy w Storage, wgranie części, zapis). Termin UDT z tego skanu AI raz podało (01.01.2028), raz nie — do sprawdzenia przez człowieka w oknie.
+
+## 2026-11-25 cd. — Pojazdy: faktury ze skanu → Koszty, dokumenty firmy → „Dok. firmowe” (zatwierdza admin)
+
+**Ustalenia usera**: faktura ze skanu ma dać koszt w panelu Koszty na miesiąc faktury (kwota, numer, sprzedawca, data) **bez zapisywania pliku** — w razie potrzeby fakturę wyciąga się od księgowej po numerze. Kategorię AI tylko podpowiada. Kwota netto, zł → € kursem NBP z dnia faktury. Faktura bez auta: admin przydziela na jedno, kilka albo wszystkie auta, po równo. Umowy i dokumenty firmy → sklasyfikowane do „Dok. firmowych”. Wszystko zatwierdza **admin**. Koszt z FS ma też trafić do arkusza z notatką.
+
+**Co zrobione**
+- Prompty (`promptRozpoznania`, `promptPodzialu`) dostały blok dodatkowy: `zakres` (pojazd/firma), `rodzajFirmowy`, `kontrahent`, `faktura {sprzedawca, netto, brutto, waluta, kategoria, zaCo, rejestracje[]}` — tylko gdy wgrywa admin.
+- `rozpoznajPlik` (`src/utils/podzielSkan.js`): każdy czytelny plik jest rozpoznawany PRZED zapisem (plik tymczasowy w Storage, kasowany). Faktura i dokument firmowy u admina **nie idą do bazy**, czekają w pamięci przeglądarki na decyzję.
+- `OknoKosztu`: sprzedawca, numer, data, netto, waluta, kategoria, opis; lista aut z ptaszkami („wszystkie” / „żadne”), podział po równo co do grosza; podgląd kursu NBP i kwoty w €; ostrzeżenie, gdy faktura o tym numerze ma już koszt. Zapis: `zapiszKosztZFaktury` → po jednym wpisie w `costs` na auto, z `nrFaktury`, `sprzedawca`, `zrodlo: "skan"`, `kursNbp`, `kursData`, **`arkusz: false`**.
+- `OknoFirmowe`: rodzaj z listy `DOC_TYPES`, nazwa, kontrahent, numer, daty; zapis `zapiszDokumentFirmowy` → plik do `docs/…`, wpis do `fleetv2_docs` (`dbAddToArrayFieldVerified`).
+- Dyspozytor: bez zmian — faktura i dokument firmowy idą po staremu do dokumentów auta.
+
+**Sprawdzone**: prawdziwy skan usera w Node — obie faktury wyciągnięte (Quest Stacje Paliw, 190,24 zł netto / 234 brutto, numery, auta, podpowiedź „Serwis”). Atrapa: okno kosztu, faktura bez auta (blokada zapisu do wyboru auta, podział 1000,01 zł na 7 aut = 6×142,85 + 142,91), dokument firmowy, ostrzeżenie o duplikacie, ścieżka nie-admina. Lint 0 błędów, build OK.
+
+**NIE zrobione / NIE sprawdzone**
+- **Wpis kosztu do arkusza Total_26 z notatką — NIE zrobiony.** Koszty ze skanu mają znacznik `arkusz: false`; sposób wpisu (automat przy zatwierdzeniu czy zbiorczo przy miesięcznym uzupełnianiu) czeka na decyzję usera.
+- ⚠️ Miesięczny import kosztów z arkusza do FS: koszt wpisany i tu, i w arkuszu wejdzie drugi raz, jeśli import nie pominie wpisów `zrodlo: "skan"`.
+- Cała ścieżka na produkcji (zapis kosztu, kurs NBP na żywo, wpis w „Dok. firmowych” i jego wygląd w zakładce). „Tylko admin” pilnuje aplikacja, nie reguły Firestore.
