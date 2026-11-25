@@ -8886,3 +8886,16 @@ Decyzje usera: liczymy **jazda + inna praca + dyspozycyjność**, **każdy miesi
 - 🚩 Otwarte przed etapem 2: user chce ręcznie modyfikować godziny „żeby było dobrze dla księgowej”.
   Zgłoszone ryzyko: ewidencja rozjechana z kartą przy kontroli PIP/ITD — do ustalenia z księgową,
   co wolno korygować; edycji NIE budowałem.
+
+## 2026-11-25 cd.2 — Raport czasu pracy: sumy WYŁĄCZNIE z karty (DDD)
+
+User: „bardziej prawidłowe dane mamy z plików DDD, nie z GPS-ów”. Raport już brał kartę jako
+nadrzędną, ale tam, gdzie karty nie było, dopisywał do sum pracę z GPS / raportu ww.
+- Teraz do sum idzie **tylko `source=ddd` i ręczna korekta**. Praca widziana wyłącznie poza kartą
+  ma osobną kolumnę „Poza kartą (GPS)” i **nie wchodzi do żadnej sumy**; dzień dostaje znaczek
+  „brak karty” albo „karta urywa się”.
+- ✅ Sumy = sumy wprost z `dddFiles.dailyTotals` u wszystkich pięciu kierowców za IX–XI
+  (np. Ivanskyy IX 51,1 h z karty; 55,2 h widzi tylko GPS po 22.09 — niewliczone).
+- ✅ Lint 0 błędów, build zielony, atrapa obejrzana, serwer zatrzymany. ❌ Produkcja nieklikana.
+- ℹ️ `preview_start` atrapy otwiera najpierw `localhost:5199/` = prawdziwą aplikację (strona
+  logowania, bez zapisu) — od razu przechodzić na `/podglad/czaspracy/index.html`.

@@ -80,8 +80,10 @@ function bezSzumuWCiszyKarty(segmenty) {
 //   dni[]   — KAŻDY dzień kalendarzowy miesiąca (także bez pracy), do `now` dla bieżącego
 //   suma    — minuty jazdy / innej pracy / dyspozycyjności / razem + liczba dni pracy
 //   tachoDoMs — koniec ostatniego segmentu z karty (DDD) w pobranych danych, albo null
-// Pole `zrodlo` dnia: "tacho" (dzień pokryty zapisem karty), "inne" (jest aktywność, ale
-// spoza karty — raport ww albo GPS), "mieszane", "brak" (żadnego zapisu).
+// Sumy liczone są TYLKO z karty (DDD + korekty). Pole `zrodlo` dnia: "tacho" (dzień pokryty
+// zapisem karty), "mieszane" (karta urywa się w ciągu dnia, dalej widzi tylko GPS), "inne"
+// (karty brak, GPS / raport ww widzi aktywność — niewliczoną), "brak" (żadnego zapisu).
+// `pozaKarta` / `suma.pracaSpozaTacho` = minuty pracy widziane tylko poza kartą (informacja).
 export function raportMiesiaca(surowe = [], rok, miesiac, now = new Date()) {
   const { odMs, doMs: koniecMies } = graniceMiesiaca(rok, miesiac);
   const doMs = Math.min(koniecMies, now.getTime());
@@ -109,10 +111,16 @@ export function raportMiesiaca(surowe = [], rok, miesiac, now = new Date()) {
       if (s.source === "ddd") D.tachoMin += min; else if (s.source !== "fillgap") D.inneMin += min;
       if (s.source === "correction") D.korekta = true;
       if (TYPY_PRACY.includes(s.type)) {
-        D[s.type] += min;
-        if (s.source !== "ddd" && s.source !== "correction") D.pracaSpozaTacho += min;
-        if (D.poczatekMs === null || a < D.poczatekMs) D.poczatekMs = a;
-        if (D.koniecMs === null || b > D.koniecMs) D.koniecMs = b;
+        // Decyzja użytkownika (25.11.2026): do sum idzie WYŁĄCZNIE karta kierowcy (DDD)
+        // i ręczna korekta zapisu karty. Praca widziana tylko przez GPS / raport ww jest
+        // liczona osobno jako informacja „poza kartą" i NIE wchodzi do żadnej sumy.
+        if (s.source === "ddd" || s.source === "correction") {
+          D[s.type] += min;
+          if (D.poczatekMs === null || a < D.poczatekMs) D.poczatekMs = a;
+          if (D.koniecMs === null || b > D.koniecMs) D.koniecMs = b;
+        } else {
+          D.pracaSpozaTacho += min;
+        }
       }
       a = b;
     }
@@ -136,7 +144,7 @@ export function raportMiesiaca(surowe = [], rok, miesiac, now = new Date()) {
       poczatek: razem > 0 && D.poczatekMs !== null ? hhmm(D.poczatekMs) : "",
       // 24:00 zamiast 00:00, gdy praca dociągnęła do północy
       koniec: razem > 0 && D.koniecMs !== null ? (kluczDnia(D.koniecMs) !== klucz ? "24:00" : hhmm(D.koniecMs)) : "",
-      zrodlo, korekta: !!D?.korekta,
+      zrodlo, korekta: !!D?.korekta, pozaKarta: Math.round(D?.pracaSpozaTacho || 0),
     });
     suma.drive += drive; suma.work += work; suma.avail += avail; suma.razem += razem;
     suma.pracaSpozaTacho += Math.round(D?.pracaSpozaTacho || 0);

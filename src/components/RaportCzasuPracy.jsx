@@ -20,8 +20,8 @@ const nazwaMiesiaca = (klucz) => { const [r, m] = klucz.split("-").map(Number); 
 
 const ZRODLA = {
   tacho: { etykieta: "tachograf", tlo: "#ecfdf5", kolor: "#047857" },
-  mieszane: { etykieta: "tachograf + GPS", tlo: "#fffbeb", kolor: "#92400e" },
-  inne: { etykieta: "poza tachografem", tlo: "#fef2f2", kolor: "#b91c1c" },
+  mieszane: { etykieta: "karta urywa się", tlo: "#fffbeb", kolor: "#92400e" },
+  inne: { etykieta: "brak karty", tlo: "#fef2f2", kolor: "#b91c1c" },
   brak: { etykieta: "brak zapisu", tlo: "#f3f4f6", kolor: "#4b5563" },
 };
 
@@ -35,7 +35,7 @@ function Znaczek({ zrodlo }) {
 // Uwaga o jakości danych w wierszu kierowcy — to, co trzeba wiedzieć, zanim uwierzy się w sumę.
 function uwagaDoRaportu(r) {
   const czesci = [];
-  if (r.suma.pracaSpozaTacho >= 30) czesci.push(`${fmtKrotko(r.suma.pracaSpozaTacho)} h pracy spoza karty`);
+  if (r.suma.pracaSpozaTacho >= 30) czesci.push(`GPS widzi jeszcze ${fmtKrotko(r.suma.pracaSpozaTacho)} h poza kartą (niewliczone)`);
   if (r.suma.dniBezZapisu > 0) czesci.push(`${r.suma.dniBezZapisu} dni bez żadnego zapisu`);
   return czesci.join(" · ");
 }
@@ -88,7 +88,7 @@ export default function RaportCzasuPracy({ vehicles = [], pobierz, teraz }) {
         <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
           <div>
             <div className="text-base font-bold text-gray-900">Raport czasu pracy kierowców</div>
-            <div className="text-xs text-gray-500">Stan faktyczny z tachografu: jazda + inna praca + dyspozycyjność. Tylko do odczytu.</div>
+            <div className="text-xs text-gray-500">Wyłącznie z plików karty kierowcy (DDD): jazda + inna praca + dyspozycyjność. Tylko do odczytu.</div>
           </div>
           <label className="text-xs text-gray-600 flex items-center gap-2">
             Miesiąc
@@ -100,7 +100,7 @@ export default function RaportCzasuPracy({ vehicles = [], pobierz, teraz }) {
         </div>
         {niepelny && (
           <div className="mt-3 text-xs px-3 py-2 rounded-lg" style={{ background: "#fffbeb", color: "#92400e", border: "1px solid #fde68a" }}>
-            Miesiąc jeszcze trwa. Sumy sięgają tylko do ostatniego wgranego pliku karty — dni po nim liczone są z GPS albo nie mają zapisu.
+            Miesiąc jeszcze trwa. Sumy sięgają tylko do ostatniego wgranego pliku karty — późniejszych dni w nich nie ma.
           </div>
         )}
 
@@ -150,7 +150,7 @@ export default function RaportCzasuPracy({ vehicles = [], pobierz, teraz }) {
             </tbody>
           </table>
         </div>
-        <div className="mt-3 text-[11px] text-gray-500">Kliknij kierowcę, żeby zobaczyć miesiąc dzień po dniu. „Karta do” = koniec ostatniego zapisu z karty kierowcy w tym miesiącu.</div>
+        <div className="mt-3 text-[11px] text-gray-500">Kliknij kierowcę, żeby zobaczyć miesiąc dzień po dniu. „Karta do” = koniec ostatniego zapisu z karty kierowcy w tym miesiącu. Czas widziany tylko przez GPS nie wchodzi do sum.</div>
       </div>
 
       {szczegoly && (
@@ -160,7 +160,7 @@ export default function RaportCzasuPracy({ vehicles = [], pobierz, teraz }) {
             <div className="text-xs text-gray-600">Razem <b className="text-gray-900">{fmtGodz(szczegoly.r.suma.razem)}</b> w {szczegoly.r.suma.dniPracy} dniach</div>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm" style={{ minWidth: 680 }}>
+            <table className="w-full text-sm" style={{ minWidth: 780 }}>
               <thead>
                 <tr className="text-left text-[11px] uppercase tracking-wide text-gray-500 border-b border-gray-100">
                   <th className="py-2 pr-3 font-semibold">Dzień</th>
@@ -170,6 +170,7 @@ export default function RaportCzasuPracy({ vehicles = [], pobierz, teraz }) {
                   <th className="py-2 px-2 font-semibold text-right whitespace-nowrap">Inna praca</th>
                   <th className="py-2 px-2 font-semibold text-right whitespace-nowrap">Dyspoz.</th>
                   <th className="py-2 px-2 font-semibold text-right whitespace-nowrap">Razem</th>
+                  <th className="py-2 px-2 font-semibold text-right whitespace-nowrap">Poza kartą (GPS)</th>
                   <th className="py-2 pl-3 font-semibold">Źródło</th>
                 </tr>
               </thead>
@@ -186,6 +187,7 @@ export default function RaportCzasuPracy({ vehicles = [], pobierz, teraz }) {
                     <td className="py-1.5 px-2 text-right tabular-nums whitespace-nowrap text-gray-700">{fmtKrotko(d.work)}</td>
                     <td className="py-1.5 px-2 text-right tabular-nums whitespace-nowrap text-gray-700">{fmtKrotko(d.avail)}</td>
                     <td className="py-1.5 px-2 text-right tabular-nums whitespace-nowrap font-semibold text-gray-900">{fmtKrotko(d.razem)}</td>
+                    <td className="py-1.5 px-2 text-right tabular-nums whitespace-nowrap text-xs" style={{ color: d.pozaKarta > 0 ? "#92400e" : "#9ca3af" }}>{d.pozaKarta > 0 ? fmtKrotko(d.pozaKarta) : "—"}</td>
                     <td className="py-1.5 pl-3"><Znaczek zrodlo={d.zrodlo} />{d.korekta && <span className="ml-1.5 text-[11px] text-gray-500">korekta ręczna</span>}</td>
                   </tr>
                 ))}
@@ -197,6 +199,7 @@ export default function RaportCzasuPracy({ vehicles = [], pobierz, teraz }) {
                   <td className="py-2 px-2 text-right tabular-nums whitespace-nowrap font-semibold text-gray-900">{fmtKrotko(szczegoly.r.suma.work)}</td>
                   <td className="py-2 px-2 text-right tabular-nums whitespace-nowrap font-semibold text-gray-900">{fmtKrotko(szczegoly.r.suma.avail)}</td>
                   <td className="py-2 px-2 text-right tabular-nums whitespace-nowrap font-bold text-gray-900">{fmtKrotko(szczegoly.r.suma.razem)}</td>
+                  <td className="py-2 px-2 text-right tabular-nums whitespace-nowrap text-xs" style={{ color: "#92400e" }}>{szczegoly.r.suma.pracaSpozaTacho > 0 ? fmtKrotko(szczegoly.r.suma.pracaSpozaTacho) : ""}</td>
                   <td></td>
                 </tr>
               </tfoot>
