@@ -8950,3 +8950,11 @@ nadrzędną, ale tam, gdzie karty nie było, dopisywał do sum pracę z GPS / ra
 - **Nowe Iveco (WGM 7651V/7652V/7653V) i TK 795GM nie mają bloków w Total_26** — ich koszty nie wejdą do arkusza (odmowa z powodem).
 - Pytanie do usera: w wierszu „Serwis” stoi co miesiąc `-150` — jeśli to ryczałt/rezerwa, dopisanie faktury zawyży koszt.
 - Edycja lub usunięcie kosztu w FS NIE cofa wpisu w arkuszu.
+
+## 2026-11-25 cd.3 — Arkusz: serwis z ryczałtem 150 € jako minimum
+
+**Ustalenie usera**: „Przyjąłem ryczałt na serwis wszędzie -150 € miesięcznie, bo nie miałem wiedzy o serwisach — jeżeli naprawy z faktur przekroczą 150 €, kwota ma rosnąć powyżej 150 € z notatkami w arkuszu.”
+
+**Zrobione**: w wierszu „Serwis” funkcja `kosztDoArkusza` nie dodaje faktury do ryczałtu, tylko zapisuje `=MIN(<to, co stało>;-(<faktura>+<faktura>…))` — koszt miesiąca to większa z kwot: ryczałt albo suma faktur. Ryczałt zostaje nietknięty jako pierwszy argument (także proporcjonalny, np. `-150*4/18`). Notatka komórki podaje każdą fakturę i sumę faktur. Pozostałe wiersze — dopisywanie jak dotąd.
+
+**Sprawdzone**: logika na liczbach (150 → 44,93 → +60 → +80,50 = 185,43; ryczałt proporcjonalny; pusta komórka) i próba na sucho na arkuszu (`M53`, `M95`). **Prawdziwego zapisu nadal nie było**; formuła z `;` i przecinkiem zakłada polskie ustawienia arkusza — przy złym wyniku funkcja przywraca poprzednią treść i zgłasza błąd.

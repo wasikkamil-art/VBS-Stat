@@ -54,6 +54,31 @@ function nowaTresc(stara, eur) {
   throw new Error(`w komórce jest tekst („${s.slice(0, 30)}”), nie liczba — nie dopisuję`);
 }
 
+// ── Serwis: ryczałt jako minimum (user, 25.11.2026) ──
+// „Przyjąłem ryczałt na serwis wszędzie -150 € miesięcznie, bo nie miałem wiedzy o serwisach — jeżeli naprawy
+// z faktur przekroczą 150 €, kwota ma rosnąć powyżej 150 € z notatkami.” Czyli koszt serwisu w miesiącu to
+// WIĘKSZA z kwot: ryczałt albo suma faktur. Zapis w komórce: `=MIN(<ryczałt>;-(<faktura>+<faktura>…))` —
+// to, co stało w komórce (np. `-150` albo `=-150*4/18`), zostaje nietknięte jako pierwszy argument.
+// Arkusz ma polskie ustawienia: przecinek dziesiętny, średnik między argumentami.
+const RYCZALT = /^=MIN\((.+);-\(([\d,+]+)\)\)$/;
+const suma = (wyrazenie) => wyrazenie.split("+").reduce((a, x) => a + Number(x.replace(",", ".")), 0);
+
+/** Nowa treść i oczekiwana wartość komórki „Serwis”. `przed` = { tresc, wartosc }. */
+function serwisZRyczaltem(przed, eur) {
+  const kw = pl(eur);
+  const stara = przed.tresc;
+  if (typeof stara === "string" && stara.trim() && !stara.trim().startsWith("=")) throw new Error(`w komórce jest tekst („${stara.slice(0, 30)}”), nie liczba — nie dopisuję`);
+  const m = typeof stara === "string" ? RYCZALT.exec(stara.trim()) : null;
+  if (m) {
+    const bylo = suma(m[2]), razem = Math.round((bylo + eur) * 100) / 100;
+    // Jeśli komórka pokazywała mniej niż -suma faktur, to wygrywał ryczałt i jego wartość to właśnie `przed.wartosc`.
+    const ryczalt = przed.wartosc < -bylo - 0.005 ? przed.wartosc : null;
+    return { tresc: `=MIN(${m[1]};-(${m[2]}+${kw}))`, po: ryczalt == null ? -razem : Math.min(ryczalt, -razem), faktury: razem, ryczalt };
+  }
+  const pierwszy = stara == null || stara === "" ? "0" : typeof stara === "number" ? pl(stara) : String(stara).trim().slice(1);
+  return { tresc: `=MIN(${pierwszy};-(${kw}))`, po: Math.min(przed.wartosc, -eur), faktury: eur, ryczalt: przed.wartosc };
+}
+
 function notatkaKosztu(k, eur) {
   const d = String(k.date || "").split("-").reverse().join(".");
   return ["FleetStat", k.nrFaktury && `FV ${k.nrFaktury}`, k.sprzedawca, d, `${pl(eur)} € netto`, k.category && `kat. ${k.category}`].filter(Boolean).join(" · ");
@@ -87,10 +112,13 @@ async function wpiszKoszt({ koszt, rejestracja, zadanie, naSucho = false }) {
   };
   const przed = await czytaj();
   if (Number.isNaN(przed.wartosc)) throw new Error(`komórka ${a1} nie ma wartości liczbowej — nie dopisuję`);
-  const tresc = nowaTresc(przed.tresc, eur);
-  const dopisek = notatkaKosztu(koszt, eur) + (cel.zastepczy ? " (brak osobnego wiersza w arkuszu)" : "");
+  const serwis = etykieta(cel.etykieta) === "serwis" ? serwisZRyczaltem(przed, eur) : null;
+  const tresc = serwis ? serwis.tresc : nowaTresc(przed.tresc, eur);
+  const dopisek = notatkaKosztu(koszt, eur) + (cel.zastepczy ? " (brak osobnego wiersza w arkuszu)" : "")
+    + (serwis ? ` · faktury razem ${pl(serwis.faktury)} €${serwis.ryczalt ? `, ryczałt ${pl(-serwis.ryczalt)} € — liczy się większa kwota` : ""}` : "");
   const notatka = przed.notatka ? `${przed.notatka}\n${dopisek}` : dopisek;
-  const wynik = { komorka: `${zakladka}!${a1}`, wiersz: cel.etykieta, przed: przed.wartosc, po: Math.round((przed.wartosc - eur) * 100) / 100, trescPrzed: przed.tresc, tresc, notatka };
+  const oczekiwane = serwis ? serwis.po : przed.wartosc - eur;
+  const wynik = { komorka: `${zakladka}!${a1}`, wiersz: cel.etykieta, przed: przed.wartosc, po: Math.round(oczekiwane * 100) / 100, trescPrzed: przed.tresc, tresc, notatka };
   if (naSucho) return wynik;
 
   const zapisz = (t, n) => Promise.all([
@@ -109,4 +137,4 @@ async function wpiszKoszt({ koszt, rejestracja, zadanie, naSucho = false }) {
   return wynik;
 }
 
-module.exports = { wpiszKoszt, znajdzWiersz, nowaTresc, notatkaKosztu, ARKUSZ_ID };
+module.exports = { wpiszKoszt, znajdzWiersz, nowaTresc, serwisZRyczaltem, notatkaKosztu, ARKUSZ_ID };
