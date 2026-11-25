@@ -8844,3 +8844,21 @@ i dopiero klikasz i wchodzi dopiero do zawartości dokumentów”.
 - Atrapa `podglad/pojazdy`: przycisk, okno, poprawka daty przenosi się na pola karty, zapis, kolejka 2 plików, CSV, błąd AI, dokument w kafelku „Ubezpieczenie i UDT”. Lint 0 błędów, build OK.
 
 **NIE sprawdzone**: po zalogowaniu na produkcji (prawdziwe wgranie + zapis do bazy), telefon. Danych z umowy leasingu AI nie wpisuje do kafelka „Leasing” (tylko odkłada plik) — do decyzji usera.
+
+## 2026-11-25 — Raport czasu pracy kierowców z tacho: etap 1, stan faktyczny (sam odczyt)
+
+User: raport czasu pracy kierowców „do kontroli dla urzędów lub księgowych”, pełny etat rozłożony
+tak, jak kierowca faktycznie jeździł w miesiącu. **Etap 1 = stan faktyczny od 1.09.2026**, bez zapisów.
+
+- Policzone dwiema drogami i zgodne: (a) wprost z plików kart (`dddFiles.dailyTotals`, ostatni plik
+  wygrywa per dzień), (b) potokiem panelu (`normalizeSegment` → `preferDddSegments`) na `driverActivities`.
+  Różnice tylko tam, gdzie po ostatnim pliku karty dochodzi ogon z raportu ww / GPS.
+- Praca z karty (jazda + inna praca), IX / X / XI do daty ostatniego pliku: Teper 140,2 / 176,5 / 86,1 h;
+  Kolabau 111,0 / 142,9 / 113,0; Lukashchuk 153,5 / 161,3 / 143,9; Omelianiuk 0 / 80,6 / 52,0;
+  Ivanskyy 50,4 (karta tylko do 22.09).
+- 🚩 Luki: Ivanskyy — brak karty po 22.09 (wg raportu ww pracował do ~6.10); Omelianiuk — pliki
+  zaczynają się 16.09, wcześniejszych dni nie mamy. Dyspozycyjność na kartach bliska zeru.
+- ❌ Nic nie zapisane do bazy, żadnych zmian w kodzie. Zasady rozkładu etatu (etap 2) NIE ustalone —
+  czekają na odpowiedzi usera (wymiar, co liczymy jako pracę, okres rozliczeniowy, forma raportu).
+- Przy okazji (nie ruszane): VU po terminie 90 dni na 4 starszych autach; wpis Tepera na WGM 7651V
+  bez numeru karty; v7/v8 bez `tachoCardStart`.
