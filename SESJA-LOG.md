@@ -8899,3 +8899,17 @@ nadrzędną, ale tam, gdzie karty nie było, dopisywał do sum pracę z GPS / ra
 - ✅ Lint 0 błędów, build zielony, atrapa obejrzana, serwer zatrzymany. ❌ Produkcja nieklikana.
 - ℹ️ `preview_start` atrapy otwiera najpierw `localhost:5199/` = prawdziwą aplikację (strona
   logowania, bez zapisu) — od razu przechodzić na `/podglad/czaspracy/index.html`.
+
+## 2026-11-25 — Pojazdy: skan zbiorczy (kilka dokumentów i aut w jednym PDF-ie)
+
+**Zgłoszenie usera**: `Zeskanowany dokument 3.pdf` — „to jest kilka dokumentów, a tak będziemy działać”. Plik: 8 stron, 6 dokumentów, dwa auta (WGM 0475M i WGM 0507M). Wersja z 24.11 wgrałaby to jako jeden wpis „Inne”.
+
+**Co zrobione**
+- `promptPodzialu` + `planPodzialu` (`src/utils/dowodRejestracyjny.js`): AI dzieli PDF na dokumenty wg stron i od razu czyta każdy; plan jest sprawdzany (strony w zakresie, bez powtórek, **strony nieprzypisane idą do osobnej części „inne” — nic nie ginie**). Zła odpowiedź → plik wchodzi w całości jak dotąd.
+- `src/utils/podzielSkan.js`: pdf-lib (ten sam z CDN co do znaku wodnego) przepisuje strony do osobnych plików, bez utraty jakości.
+- `wgrajZRozpoznaniem` w `App.jsx`: wielostronicowy PDF idzie na chwilę do Storage (`vehicleDocs/{id}/tmp_*.pdf`, kasowany po odczycie), części wgrywają się osobno (znak wodny + oryginał każda) **na kartę auta z rejestracji w dokumencie**.
+- Okno potwierdzenia: nowe pole **„Auto”** (domyślnie z rejestracji odczytanej przez AI, do zmiany); ostrzeżenie, gdy dokument trafia na inną kartę niż otwarta. Zapis ustawia `vehicleId` dokumentu.
+
+**Sprawdzone**: prawdziwy skan usera w Node (sam odczyt + cięcie do folderu roboczego): 6 części, 8 z 8 stron, rodzaje/numery/daty poprawne, oba auta rozpoznane. Atrapa: prawdziwe cięcie 8-stronicowego PDF w przeglądarce, kolejka 6 okien, dokumenty 0507M przypisane do 0507M, zapis pól karty do właściwego auta. Lint 0 błędów, build OK.
+
+**NIE sprawdzone**: cała ścieżka na produkcji (plik tymczasowy w Storage, wgranie części, zapis). Termin UDT z tego skanu AI raz podało (01.01.2028), raz nie — do sprawdzenia przez człowieka w oknie.

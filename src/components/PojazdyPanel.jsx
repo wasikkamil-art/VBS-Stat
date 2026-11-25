@@ -8,7 +8,7 @@
 // wymagają migracji. Nowe są tylko: `leasing` (obiekt) i dokumenty pojazdu (`docs`).
 import { useCallback, useMemo, useRef, useState } from "react";
 import UruchomienieAuta from "./UruchomienieAuta";
-import { porownajZDowodem, porownajZDokumentem, opisZRozpoznania, czyjDokument, polaKartyZDokumentu, RODZAJE_Z_POLEM_KARTY } from "../utils/dowodRejestracyjny";
+import { porownajZDowodem, porownajZDokumentem, opisZRozpoznania, czyjDokument, polaKartyZDokumentu, pojazdZDokumentu, RODZAJE_Z_POLEM_KARTY } from "../utils/dowodRejestracyjny";
 import { pierwszaRataLeasingu } from "../utils/leasing";
 
 // Rodzaje dokumentów pojazdu. `oferta: true` = domyślnie proponowany do dołączenia do oferty.
@@ -463,8 +463,14 @@ const BIALE = { background: "#fff" };
  * `pozycja`: { doc, stan: "czytam" | "gotowe" | "blad" | "reczne", dane?, daneDowodu?, blad? }.
  * Formularz jest edytowalny w każdym stanie poza „czytam” — przy błędzie AI dane wpisuje się ręcznie.
  */
-function OknoRozpoznania({ v, pozycja, zostalo, onZapisz, onPonow, onClose }) {
+function OknoRozpoznania({ karta, pojazdy, pozycja, zostalo, onZapisz, onPonow, onClose }) {
   const { doc: d, stan, dane, daneDowodu } = pozycja;
+  // Auto dokumentu: to z rejestracji odczytanej przez AI (skan zbiorczy bywa z kilku aut), inaczej to,
+  // przy którym plik leży. User może je zmienić — dokument przejdzie wtedy na kartę wybranego auta.
+  const aktywne = useMemo(() => pojazdy.filter(x => !x.archived), [pojazdy]);
+  const zOdczytu = useMemo(() => (stan === "gotowe" ? pojazdZDokumentu(aktywne, daneDowodu || dane) : null), [aktywne, stan, dane, daneDowodu]);
+  const [autoId, setAutoId] = useState(null);
+  const v = aktywne.find(x => x.id === (autoId ?? zOdczytu?.id ?? d.vehicleId)) || karta;
   const start = useMemo(() => (stan === "gotowe" ? opisZRozpoznania(d, dane, RODZAJE_DOKUMENTOW.map(r => r.id)) : { kind: "inne", label: d.label || "", number: "", issueDate: "", expiryDate: "", notes: "" }), [d, stan, dane]);
   const [f, setF] = useState(null);
   const opis = f ?? start;
@@ -481,8 +487,8 @@ function OknoRozpoznania({ v, pozycja, zostalo, onZapisz, onPonow, onClose }) {
     if (!opis.label.trim()) return;
     setZapis(true);
     // Przy dowodzie numer i data wydania z odczytu uzupełniają opis tylko tam, gdzie user nic nie wpisał.
-    const zOdczytu = zDowodu ? Object.fromEntries(Object.entries(zDowodu.opisDokumentu).filter(([k]) => !String(opis[k] || "").trim())) : {};
-    const ok = await onZapisz({ ...opis, ...zOdczytu, label: opis.label.trim(), number: (zOdczytu.number || opis.number).trim(), notes: (zOdczytu.notes || opis.notes).trim() }, Object.fromEntries(doKarty.map(p => [p.klucz, p.wartosc])));
+    const zDow = zDowodu ? Object.fromEntries(Object.entries(zDowodu.opisDokumentu).filter(([k]) => !String(opis[k] || "").trim())) : {};
+    const ok = await onZapisz(v, { ...opis, ...zDow, label: opis.label.trim(), number: (zDow.number || opis.number).trim(), notes: (zDow.notes || opis.notes).trim() }, Object.fromEntries(doKarty.map(p => [p.klucz, p.wartosc])));
     setZapis(false);
     if (ok !== false) onClose();
   };
@@ -514,7 +520,12 @@ function OknoRozpoznania({ v, pozycja, zostalo, onZapisz, onPonow, onClose }) {
           )}
           {czyj && czyj.zDokumentu && !czyj.zgodna && (
             <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">
-              Uwaga: dokument jest wystawiony na <b>{czyj.zDokumentu}</b>, a to karta auta <b>{v.plate}</b>. Sprawdź, czy to dokument tego pojazdu, zanim cokolwiek zapiszesz.
+              Uwaga: dokument jest wystawiony na <b>{czyj.zDokumentu}</b>, a wybrane auto to <b>{v.plate}</b>. Sprawdź pole „Auto” poniżej, zanim cokolwiek zapiszesz.
+            </p>
+          )}
+          {stan !== "czytam" && v.id !== karta.id && (
+            <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+              Ten dokument dotyczy <b>{v.plate}</b>, nie otwartej karty {karta.plate} — zapisze się przy <b>{v.plate}</b>.
             </p>
           )}
           {czyj?.vinRozny && (
@@ -527,6 +538,11 @@ function OknoRozpoznania({ v, pozycja, zostalo, onZapisz, onPonow, onClose }) {
           {stan !== "czytam" && (
             <>
               <div className="grid sm:grid-cols-6 gap-2">
+                <label className="text-xs text-gray-600 sm:col-span-6">Auto
+                  <select value={v.id} onChange={(e) => { setAutoId(e.target.value); setWybrane({}); }} className={POLE} style={BIALE}>
+                    {(aktywne.some(x => x.id === v.id) ? aktywne : [v, ...aktywne]).map(x => <option key={x.id} value={x.id}>{x.plate}{x.plate2 ? ` + ${x.plate2}` : ""}{x.brand ? ` · ${x.brand}` : ""}</option>)}
+                  </select>
+                </label>
                 <label className="text-xs text-gray-600 sm:col-span-3">Rodzaj dokumentu
                   <select value={opis.kind} onChange={ustaw("kind")} className={POLE} style={BIALE}>
                     {GRUPY.map(g => <optgroup key={g} label={g}>{RODZAJE_DOKUMENTOW.filter(r => r.grupa === g).map(r => <option key={r.id} value={r.id}>{r.label}</option>)}</optgroup>)}
@@ -794,7 +810,7 @@ function Harmonogram({ leasing, dzis }) {
   );
 }
 
-function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, onPodgladDokumentu, onZapiszPole, onRozpoznajDokument, onZapiszRozpoznany, isAdmin, uruchomienie, onBrudne, showToast, safeHref }) {
+function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, onPodgladDokumentu, onZapiszPole, onRozpoznajDokument, onZapiszRozpoznany, onWgrajDokumenty, pojazdy, isAdmin, uruchomienie, onBrudne, showToast, safeHref }) {
   const [oferta, setOferta] = useState(false);
   const mozePole = canEdit && onZapiszPole && !v.archived;
   const [sekcja, setSekcja] = useState(null); // która sekcja karty jest otwarta; null = kafelki
@@ -820,7 +836,8 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
   const wgrajPliki = async (pliki) => {
     setWgrywam(true);
     try {
-      const wgrane = (await onDodajDokumenty(v, pliki, { kind: "inne" })) || [];
+      const rodzaje = RODZAJE_DOKUMENTOW.map(r => ({ id: r.id, label: r.label }));
+      const wgrane = (await (onWgrajDokumenty ? onWgrajDokumenty(v, pliki, rodzaje) : onDodajDokumenty(v, pliki, { kind: "inne" }))) || [];
       setKolejka(k => [...k, ...wgrane.map(d => ({ doc: d, stan: "czytam" }))]);
       wgrane.forEach(rozpoznaj);
     } finally { setWgrywam(false); }
@@ -991,15 +1008,15 @@ function KartaPojazdu({ v, docs, dzis, canEdit, renderEdycja, renderSerwis, onAr
 
       {odczyt && <OknoDanychZDowodu key={`${odczyt.doc.id}-${odczyt.stan}`} v={v} odczyt={odczyt} onClose={() => setOdczyt(null)}
         onPonow={() => czytajDowod(odczyt.doc)} onZapisz={(patch, opis) => onZapiszZDowodu(v, patch, odczyt.doc, opis)} />}
-      {kolejka[0] && <OknoRozpoznania key={`${kolejka[0].doc.id}-${kolejka[0].stan}`} v={v} pozycja={kolejka[0]} zostalo={kolejka.length - 1}
+      {kolejka[0] && <OknoRozpoznania key={`${kolejka[0].doc.id}-${kolejka[0].stan}`} karta={v} pojazdy={pojazdy || [v]} pozycja={kolejka[0]} zostalo={kolejka.length - 1}
         onClose={() => setKolejka(k => k.slice(1))} onPonow={() => rozpoznaj(kolejka[0].doc)}
-        onZapisz={(opis, patch) => onZapiszRozpoznany(v, kolejka[0].doc, opis, patch)} />}
+        onZapisz={(auto, opis, patch) => onZapiszRozpoznany(auto, kolejka[0].doc, opis, patch)} />}
       {oferta && <OknoOferty v={v} kierowca={kierowca} docs={docs} onClose={() => setOferta(false)} showToast={showToast} />}
     </article>
   );
 }
 
-export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajPojazd, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, onPodgladDokumentu, onZapiszPole, onRozpoznajDokument, onZapiszRozpoznany, isAdmin = false, uruchomienie, showToast, safeHref }) {
+export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit = false, dzis, renderEdycja, renderSerwis, onArchiwizuj, onPrzywroc, onDodajPojazd, onDodajDokumenty, onUsunDokument, onEdytujDokument, onZapiszLeasing, onOdczytajDowod, onZapiszZDowodu, onPobierzOryginal, onPobierzDokument, onPodgladDokumentu, onZapiszPole, onRozpoznajDokument, onZapiszRozpoznany, onWgrajDokumenty, isAdmin = false, uruchomienie, showToast, safeHref }) {
   const teraz = useMemo(() => dzis ?? new Date().setHours(0, 0, 0, 0), [dzis]);
   const [archiwum, setArchiwum] = useState(false);
   const [szukaj, setSzukaj] = useState("");
@@ -1075,7 +1092,7 @@ export default function PojazdyPanel({ vehicles = [], vehicleDocs = [], canEdit 
 
         {aktywny
           ? <KartaPojazdu key={aktywny.id} v={aktywny} docs={docsWg[aktywny.id] || []} dzis={teraz} canEdit={canEdit}
-              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} onOdczytajDowod={onOdczytajDowod} onZapiszZDowodu={onZapiszZDowodu} onPobierzOryginal={onPobierzOryginal} onPobierzDokument={onPobierzDokument} onPodgladDokumentu={onPodgladDokumentu} onZapiszPole={onZapiszPole} onRozpoznajDokument={onRozpoznajDokument} onZapiszRozpoznany={onZapiszRozpoznany} isAdmin={isAdmin} uruchomienie={uruchomienie} onBrudne={onBrudne} showToast={showToast} safeHref={safeHref} />
+              renderEdycja={renderEdycja} renderSerwis={renderSerwis} onArchiwizuj={onArchiwizuj} onPrzywroc={onPrzywroc} onDodajDokumenty={onDodajDokumenty} onUsunDokument={onUsunDokument} onEdytujDokument={onEdytujDokument} onZapiszLeasing={onZapiszLeasing} onOdczytajDowod={onOdczytajDowod} onZapiszZDowodu={onZapiszZDowodu} onPobierzOryginal={onPobierzOryginal} onPobierzDokument={onPobierzDokument} onPodgladDokumentu={onPodgladDokumentu} onZapiszPole={onZapiszPole} onRozpoznajDokument={onRozpoznajDokument} onZapiszRozpoznany={onZapiszRozpoznany} onWgrajDokumenty={onWgrajDokumenty} pojazdy={vehicles} isAdmin={isAdmin} uruchomienie={uruchomienie} onBrudne={onBrudne} showToast={showToast} safeHref={safeHref} />
           : <div className="bg-white rounded-2xl border border-gray-100 p-8 text-sm text-gray-500">Wybierz pojazd z listy.</div>}
       </div>
 

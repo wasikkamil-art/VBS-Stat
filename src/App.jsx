@@ -16,7 +16,8 @@ import { safeHref } from "./utils/safeHref";
 import { licznikiZadan, noweZadanie, przygotujEdycje, wpisHistorii, czyPowiadamiac } from "./utils/zadaniaAuta";
 import { naJpgJesliHeic } from "./utils/heicNaJpg";
 import { zmniejszPdf, czyPdf, fmtMB, LIMIT_PLIKU } from "./utils/zmniejszPdf";
-import { PROMPT_DOWOD, promptDokumentu, promptRozpoznania } from "./utils/dowodRejestracyjny";
+import { PROMPT_DOWOD, promptDokumentu, promptRozpoznania, pojazdZDokumentu } from "./utils/dowodRejestracyjny";
+import { rozlozSkan } from "./utils/podzielSkan";
 import { pierwszaRataLeasingu } from "./utils/leasing";
 import { nalozZnakWodny, tekstZnaku, czyDaSieOznaczyc } from "./utils/znakWodny";
 import { tekstowy, zmieszaj, alfaZSufiksu } from "./utils/kolorTekstu";
@@ -1918,10 +1919,10 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   };
   // AI czyta dowód rejestracyjny. Plik idzie URL-em ze Storage (limit body funkcji Vercela).
   // Niczego nie zapisuje — wynik trafia do okna, w którym user zatwierdza pole po polu.
-  const zapytajODokument = async (d, prompt) => {
+  const zapytajODokument = async (d, prompt, maxTokens = 900) => {
     const czyDokument = /pdf/i.test(d.fileType || "") || /\.pdf$/i.test(d.fileName || d.storagePath || "");
     const resp = await callClaude({
-      model: "claude-sonnet-4-6", max_tokens: 900,
+      model: "claude-sonnet-4-6", max_tokens: maxTokens,
       messages: [{ role: "user", content: [
         { type: czyDokument ? "document" : "image", source: { type: "url", url: d.fileUrl } },
         { type: "text", text: prompt },
@@ -1938,15 +1939,46 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
   // Gdy to dowód rejestracyjny, drugi odczyt bierze z niego dane auta (VIN, przegląd, rok…).
   // Lista rodzajów przychodzi z panelu (jest w leniwie ładowanym pliku — nie wciągamy jej do głównej paczki).
   const rozpoznajDokument = async (d, rodzaje) => {
-    const dane = await zapytajODokument(d, promptRozpoznania(rodzaje));
+    // Część skanu zbiorczego ma odczyt już przy sobie (`rozpoznanie`) — drugi raz nie pytamy.
+    const dane = d.rozpoznanie || await zapytajODokument(d, promptRozpoznania(rodzaje));
     let daneDowodu = null;
     if (dane?.rodzaj === "dowod") { try { daneDowodu = await zapytajODokument(d, PROMPT_DOWOD); } catch (e) { console.error("rozpoznajDokument: dane z dowodu", e); } }
     return { dane, daneDowodu };
   };
+  // Wgrywanie z przycisku „Wgraj dokument”. Wielostronicowy PDF może być skanem zbiorczym (user, 25.11.2026:
+  // „to jest kilka dokumentów, a tak będziemy działać”): AI dzieli go na dokumenty, tniemy plik na części
+  // i każdą wgrywamy na kartę auta z JEJ rejestracją (skan bywa z dwóch aut). Gdy podział się nie uda,
+  // plik wchodzi w całości — jak dotąd. AI czyta plik po adresie, więc skan idzie na chwilę do Storage.
+  const wgrajZRozpoznaniem = async (v, pliki, rodzaje) => {
+    const wynik = [];
+    for (const oryginal of pliki) {
+      let czesci = null;
+      try {
+        const plik = await przygotujPlikPojazdu(oryginal);
+        czesci = await rozlozSkan({ plik, rodzaje, zapytaj: async (p, prompt) => {
+          showToast(`⏳ „${oryginal.name}”: sprawdzam, ile dokumentów jest w skanie…`);
+          const r = storageRef(storage, `vehicleDocs/${v.id}/tmp_${uid()}.pdf`);
+          await uploadBytes(r, p, { contentType: "application/pdf" });
+          try { return await zapytajODokument({ fileUrl: await getDownloadURL(r), fileType: "application/pdf" }, prompt, 4000); }
+          finally { deleteObject(r).catch(e => console.warn("skan zbiorczy: plik tymczasowy został w Storage", e)); }
+        } });
+      } catch (e) { console.error("wgrajZRozpoznaniem: podział skanu", e); }
+      if (!czesci) { wynik.push(...await addVehicleDocs(v, [oryginal], { kind: "inne" })); continue; }
+      if (czesci.length > 1) showToast(`📑 „${oryginal.name}”: ${czesci.length} dokumentów w skanie — wgrywam osobno…`);
+      for (const c of czesci) {
+        const auto = pojazdZDokumentu(vehicles, c.dane) || v;
+        const [d] = await addVehicleDocs(auto, [c.plik], { kind: "inne" });
+        if (d) wynik.push({ ...d, rozpoznanie: c.dane });
+      }
+    }
+    return wynik;
+  };
   // Zapis po zatwierdzeniu w oknie: opis dokumentu (z rodzajem) + zaznaczone pola karty auta.
+  // `v` = auto wybrane w oknie; gdy inne niż to, przy którym plik wgrano, dokument przechodzi na jego kartę.
   const zapiszRozpoznany = async (v, d, opis, patch) => {
     try {
       await updateDoc(doc(db, "vehicleDocs", d.id), {
+        vehicleId: v.id,
         label: opis.label, kind: opis.kind, number: opis.number || "", issueDate: opis.issueDate || "",
         expiryDate: opis.expiryDate || "", notes: opis.notes || "",
         updatedAt: new Date().toISOString(), updatedBy: user?.email || "",
@@ -4256,7 +4288,7 @@ Przepisz kwoty DOKŁADNIE z dokumentu. Nie przeliczaj walut i nie wyliczaj netto
                     return true;
                   } catch (e) { console.error("zapis pola pojazdu", e); showToast("❌ Błąd zapisu: " + (e?.message || e)); return false; }
                 }}
-                onOdczytajDowod={odczytajDowod} onZapiszZDowodu={zapiszDaneZDowodu} onRozpoznajDokument={rozpoznajDokument} onZapiszRozpoznany={zapiszRozpoznany} onPobierzOryginal={pobierzOryginalDokumentu} onPobierzDokument={pobierzDokumentPojazdu} onPodgladDokumentu={podgladDokumentuPojazdu}
+                onOdczytajDowod={odczytajDowod} onZapiszZDowodu={zapiszDaneZDowodu} onRozpoznajDokument={rozpoznajDokument} onZapiszRozpoznany={zapiszRozpoznany} onWgrajDokumenty={wgrajZRozpoznaniem} onPobierzOryginal={pobierzOryginalDokumentu} onPobierzDokument={pobierzDokumentPojazdu} onPodgladDokumentu={podgladDokumentuPojazdu}
                 onEdytujDokument={updateVehicleDocMeta} onZapiszLeasing={saveVehicleLeasing}
                 uruchomienie={uruchomienieApi}
               />

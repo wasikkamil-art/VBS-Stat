@@ -70,7 +70,7 @@ export function rysujZnak(ctx, w, h, logo, tekstDaty) {
 }
 
 let ladowanie = null;
-const zaladuj = () => ladowanie || (ladowanie = new Promise((ok, zle) => {
+export const zaladujPdfLib = () => ladowanie || (ladowanie = new Promise((ok, zle) => {
   if (window.PDFLib) return ok(window.PDFLib);
   const s = document.createElement("script");
   s.src = SRC; s.integrity = SRI; s.crossOrigin = "anonymous";
@@ -101,7 +101,7 @@ export async function znakNaDokumenciePdf(lib, pdf, logoPng, tekstDaty) {
 }
 
 async function znakNaPdf(plik, tekstDaty) {
-  const lib = await zaladuj();
+  const lib = await zaladujPdfLib();
   const pdf = await lib.PDFDocument.load(await plik.arrayBuffer());
   await znakNaDokumenciePdf(lib, pdf, await pobierzLogo(), tekstDaty);
   return new File([await pdf.save()], plik.name, { type: "application/pdf" });

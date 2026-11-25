@@ -242,3 +242,64 @@ export function polaKartyZDokumentu(v, opis, dane) {
   else if (opis.kind === "gasnica") para(null, "gasnicaExpiry", "Gaśnica");
   return pola;
 }
+
+// ── Skan zbiorczy: kilka dokumentów (i kilku aut) w jednym PDF-ie (user, 25.11.2026) ──
+// „To jest kilka dokumentów, a tak będziemy działać.” AI dzieli plik na dokumenty wg stron i dla każdego
+// zwraca te same pola co `promptRozpoznania`; `planPodzialu` sprawdza odpowiedź, zanim cokolwiek potniemy.
+
+export const promptPodzialu = (rodzaje) => `Ten plik PDF to skan, w którym może być KILKA osobnych dokumentów jeden po drugim (także dokumenty RÓŻNYCH pojazdów).
+Podziel go na dokumenty: każda strona należy do dokładnie jednego dokumentu, strony jednego dokumentu idą po kolei
+(np. dwie strony dowodu rejestracyjnego albo protokołu to JEDEN dokument). Odpowiedz TYLKO w formacie JSON (bez markdown):
+{
+  "stron": liczba stron pliku,
+  "dokumenty": [ {
+    "strony": [numery stron tego dokumentu, liczone od 1],
+    "rodzaj": "DOKŁADNIE jeden identyfikator z listy poniżej",
+    "tytul": "krótka nazwa dokumentu po polsku, do 60 znaków",
+    "numer": "numer dokumentu albo null",
+    "dataDokumentu": "data wystawienia / wykonania YYYY-MM-DD albo null",
+    "waznyDo": "termin ważności albo data następnej czynności YYYY-MM-DD albo null",
+    "rejestracja": "numer rejestracyjny pojazdu, którego dokument dotyczy, albo null",
+    "vin": "numer VIN z dokumentu albo null",
+    "polisa": { "oc": true/false, "ac": true/false, "gap": true/false } albo null (tylko polisy),
+    "nrEwidencyjnyUdt": "numer ewidencyjny urządzenia z decyzji / protokołu UDT albo null"
+  } ]
+}
+Lista rodzajów (identyfikator — znaczenie):
+${rodzaje.map(r => `- ${r.id} — ${r.label}`).join("\n")}
+Wskazówki: dowód rejestracyjny → dowod; zaświadczenie o badaniu technicznym → badanie; polisa OC/AC → polisa; GAP → gap;
+przegląd gaśnicy → gasnica; kalibracja tachografu → tachograf; faktura (także za badanie techniczne) → faktura; brak pewności → inne.
+waznyDo: polisa — koniec okresu ubezpieczenia; badanie techniczne i UDT — termin następnego badania; kalibracja tachografu —
+data następnej kalibracji. Dowód rejestracyjny, faktura, umowa, protokół przekazania: null.
+Przepisuj DOKŁADNIE z dokumentu. Czego nie widać, nie zgaduj — zwróć null. Terminu ważności NIE wyliczaj samodzielnie.`;
+
+/**
+ * Sprawdza odpowiedź AI i zwraca plan cięcia: [{ strony: [1-based], dane }] albo null, gdy odpowiedzi nie da się
+ * bezpiecznie użyć (wtedy plik idzie w całości jako jeden dokument). Żadna strona nie może zginąć:
+ * strony, których AI nie przypisało, trafiają do osobnej części „inne”. Strona wskazana dwa razy zostaje przy pierwszym.
+ */
+export function planPodzialu(odp, liczbaStron) {
+  const lista = Array.isArray(odp?.dokumenty) ? odp.dokumenty : null;
+  if (!lista || !lista.length || !(liczbaStron >= 1)) return null;
+  const zajete = new Set();
+  const plan = [];
+  for (const d of lista) {
+    const strony = [...new Set((Array.isArray(d?.strony) ? d.strony : []).map(Number))]
+      .filter(n => Number.isInteger(n) && n >= 1 && n <= liczbaStron && !zajete.has(n)).sort((a, b) => a - b);
+    if (!strony.length) continue;
+    strony.forEach(n => zajete.add(n));
+    plan.push({ strony, dane: d });
+  }
+  if (!plan.length) return null;
+  const reszta = [];
+  for (let n = 1; n <= liczbaStron; n++) if (!zajete.has(n)) reszta.push(n);
+  if (reszta.length) plan.push({ strony: reszta, dane: { rodzaj: "inne", tytul: `Strony nieprzypisane (${reszta.join(", ")})` } });
+  return plan.sort((a, b) => a.strony[0] - b.strony[0]);
+}
+
+/** Auto, którego dotyczy dokument — po rejestracji (auto albo przyczepa), wśród aut spoza archiwum. */
+export function pojazdZDokumentu(pojazdy, dane) {
+  const rej = bezOdstepow(dane?.rejestracja);
+  if (!rej) return null;
+  return (pojazdy || []).find(v => v && !v.archived && [v.plate, v.plate2].some(p => p && bezOdstepow(p) === rej)) || null;
+}
