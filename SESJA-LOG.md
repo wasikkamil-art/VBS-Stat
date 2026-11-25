@@ -8931,3 +8931,22 @@ nadrzędną, ale tam, gdzie karty nie było, dopisywał do sum pracę z GPS / ra
 - **Wpis kosztu do arkusza Total_26 z notatką — NIE zrobiony.** Koszty ze skanu mają znacznik `arkusz: false`; sposób wpisu (automat przy zatwierdzeniu czy zbiorczo przy miesięcznym uzupełnianiu) czeka na decyzję usera.
 - ⚠️ Miesięczny import kosztów z arkusza do FS: koszt wpisany i tu, i w arkuszu wejdzie drugi raz, jeśli import nie pominie wpisów `zrodlo: "skan"`.
 - Cała ścieżka na produkcji (zapis kosztu, kurs NBP na żywo, wpis w „Dok. firmowych” i jego wygląd w zakładce). „Tylko admin” pilnuje aplikacja, nie reguły Firestore.
+
+## 2026-11-25 cd.2 — Koszt z faktury ze skanu → arkusz Total_26 (automat)
+
+**Decyzja usera**: „Automat od razu” — koszt zatwierdzony w FS ma od razu trafić do arkusza z notatką.
+
+**Co zrobione**
+- `functions/lib/arkuszKosztow.js` + Cloud Function **`kosztDoArkusza`** (wdrożona, `onDocumentWritten costs/{id}`, jedna instancja naraz). Reaguje na `zrodlo: "skan"` + `arkusz: false`.
+- Komórkę znajduje po treści: blok auta = rejestracja w wierszu pod „AUTO” (kolumna B), wiersz = etykieta kategorii, kolumna = miesiąc z daty faktury. **Dopisuje, nie nadpisuje** (`-150` → `=-150-44,93`; formuła → formuła`-44,93`), dokłada notatkę komórki (FV, sprzedawca, data, kwota), czyta wynik i przy niezgodności przywraca poprzednią treść.
+- Kategorie bez wiersza w arkuszu (opony, opłaty drogowe, własne) → „inne (dodaj komentarz)”.
+- Wynik w dokumencie kosztu: `arkusz: true` + `arkuszKomorka`, albo `arkusz: "blad"` + `arkuszBlad` (arkusz nieruszony). Ponowienie = ustawić `arkusz: false`. Aplikacja pokazuje wynik komunikatem po zapisie.
+
+**Sprawdzone**: próba NA SUCHO na prawdziwym arkuszu (sam odczyt) — 7 przypadków: Serwis XI dla 0475M (`M53`) i 0507M (`M95`), opony → „inne” z zachowaniem istniejącej formuły i notatki, polisa z formułą, pusta komórka, odmowa dla auta bez bloku i dla roku 2025.
+
+**NIE sprawdzone / do zrobienia przez usera**
+- 🔴 **Arkusz trzeba udostępnić (Edytor) kontu `331217061974-compute@developer.gserviceaccount.com`** — na nim działają funkcje. Dotąd dostęp ma tylko konto `firebase-adminsdk-fbsvc`; próba uruchomienia funkcji na nim odbiła się od uprawnień (eventarc), ról w projekcie nie zmieniałem. Do czasu udostępnienia każdy koszt dostanie `arkusz: "blad"`.
+- **Prawdziwego zapisu do arkusza nie było** — pierwszy nastąpi przy pierwszym zatwierdzonym koszcie.
+- **Nowe Iveco (WGM 7651V/7652V/7653V) i TK 795GM nie mają bloków w Total_26** — ich koszty nie wejdą do arkusza (odmowa z powodem).
+- Pytanie do usera: w wierszu „Serwis” stoi co miesiąc `-150` — jeśli to ryczałt/rezerwa, dopisanie faktury zawyży koszt.
+- Edycja lub usunięcie kosztu w FS NIE cofa wpisu w arkuszu.

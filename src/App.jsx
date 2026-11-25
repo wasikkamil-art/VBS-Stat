@@ -2029,7 +2029,20 @@ function App({ user, role, appUsers = [], allowedTabs = null }) {
       for (const r of nowe) await dbAddKoszt(r);
       setCosts(p => [...p, ...nowe.filter(r => !p.some(x => x.id === r.id))]);
       logAction("add", "costs", { action: "koszt-z-faktury", nrFaktury: k.numer, sprzedawca: k.sprzedawca, netto, waluta: k.waluta, auta: auta.map(a => a.plate).join(", "), category: k.kategoria });
-      showToast(`✅ Koszt z FV ${k.numer} dodany: ${auta.map(a => a.plate).join(", ")}`);
+      showToast(`✅ Koszt z FV ${k.numer} dodany: ${auta.map(a => a.plate).join(", ")} — wpisuję do arkusza…`);
+      // Wpis do arkusza Total_26 robi Cloud Function `kosztDoArkusza`; wynik wraca do dokumentu kosztu.
+      // Czekamy na niego do 90 s, żeby admin od razu wiedział, czy arkusz przyjął kwotę.
+      nowe.forEach((r) => {
+        const auto = auta.find(a => a.id === r.vehicleId)?.plate || "";
+        let stop = () => {};
+        const limit = setTimeout(() => { stop(); showToast(`⚠️ ${auto}: brak potwierdzenia wpisu do arkusza — sprawdź arkusz ręcznie`); }, 90000);
+        stop = onSnapshot(COST_REF(r.id), (snap) => {
+          const d = snap.data();
+          if (!d || d.arkusz === false || d.arkusz === "w-toku") return;
+          clearTimeout(limit); stop();
+          showToast(d.arkusz === true ? `📊 ${auto}: wpisane do arkusza (${d.arkuszKomorka}, wiersz „${d.arkuszWiersz}”)` : `⚠️ ${auto}: NIE wpisano do arkusza — ${d.arkuszBlad || "nieznany błąd"}`);
+        }, () => { clearTimeout(limit); });
+      });
       return true;
     } catch (e) {
       console.error("zapiszKosztZFaktury", e);

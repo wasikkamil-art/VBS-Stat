@@ -737,6 +737,45 @@ async function terminyFlotyWyslij() {
   return { wyslano: doKogo.length, terminow: lista.length };
 }
 
+// ── Koszt z faktury ze skanu → arkusz Total_26 (user, 25.11.2026: „automat od razu”) ──
+// Odpala się, gdy dokument w `costs` ma `zrodlo: "skan"` i `arkusz: false` — nowy (tak zapisuje
+// `zapiszKosztZFaktury` w App.jsx po zatwierdzeniu przez admina). Wynik wraca do dokumentu kosztu:
+// `arkusz: true` + `arkuszKomorka`, albo `arkusz: "blad"` + `arkuszBlad` (wtedy arkusz NIE został ruszony).
+// Ponowienie po błędzie = ustawić w dokumencie kosztu `arkusz: false`.
+// Jedna instancja naraz — dwa koszty do tej samej komórki nie mogą się nadpisać.
+// Arkusz musi być udostępniony (Edytor) kontu, na którym działają funkcje:
+// 331217061974-compute@developer.gserviceaccount.com. `google-auth-library` przychodzi z firebase-admin.
+exports.kosztDoArkusza = onDocumentWritten(
+  { document: "costs/{id}", region: "europe-west1", maxInstances: 1, concurrency: 1, timeoutSeconds: 120 },
+  async (event) => {
+    const k = event.data?.after?.data();
+    if (!k || k.zrodlo !== "skan" || k.arkusz !== false) return;
+    const ref = event.data.after.ref;
+    // Znacznik „w toku” w transakcji — ponowne dostarczenie zdarzenia nie dopisze kwoty drugi raz.
+    const moje = await getFirestore().runTransaction(async (t) => {
+      const d = (await t.get(ref)).data();
+      if (!d || d.arkusz !== false) return false;
+      t.update(ref, { arkusz: "w-toku" });
+      return true;
+    });
+    if (!moje) return;
+    try {
+      const { GoogleAuth } = require("google-auth-library");
+      const { wpiszKoszt } = require("./lib/arkuszKosztow");
+      const klient = await new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/spreadsheets"] }).getClient();
+      const pojazdy = (await getFirestore().doc("fleet/data").get()).data()?.fleetv2_vehicles || [];
+      const auto = pojazdy.find(v => v && v.id === k.vehicleId);
+      if (!auto) throw new Error(`nie ma auta ${k.vehicleId} w kartotece`);
+      const w = await wpiszKoszt({ koszt: k, rejestracja: auto.plate, zadanie: async (o) => (await klient.request(o)).data });
+      await ref.update({ arkusz: true, arkuszKomorka: w.komorka, arkuszWiersz: w.wiersz, arkuszKiedy: new Date().toISOString() });
+      console.log(`kosztDoArkusza: ${event.params.id} → ${w.komorka} (${w.przed} → ${w.po})`);
+    } catch (e) {
+      console.error("kosztDoArkusza", event.params.id, e);
+      await ref.update({ arkusz: "blad", arkuszBlad: String(e?.message || e).slice(0, 300), arkuszKiedy: new Date().toISOString() });
+    }
+  }
+);
+
 exports.terminyFlotyMail = onSchedule(
   { schedule: "0 7 * * 1,4", timeZone: "Europe/Warsaw", region: "europe-west1" },
   async () => { await terminyFlotyWyslij(); }
